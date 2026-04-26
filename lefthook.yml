@@ -1,0 +1,13 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: biome
+      glob: "*.{ts,js,mjs,json}"
+      run: npx biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+
+pre-push:
+  jobs:
+    - name: typecheck
+      run: npx tsc -p tsconfig.json --noEmit
+    - name: tests
+      run: npx vitest run --changed

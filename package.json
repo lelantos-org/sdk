@@ -1,0 +1,168 @@
+{
+  "name": "@lelantos-org/sdk",
+  "version": "0.5.6",
+  "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
+  "license": "Apache-2.0",
+  "author": "Lelantos",
+  "type": "module",
+  "sideEffects": false,
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "imports": {
+    "#wasm/jubjub": "./wasm/jubjub/pkg/jubjub_wasm.js",
+    "#wasm/prover": "./wasm/prover/pkg/prover.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lelantos-org/sdk.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./crypto": {
+      "types": "./dist/crypto/index.d.ts",
+      "default": "./dist/crypto/index.js"
+    },
+    "./keys": {
+      "types": "./dist/keys/index.d.ts",
+      "default": "./dist/keys/index.js"
+    },
+    "./notes": {
+      "types": "./dist/notes/index.d.ts",
+      "default": "./dist/notes/index.js"
+    },
+    "./fmd": {
+      "types": "./dist/fmd/index.d.ts",
+      "default": "./dist/fmd/index.js"
+    },
+    "./bundle": {
+      "types": "./dist/bundle/index.d.ts",
+      "default": "./dist/bundle/index.js"
+    },
+    "./prover": {
+      "types": "./dist/prover/index.d.ts",
+      "default": "./dist/prover/index.js"
+    },
+    "./relayer": {
+      "types": "./dist/relayer/index.d.ts",
+      "default": "./dist/relayer/index.js"
+    },
+    "./sync": {
+      "types": "./dist/sync/index.d.ts",
+      "default": "./dist/sync/index.js"
+    },
+    "./chain": {
+      "types": "./dist/chain/index.d.ts",
+      "default": "./dist/chain/index.js"
+    },
+    "./wallet": {
+      "types": "./dist/wallet/index.d.ts",
+      "default": "./dist/wallet/index.js"
+    },
+    "./witness": {
+      "types": "./dist/bundle/witness.d.ts",
+      "default": "./dist/bundle/witness.js"
+    },
+    "./networks": {
+      "types": "./dist/chain/networks.d.ts",
+      "default": "./dist/chain/networks.js"
+    },
+    "./errors": {
+      "types": "./dist/wallet/errors.d.ts",
+      "default": "./dist/wallet/errors.js"
+    },
+    "./wasm-prover": {
+      "types": "./dist/prover/wasm-prover.d.ts",
+      "default": "./dist/prover/wasm-prover.js"
+    },
+    "./prover-worker": {
+      "types": "./dist/prover/worker.d.ts",
+      "default": "./dist/prover/worker.js"
+    },
+    "./scanner-worker": {
+      "types": "./dist/sync/scanner-worker.d.ts",
+      "default": "./dist/sync/scanner-worker.js"
+    },
+    "./wasm/prover": {
+      "types": "./wasm/prover/pkg/prover.d.ts",
+      "default": "./wasm/prover/pkg/prover.js"
+    },
+    "./wasm/prover/wasm": "./wasm/prover/pkg/prover_bg.wasm",
+    "./wasm/jubjub": {
+      "types": "./wasm/jubjub/pkg/jubjub_wasm.d.ts",
+      "default": "./wasm/jubjub/pkg/jubjub_wasm.js"
+    },
+    "./wasm/jubjub/wasm": "./wasm/jubjub/pkg/jubjub_wasm_bg.wasm"
+  },
+  "files": [
+    "dist",
+    "wasm/prover/pkg",
+    "wasm/jubjub/pkg"
+  ],
+  "scripts": {
+    "prebuild": "node scripts/sync-version.mjs",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/wasm && cp src/wasm/rayon-worker-bootstrap.mjs dist/wasm/rayon-worker-bootstrap.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:bench": "vitest run --config vitest.bench.config.ts",
+    "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
+    "bench:scan": "tsx scripts/bench-scan.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "check": "biome check .",
+    "check:browser-safe": "node scripts/check-browser-safe.mjs",
+    "check:bundle-size": "node scripts/check-bundle-size.mjs",
+    "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm",
+    "prepare": "lefthook install >/dev/null 2>&1 || true",
+    "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
+  },
+  "peerDependencies": {
+    "@lelantos-org/circuits": "0.6.4",
+    "snarkjs": "^0.7.4",
+    "viem": "^2.49.3"
+  },
+  "peerDependenciesMeta": {
+    "@lelantos-org/circuits": {
+      "optional": true
+    },
+    "snarkjs": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.0.0",
+    "@noble/hashes": "^1.5.0",
+    "@scure/bip39": "^1.3.0",
+    "bech32": "^2.0.0",
+    "poseidon-lite": "^0.3.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.17.0",
+    "@biomejs/biome": "^2.4.13",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "lefthook": "^1.8.0",
+    "publint": "^0.3.0",
+    "snarkjs": "^0.7.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "viem": "^2.49.3",
+    "vitest": "^4.1.5"
+  },
+  "overrides": {
+    "underscore": "^1.13.8"
+  }
+}

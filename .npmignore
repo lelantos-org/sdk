@@ -1,0 +1,3 @@
+# Empty: rely solely on `files` allowlist in package.json.
+# This file's presence prevents npm from falling back to .gitignore,
+# which excludes wasm/*/pkg artifacts that we DO want to ship.
