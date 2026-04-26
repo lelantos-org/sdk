@@ -1,0 +1,23 @@
+[package]
+name = "jubjub-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ff = { version = "0.11", features = ["derive"], package = "ff_ce" }
+rand = "0.4"
+num-bigint = "0.4"
+num-traits = "0.2"
+getrandom = { version = "0.2", features = ["js"] }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+blake2 = { version = "0.10", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+zeroize = { version = "1", default-features = false }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O4", "--enable-simd", "--enable-bulk-memory", "--enable-threads", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-mutable-globals"]
