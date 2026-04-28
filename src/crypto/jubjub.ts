@@ -8,6 +8,7 @@
 import { buildBabyjub, buildPedersenHash } from "circomlibjs";
 import type { Field } from "./poseidon";
 import { toLeBytes } from "./bytes";
+import { TAG_ASSET } from "./tags";
 
 export type Point = [Field, Field];
 
@@ -52,14 +53,22 @@ export class Jubjub {
         return u ? this.toAffine(u) : null;
     }
 
-    // Mirrors HashToAssetGen in `asset_gen.circom`: Num2Bits_strict(asset_id)
-    // → Pedersen(254). circomlib pads the final segment with zero bits, so a
-    // 32-byte LE buffer with bits 254..255 = 0 reproduces the exact bit stream.
+    // Mirrors HashToAssetGen in `asset_gen.circom`: Pedersen(264) over
+    //   bits[  0.. 7]  = TAG_ASSET (LSB-first byte)
+    //   bits[  8..261] = asset_id (254 LSB-first bits; high 2 bits of byte 31
+    //                              are 0 because asset_id < 2^254)
+    //   bits[262..263] = 0 (zero-pad to byte boundary)
+    // circomlibjs `pedersen.hash(buf)` operates on 8·buf.length bits LSB-first
+    // per byte, so the 33-byte input below reproduces the circuit bit stream
+    // byte-for-byte.
     hashToAssetGen(assetId: Field): Point {
         if (assetId >= 1n << 254n) {
             throw new Error("asset_id must be < 2^254 for HashToAssetGen parity");
         }
-        const packed = this.pedersen.hash(toLeBytes(assetId));
+        const buf = new Uint8Array(33);
+        buf[0] = Number(TAG_ASSET);
+        buf.set(toLeBytes(assetId), 1);
+        const packed = this.pedersen.hash(buf);
         return this.toAffine(this.babyjub.unpackPoint(packed));
     }
 

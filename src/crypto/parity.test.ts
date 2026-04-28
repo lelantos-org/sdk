@@ -18,6 +18,7 @@ import {
     TAG_IVK,
     TAG_MERKLE,
     TAG_DK,
+    TAG_ASSET,
     POW_2_64,
 } from "./index";
 
@@ -36,6 +37,7 @@ describe("crypto parity with circuits/src/lib", () => {
         expect(TAG_IVK).toBe(4n);
         expect(TAG_MERKLE).toBe(5n);
         expect(TAG_DK).toBe(6n);
+        expect(TAG_ASSET).toBe(7n);
     });
 
     it("ivk = Poseidon(4, nsk); pk = Poseidon(3, ivk)", () => {

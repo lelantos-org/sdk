@@ -7,6 +7,7 @@
 // | TAG_IVK     | 4     | ivk = Poseidon(TAG_IVK, nsk)            arity 2
 // | TAG_MERKLE  | 5     | node = Poseidon(TAG_MERKLE, c0..c3)     arity 5
 // | TAG_DK      | 6     | dk  = Poseidon(TAG_DK, ivk)             off-circuit, FMD
+// | TAG_ASSET   | 7     | V^t = Pedersen(TAG_ASSET || asset_id_bits)  Pedersen(264)
 
 export const TAG_CM = 1n;
 export const TAG_NF = 2n;
@@ -14,6 +15,7 @@ export const TAG_PK = 3n;
 export const TAG_IVK = 4n;
 export const TAG_MERKLE = 5n;
 export const TAG_DK = 6n;
+export const TAG_ASSET = 7n;
 
 export const POW_2_64 = 1n << 64n;
 

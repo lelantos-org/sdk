@@ -36,6 +36,52 @@ export class MerkleTree {
         return this.nodeAt(this.depth, 0);
     }
 
+    /// Frontier snapshot for the lazy-root tree-update circuit.
+    ///
+    /// Returns `depth × 3` slots, mirroring the layout the prior on-chain
+    /// `filledSubtrees` storage exposed (now retired). For each level `lvl`
+    /// and slot `k ∈ {0,1,2}`:
+    ///
+    ///   frontier[lvl][k] = nodeAt(lvl, parentIdx * 4 + k)   if k < currentSlot
+    ///   frontier[lvl][k] = 0                                  otherwise
+    ///
+    /// where `currentSlot = (N / 4^lvl) % 4`, `parentIdx = N / 4^(lvl+1)`,
+    /// and `N = leaves.length`. The k ≥ currentSlot entries are not read by
+    /// the next insert (they would be stale-from-prior-parent-group in the
+    /// contract too); we zero them deterministically.
+    frontier(): Field[][] {
+        const N = this.leaves.length;
+        const out: Field[][] = [];
+        for (let lvl = 0; lvl < this.depth; lvl++) {
+            const stride = Math.pow(ARITY, lvl);
+            const slot = Math.floor(N / stride) % ARITY;
+            const parentIdx = Math.floor(N / (stride * ARITY));
+            const slots: Field[] = [];
+            for (let k = 0; k < 3; k++) {
+                if (k < slot) {
+                    slots.push(this.nodeAt(lvl, parentIdx * ARITY + k));
+                } else {
+                    slots.push(0n);
+                }
+            }
+            out.push(slots);
+        }
+        return out;
+    }
+
+    /// Quaternary digits of `leafIndex` from level 0 to level depth-1.
+    /// Each digit ∈ {0,1,2,3}. Used by tree-update witness builders to
+    /// match the Num2Bits decomposition the circuit performs internally.
+    pathIndicesAt(leafIndex: number): number[] {
+        const out: number[] = [];
+        let idx = leafIndex;
+        for (let lvl = 0; lvl < this.depth; lvl++) {
+            out.push(idx % ARITY);
+            idx = Math.floor(idx / ARITY);
+        }
+        return out;
+    }
+
     proof(leafIndex: number): MerkleProof {
         const pathElements: Field[][] = [];
         const pathIndices: number[] = [];

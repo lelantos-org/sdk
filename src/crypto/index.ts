@@ -16,6 +16,7 @@ export {
     TAG_IVK,
     TAG_MERKLE,
     TAG_DK,
+    TAG_ASSET,
     POW_2_64,
     BN254_FR,
     BABYJUB_SUBGROUP_ORDER,

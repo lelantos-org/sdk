@@ -9,6 +9,10 @@ export interface CachedNote {
     nf: Field;
     leafIndex: number;
     spent: boolean;
+    /// Lazy-root model: true between user POST and observed `BatchCommitted`
+    /// covering the leafIndex. While `pending`, the note has no chain root
+    /// to spend against and `unspent()` filters it out.
+    pending: boolean;
 }
 
 export class NoteCache {
@@ -25,12 +29,18 @@ export class NoteCache {
         if (c) c.spent = true;
     }
 
+    /// Flip `pending=false` once the note's batch lands on chain.
+    markCommitted(cm: Field): void {
+        const c = this.byCm.get(cm.toString());
+        if (c) c.pending = false;
+    }
+
     all(): CachedNote[] {
         return [...this.byCm.values()];
     }
 
     unspent(): CachedNote[] {
-        return this.all().filter(c => !c.spent);
+        return this.all().filter(c => !c.spent && !c.pending);
     }
 
     unspentForAsset(asset: Field): CachedNote[] {
