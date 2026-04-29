@@ -21,6 +21,7 @@ import {
     type Field,
     type Point,
 } from "./crypto/index";
+import { encodeAddress } from "./address";
 
 export interface SpendingKey {
     nsk: Field;
@@ -50,4 +51,9 @@ export function buildSpendingKey(P: Poseidon, J: Jubjub, nsk: Field): SpendingKe
 
 export function viewingKeyFromSpending(sk: SpendingKey): ViewingKey {
     return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk };
+}
+
+/// Single-call address encoder. Saves callers from threading three fields.
+export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): string {
+    return encodeAddress(J, sk.pk_d, sk.dk, sk.pk);
 }

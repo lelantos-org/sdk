@@ -6,12 +6,49 @@
 import {
     Poseidon,
     Jubjub,
+    MerkleTree,
     buildNoteCommitment,
     buildNullifier,
     type Field,
     type Point,
 } from "./crypto/index";
 import type { Note, SpentNote } from "./notes";
+
+export interface SpendableCachedNote {
+    note: Note;
+    nsk: Field;
+    leafIndex: number;
+}
+
+/// Wallet-cached note + local merkle tree → SpentNote ready for the witness.
+/// Use when the wallet already has the canonical tree (tests / e2e).
+export function toSpentNote(P: Poseidon, cached: SpendableCachedNote, tree: MerkleTree): SpentNote {
+    const proof = tree.proof(cached.leafIndex);
+    return toSpentNoteFromPath(P, cached, proof.pathElements, proof.pathIndices);
+}
+
+/// Same shape, but path was supplied externally (e.g. by the relayer's
+/// `/path` endpoint). Caller is responsible for verifying the path against
+/// an on-chain `isKnownRoot` before trusting it for spending.
+export function toSpentNoteFromPath(
+    P: Poseidon,
+    cached: SpendableCachedNote,
+    pathElements: Field[][],
+    pathIndices: number[],
+): SpentNote {
+    const cm = buildNoteCommitment(P, cached.note);
+    const nf = buildNullifier(P, cached.nsk, cached.note.rho);
+    return {
+        ...cached.note,
+        nsk: cached.nsk,
+        cm,
+        nf,
+        leafIndex: cached.leafIndex,
+        pathElements,
+        pathIndices,
+        isDummy: false,
+    };
+}
 
 export interface BuildOpts {
     publicAssetId: Field;

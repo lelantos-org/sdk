@@ -10,6 +10,7 @@
 // `isKnownRoot` before the wallet trusts it for spending.
 
 import type { Field, Point } from "./crypto/index";
+import type { Erc2612Permit } from "./permit";
 
 export interface SubmitTransactPayload {
     /// Target chain id; relayer routes to the per-chain pipeline by this key.
@@ -28,6 +29,11 @@ export interface SubmitTransactPayload {
     pubInputs: TransactPubInputs;
     /// Off-circuit FMD + ciphertext payload, one per output slot.
     aux: [TransactAux, TransactAux];
+    /// Optional EIP-2612 permit. Present → relayer routes to
+    /// `MASP.transactWithPermit`, lifting the deposit allowance atomically.
+    /// Absent → relayer falls back to legacy `MASP.transact` (caller must
+    /// have approved beforehand).
+    permit?: Erc2612Permit;
 }
 
 export interface TransactPubInputs {
@@ -160,12 +166,22 @@ interface SerializedTreeState {
 }
 
 function serializeSubmit(p: SubmitTransactPayload): unknown {
-    return {
+    const out: Record<string, unknown> = {
         chainId: Number(p.chainId),
         proof2x2: p.proof2x2,
         pubInputs: serializePubInputs(p.pubInputs),
         aux: p.aux.map(serializeAux),
     };
+    if (p.permit) {
+        out.permit = {
+            value: p.permit.value,
+            deadline: p.permit.deadline,
+            v: p.permit.v,
+            r: p.permit.r,
+            s: p.permit.s,
+        };
+    }
+    return out;
 }
 
 function pointToObj(p: Point): { x: string; y: string } {

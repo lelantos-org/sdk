@@ -6,10 +6,68 @@
 // the root from `(leaf, pathElements, pathIndices)` and asserting the
 // result is on-chain `isKnownRoot`. Soundness gives no path-forgery vector.
 
-import type { Poseidon, Field } from "./crypto/index";
-import { TAG_MERKLE } from "./crypto/index";
+import {
+    Jubjub,
+    type Poseidon,
+    type Field,
+    TAG_MERKLE,
+} from "./crypto/index";
+import { decryptNote } from "./note-encrypt";
+import {
+    decodeNotePayload,
+    stripClueBitsPrefix,
+    type NotePayload,
+} from "./note-codec";
+import { fmdTest, type FmdClue, type FmdDetectionKey } from "./fmd";
 
 const ARITY = 4;
+
+export interface ScanInput {
+    /// Wire ciphertext (2B clueBits prefix + ChaCha body), unstripped.
+    ciphertext: Uint8Array;
+    /// Recipient ECDH ephemeral pub (packed Baby-Jubjub).
+    epk: Uint8Array;
+    /// On-chain commitment for this note (used by callers to look up paths).
+    cm: Field;
+    leafIndex: number;
+    /// Optional FMD clue. If provided AND a detection key is supplied to
+    /// `scanNotes`, the clue is tested first as a cheap reject.
+    clue?: FmdClue;
+}
+
+export interface ScanHit extends NotePayload {
+    cm: Field;
+    leafIndex: number;
+}
+
+/// Trial-decrypt every note with the given ivk; return the ones whose
+/// ChaCha tag verifies and whose plaintext decodes cleanly.
+///
+/// `detectionKey` is optional: when supplied, FMD is used as a pre-filter
+/// to skip clearly-not-mine notes without paying the ECDH+ChaCha cost.
+export function scanNotes(
+    J: Jubjub,
+    ivk: Field,
+    inputs: ScanInput[],
+    detectionKey?: FmdDetectionKey,
+): ScanHit[] {
+    const hits: ScanHit[] = [];
+    for (const inp of inputs) {
+        if (detectionKey && inp.clue) {
+            if (!fmdTest(J, detectionKey, inp.clue)) continue;
+        }
+        const { body } = stripClueBitsPrefix(inp.ciphertext);
+        const plain = decryptNote({ J, ivk, note: { epk: inp.epk, ciphertext: body } });
+        if (!plain) continue;
+        try {
+            const payload = decodeNotePayload(plain);
+            hits.push({ ...payload, cm: inp.cm, leafIndex: inp.leafIndex });
+        } catch {
+            /* tag passed but body did not decode as a NotePayload — skip. */
+        }
+    }
+    return hits;
+}
 
 /// Recompute the merkle root from a path supplied by the relayer.
 export function rootFromPath(
