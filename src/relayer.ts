@@ -12,17 +12,16 @@
 import type { Field, Point } from "./crypto/index";
 
 export interface SubmitTransactPayload {
+    /// Target chain id; relayer routes to the per-chain pipeline by this key.
+    chainId: bigint;
     /// Snarkjs-shaped Groth16 proof for the transact_2x2 circuit.
     proof2x2: {
-        pi_a: string[];
-        pi_b: string[][];
-        pi_c: string[];
+        piA: string[];
+        piB: string[][];
+        piC: string[];
         protocol?: string;
         curve?: string;
     };
-    /// Public signals as snarkjs emits them. For compressed-PI mode, this
-    /// is the [y, z] pair the verifier consumes — same shape today.
-    publicSignals: string[];
     /// The 22 logical PIs in declaration order — the relayer needs these
     /// (specifically cm0, cm1, payer, relayer, recipient, amounts, etc.)
     /// to build the matching tree-update proof + the transact() calldata.
@@ -60,8 +59,6 @@ export interface TransactAux {
 export interface RelayerSubmitResponse {
     /// Tx hash once mined. Relayer awaits inclusion before responding.
     txHash: string;
-    /// Leaf indices of the two output cms, post-batch.
-    leafIndex: [number, number];
 }
 
 export interface MerkleProofResponse {
@@ -95,7 +92,7 @@ export class RelayerClient {
     constructor(private readonly baseUrl: string, private readonly fetchImpl: typeof fetch = fetch) {}
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
-        return this.postJson("/transact", serializeSubmit(payload));
+        return this.postJson("/v1/transact", serializeSubmit(payload));
     }
 
     async scan(fmdSecret: string): Promise<ScannedNote[]> {
@@ -164,11 +161,15 @@ interface SerializedTreeState {
 
 function serializeSubmit(p: SubmitTransactPayload): unknown {
     return {
+        chainId: Number(p.chainId),
         proof2x2: p.proof2x2,
-        publicSignals: p.publicSignals,
         pubInputs: serializePubInputs(p.pubInputs),
         aux: p.aux.map(serializeAux),
     };
+}
+
+function pointToObj(p: Point): { x: string; y: string } {
+    return { x: p[0].toString(), y: p[1].toString() };
 }
 
 function serializePubInputs(pi: TransactPubInputs): unknown {
@@ -176,14 +177,14 @@ function serializePubInputs(pi: TransactPubInputs): unknown {
         merkleRoot: pi.merkleRoot.toString(),
         nullifier: pi.nullifier.map(n => n.toString()),
         outCm: pi.outCm.map(c => c.toString()),
-        publicAssetId: pi.publicAssetId.toString(),
-        pubAssetGen: [pi.pubAssetGen[0].toString(), pi.pubAssetGen[1].toString()],
-        publicIn: pi.publicIn.toString(),
-        publicOut: pi.publicOut.toString(),
-        inCv: pi.inCv.map(p => [p[0].toString(), p[1].toString()]),
-        outCv: pi.outCv.map(p => [p[0].toString(), p[1].toString()]),
+        publicAssetId: Number(pi.publicAssetId),
+        pubAssetGen: pointToObj(pi.pubAssetGen),
+        publicIn: Number(pi.publicIn),
+        publicOut: Number(pi.publicOut),
+        inCv: pi.inCv.map(pointToObj),
+        outCv: pi.outCv.map(pointToObj),
         recipient: pi.recipient,
-        chainId: pi.chainId.toString(),
+        chainId: Number(pi.chainId),
         payer: pi.payer,
         relayer: pi.relayer,
     };
@@ -191,8 +192,8 @@ function serializePubInputs(pi: TransactPubInputs): unknown {
 
 function serializeAux(a: TransactAux): unknown {
     return {
-        clueR: [a.clueR[0].toString(), a.clueR[1].toString()],
-        ephPub: [a.ephPub[0].toString(), a.ephPub[1].toString()],
+        clueR: pointToObj(a.clueR),
+        ephPub: pointToObj(a.ephPub),
         ciphertext: bytesToHex(a.ciphertext),
     };
 }
