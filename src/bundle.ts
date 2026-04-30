@@ -228,6 +228,11 @@ async function finalize(
     aux: [OutputAux, OutputAux],
 ): Promise<BuiltBundle> {
     const { P, J, asset } = common;
+    // Warm WasmJubjub's circomlibjs fallback once; subsequent sync
+    // hashToAssetGen calls inside toCircomInput depend on it.
+    if (typeof (J as any).hashToAssetGenAsync === "function") {
+        await (J as any).hashToAssetGenAsync(asset);
+    }
     const pubGen = J.hashToAssetGen(asset);
 
     const baseInput = toCircomInput(P, J, {

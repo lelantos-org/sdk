@@ -15,9 +15,10 @@
 
 import {
     Poseidon,
-    Jubjub,
+    type Jubjub,
     type Field,
 } from "../crypto/index";
+import { WasmJubjub } from "../crypto/jubjub-wasm";
 import {
     buildSpendingKey,
     addressFromSpendingKey,
@@ -46,6 +47,8 @@ import { FmdClient } from "./fmd-client";
 import { FmdNoteSource, type NoteSource } from "./note-source";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter";
 import { SnarkjsProver, type Prover } from "./prover";
+import { LocalScanner } from "./scanner-local";
+import type { Scanner } from "./scanner";
 import {
     InMemoryNoteStore,
     addHits,
@@ -122,6 +125,7 @@ export class Wallet implements WalletApi {
     readonly submitter: Submitter;
     readonly prover: Prover;
     readonly selector: CoinSelector;
+    readonly scanner: Scanner;
     private file: NotesFile;
 
     private constructor(args: {
@@ -136,6 +140,7 @@ export class Wallet implements WalletApi {
         submitter: Submitter;
         prover: Prover;
         selector: CoinSelector;
+        scanner: Scanner;
     }) {
         this.P = args.P;
         this.J = args.J;
@@ -148,13 +153,16 @@ export class Wallet implements WalletApi {
         this.submitter = args.submitter;
         this.prover = args.prover;
         this.selector = args.selector;
+        this.scanner = args.scanner;
     }
 
     /// Build a wallet from any key source. Wires defaults for any
     /// pluggable not supplied in `cfg`.
     static async create(source: KeySource, cfg: WalletConfig): Promise<Wallet> {
         const P = await Poseidon.build();
-        const J = await Jubjub.build();
+        // WasmJubjub mirrors Jubjub's public surface (parity-locked by
+        // jubjub-wasm.test.ts); cast to satisfy the nominal type downstream.
+        const J = (await WasmJubjub.build()) as unknown as Jubjub;
         const nsk = resolveNsk(source);
         const keys = buildSpendingKey(P, J, nsk);
         const address = addressFromSpendingKey(J, keys);
@@ -166,12 +174,13 @@ export class Wallet implements WalletApi {
         const submitter = cfg.submitter ?? defaultSubmitter(cfg);
         const prover = cfg.prover ?? defaultProver(cfg);
         const selector = cfg.selector ?? new SfrtCoinSelector();
+        const scanner = cfg.scanner ?? new LocalScanner(J);
 
         return new Wallet({
             P, J, keys, address,
-            cfg: { ...cfg, noteStore, noteSource, submitter, prover, selector },
+            cfg: { ...cfg, noteStore, noteSource, submitter, prover, selector, scanner },
             file,
-            noteStore, noteSource, submitter, prover, selector,
+            noteStore, noteSource, submitter, prover, selector, scanner,
         });
     }
 
@@ -179,7 +188,14 @@ export class Wallet implements WalletApi {
 
     async sync(opts?: { limit?: number }): Promise<SyncResult> {
         const result = await syncWallet(
-            { J: this.J, ivk: this.keys.ivk, dk: this.keys.dk, source: this.noteSource, store: this.noteStore },
+            {
+                J: this.J,
+                ivk: this.keys.ivk,
+                dk: this.keys.dk,
+                source: this.noteSource,
+                store: this.noteStore,
+                scanner: this.scanner,
+            },
             opts ?? {},
         );
         this.file = await this.noteStore.load();

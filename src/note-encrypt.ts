@@ -23,6 +23,7 @@ import {
     type Field,
     type Point,
 } from "./crypto/index";
+import { WasmJubjub } from "./crypto/jubjub-wasm";
 import type { EncryptedNote } from "./notes";
 
 const KDF_DOMAIN = new TextEncoder().encode("lelantos.note.kdf.v1");
@@ -57,6 +58,9 @@ export function encryptNote({ J, recipientPkD, esk, plaintext }: EncryptArgs): E
 
 // Returns null on tag failure (not-for-me / corrupted).
 export function decryptNote({ J, ivk, note }: DecryptArgs): Uint8Array | null {
+    if (J instanceof WasmJubjub) {
+        return J.tryDecryptNote(ivk, note.epk, note.ciphertext);
+    }
     const epk = J.unpackPoint(note.epk);
     if (!epk || !J.inSubgroup(epk)) return null;
 

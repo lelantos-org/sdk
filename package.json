@@ -12,14 +12,30 @@
     "./crypto": {
       "types": "./dist/crypto/index.d.ts",
       "default": "./dist/crypto/index.js"
-    }
+    },
+    "./wasm/prover": {
+      "types": "./wasm/prover/pkg/prover.d.ts",
+      "default": "./wasm/prover/pkg/prover.js"
+    },
+    "./wasm/prover/wasm": "./wasm/prover/pkg/prover_bg.wasm",
+    "./wasm/jubjub": {
+      "types": "./wasm/jubjub/pkg/jubjub_wasm.d.ts",
+      "default": "./wasm/jubjub/pkg/jubjub_wasm.js"
+    },
+    "./wasm/jubjub/wasm": "./wasm/jubjub/pkg/jubjub_wasm_bg.wasm"
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src",
+    "wasm/prover/pkg",
+    "wasm/jubjub/pkg"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "gen:vectors": "tsx scripts/gen-fmd-vectors.ts"
+    "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
+    "bench:scan": "tsx scripts/bench-scan.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",

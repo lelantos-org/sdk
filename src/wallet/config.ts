@@ -13,6 +13,7 @@ import type { NoteSource } from "./note-source";
 import type { Submitter } from "./submitter";
 import type { Prover } from "./prover";
 import type { CoinSelector } from "./selection";
+import type { Scanner } from "./scanner";
 
 export interface WalletConfig {
     /// EVM chain id; bound into the SNARK and the FMD-webserver query.
@@ -45,4 +46,8 @@ export interface WalletConfig {
     prover?: Prover;
     /// Coin-selection strategy. Defaults to SFRT.
     selector?: CoinSelector;
+    /// Trial-decrypt scanner. Defaults to in-process `LocalScanner` running
+    /// the WASM hot path. Swap for `WorkerPoolScanner` (parallel) when off-
+    /// main-thread scan matters.
+    scanner?: Scanner;
 }

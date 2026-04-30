@@ -1,0 +1,62 @@
+name: WASM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wasm/**"
+      - ".github/workflows/wasm.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "wasm/**"
+      - ".github/workflows/wasm.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: wasm
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-23
+          components: rustfmt
+      - uses: extractions/setup-just@v2
+      - run: just fmt-check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-23
+          components: clippy, rust-src
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasm
+      - uses: extractions/setup-just@v2
+      - run: just clippy
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-06-23
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasm
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: extractions/setup-just@v2
+      - run: just build
+      - run: just size

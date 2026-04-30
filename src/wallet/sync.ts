@@ -3,10 +3,10 @@
 
 import { Jubjub, type Field } from "../crypto/index";
 import { flagKeyFromAddressDk } from "../aux";
-import { scanNotes } from "../sync";
 import type { NoteSource } from "./note-source";
 import type { NoteStore } from "./note-store";
 import { addHits } from "./note-store";
+import type { Scanner } from "./scanner";
 
 export interface SyncResult {
     fetched: number;
@@ -21,6 +21,7 @@ export interface SyncDeps {
     dk: Field;
     source: NoteSource;
     store: NoteStore;
+    scanner: Scanner;
 }
 
 export async function syncWallet(
@@ -30,7 +31,7 @@ export async function syncWallet(
     const { detection } = flagKeyFromAddressDk(deps.J, deps.dk);
     const inputs = await deps.source.listNotes({ limit: opts.limit ?? 1000 });
 
-    const hits = scanNotes(deps.J, deps.ivk, inputs, detection);
+    const hits = await deps.scanner.scan(deps.ivk, inputs, detection);
     const file = await deps.store.load();
     const { added, skipped } = addHits(file, hits);
     await deps.store.save(file);

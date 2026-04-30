@@ -33,6 +33,8 @@ import {
     type Field,
     type Point,
 } from "./crypto/index";
+import { WasmJubjub } from "./crypto/jubjub-wasm";
+import { toLeBytes, FIELD_BYTES } from "./crypto/bytes";
 
 export const FMD_DEFAULT_GAMMA = 5;
 export const FMD_DOMAIN = new TextEncoder().encode("lelantos.fmd.v1");
@@ -74,6 +76,13 @@ export function fmdFlag(J: Jubjub, fk: FmdFlagKey, r: Field): FmdClue {
 
 export function fmdTest(J: Jubjub, dk: FmdDetectionKey, clue: FmdClue): boolean {
     if (dk.x.length !== clue.gamma) return false;
+    if (J instanceof WasmJubjub) {
+        const dkLe = new Uint8Array(clue.gamma * FIELD_BYTES);
+        for (let i = 0; i < clue.gamma; i++) {
+            dkLe.set(toLeBytes(dk.x[i] % BABYJUB_SUBGROUP_ORDER, FIELD_BYTES), i * FIELD_BYTES);
+        }
+        return J.fmdTest(dkLe, clue.R, clue.bits, clue.gamma);
+    }
     const R = J.unpackPoint(clue.R);
     if (!R || !J.inSubgroup(R)) return false;
 
