@@ -1,4 +1,4 @@
-// High-level Wallet — primary integration surface for `@lelantos/sdk`.
+// High-level Wallet — primary integration surface for `@lelantos-org/sdk`.
 //
 // Owns: keys, in-memory note cache, plus *injected* pluggables for every
 // external dependency:

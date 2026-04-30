@@ -7,6 +7,8 @@
 //! Public surface kept: `Point`, `PointProjective`, `decompress_point`,
 //! `compress`, `mul_scalar`, `add`, plus modular helpers.
 
+#![allow(clippy::too_many_arguments)]
+
 use ff::*;
 use num_bigint::{BigInt, Sign};
 use num_traits::One;
@@ -78,7 +80,10 @@ pub struct PointProjective {
 impl PointProjective {
     pub fn affine(&self) -> Point {
         if self.z.is_zero() {
-            return Point { x: fr_zero(), y: fr_zero() };
+            return Point {
+                x: fr_zero(),
+                y: fr_zero(),
+            };
         }
         let zinv = self.z.inverse().unwrap();
         let mut x = self.x;
@@ -126,7 +131,11 @@ impl PointProjective {
         y3.mul_assign(&dac);
         let mut z3 = f;
         z3.mul_assign(&g);
-        PointProjective { x: x3, y: y3, z: z3 }
+        PointProjective {
+            x: x3,
+            y: y3,
+            z: z3,
+        }
     }
 }
 
@@ -138,12 +147,20 @@ pub struct Point {
 
 impl Point {
     pub fn projective(&self) -> PointProjective {
-        PointProjective { x: self.x, y: self.y, z: fr_one() }
+        PointProjective {
+            x: self.x,
+            y: self.y,
+            z: fr_one(),
+        }
     }
 
     pub fn mul_scalar(&self, n: &BigInt) -> Point {
         let one = fr_one();
-        let mut r = PointProjective { x: fr_zero(), y: one, z: one };
+        let mut r = PointProjective {
+            x: fr_zero(),
+            y: one,
+            z: one,
+        };
         let mut exp = self.projective();
         let (_, b) = n.to_bytes_le();
         for i in 0..n.bits() {
@@ -210,14 +227,18 @@ fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
 
 fn modinv(a: &BigInt, qq: &BigInt) -> Result<BigInt, String> {
     let zero: BigInt = num_traits::Zero::zero();
-    if a == &zero { return Err("no mod inv of zero".into()); }
+    if a == &zero {
+        return Err("no mod inv of zero".into());
+    }
     let mut mn = (qq.clone(), a.clone());
     let mut xy: (BigInt, BigInt) = (zero.clone(), One::one());
     while mn.1 != zero {
         xy = (xy.1.clone(), xy.0 - (mn.0.clone() / mn.1.clone()) * xy.1);
         mn = (mn.1.clone(), modulus(&mn.0, &mn.1));
     }
-    while xy.0 < zero { xy.0 = modulus(&xy.0, qq); }
+    while xy.0 < zero {
+        xy.0 = modulus(&xy.0, qq);
+    }
     Ok(xy.0)
 }
 
@@ -234,9 +255,14 @@ fn modsqrt(a: &BigInt, qq: &BigInt) -> Result<BigInt, String> {
     }
     let mut s = qq - &one;
     let mut e: BigInt = zero.clone();
-    while &s % &two == zero { s >>= 1; e += &one; }
+    while &s % &two == zero {
+        s >>= 1;
+        e += &one;
+    }
     let mut n: BigInt = two.clone();
-    while legendre_symbol(&n, qq) != -1 { n += &one; }
+    while legendre_symbol(&n, qq) != -1 {
+        n += &one;
+    }
     let mut y = a.modpow(&((&s + &one) >> 1), qq);
     let mut b = a.modpow(&s, qq);
     let mut g = n.modpow(&s, qq);
@@ -248,7 +274,9 @@ fn modsqrt(a: &BigInt, qq: &BigInt) -> Result<BigInt, String> {
             t = modulus(&(&t * &t), qq);
             m += &one;
         }
-        if m == zero { return Ok(y); }
+        if m == zero {
+            return Ok(y);
+        }
         t = g.modpow(&two.modpow(&(&r - &m - &one), qq), qq);
         g = g.modpow(&two.modpow(&(r - &m), qq), qq);
         y = modulus(&(y * t), qq);
@@ -260,5 +288,9 @@ fn modsqrt(a: &BigInt, qq: &BigInt) -> Result<BigInt, String> {
 fn legendre_symbol(a: &BigInt, qq: &BigInt) -> i32 {
     let one: BigInt = One::one();
     let ls = a.modpow(&((qq - &one) >> 1), qq);
-    if ls == qq - one { -1 } else { 1 }
+    if ls == qq - one {
+        -1
+    } else {
+        1
+    }
 }

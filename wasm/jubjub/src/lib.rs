@@ -49,9 +49,7 @@ fn fr_from_le(bytes: &[u8]) -> Result<Fr, JsValue> {
 
 fn fr_to_le(f: &Fr) -> [u8; FIELD_BYTES] {
     let mut out = [0u8; FIELD_BYTES];
-    f.into_repr()
-        .write_le(&mut out[..])
-        .expect("write_le 32B");
+    f.into_repr().write_le(&mut out[..]).expect("write_le 32B");
     out
 }
 

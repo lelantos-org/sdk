@@ -21,7 +21,7 @@ export interface FastWalletOpts {
     /// Worker pool size. Default `navigator.hardwareConcurrency` clamped 2-8.
     workerSize?: number;
     /// Worker pool config. `workerUrl` required — pass from your ESM call
-    /// site: `new URL("@lelantos/sdk/scanner-worker", import.meta.url)`.
+    /// site: `new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`.
     workerOpts: Omit<BrowserWorkerScannerOpts, "size">;
     /// Skip eager WASM warmup. Saves ~10-50ms construction time but pushes
     /// first-decrypt latency onto the first `wallet.sync()`.

@@ -5,7 +5,7 @@
 //
 //   new WorkerPoolScanner({
 //       factory: () => new Worker(
-//           new URL("@lelantos/sdk/scanner-worker", import.meta.url),
+//           new URL("@lelantos-org/sdk/scanner-worker", import.meta.url),
 //           { type: "module" },
 //       ),
 //   });

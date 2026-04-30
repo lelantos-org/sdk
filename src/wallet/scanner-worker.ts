@@ -2,7 +2,7 @@
 // each scan request via the fused decrypt + FMD WASM paths.
 //
 // Bundle this as a separate worker chunk in your app build:
-//   new Worker(new URL("@lelantos/sdk/scanner-worker", import.meta.url),
+//   new Worker(new URL("@lelantos-org/sdk/scanner-worker", import.meta.url),
 //              { type: "module" })
 
 import { WasmJubjub } from "../crypto/jubjub-wasm";

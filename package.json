@@ -1,7 +1,17 @@
 {
-  "name": "@lelantos/sdk",
+  "name": "@lelantos-org/sdk",
   "version": "0.1.0",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
+  "license": "Apache-2.0",
+  "author": "Lelantos",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lelantos-org/sdk.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -26,7 +36,6 @@
   },
   "files": [
     "dist",
-    "src",
     "wasm/prover/pkg",
     "wasm/jubjub/pkg"
   ],
@@ -35,7 +44,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
-    "bench:scan": "tsx scripts/bench-scan.ts"
+    "bench:scan": "tsx scripts/bench-scan.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",

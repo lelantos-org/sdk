@@ -1,0 +1,1 @@
+# Override wasm/.gitignore for npm pack — we ship wasm/*/pkg artifacts.

@@ -17,12 +17,7 @@ const FMD_DOMAIN: &[u8] = b"lelantos.fmd.v1";
 /// `clue_r` is the packed Baby-Jubjub point (32B).
 /// `clue_bits` is the LSB-first packed bit array (⌈γ/8⌉ bytes).
 #[wasm_bindgen]
-pub fn fmd_test(
-    dk_le: &[u8],
-    clue_r: &[u8],
-    clue_bits: &[u8],
-    gamma: u8,
-) -> Result<bool, JsValue> {
+pub fn fmd_test(dk_le: &[u8], clue_r: &[u8], clue_bits: &[u8], gamma: u8) -> Result<bool, JsValue> {
     let g = gamma as usize;
     if dk_le.len() != g * FIELD_BYTES {
         return Err(JsValue::from_str("dk length must equal gamma * 32"));
@@ -30,8 +25,10 @@ pub fn fmd_test(
     if clue_r.len() != FIELD_BYTES {
         return Err(JsValue::from_str("clue_r must be 32 bytes"));
     }
-    if clue_bits.len() != (g + 7) / 8 {
-        return Err(JsValue::from_str("clue_bits length must equal ceil(gamma/8)"));
+    if clue_bits.len() != g.div_ceil(8) {
+        return Err(JsValue::from_str(
+            "clue_bits length must equal ceil(gamma/8)",
+        ));
     }
 
     let mut r_arr = [0u8; FIELD_BYTES];
@@ -44,7 +41,12 @@ pub fn fmd_test(
     for i in 0..g {
         let xi = scalar_from_le(&dk_le[i * FIELD_BYTES..(i + 1) * FIELD_BYTES]);
         let shared_packed = r_point.mul_scalar(&xi).compress();
-        let bit = blake2b_32(&[FMD_DOMAIN, clue_r, &(i as u32).to_le_bytes(), &shared_packed])[0]
+        let bit = blake2b_32(&[
+            FMD_DOMAIN,
+            clue_r,
+            &(i as u32).to_le_bytes(),
+            &shared_packed,
+        ])[0]
             & 1;
         let c_bit = (clue_bits[i >> 3] >> (i & 7)) & 1;
         if (bit ^ c_bit) != 1 {

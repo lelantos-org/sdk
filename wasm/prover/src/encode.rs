@@ -33,9 +33,15 @@ pub fn public_signals(witness: &[Fr], n_public: usize) -> Vec<String> {
     witness.iter().skip(1).take(n_public).map(fr).collect()
 }
 
-fn fr(f: &Fr) -> String { f.into_bigint().to_string() }
-fn fq(f: &Fq) -> String { f.into_bigint().to_string() }
-fn fq2(f: &Fq2) -> [String; 2] { [fq(&f.c0), fq(&f.c1)] }
+fn fr(f: &Fr) -> String {
+    f.into_bigint().to_string()
+}
+fn fq(f: &Fq) -> String {
+    f.into_bigint().to_string()
+}
+fn fq2(f: &Fq2) -> [String; 2] {
+    [fq(&f.c0), fq(&f.c1)]
+}
 
 // G1 = [x, y, "1"] (Jacobian Z=1).
 fn g1(p: &G1Affine) -> [String; 3] {

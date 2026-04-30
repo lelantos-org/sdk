@@ -1,6 +1,6 @@
 set shell := ["bash", "-ceuo", "pipefail"]
 
-# WASM crates consumed by @lelantos/sdk. Each crate's wasm-pack output lands
+# WASM crates consumed by @lelantos-org/sdk. Each crate's wasm-pack output lands
 # in its own `pkg/` (gitignored). SDK imports the generated JS/.d.ts via
 # relative paths from `sdk/src/**`.
 

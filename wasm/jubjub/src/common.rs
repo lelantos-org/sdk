@@ -31,7 +31,11 @@ pub fn in_subgroup(p: &Point) -> bool {
 /// callers in fused paths treat both as "not for me".
 pub fn decode_subgroup_point(packed: &[u8; FIELD_BYTES]) -> Option<Point> {
     let p = decompress_point(*packed).ok()?;
-    if in_subgroup(&p) { Some(p) } else { None }
+    if in_subgroup(&p) {
+        Some(p)
+    } else {
+        None
+    }
 }
 
 /// blake2b 32-byte digest over concatenated parts. Both KDF and FMD use

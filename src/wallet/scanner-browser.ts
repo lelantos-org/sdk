@@ -19,7 +19,7 @@ export interface BrowserWorkerScannerOpts
     extends Omit<WorkerPoolScannerOpts, "factory"> {
     /// Worker module URL. Required: SDK ships as CJS so it cannot reference
     /// `import.meta.url` here. Pass it from your ESM call site:
-    ///   `workerUrl: new URL("@lelantos/sdk/scanner-worker", import.meta.url)`
+    ///   `workerUrl: new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`
     workerUrl: string | URL;
 }
 

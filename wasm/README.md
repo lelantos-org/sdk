@@ -1,6 +1,6 @@
 # sdk/wasm
 
-WASM crates consumed by `@lelantos/sdk`. Each crate builds via `wasm-pack` into its own `pkg/` (gitignored). SDK imports the generated JS / `.d.ts` from `sdk/src/**` via relative paths.
+WASM crates consumed by `@lelantos-org/sdk`. Each crate builds via `wasm-pack` into its own `pkg/` (gitignored). SDK imports the generated JS / `.d.ts` from `sdk/src/**` via relative paths.
 
 ## Crates
 

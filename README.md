@@ -1,4 +1,4 @@
-# @lelantos/sdk
+# @lelantos-org/sdk
 
 Client SDK for the Lelantos MASP. Three layers:
 
@@ -10,6 +10,34 @@ Browser-safe: SDK uses Web Crypto + `fetch`; no `node:*` imports. Works in Node 
 
 ---
 
+## Installation
+
+Published privately on **GitHub Packages**. Consumers need a token with `read:packages` scope.
+
+1. Create `.npmrc` in the consuming repo:
+
+   ```
+   @lelantos-org:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+   ```
+
+2. Export a token before installing:
+
+   ```bash
+   export NODE_AUTH_TOKEN=$(gh auth token)   # or a PAT with read:packages
+   npm install @lelantos-org/sdk
+   ```
+
+3. **CI** — pass the auto-provisioned `GITHUB_TOKEN` (same org grants read on packages):
+
+   ```yaml
+   - run: npm ci
+     env:
+       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+   ```
+
+---
+
 ## Quickstart
 
 ```ts
@@ -18,7 +46,7 @@ import {
     EthersChainAdapter,
     InMemoryNoteStore,
     generateNewMnemonic,
-} from "@lelantos/sdk";
+} from "@lelantos-org/sdk";
 
 const wallet = await Wallet.create(
     { type: "mnemonic", mnemonic: generateNewMnemonic(24) },
@@ -66,7 +94,7 @@ Three key sources. All produce a deterministic `nsk` field element; the wallet k
 ### From a BIP39 mnemonic
 
 ```ts
-import { Wallet, generateNewMnemonic, isValidMnemonic } from "@lelantos/sdk";
+import { Wallet, generateNewMnemonic, isValidMnemonic } from "@lelantos-org/sdk";
 
 const mnemonic = generateNewMnemonic(24); // or 12-word: generateNewMnemonic(128)
 if (!isValidMnemonic(mnemonic)) throw new Error("bad seed");
@@ -80,7 +108,7 @@ const wallet = await Wallet.create(
 ### From an EIP-712 signature (MetaMask / hardware wallet)
 
 ```ts
-import { Wallet, metamask } from "@lelantos/sdk";
+import { Wallet, metamask } from "@lelantos-org/sdk";
 
 // Browser flow:
 const sig = await metamask.deriveNskFromSigner(ethersSigner);
@@ -183,7 +211,7 @@ wallet.balance(1n);                                // bigint, unspent only
 ### Select notes manually
 
 ```ts
-import { selectNotes } from "@lelantos/sdk";
+import { selectNotes } from "@lelantos-org/sdk";
 
 const result = wallet.selectNotes(asset, target, {
     fee: 25n,
@@ -209,7 +237,7 @@ Strategy is **SFRT** — Smallest-First with Random Tiebreak. Avoids the largest
 `InMemoryNoteStore` is the default. For persistence, implement the `NoteStore` interface:
 
 ```ts
-import { type NoteStore, type NotesFile } from "@lelantos/sdk";
+import { type NoteStore, type NotesFile } from "@lelantos-org/sdk";
 
 class IndexedDbNoteStore implements NoteStore {
     async load(): Promise<NotesFile> {
@@ -233,7 +261,7 @@ The CLI's [`FileNoteStore`](../cli/src/notes-store.ts) is a working node-side re
 `EthersChainAdapter` ships in the SDK. To use viem / web3.js / a hardware wallet, implement `ChainAdapter`:
 
 ```ts
-import { type ChainAdapter, type AssetEntry, signErc2612Permit } from "@lelantos/sdk";
+import { type ChainAdapter, type AssetEntry, signErc2612Permit } from "@lelantos-org/sdk";
 
 class ViemChainAdapter implements ChainAdapter {
     async chainId(): Promise<bigint> { ... }
@@ -267,7 +295,7 @@ Plus `WalletApi` itself is an interface — useful for mocking the whole wallet 
 ### Mock submitter for tests
 
 ```ts
-import { type Submitter, type SubmitTransactPayload } from "@lelantos/sdk";
+import { type Submitter, type SubmitTransactPayload } from "@lelantos-org/sdk";
 
 class MockSubmitter implements Submitter {
     public lastPayload?: SubmitTransactPayload;
@@ -286,7 +314,7 @@ expect(submitter.lastPayload?.permit).toBeDefined();
 ### Custom prover (e.g. remote service)
 
 ```ts
-import { type Prover } from "@lelantos/sdk";
+import { type Prover } from "@lelantos-org/sdk";
 
 class RemoteProver implements Prover {
     constructor(private url: string) {}
@@ -305,7 +333,7 @@ const wallet = await Wallet.create(keySource, {
 ### Custom coin selector
 
 ```ts
-import { type CoinSelector, type StoredNote } from "@lelantos/sdk";
+import { type CoinSelector, type StoredNote } from "@lelantos-org/sdk";
 
 class LargestFirstSelector implements CoinSelector {
     select(notes: StoredNote[], asset: bigint, target: bigint) {
@@ -325,7 +353,7 @@ const wallet = await Wallet.create(keySource, { ...cfg, selector: new LargestFir
 ### Custom note source (alt indexer)
 
 ```ts
-import { type NoteSource, type ScanInput, type MerklePath } from "@lelantos/sdk";
+import { type NoteSource, type ScanInput, type MerklePath } from "@lelantos-org/sdk";
 
 class IndexerNoteSource implements NoteSource {
     async listNotes(opts): Promise<ScanInput[]> { /* fetch from your indexer */ }
@@ -338,7 +366,7 @@ class IndexerNoteSource implements NoteSource {
 ## Browser usage
 
 ```ts
-import { Wallet, EthersChainAdapter, InMemoryNoteStore } from "@lelantos/sdk";
+import { Wallet, EthersChainAdapter, InMemoryNoteStore } from "@lelantos-org/sdk";
 import { BrowserProvider } from "ethers";
 
 // Get a signer from MetaMask:
@@ -381,7 +409,7 @@ import {
     RelayerClient,
     signErc2612Permit,
     prove, verify, configureProver,
-} from "@lelantos/sdk";
+} from "@lelantos-org/sdk";
 ```
 
 The `e2e/runner` consumes these directly without using the `Wallet` class.
