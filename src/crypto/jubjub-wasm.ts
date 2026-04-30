@@ -14,18 +14,33 @@ import type { Jubjub as CircomlibJubjub } from "./jubjub";
 import { toLeBytes, fromLeBytes, FIELD_BYTES } from "./bytes";
 import type { Field } from "./poseidon";
 
-// wasm-pack output. CI builds this; consumers receive it via npm dist.
-// Type-only — actual module loaded lazily via real dynamic import (TS lowers
-// `import(...)` to `require()` under `module: commonjs`, which fails for the
-// ESM-shaped wasm-pack output with ERR_REQUIRE_ESM).
-import type * as JubWasmMod from "../../wasm/jubjub/pkg/jubjub_wasm.js";
+// Local type for the wasm-pack output. The real `.d.ts` ships at
+// `wasm/jubjub/pkg/jubjub_wasm.d.ts` after `just build`, but is gitignored,
+// so we describe the consumed surface inline to keep `tsc --noEmit` green
+// in CI without a wasm build step.
+interface JubWasmMod {
+    default: (input?: { module_or_path?: Uint8Array | unknown }) => Promise<unknown>;
+    add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
+    base8(): Uint8Array;
+    fmd_test(dk_le: Uint8Array, clue_r: Uint8Array, clue_bits: Uint8Array, gamma: number): boolean;
+    in_subgroup(p: Uint8Array): boolean;
+    mul_point_escalar(p: Uint8Array, scalar_le: Uint8Array): Uint8Array;
+    pack_point(p: Uint8Array): Uint8Array;
+    sub_order_le(): Uint8Array;
+    try_decrypt_note(
+        ivk_le: Uint8Array,
+        epk_packed: Uint8Array,
+        ciphertext: Uint8Array,
+    ): Uint8Array | undefined;
+    unpack_point(buf: Uint8Array): Uint8Array | undefined;
+}
 
 const POINT_BYTES = 64;
 
 // Indirect eval: bypasses TS CJS lowering so `import()` stays a real ESM import.
 const esmImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
 
-let jubWasm: typeof JubWasmMod | null = null;
+let jubWasm: JubWasmMod | null = null;
 
 let inited: Promise<void> | null = null;
 function ensureInit(): Promise<void> {
@@ -41,18 +56,18 @@ async function doInit(): Promise<void> {
         const pkgDir = join(__dirname, "..", "..", "wasm", "jubjub", "pkg");
         const mod = (await esmImport(
             pathToFileURL(join(pkgDir, "jubjub_wasm.js")).href,
-        )) as typeof JubWasmMod;
+        )) as JubWasmMod;
         const bytes = await readFile(join(pkgDir, "jubjub_wasm_bg.wasm"));
         await mod.default({ module_or_path: bytes });
         jubWasm = mod;
         return;
     }
-    const mod = (await esmImport("../../wasm/jubjub/pkg/jubjub_wasm.js")) as typeof JubWasmMod;
+    const mod = (await esmImport("../../wasm/jubjub/pkg/jubjub_wasm.js")) as JubWasmMod;
     await mod.default();
     jubWasm = mod;
 }
 
-function w(): typeof JubWasmMod {
+function w(): JubWasmMod {
     if (!jubWasm) throw new Error("WasmJubjub not initialized; call WasmJubjub.build() first");
     return jubWasm;
 }
