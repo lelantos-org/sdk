@@ -9,12 +9,7 @@ import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../src/cry
 import { buildSpendingKey } from "../src/keys";
 import { encryptNote } from "../src/note-encrypt";
 import { encodeNotePayload, withClueBitsPrefix, clueBitsToPrefix } from "../src/note-codec";
-import {
-    fmdFlag,
-    fmdGenDetectionKey,
-    fmdFlagKeyFromDetection,
-    type FmdFlagKey,
-} from "../src/fmd";
+import { fmdFlag, fmdGenDetectionKey, fmdFlagKeyFromDetection, type FmdFlagKey } from "../src/fmd";
 import { LocalScanner } from "../src/wallet/scanner-local";
 import { WasmJubjub } from "../src/crypto/jubjub-wasm";
 import type { ScanInput } from "../src/sync";
