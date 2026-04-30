@@ -11,11 +11,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import {
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-    type Field,
-} from "../src/crypto/index";
+import { Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../src/crypto/index";
 import {
     fmdFlag,
     fmdFlagKeyFromDetection,
@@ -25,7 +21,7 @@ import {
 } from "../src/fmd";
 
 function bytesHex(b: Uint8Array): string {
-    return "0x" + Array.from(b, v => v.toString(16).padStart(2, "0")).join("");
+    return `0x${Array.from(b, (v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
 // Deterministic LCG so vectors reproduce bit-for-bit across runs.
@@ -67,8 +63,8 @@ async function main() {
         vectors.push({
             label: `gamma=${gamma}`,
             gamma,
-            dk_x: dkA.x.map(x => x.toString()),
-            fk_X: fkA.X.map(P => ({ x: P[0].toString(), y: P[1].toString() })),
+            dk_x: dkA.x.map((x) => x.toString()),
+            fk_X: fkA.X.map((P) => ({ x: P[0].toString(), y: P[1].toString() })),
             r: r.toString(),
             clue_R: bytesHex(clue.R),
             clue_bits: bytesHex(clue.bits),
@@ -88,11 +84,14 @@ async function main() {
 
     const outPath = resolve(__dirname, "../tests/vectors/fmd.json");
     mkdirSync(dirname(outPath), { recursive: true });
-    writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");
+    writeFileSync(outPath, `${JSON.stringify(out, null, 2)}\n`);
     console.log(`wrote ${outPath} — ${vectors.length} vectors`);
     for (const v of vectors) {
         if (!v.detect_self) throw new Error(`self-detect failed for ${v.label}`);
     }
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+});

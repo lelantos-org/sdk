@@ -17,7 +17,7 @@ export interface InitRes {
 export interface ScanReq {
     type: "scan";
     id: number;
-    ivk: string;            // bigint as decimal string (postMessage-safe)
+    ivk: string; // bigint as decimal string (postMessage-safe)
     inputs: WireScanInput[];
     detectionKey?: WireDetectionKey;
 }
@@ -37,12 +37,14 @@ export interface ScanErr {
 export interface WireScanInput {
     ciphertext: Uint8Array;
     epk: Uint8Array;
-    cm: string;             // bigint decimal
+    cm: string; // bigint decimal
     leafIndex: number;
     clue?: { R: Uint8Array; bits: Uint8Array; gamma: number };
 }
 
-export interface WireDetectionKey { x: string[] }
+export interface WireDetectionKey {
+    x: string[];
+}
 
 export interface WireScanHit {
     asset: string;
@@ -59,9 +61,7 @@ export function encodeInput(i: ScanInput): WireScanInput {
         epk: i.epk,
         cm: i.cm.toString(),
         leafIndex: i.leafIndex,
-        clue: i.clue
-            ? { R: i.clue.R, bits: i.clue.bits, gamma: i.clue.gamma }
-            : undefined,
+        clue: i.clue ? { R: i.clue.R, bits: i.clue.bits, gamma: i.clue.gamma } : undefined,
     };
 }
 

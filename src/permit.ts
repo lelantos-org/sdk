@@ -7,7 +7,7 @@
 //
 // Domain matches OZ's ERC20Permit: `{ name, version: "1", chainId, verifyingContract }`.
 
-import { Signer, Signature, TypedDataDomain } from "ethers";
+import { type Signer, Signature, type TypedDataDomain } from "ethers";
 
 export interface Erc2612Permit {
     /// Decimal U256 string — caller passes a bigint and we stringify.

@@ -15,23 +15,19 @@ import {
     type WorkerPoolScannerOpts,
 } from "./scanner-worker-pool";
 
-export interface BrowserWorkerScannerOpts
-    extends Omit<WorkerPoolScannerOpts, "factory"> {
+export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "factory"> {
     /// Worker module URL. Required: SDK ships as CJS so it cannot reference
     /// `import.meta.url` here. Pass it from your ESM call site:
     ///   `workerUrl: new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`
     workerUrl: string | URL;
 }
 
-export function browserWorkerScanner(
-    opts: BrowserWorkerScannerOpts,
-): WorkerPoolScanner {
+export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPoolScanner {
     const url = opts.workerUrl;
     return new WorkerPoolScanner({
         // Native Worker is structurally compatible with WorkerLike modulo
         // MessageEvent typing — cast through unknown.
-        factory: () =>
-            new Worker(url, { type: "module" }) as unknown as WorkerLike,
+        factory: () => new Worker(url, { type: "module" }) as unknown as WorkerLike,
         size: opts.size,
         chunkSize: opts.chunkSize,
     });

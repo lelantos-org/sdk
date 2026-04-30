@@ -40,11 +40,11 @@ export class NoteCache {
     }
 
     unspent(): CachedNote[] {
-        return this.all().filter(c => !c.spent && !c.pending);
+        return this.all().filter((c) => !c.spent && !c.pending);
     }
 
     unspentForAsset(asset: Field): CachedNote[] {
-        return this.unspent().filter(c => c.note.asset === asset);
+        return this.unspent().filter((c) => c.note.asset === asset);
     }
 
     balance(asset: Field): bigint {

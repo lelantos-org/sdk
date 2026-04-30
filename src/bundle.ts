@@ -7,8 +7,8 @@
 // to the relayer's `/v1/transact`.
 
 import {
-    Poseidon,
-    Jubjub,
+    type Poseidon,
+    type Jubjub,
     MerkleTree,
     buildNoteCommitment,
     type Field,
@@ -24,12 +24,7 @@ import {
 import { flatten, fiatShamirZ } from "./snark-compression";
 import { prove, type ProverPaths, type Groth16Proof } from "./prover";
 import type { Prover } from "./wallet/prover";
-import {
-    EMPTY_AUX,
-    buildOutputAux,
-    flagKeyFromAddressDk,
-    type OutputAux,
-} from "./aux";
+import { EMPTY_AUX, buildOutputAux, flagKeyFromAddressDk, type OutputAux } from "./aux";
 import type { SubmitTransactPayload, TransactPubInputs } from "./relayer";
 
 export interface OutputRecipient {
@@ -51,8 +46,8 @@ export interface BundleCommon {
     J: Jubjub;
     chainId: bigint;
     asset: bigint;
-    payerAddress: string;     // 0x ETH (deposit ERC20 source; pass `0x0` for transfer/withdraw)
-    relayerAddress: string;   // 0x ETH; must equal relayer's signing key
+    payerAddress: string; // 0x ETH (deposit ERC20 source; pass `0x0` for transfer/withdraw)
+    relayerAddress: string; // 0x ETH; must equal relayer's signing key
     recipientAddress: string; // 0x ETH (on-chain recipient for withdraw, sender for deposit/transfer)
     /// Pluggable prover. Pass either:
     ///   - `proverPaths: ProverPaths` (legacy; SDK builds a SnarkjsProver)
@@ -142,7 +137,8 @@ export interface TransferArgs extends BundleCommon {
 
 export async function buildTransfer(a: TransferArgs): Promise<BuiltBundle> {
     const { P, J } = a;
-    if (a.inputs.every((s) => s == null)) throw new Error("transfer: at least one real input required");
+    if (a.inputs.every((s) => s == null))
+        throw new Error("transfer: at least one real input required");
 
     const sumIn = a.inputs.reduce((acc, s) => acc + (s?.cached.note.value ?? 0n), 0n);
     const sumOut = a.outputs[0].value + a.outputs[1].value;
@@ -171,12 +167,15 @@ export interface WithdrawArgs extends BundleCommon {
 
 export async function buildWithdraw(a: WithdrawArgs): Promise<BuiltBundle> {
     const { P, J } = a;
-    if (a.inputs.every((s) => s == null)) throw new Error("withdraw: at least one real input required");
+    if (a.inputs.every((s) => s == null))
+        throw new Error("withdraw: at least one real input required");
 
     const sumIn = a.inputs.reduce((acc, s) => acc + (s?.cached.note.value ?? 0n), 0n);
     const sumChange = a.change[0].value + a.change[1].value;
     if (sumIn !== a.publicOut + sumChange) {
-        throw new Error(`withdraw balance: in=${sumIn} publicOut=${a.publicOut} change=${sumChange}`);
+        throw new Error(
+            `withdraw balance: in=${sumIn} publicOut=${a.publicOut} change=${sumChange}`,
+        );
     }
 
     const realIns = buildInputs(P, a.inputs, a.treeDepth, 0xd4n);
@@ -267,10 +266,7 @@ async function finalize(
             BigInt((baseInput as any).nullifier[0]),
             BigInt((baseInput as any).nullifier[1]),
         ],
-        outCm: [
-            BigInt((baseInput as any).out_cm[0]),
-            BigInt((baseInput as any).out_cm[1]),
-        ],
+        outCm: [BigInt((baseInput as any).out_cm[0]), BigInt((baseInput as any).out_cm[1])],
         publicAssetId: asset,
         pubAssetGen: pubGen,
         publicIn,

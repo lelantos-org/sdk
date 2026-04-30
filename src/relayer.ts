@@ -46,10 +46,10 @@ export interface TransactPubInputs {
     publicOut: bigint;
     inCv: [Point, Point];
     outCv: [Point, Point];
-    recipient: string;     // 0x-hex address
+    recipient: string; // 0x-hex address
     chainId: bigint;
-    payer: string;         // 0x-hex address
-    relayer: string;       // 0x-hex address; must equal the relayer's own
+    payer: string; // 0x-hex address
+    relayer: string; // 0x-hex address; must equal the relayer's own
 }
 
 export interface TransactAux {
@@ -95,7 +95,10 @@ export interface ScannedNote {
 /// here is the SDK's expectation — every relayer service speaking it MUST
 /// match these shapes.
 export class RelayerClient {
-    constructor(private readonly baseUrl: string, private readonly fetchImpl: typeof fetch = fetch) {}
+    constructor(
+        private readonly baseUrl: string,
+        private readonly fetchImpl: typeof fetch = fetch,
+    ) {}
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
         return this.postJson("/v1/transact", serializeSubmit(payload));
@@ -112,7 +115,7 @@ export class RelayerClient {
         const data = await this.getJson<SerializedMerkleProof>(`/path?cm=${cm.toString()}`);
         return {
             leafIndex: data.leafIndex,
-            pathElements: data.pathElements.map(lvl => lvl.map(BigInt)),
+            pathElements: data.pathElements.map((lvl) => lvl.map(BigInt)),
             pathIndices: data.pathIndices,
             root: BigInt(data.root),
         };
@@ -123,7 +126,7 @@ export class RelayerClient {
         return {
             leafCount: data.leafCount,
             root: BigInt(data.root),
-            frontier: data.frontier.map(lvl => lvl.map(BigInt)),
+            frontier: data.frontier.map((lvl) => lvl.map(BigInt)),
         };
     }
 
@@ -145,7 +148,7 @@ export class RelayerClient {
 }
 
 interface SerializedScannedNote {
-    ciphertext: string;       // hex
+    ciphertext: string; // hex
     clueR: [string, string];
     ephPub: [string, string];
     cm: string;
@@ -191,8 +194,8 @@ function pointToObj(p: Point): { x: string; y: string } {
 function serializePubInputs(pi: TransactPubInputs): unknown {
     return {
         merkleRoot: pi.merkleRoot.toString(),
-        nullifier: pi.nullifier.map(n => n.toString()),
-        outCm: pi.outCm.map(c => c.toString()),
+        nullifier: pi.nullifier.map((n) => n.toString()),
+        outCm: pi.outCm.map((c) => c.toString()),
         publicAssetId: Number(pi.publicAssetId),
         pubAssetGen: pointToObj(pi.pubAssetGen),
         publicIn: Number(pi.publicIn),

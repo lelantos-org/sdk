@@ -23,10 +23,10 @@ export interface FmdTreeState {
 export interface FmdNoteOut {
     id: number;
     leafIndex: number;
-    commitmentHex: string;     // BARE hex (no 0x)
-    ciphertextHex: string;     // BARE hex (no 0x)
-    ephPubX: string;           // decimal
-    ephPubY: string;           // decimal
+    commitmentHex: string; // BARE hex (no 0x)
+    ciphertextHex: string; // BARE hex (no 0x)
+    ephPubX: string; // decimal
+    ephPubY: string; // decimal
     blockNumber?: number;
     chainId?: number;
 }

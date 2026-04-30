@@ -6,13 +6,17 @@
 
 import type { ScanHit } from "../sync";
 
+/// JSON-safe wire/storage shape. BigInts serialised as decimal strings,
+/// `cm` as 0x-hex (32 bytes). Persistable verbatim to disk / IndexedDB /
+/// SQLite TEXT columns. Use `decodeStoredNote` to lift to native types
+/// before doing arithmetic; use `encodeStoredNote` to round-trip back.
 export interface StoredNote {
     id: string;
-    asset: string;     // bigint as decimal string
+    asset: string; // bigint as decimal string
     value: string;
     rho: string;
     rcm: string;
-    cm: string;        // 0x-hex 32 B
+    cm: string; // 0x-hex 32 B
     leafIndex: number;
     spent: boolean;
     discoveredAt: string;
@@ -20,6 +24,53 @@ export interface StoredNote {
     /// by the selector to enforce a spend cooldown that breaks same-block
     /// change-link heuristics. Optional; when absent, cooldown is skipped.
     firstSeenBlock?: number;
+}
+
+/// In-memory shape with native BigInts. Returned by `decodeStoredNote`.
+/// Cheaper to work with than re-parsing decimal strings on every read.
+export interface NoteRecord {
+    id: string;
+    asset: bigint;
+    value: bigint;
+    rho: bigint;
+    rcm: bigint;
+    cm: string; // 0x-hex 32 B
+    leafIndex: number;
+    spent: boolean;
+    discoveredAt: string;
+    firstSeenBlock?: number;
+}
+
+/// Decode a persisted `StoredNote` (decimal strings) to native BigInts.
+export function decodeStoredNote(s: StoredNote): NoteRecord {
+    return {
+        id: s.id,
+        asset: BigInt(s.asset),
+        value: BigInt(s.value),
+        rho: BigInt(s.rho),
+        rcm: BigInt(s.rcm),
+        cm: s.cm,
+        leafIndex: s.leafIndex,
+        spent: s.spent,
+        discoveredAt: s.discoveredAt,
+        firstSeenBlock: s.firstSeenBlock,
+    };
+}
+
+/// Encode a `NoteRecord` (BigInts) to the JSON-safe `StoredNote` shape.
+export function encodeStoredNote(n: NoteRecord): StoredNote {
+    return {
+        id: n.id,
+        asset: n.asset.toString(),
+        value: n.value.toString(),
+        rho: n.rho.toString(),
+        rcm: n.rcm.toString(),
+        cm: n.cm,
+        leafIndex: n.leafIndex,
+        spent: n.spent,
+        discoveredAt: n.discoveredAt,
+        firstSeenBlock: n.firstSeenBlock,
+    };
 }
 
 export interface NotesFile {
@@ -56,7 +107,7 @@ export function addHits(
     const added: StoredNote[] = [];
     let skipped = 0;
     for (const h of hits) {
-        const cmHex = "0x" + h.cm.toString(16).padStart(64, "0");
+        const cmHex = `0x${h.cm.toString(16).padStart(64, "0")}`;
         if (known.has(cmHex)) {
             skipped++;
             continue;
@@ -87,7 +138,7 @@ export function markSpent(file: NotesFile, id: string): void {
 }
 
 function shortId(): string {
-    if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+    if (!globalThis.crypto?.getRandomValues) {
         throw new Error("Web Crypto API not available; provide a polyfill");
     }
     const b = new Uint8Array(4);

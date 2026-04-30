@@ -15,7 +15,7 @@
 // `pk_d` already exposes — see the audit in PR description.
 
 import { bech32m } from "bech32";
-import { Jubjub, type Field, type Point } from "./crypto/index";
+import type { Jubjub, Field, Point } from "./crypto/index";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./crypto/bytes";
 
 export const ADDRESS_HRP = "lelantos2";

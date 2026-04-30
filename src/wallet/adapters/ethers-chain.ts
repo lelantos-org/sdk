@@ -42,7 +42,7 @@ export class EthersChainAdapter implements ChainAdapter {
     readonly provider: JsonRpcProvider;
     readonly signer: Signer;
     private readonly maspContract: Contract;
-    private readonly maspAddress: string;
+    private readonly _maspAddress: string;
     private readonly chainIdOverride?: bigint;
     private cachedChainId?: bigint;
 
@@ -55,7 +55,7 @@ export class EthersChainAdapter implements ChainAdapter {
         } else {
             throw new Error("EthersChainAdapter: pass `signerKey` or `signer`");
         }
-        this.maspAddress = opts.maspAddress;
+        this._maspAddress = opts.maspAddress;
         this.maspContract = new Contract(opts.maspAddress, MASP_ABI, this.provider);
         this.chainIdOverride = opts.chainId;
     }
@@ -113,7 +113,7 @@ export class EthersChainAdapter implements ChainAdapter {
         return this.maspContract;
     }
 
-    get maspAddr(): string {
-        return this.maspAddress;
+    async maspAddress(): Promise<string> {
+        return this._maspAddress;
     }
 }

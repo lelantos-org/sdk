@@ -9,12 +9,7 @@
 //
 // Pad slots use `EMPTY_AUX`. Real outputs go through `buildOutputAux`.
 
-import {
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-    type Field,
-    type Point,
-} from "./crypto/index";
+import { type Jubjub, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./crypto/index";
 import {
     fmdFlag,
     fmdFlagKeyFromDetection,

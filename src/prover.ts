@@ -3,12 +3,11 @@
 // per-call. Build artifacts live under `circuits/build/` after the
 // trusted-setup ceremony output is materialised.
 
-// @ts-ignore — snarkjs ships without types
 import * as snarkjs from "snarkjs";
 
 export interface ProverPaths {
-    wasmPath: string;  // e.g. "circuits/build/2x2_js/2x2.wasm"
-    zkeyPath: string;  // e.g. "circuits/build/2x2_final.zkey"
+    wasmPath: string; // e.g. "circuits/build/2x2_js/2x2.wasm"
+    zkeyPath: string; // e.g. "circuits/build/2x2_final.zkey"
 }
 
 let DEFAULT_PATHS: ProverPaths | null = null;

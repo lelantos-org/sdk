@@ -8,7 +8,7 @@ import { BABYJUB_SUBGROUP_ORDER, BN254_FR, fromLeBytes, type Field } from "../cr
 
 function randomBytes32(): Uint8Array {
     const out = new Uint8Array(32);
-    if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+    if (!globalThis.crypto?.getRandomValues) {
         throw new Error("Web Crypto API not available; provide a polyfill");
     }
     globalThis.crypto.getRandomValues(out);

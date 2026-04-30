@@ -11,7 +11,9 @@ import {
 
 describe("FMD (Niwl)", () => {
     let J: Jubjub;
-    beforeAll(async () => { J = await Jubjub.build(); });
+    beforeAll(async () => {
+        J = await Jubjub.build();
+    });
 
     function rng(seed: bigint) {
         let s = seed;
@@ -34,7 +36,8 @@ describe("FMD (Niwl)", () => {
     it("foreign detection statistically near 2^-γ", () => {
         const N = 256;
         const γ = FMD_DEFAULT_GAMMA;
-        const ra = rng(0xa1n), rb = rng(0xb2n);
+        const ra = rng(0xa1n),
+            rb = rng(0xb2n);
         const dkA = { x: Array.from({ length: γ }, () => ra()) };
         const dkB = { x: Array.from({ length: γ }, () => rb()) };
         const fkA = fmdFlagKeyFromDetection(J, dkA);

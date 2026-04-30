@@ -33,11 +33,16 @@ async function main(): Promise<void> {
     const newRoot = after.root();
 
     const input = buildTreeUpdateInput({
-        oldRoot, newRoot, cm0, cm1, startIndex, frontier,
+        oldRoot,
+        newRoot,
+        cm0,
+        cm1,
+        startIndex,
+        frontier,
     });
 
     mkdirSync(dirname(OUT), { recursive: true });
-    writeFileSync(OUT, JSON.stringify(input, null, 2) + "\n");
+    writeFileSync(OUT, `${JSON.stringify(input, null, 2)}\n`);
     console.log(`wrote ${OUT}`);
 }
 

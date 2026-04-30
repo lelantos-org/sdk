@@ -203,7 +203,7 @@ function cmp(a: bigint, b: bigint): number {
 }
 
 function defaultRng(): number {
-    if (!globalThis.crypto || !globalThis.crypto.getRandomValues) {
+    if (!globalThis.crypto?.getRandomValues) {
         throw new Error("Web Crypto API not available; pass an rng in SelectOpts");
     }
     const buf = new Uint8Array(7);
@@ -219,22 +219,12 @@ function defaultRng(): number {
 /// strategies (largest-first, Penumbra planner, deterministic test stub)
 /// and pass via `WalletConfig.selector`.
 export interface CoinSelector {
-    select(
-        all: StoredNote[],
-        asset: bigint,
-        target: bigint,
-        opts?: SelectOpts,
-    ): SelectionResult;
+    select(all: StoredNote[], asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
 }
 
 /// Default — Smallest-First with Random Tiebreak.
 export class SfrtCoinSelector implements CoinSelector {
-    select(
-        all: StoredNote[],
-        asset: bigint,
-        target: bigint,
-        opts?: SelectOpts,
-    ): SelectionResult {
+    select(all: StoredNote[], asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult {
         return selectNotes(all, asset, target, opts);
     }
 }

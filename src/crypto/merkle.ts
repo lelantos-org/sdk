@@ -53,7 +53,7 @@ export class MerkleTree {
         const N = this.leaves.length;
         const out: Field[][] = [];
         for (let lvl = 0; lvl < this.depth; lvl++) {
-            const stride = Math.pow(ARITY, lvl);
+            const stride = ARITY ** lvl;
             const slot = Math.floor(N / stride) % ARITY;
             const parentIdx = Math.floor(N / (stride * ARITY));
             const slots: Field[] = [];

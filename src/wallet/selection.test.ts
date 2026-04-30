@@ -13,7 +13,7 @@ function note(
         value: value.toString(),
         rho: "0",
         rcm: "0",
-        cm: "0x" + id.padStart(64, "0"),
+        cm: `0x${id.padStart(64, "0")}`,
         leafIndex: parseInt(id, 16) || 0,
         spent: opts.spent ?? false,
         discoveredAt: "1970-01-01T00:00:00Z",
@@ -25,7 +25,7 @@ function note(
 function seededRng(seed: number): () => number {
     let s = seed >>> 0;
     return () => {
-        s = (s + 0x6D2B79F5) >>> 0;
+        s = (s + 0x6d2b79f5) >>> 0;
         let t = s;
         t = Math.imul(t ^ (t >>> 15), t | 1);
         t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
@@ -59,12 +59,7 @@ describe("selectNotes", () => {
     });
 
     it("single-cover prefers smallest sufficient note (not largest)", () => {
-        const notes = [
-            note("a", 50n),
-            note("b", 200n),
-            note("c", 1000n),
-            note("d", 5000n),
-        ];
+        const notes = [note("a", 50n), note("b", 200n), note("c", 1000n), note("d", 5000n)];
         const r = selectNotes(notes, 1n, 100n, baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.notes).toHaveLength(1);
@@ -80,12 +75,7 @@ describe("selectNotes", () => {
     });
 
     it("two-cover picks smallest pair, not largest+gap", () => {
-        const notes = [
-            note("a", 30n),
-            note("b", 40n),
-            note("c", 60n),
-            note("d", 1000n),
-        ];
+        const notes = [note("a", 30n), note("b", 40n), note("c", 60n), note("d", 1000n)];
         // target 80 → smallest pair sum is (a=30, c=60)=90; NOT (d=1000, *).
         // The big note `d` is left for future spends — drains dust first.
         const r = selectNotes(notes, 1n, 80n, baseOpts());
@@ -114,20 +104,30 @@ describe("selectNotes", () => {
             note("fresh", 1000n, { firstSeenBlock: 99 }),
             note("ripe", 200n, { firstSeenBlock: 50 }),
         ];
-        const r = selectNotes(notes, 1n, 100n, baseOpts({
-            cooldownBlocks: 2,
-            tipBlock: 100,
-        }));
+        const r = selectNotes(
+            notes,
+            1n,
+            100n,
+            baseOpts({
+                cooldownBlocks: 2,
+                tipBlock: 100,
+            }),
+        );
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.notes[0].id).toBe("ripe");
     });
 
     it("ignores cooldown when firstSeenBlock missing", () => {
         const notes = [note("a", 200n)];
-        const r = selectNotes(notes, 1n, 100n, baseOpts({
-            cooldownBlocks: 5,
-            tipBlock: 100,
-        }));
+        const r = selectNotes(
+            notes,
+            1n,
+            100n,
+            baseOpts({
+                cooldownBlocks: 5,
+                tipBlock: 100,
+            }),
+        );
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.notes[0].id).toBe("a");
     });
@@ -176,7 +176,7 @@ describe("selectNotes", () => {
             if (r.plan !== "direct") continue;
             const ascValues = [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
             const picked = BigInt(r.notes[0].value);
-            const rank = ascValues.findIndex((v) => v === picked) / Math.max(1, n - 1);
+            const rank = ascValues.indexOf(picked) / Math.max(1, n - 1);
             samples.push(rank);
         }
         const mean = samples.reduce((s, x) => s + x, 0) / samples.length;

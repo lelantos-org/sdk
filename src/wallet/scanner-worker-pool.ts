@@ -54,9 +54,9 @@ export class WorkerPoolScanner implements Scanner {
         if (size < 1) throw new Error("WorkerPoolScanner: size must be >= 1");
         this.workers = Array.from({ length: size }, () => opts.factory());
         this.chunkSize = opts.chunkSize;
-        this.initPromise = Promise.all(
-            this.workers.map((w) => this.initOne(w)),
-        ).then(() => undefined);
+        this.initPromise = Promise.all(this.workers.map((w) => this.initOne(w))).then(
+            () => undefined,
+        );
     }
 
     private initOne(worker: WorkerLike): Promise<void> {
@@ -137,7 +137,8 @@ export class WorkerPoolScanner implements Scanner {
 }
 
 function defaultPoolSize(): number {
-    const hw = (globalThis as { navigator?: { hardwareConcurrency?: number } })
-        .navigator?.hardwareConcurrency ?? 4;
+    const hw =
+        (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+            ?.hardwareConcurrency ?? 4;
     return Math.max(2, Math.min(8, hw));
 }

@@ -29,10 +29,7 @@ export function encodeNotePayload(p: NotePayload): Uint8Array {
     out.set(toLeBytes(p.asset, NOTE_ASSET_BYTES), 0);
     out.set(toLeBytes(p.value, NOTE_VALUE_BYTES), NOTE_ASSET_BYTES);
     out.set(toLeBytes(p.rho, NOTE_RHO_BYTES), NOTE_ASSET_BYTES + NOTE_VALUE_BYTES);
-    out.set(
-        toLeBytes(p.rcm, NOTE_RCM_BYTES),
-        NOTE_ASSET_BYTES + NOTE_VALUE_BYTES + NOTE_RHO_BYTES,
-    );
+    out.set(toLeBytes(p.rcm, NOTE_RCM_BYTES), NOTE_ASSET_BYTES + NOTE_VALUE_BYTES + NOTE_RHO_BYTES);
     return out;
 }
 

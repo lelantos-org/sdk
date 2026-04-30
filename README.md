@@ -49,7 +49,7 @@ import {
 } from "@lelantos-org/sdk";
 
 const wallet = await Wallet.create(
-    { type: "mnemonic", mnemonic: generateNewMnemonic(24) },
+    { type: "mnemonic", mnemonic: generateNewMnemonic(256) },
     {
         chainId: 31337n,
         treeDepth: 10,
@@ -96,7 +96,10 @@ Three key sources. All produce a deterministic `nsk` field element; the wallet k
 ```ts
 import { Wallet, generateNewMnemonic, isValidMnemonic } from "@lelantos-org/sdk";
 
-const mnemonic = generateNewMnemonic(24); // or 12-word: generateNewMnemonic(128)
+// Argument is BIP39 entropy bits, NOT word count.
+//   256 → 24 words (default, recommended)
+//   128 → 12 words
+const mnemonic = generateNewMnemonic(256);
 if (!isValidMnemonic(mnemonic)) throw new Error("bad seed");
 
 const wallet = await Wallet.create(
@@ -486,3 +489,21 @@ npm run build         # tsc → dist/
 ```
 
 CLI demo at [`../cli`](../cli) wires this SDK into a `lel` binary covering wallet management, scan, transact, chain debug.
+
+---
+
+## Stability
+
+Pre-1.0. **No semver guarantees** until `v1.0.0`. Minor versions may include breaking API changes. Pin to an exact version (`"@lelantos-org/sdk": "0.1.0"`) and read the changelog before bumping.
+
+## Browser CSP
+
+WASM modules are loaded via a real dynamic `import()` (TS lowering bypassed via indirect `Function("...")`). Strict `script-src` policies that forbid `'unsafe-eval'` will block module init. Allow `'wasm-unsafe-eval'` (and `'unsafe-eval'` if your bundler does not preserve the dynamic import).
+
+## Errors
+
+Programmatic flows should catch typed errors via `instanceof`:
+
+- `InsufficientCoverError` — thrown by `transfer` / `withdraw` when no 1- or 2-note cover exists. Properties: `target`, `asset`, `consolidate: StoredNote[]`, `consolidateSum`. Self-spend `consolidate` first, then re-sync and retry.
+- `WalletConfigError` — thrown by `Wallet.create` when a default pluggable is needed but its config field is missing. Suggests `presets` (`fastWallet`, `nodeWallet`) for opinionated defaults.
+

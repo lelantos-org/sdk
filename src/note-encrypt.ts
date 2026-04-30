@@ -17,12 +17,7 @@
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
 import { blake2b } from "@noble/hashes/blake2";
-import {
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-    type Field,
-    type Point,
-} from "./crypto/index";
+import { type Jubjub, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./crypto/index";
 import { WasmJubjub } from "./crypto/jubjub-wasm";
 import type { EncryptedNote } from "./notes";
 

@@ -14,11 +14,7 @@ export interface Scanner {
     /// before paying the ECDH+ChaCha cost.
     ///
     /// Result order MUST match input order (filtered to hits).
-    scan(
-        ivk: Field,
-        inputs: ScanInput[],
-        detectionKey?: FmdDetectionKey,
-    ): Promise<ScanHit[]>;
+    scan(ivk: Field, inputs: ScanInput[], detectionKey?: FmdDetectionKey): Promise<ScanHit[]>;
 
     /// Optional: release any held resources (workers, native handles).
     dispose?(): Promise<void> | void;

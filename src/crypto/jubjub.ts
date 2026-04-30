@@ -4,7 +4,7 @@
 //   cv = value · gen + rcv · H
 // Must match `circuits/src/lib/value_commit.circom` byte-for-byte.
 
-// @ts-ignore — circomlibjs ships without TS types
+// @ts-expect-error — circomlibjs ships without TS types
 import { buildBabyjub, buildPedersenHash } from "circomlibjs";
 import type { Field } from "./poseidon";
 import { toLeBytes } from "./bytes";
@@ -27,8 +27,12 @@ export class Jubjub {
         return new Jubjub(await buildBabyjub(), await buildPedersenHash());
     }
 
-    get base8(): Point { return this.toAffine(this.babyjub.Base8); }
-    get order(): bigint { return this.babyjub.subOrder; }
+    get base8(): Point {
+        return this.toAffine(this.babyjub.Base8);
+    }
+    get order(): bigint {
+        return this.babyjub.subOrder;
+    }
 
     addPoint(a: Point, b: Point): Point {
         return this.toAffine(this.babyjub.addPoint(this.fromAffine(a), this.fromAffine(b)));
@@ -79,8 +83,16 @@ export class Jubjub {
     }
 
     // ---- coordinate plumbing (Montgomery FE ↔ bigint) ----
-    private toCoord(fe: any): Field { return BigInt(this.babyjub.F.toObject(fe)); }
-    private fromCoord(x: Field): any { return this.babyjub.F.e(x); }
-    private toAffine(p: any): Point { return [this.toCoord(p[0]), this.toCoord(p[1])]; }
-    private fromAffine(p: Point): any { return [this.fromCoord(p[0]), this.fromCoord(p[1])]; }
+    private toCoord(fe: any): Field {
+        return BigInt(this.babyjub.F.toObject(fe));
+    }
+    private fromCoord(x: Field): any {
+        return this.babyjub.F.e(x);
+    }
+    private toAffine(p: any): Point {
+        return [this.toCoord(p[0]), this.toCoord(p[1])];
+    }
+    private fromAffine(p: Point): any {
+        return [this.fromCoord(p[0]), this.fromCoord(p[1])];
+    }
 }

@@ -66,6 +66,8 @@ wasmDescribe("WasmJubjub fused decrypt parity vs circomlibjs", () => {
             plaintext: encodeNotePayload({ asset: 1n, value: 99n, rho: 3n, rcm: 4n }),
         });
         const bad = new Uint8Array(32).fill(0xff);
-        expect(decryptNote({ J: wasmJ, ivk: me.ivk, note: { epk: bad, ciphertext: enc.ciphertext } })).toBeNull();
+        expect(
+            decryptNote({ J: wasmJ, ivk: me.ivk, note: { epk: bad, ciphertext: enc.ciphertext } }),
+        ).toBeNull();
     });
 });

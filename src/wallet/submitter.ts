@@ -3,11 +3,7 @@
 // submitter (race / fallback), a mock for tests, or a direct on-chain
 // submitter for self-relaying flows.
 
-import {
-    RelayerClient,
-    type RelayerSubmitResponse,
-    type SubmitTransactPayload,
-} from "../relayer";
+import { RelayerClient, type RelayerSubmitResponse, type SubmitTransactPayload } from "../relayer";
 
 export interface Submitter {
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse>;

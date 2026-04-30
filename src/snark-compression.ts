@@ -10,7 +10,8 @@ import { AbiCoder, keccak256 } from "ethers";
 import type { Field } from "./crypto/index";
 
 // BN254 scalar field (Groth16 curve).
-export const BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+export const BN254_R =
+    21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 // Logical PI shape produced by `toCircomInput`. Generic over keys we read.
 export interface FlattenInput {
@@ -85,7 +86,7 @@ export function flattenTreeUpdate(input: TreeUpdateFlattenInput): Field[] {
 export function fiatShamirZ(coeffs: Field[]): Field {
     const packed = AbiCoder.defaultAbiCoder().encode(
         ["uint256[]"],
-        [coeffs.map(c => c.toString())],
+        [coeffs.map((c) => c.toString())],
     );
     return BigInt(keccak256(packed)) % BN254_R;
 }

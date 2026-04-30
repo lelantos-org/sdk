@@ -24,8 +24,9 @@ function jub(): Promise<WasmJubjub> {
     return jubPromise;
 }
 
-const ctx: { onmessage: ((ev: { data: unknown }) => void) | null } =
-    globalThis as unknown as { onmessage: ((ev: { data: unknown }) => void) | null };
+const ctx: { onmessage: ((ev: { data: unknown }) => void) | null } = globalThis as unknown as {
+    onmessage: ((ev: { data: unknown }) => void) | null;
+};
 
 const post = (msg: ScanRes | ScanErr | InitRes): void => {
     (globalThis as unknown as { postMessage: (m: unknown) => void }).postMessage(msg);

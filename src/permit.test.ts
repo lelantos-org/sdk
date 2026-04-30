@@ -14,7 +14,9 @@ const PERMIT_TYPES = {
 
 describe("signErc2612Permit", () => {
     it("round-trips: signature recovers the payer's address", async () => {
-        const signer = new Wallet("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+        const signer = new Wallet(
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        );
         const token = "0x0000000000000000000000000000000000001234";
         const spender = "0x0000000000000000000000000000000000005678";
         const chainId = 31337n;
@@ -23,8 +25,14 @@ describe("signErc2612Permit", () => {
         const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
         const out = await signErc2612Permit({
-            signer, token, tokenName: "USDC", chainId,
-            spender, value, nonce, deadline,
+            signer,
+            token,
+            tokenName: "USDC",
+            chainId,
+            spender,
+            value,
+            nonce,
+            deadline,
         });
 
         // Reassemble the 65-byte sig and verify.
@@ -43,12 +51,20 @@ describe("signErc2612Permit", () => {
     });
 
     it("custom version is honored in the domain", async () => {
-        const signer = new Wallet("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+        const signer = new Wallet(
+            "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+        );
         const token = "0x000000000000000000000000000000000000ABCD";
         const out = await signErc2612Permit({
-            signer, token, tokenName: "DAI", tokenVersion: "2", chainId: 1n,
+            signer,
+            token,
+            tokenName: "DAI",
+            tokenVersion: "2",
+            chainId: 1n,
             spender: "0x000000000000000000000000000000000000DEAD",
-            value: 1n, nonce: 0n, deadline: 1n,
+            value: 1n,
+            nonce: 0n,
+            deadline: 1n,
         });
         const sigHex = out.r + out.s.slice(2) + out.v.toString(16).padStart(2, "0");
         const recovered = verifyTypedData(
@@ -57,7 +73,9 @@ describe("signErc2612Permit", () => {
             {
                 owner: signer.address,
                 spender: "0x000000000000000000000000000000000000DEAD",
-                value: 1n, nonce: 0n, deadline: 1n,
+                value: 1n,
+                nonce: 0n,
+                deadline: 1n,
             },
             sigHex,
         );

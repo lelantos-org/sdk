@@ -16,7 +16,7 @@ describe("bech32m address", () => {
     it("round-trip carries pk_d, dk, pk", () => {
         const sk = buildSpendingKey(P, J, 0xdeadbeefn);
         const addr = encodeAddress(J, sk.pk_d, sk.dk, sk.pk);
-        expect(addr.startsWith(ADDRESS_HRP + "1")).toBe(true);
+        expect(addr.startsWith(`${ADDRESS_HRP}1`)).toBe(true);
         const dec = decodeAddress(J, addr);
         expect(dec.pk_d).toEqual(sk.pk_d);
         expect(dec.dk).toBe(sk.dk);

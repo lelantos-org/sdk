@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import {
-    Poseidon,
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-} from "./crypto/index";
+import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER } from "./crypto/index";
 import { buildSpendingKey } from "./keys";
 import { encryptNote, decryptNote } from "./note-encrypt";
 

@@ -5,24 +5,14 @@
 // Reports: total ms, ms/note, notes/sec for a few batch sizes and FMD
 // hit-rate scenarios. Establishes baseline before tuning.
 
-import {
-    Poseidon,
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-    type Field,
-} from "../src/crypto/index";
+import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../src/crypto/index";
 import { buildSpendingKey } from "../src/keys";
 import { encryptNote } from "../src/note-encrypt";
-import {
-    encodeNotePayload,
-    withClueBitsPrefix,
-    clueBitsToPrefix,
-} from "../src/note-codec";
+import { encodeNotePayload, withClueBitsPrefix, clueBitsToPrefix } from "../src/note-codec";
 import {
     fmdFlag,
     fmdGenDetectionKey,
     fmdFlagKeyFromDetection,
-    type FmdDetectionKey,
     type FmdFlagKey,
 } from "../src/fmd";
 import { LocalScanner } from "../src/wallet/scanner-local";
@@ -37,8 +27,8 @@ interface Scenario {
 }
 
 const scenarios: Scenario[] = [
-    { label: "1k notes, 0% mine",   n: 1000,  mineFrac: 0.0 },
-    { label: "1k notes, 5% mine",   n: 1000,  mineFrac: 0.05 },
+    { label: "1k notes, 0% mine", n: 1000, mineFrac: 0.0 },
+    { label: "1k notes, 5% mine", n: 1000, mineFrac: 0.05 },
 ];
 
 async function main(): Promise<void> {
@@ -81,9 +71,9 @@ async function main(): Promise<void> {
         const speedup = dtA / dtB;
         console.log(
             `${sc.label.padEnd(22)} hits=${hitsA.length.toString().padStart(4)}  ` +
-            `circomlibjs=${dtA.toFixed(0).padStart(6)}ms  ` +
-            `wasm=${dtB.toFixed(0).padStart(6)}ms  ` +
-            `speedup=${speedup.toFixed(2)}x`,
+                `circomlibjs=${dtA.toFixed(0).padStart(6)}ms  ` +
+                `wasm=${dtB.toFixed(0).padStart(6)}ms  ` +
+                `speedup=${speedup.toFixed(2)}x`,
         );
     }
 }
@@ -112,10 +102,7 @@ function buildBatch(
             }),
         });
         const clue = fmdFlag(J, mine ? fk : eveFk, rand(i + 12345));
-        const wire = withClueBitsPrefix(
-            clueBitsToPrefix(clue.bits, clue.gamma),
-            enc.ciphertext,
-        );
+        const wire = withClueBitsPrefix(clueBitsToPrefix(clue.bits, clue.gamma), enc.ciphertext);
         inputs.push({ ciphertext: wire, epk: enc.epk, cm: BigInt(i), leafIndex: i, clue });
     }
     return inputs;

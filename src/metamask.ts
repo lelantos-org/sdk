@@ -7,7 +7,7 @@
 // `LELANTOS_NSK_DOMAIN.version` invalidates all derived keys, which is
 // exactly what you want if the derivation pipeline changes.
 
-import { keccak256, TypedDataEncoder, type Signer } from "ethers";
+import { keccak256, TypedDataEncoder, type Signer, type TypedDataField } from "ethers";
 import { BABYJUB_SUBGROUP_ORDER, type Field } from "./crypto/index";
 
 export const LELANTOS_NSK_DOMAIN = {
@@ -16,12 +16,12 @@ export const LELANTOS_NSK_DOMAIN = {
     // chainId omitted on purpose — nsk is chain-independent.
 } as const;
 
-const TYPES = {
+const TYPES: Record<string, TypedDataField[]> = {
     LelantosKeyDerivation: [
         { name: "purpose", type: "string" },
         { name: "version", type: "string" },
     ],
-} as const;
+};
 
 const MESSAGE = {
     purpose: "nsk-derivation",
@@ -31,7 +31,7 @@ const MESSAGE = {
 // Returns nsk ∈ [1, BABYJUB_SUBGROUP_ORDER). Caller must persist this
 // securely — losing nsk = losing all spend authority for the address.
 export async function deriveNskFromSigner(signer: Signer): Promise<Field> {
-    const sig = await signer.signTypedData(LELANTOS_NSK_DOMAIN, TYPES as any, MESSAGE);
+    const sig = await signer.signTypedData(LELANTOS_NSK_DOMAIN, TYPES, MESSAGE);
     return reduceSignatureToScalar(sig);
 }
 
@@ -51,5 +51,5 @@ export function nskFromTypedDataDigest(typedDataDigest: string): Field {
 // Helper for tests / unit verification — recompute the typed-data hash
 // without going through a signer.
 export function lelantosTypedDataHash(): string {
-    return TypedDataEncoder.hash(LELANTOS_NSK_DOMAIN, TYPES as any, MESSAGE);
+    return TypedDataEncoder.hash(LELANTOS_NSK_DOMAIN, TYPES, MESSAGE);
 }

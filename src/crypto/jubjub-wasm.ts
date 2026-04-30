@@ -18,7 +18,6 @@ import type { Field } from "./poseidon";
 // Type-only — actual module loaded lazily via real dynamic import (TS lowers
 // `import(...)` to `require()` under `module: commonjs`, which fails for the
 // ESM-shaped wasm-pack output with ERR_REQUIRE_ESM).
-// @ts-ignore — generated module
 import type * as JubWasmMod from "../../wasm/jubjub/pkg/jubjub_wasm.js";
 
 const POINT_BYTES = 64;
@@ -40,7 +39,9 @@ async function doInit(): Promise<void> {
         const { join } = await import("node:path");
         const { pathToFileURL } = await import("node:url");
         const pkgDir = join(__dirname, "..", "..", "wasm", "jubjub", "pkg");
-        const mod = (await esmImport(pathToFileURL(join(pkgDir, "jubjub_wasm.js")).href)) as typeof JubWasmMod;
+        const mod = (await esmImport(
+            pathToFileURL(join(pkgDir, "jubjub_wasm.js")).href,
+        )) as typeof JubWasmMod;
         const bytes = await readFile(join(pkgDir, "jubjub_wasm_bg.wasm"));
         await mod.default({ module_or_path: bytes });
         jubWasm = mod;
@@ -64,10 +65,7 @@ function pointToBytes(p: Point): Uint8Array {
 }
 
 function bytesToPoint(b: Uint8Array): Point {
-    return [
-        fromLeBytes(b.slice(0, FIELD_BYTES)),
-        fromLeBytes(b.slice(FIELD_BYTES, POINT_BYTES)),
-    ];
+    return [fromLeBytes(b.slice(0, FIELD_BYTES)), fromLeBytes(b.slice(FIELD_BYTES, POINT_BYTES))];
 }
 
 export class WasmJubjub {
@@ -92,8 +90,12 @@ export class WasmJubjub {
         return this.fallback;
     }
 
-    get base8(): Point { return this._base8; }
-    get order(): bigint { return this._order; }
+    get base8(): Point {
+        return this._base8;
+    }
+    get order(): bigint {
+        return this._order;
+    }
 
     addPoint(a: Point, b: Point): Point {
         const out = w().add_point(pointToBytes(a), pointToBytes(b));
@@ -152,11 +154,7 @@ export class WasmJubjub {
         return w().fmd_test(dkLe, clueR, clueBits, gamma);
     }
 
-    tryDecryptNote(
-        ivk: Field,
-        epkPacked: Uint8Array,
-        ciphertext: Uint8Array,
-    ): Uint8Array | null {
+    tryDecryptNote(ivk: Field, epkPacked: Uint8Array, ciphertext: Uint8Array): Uint8Array | null {
         const out = w().try_decrypt_note(
             toLeBytes(ivk % this._order, FIELD_BYTES),
             epkPacked,

@@ -1,5 +1,6 @@
 // Top-level barrel.
 
+export * from "./version";
 export * from "./crypto/index";
 export * from "./notes";
 export * from "./keys";
@@ -28,6 +29,7 @@ export * as metamask from "./metamask";
 // Defaults: EthersChainAdapter, FmdNoteSource, HttpRelayerSubmitter,
 // SnarkjsProver, SfrtCoinSelector, InMemoryNoteStore.
 export * from "./wallet";
+export * from "./wallet/errors";
 export * from "./wallet/config";
 export * from "./wallet/key-source";
 export * from "./wallet/note-store";

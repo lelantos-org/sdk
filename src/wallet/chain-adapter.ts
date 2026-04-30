@@ -8,8 +8,8 @@
 import type { Erc2612Permit } from "../permit";
 
 export interface AssetEntry {
-    token: string;       // 0x ERC20 address
-    scale: bigint;       // multiplier from circuit-units to ERC20-base-units
+    token: string; // 0x ERC20 address
+    scale: bigint; // multiplier from circuit-units to ERC20-base-units
     genX: bigint;
     genY: bigint;
 }
@@ -31,6 +31,8 @@ export interface ChainAdapter {
     chainId(): Promise<bigint>;
     /// Eth address of the signer (== `pi.payer` for deposit).
     payerAddress(): Promise<string>;
+    /// MASP contract address. Used as the EIP-2612 permit `spender`.
+    maspAddress(): Promise<string>;
     /// MASP.asset(id) — returns the registered token + scale + asset gen.
     fetchAsset(id: bigint): Promise<AssetEntry>;
     /// MASP.feeBps() — basis-point shield/unshield fee. 0 disables.

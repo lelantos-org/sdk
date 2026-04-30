@@ -12,8 +12,8 @@
 // shared secret without learning ivk.
 
 import {
-    Poseidon,
-    Jubjub,
+    type Poseidon,
+    type Jubjub,
     deriveIvk,
     derivePkFromIvk,
     deriveDk,

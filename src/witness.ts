@@ -4,9 +4,9 @@
 // byte-identical.
 
 import {
-    Poseidon,
-    Jubjub,
-    MerkleTree,
+    type Poseidon,
+    type Jubjub,
+    type MerkleTree,
     buildNoteCommitment,
     buildNullifier,
     type Field,
@@ -72,7 +72,11 @@ export interface BuildOpts {
     z?: Field;
 }
 
-export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Record<string, string | string[] | string[][] | string[][][]> {
+export function toCircomInput(
+    P: Poseidon,
+    J: Jubjub,
+    opts: BuildOpts,
+): Record<string, string | string[] | string[][] | string[][][]> {
     const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;
     const N_IN = 2;
     const N_OUT = 2;
@@ -85,47 +89,53 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Record<s
     const relayerAddress = opts.relayerAddress ?? 0n;
     const pubGen = opts.publicAssetGen ?? J.hashToAssetGen(publicAssetId);
 
-    const out_cm = outputs.map(o => buildNoteCommitment(P, o));
+    const out_cm = outputs.map((o) => buildNoteCommitment(P, o));
 
-    const in_cv: Point[] = inputs.map(i => J.valueCommit(i.value, J.hashToAssetGen(i.asset), i.rcv));
-    const out_cv: Point[] = outputs.map(o => J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv));
+    const in_cv: Point[] = inputs.map((i) =>
+        J.valueCommit(i.value, J.hashToAssetGen(i.asset), i.rcv),
+    );
+    const out_cv: Point[] = outputs.map((o) =>
+        J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv),
+    );
 
     const z = opts.z ?? 1n;
 
     return {
         z: z.toString(),
         merkle_root: merkleRoot.toString(),
-        nullifier: inputs.map(i => i.nf.toString()),
-        out_cm: out_cm.map(c => c.toString()),
+        nullifier: inputs.map((i) => i.nf.toString()),
+        out_cm: out_cm.map((c) => c.toString()),
         public_asset_id: publicAssetId.toString(),
         pub_asset_gen_x: pubGen[0].toString(),
         pub_asset_gen_y: pubGen[1].toString(),
         public_in: publicIn.toString(),
         public_out: publicOut.toString(),
-        in_cv: in_cv.map(p => [p[0].toString(), p[1].toString()]),
-        out_cv: out_cv.map(p => [p[0].toString(), p[1].toString()]),
+        in_cv: in_cv.map((p) => [p[0].toString(), p[1].toString()]),
+        out_cv: out_cv.map((p) => [p[0].toString(), p[1].toString()]),
         recipient_address: recipientAddress.toString(),
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
 
-        in_asset: inputs.map(i => i.asset.toString()),
-        in_value: inputs.map(i => i.value.toString()),
-        in_pk: inputs.map(i => i.pk.toString()),
-        in_rho: inputs.map(i => i.rho.toString()),
-        in_rcm: inputs.map(i => i.rcm.toString()),
-        in_nsk: inputs.map(i => i.nsk.toString()),
-        in_rcv: inputs.map(i => i.rcv.toString()),
-        in_path_elements: inputs.map(i => i.pathElements.map(level => level.map(e => e.toString()))),
-        in_path_indices: inputs.map(i => i.pathIndices.map(b => b.toString())),
-        in_is_dummy: inputs.map(i => i.isDummy ? "1" : "0"),
+        in_asset: inputs.map((i) => i.asset.toString()),
+        in_value: inputs.map((i) => i.value.toString()),
+        in_pk: inputs.map((i) => i.pk.toString()),
+        in_rho: inputs.map((i) => i.rho.toString()),
+        in_rcm: inputs.map((i) => i.rcm.toString()),
+        in_nsk: inputs.map((i) => i.nsk.toString()),
+        in_rcv: inputs.map((i) => i.rcv.toString()),
+        in_path_elements: inputs.map((i) =>
+            i.pathElements.map((level) => level.map((e) => e.toString())),
+        ),
+        in_path_indices: inputs.map((i) => i.pathIndices.map((b) => b.toString())),
+        in_is_dummy: inputs.map((i) => (i.isDummy ? "1" : "0")),
 
-        out_asset: outputs.map(o => o.asset.toString()),
-        out_value: outputs.map(o => o.value.toString()),
-        out_pk: outputs.map(o => o.pk.toString()),
-        out_rho: outputs.map(o => o.rho.toString()),
-        out_rcm: outputs.map(o => o.rcm.toString()),
-        out_rcv: outputs.map(o => o.rcv.toString()),
+        out_asset: outputs.map((o) => o.asset.toString()),
+        out_value: outputs.map((o) => o.value.toString()),
+        out_pk: outputs.map((o) => o.pk.toString()),
+        out_rho: outputs.map((o) => o.rho.toString()),
+        out_rcm: outputs.map((o) => o.rcm.toString()),
+        out_rcv: outputs.map((o) => o.rcv.toString()),
     };
 }
 
@@ -142,7 +152,13 @@ export function dummyInputAt(P: Poseidon, depth: number, rho: Field = 0n): Spent
     const pathElements: Field[][] = [];
     for (let i = 0; i < depth; i++) pathElements.push([0n, 0n, 0n]);
     return {
-        asset: 0n, value: 0n, pk: 0n, rho, rcm: 0n, rcv: 0n, nsk,
+        asset: 0n,
+        value: 0n,
+        pk: 0n,
+        rho,
+        rcm: 0n,
+        rcv: 0n,
+        nsk,
         cm: 0n,
         nf,
         leafIndex: 0,

@@ -5,7 +5,6 @@
 // need no new package. Proof runs in the rust ark-groth16 crate at
 // `sdk/wasm/prover/`, with rayon multi-threading on COI pages.
 
-// @ts-ignore — circom_runtime ships without TS types
 import { WitnessCalculatorBuilder } from "circom_runtime";
 
 import type { Prover } from "./prover";
@@ -77,9 +76,9 @@ function polyfillSelfForNode(): void {
 async function readProverWasm(): Promise<Uint8Array> {
     const { readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    return new Uint8Array(await readFile(
-        join(__dirname, "..", "..", "wasm", "prover", "pkg", "prover_bg.wasm"),
-    ));
+    return new Uint8Array(
+        await readFile(join(__dirname, "..", "..", "wasm", "prover", "pkg", "prover_bg.wasm")),
+    );
 }
 
 async function loadBytes(path: string): Promise<Uint8Array> {

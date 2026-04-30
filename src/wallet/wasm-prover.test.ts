@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-// @ts-ignore — snarkjs ships without types
+// @ts-expect-error — snarkjs ships without types
 import * as snarkjs from "snarkjs";
 
 import { WasmProver } from "./wasm-prover";
@@ -52,7 +52,7 @@ d("WasmProver parity (tree_update)", () => {
         if (!existsSync(fixturePath)) {
             console.warn(
                 `[wasm-prover.test] missing ${fixturePath} — skipping parity. ` +
-                `Generate via scripts/gen-tree-update-fixture.ts.`,
+                    `Generate via scripts/gen-tree-update-fixture.ts.`,
             );
             return;
         }
@@ -61,10 +61,7 @@ d("WasmProver parity (tree_update)", () => {
         const wasm = await WasmProver.build(paths);
         const snark = new SnarkjsProver(paths);
 
-        const [wasmOut, snarkOut] = await Promise.all([
-            wasm.prove(input),
-            snark.prove(input),
-        ]);
+        const [wasmOut, snarkOut] = await Promise.all([wasm.prove(input), snark.prove(input)]);
 
         expect(wasmOut.publicSignals).toEqual(snarkOut.publicSignals);
 

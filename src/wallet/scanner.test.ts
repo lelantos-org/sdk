@@ -3,12 +3,7 @@
 // not vitest.
 
 import { describe, it, expect, beforeAll } from "vitest";
-import {
-    Poseidon,
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-    type Field,
-} from "../crypto/index";
+import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../crypto/index";
 import { buildSpendingKey } from "../keys";
 import { encryptNote } from "../note-encrypt";
 import { encodeNotePayload, withClueBitsPrefix, clueBitsToPrefix } from "../note-codec";
@@ -82,8 +77,8 @@ describe("LocalScanner", () => {
         const viaScanner = await scanner.scan(me.ivk, inputs, dk);
 
         expect(viaScanner).toEqual(direct);
-        expect(viaScanner.map(h => h.leafIndex)).toEqual([0, 2]);
-        expect(viaScanner.map(h => h.value)).toEqual([100n, 300n]);
+        expect(viaScanner.map((h) => h.leafIndex)).toEqual([0, 2]);
+        expect(viaScanner.map((h) => h.value)).toEqual([100n, 300n]);
     });
 
     // In-process fake of `WorkerLike`: runs the scanner-worker logic
@@ -113,9 +108,15 @@ describe("LocalScanner", () => {
                     }
                 });
             },
-            terminate(): void { onmessage = null; },
-            get onmessage() { return onmessage; },
-            set onmessage(fn) { onmessage = fn; },
+            terminate(): void {
+                onmessage = null;
+            },
+            get onmessage() {
+                return onmessage;
+            },
+            set onmessage(fn) {
+                onmessage = fn;
+            },
         };
         return w;
     }
@@ -157,7 +158,14 @@ describe("LocalScanner", () => {
         };
         for (let i = 0; i < 8; i++) {
             const mine = i % 3 === 0;
-            mk(mine ? me : eve, mine ? fk : eveFk, BigInt(i + 1) * 11n, BigInt(i + 1) * 17n, BigInt(100 + i), i);
+            mk(
+                mine ? me : eve,
+                mine ? fk : eveFk,
+                BigInt(i + 1) * 11n,
+                BigInt(i + 1) * 17n,
+                BigInt(100 + i),
+                i,
+            );
         }
 
         const local = await new LocalScanner(J).scan(me.ivk, inputs, dk);

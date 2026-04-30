@@ -25,16 +25,22 @@ export interface TreeUpdateBuildOpts {
     z?: Field;
 }
 
-export function buildTreeUpdateInput(opts: TreeUpdateBuildOpts): Record<string, string | string[][]> {
+export function buildTreeUpdateInput(
+    opts: TreeUpdateBuildOpts,
+): Record<string, string | string[][]> {
     const { oldRoot, newRoot, cm0, cm1, frontier } = opts;
     const startIndex = BigInt(opts.startIndex);
-    const z = opts.z ?? fiatShamirZ(flattenTreeUpdate({
-        old_root: oldRoot,
-        new_root: newRoot,
-        cm0,
-        cm1,
-        start_index: startIndex,
-    }));
+    const z =
+        opts.z ??
+        fiatShamirZ(
+            flattenTreeUpdate({
+                old_root: oldRoot,
+                new_root: newRoot,
+                cm0,
+                cm1,
+                start_index: startIndex,
+            }),
+        );
 
     return {
         z: z.toString(),
@@ -43,7 +49,7 @@ export function buildTreeUpdateInput(opts: TreeUpdateBuildOpts): Record<string, 
         cm0: cm0.toString(),
         cm1: cm1.toString(),
         start_index: startIndex.toString(),
-        frontier_in: frontier.map(lvl => lvl.map(s => s.toString())),
+        frontier_in: frontier.map((lvl) => lvl.map((s) => s.toString())),
     };
 }
 
@@ -52,7 +58,9 @@ export function buildTreeUpdateInput(opts: TreeUpdateBuildOpts): Record<string, 
 /// as its sole public output. This helper re-runs the same evaluation off-
 /// chain so callers can build the on-chain `verifyProof` call without going
 /// through snarkjs.
-export function compressTreeUpdatePI(opts: Pick<TreeUpdateBuildOpts, "oldRoot" | "newRoot" | "cm0" | "cm1" | "startIndex">): { z: Field; y: Field } {
+export function compressTreeUpdatePI(
+    opts: Pick<TreeUpdateBuildOpts, "oldRoot" | "newRoot" | "cm0" | "cm1" | "startIndex">,
+): { z: Field; y: Field } {
     const coeffs = flattenTreeUpdate({
         old_root: opts.oldRoot,
         new_root: opts.newRoot,

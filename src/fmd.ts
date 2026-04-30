@@ -27,21 +27,24 @@
 // FMD_DOMAIN.
 
 import { blake2b } from "@noble/hashes/blake2";
-import {
-    Jubjub,
-    BABYJUB_SUBGROUP_ORDER,
-    type Field,
-    type Point,
-} from "./crypto/index";
+import { type Jubjub, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./crypto/index";
 import { WasmJubjub } from "./crypto/jubjub-wasm";
 import { toLeBytes, FIELD_BYTES } from "./crypto/bytes";
 
 export const FMD_DEFAULT_GAMMA = 5;
 export const FMD_DOMAIN = new TextEncoder().encode("lelantos.fmd.v1");
 
-export interface FmdDetectionKey { x: Field[]; }
-export interface FmdFlagKey { X: Point[]; }
-export interface FmdClue { R: Uint8Array; bits: Uint8Array; gamma: number; }
+export interface FmdDetectionKey {
+    x: Field[];
+}
+export interface FmdFlagKey {
+    X: Point[];
+}
+export interface FmdClue {
+    R: Uint8Array;
+    bits: Uint8Array;
+    gamma: number;
+}
 
 export function fmdGenDetectionKey(
     randomScalar: () => Field,
@@ -55,7 +58,7 @@ export function fmdGenDetectionKey(
 }
 
 export function fmdFlagKeyFromDetection(J: Jubjub, dk: FmdDetectionKey): FmdFlagKey {
-    return { X: dk.x.map(xi => J.mulPointEscalar(J.base8, xi)) };
+    return { X: dk.x.map((xi) => J.mulPointEscalar(J.base8, xi)) };
 }
 
 export function fmdFlag(J: Jubjub, fk: FmdFlagKey, r: Field): FmdClue {

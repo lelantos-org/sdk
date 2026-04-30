@@ -6,18 +6,9 @@
 // the root from `(leaf, pathElements, pathIndices)` and asserting the
 // result is on-chain `isKnownRoot`. Soundness gives no path-forgery vector.
 
-import {
-    Jubjub,
-    type Poseidon,
-    type Field,
-    TAG_MERKLE,
-} from "./crypto/index";
+import { type Jubjub, type Poseidon, type Field, TAG_MERKLE } from "./crypto/index";
 import { decryptNote } from "./note-encrypt";
-import {
-    decodeNotePayload,
-    stripClueBitsPrefix,
-    type NotePayload,
-} from "./note-codec";
+import { decodeNotePayload, stripClueBitsPrefix, type NotePayload } from "./note-codec";
 import { fmdTest, type FmdClue, type FmdDetectionKey } from "./fmd";
 
 const ARITY = 4;

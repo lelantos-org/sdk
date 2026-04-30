@@ -1,7 +1,7 @@
 // Wallet sync — fetch encrypted notes from a `NoteSource`, trial-decrypt
 // with this wallet's ivk, persist hits to the `NoteStore`.
 
-import { Jubjub, type Field } from "../crypto/index";
+import type { Jubjub, Field } from "../crypto/index";
 import { flagKeyFromAddressDk } from "../aux";
 import type { NoteSource } from "./note-source";
 import type { NoteStore } from "./note-store";

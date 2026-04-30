@@ -55,7 +55,8 @@ describe("crypto parity with circuits/src/lib", () => {
     });
 
     it("nf = Poseidon(2, nsk, rho)", () => {
-        const nsk = 7n, rho = 11n;
+        const nsk = 7n,
+            rho = 11n;
         expect(buildNullifier(P, nsk, rho)).toBe(P.hash([2n, nsk, rho]));
     });
 

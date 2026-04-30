@@ -6,7 +6,7 @@
 
 import type { Field } from "../crypto/index";
 import type { ScanInput } from "../sync";
-import { FmdClient } from "./fmd-client";
+import type { FmdClient } from "./fmd-client";
 
 export interface MerklePath {
     leafIndex: number;
@@ -38,7 +38,7 @@ function hexToBytes(h: string): Uint8Array {
 }
 
 function hexToBigint(h: string): bigint {
-    return BigInt(h.startsWith("0x") ? h : "0x" + h);
+    return BigInt(h.startsWith("0x") ? h : `0x${h}`);
 }
 
 /// Default `NoteSource` against fmd-webserver. Wraps `FmdClient` and
