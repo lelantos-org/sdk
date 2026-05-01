@@ -49,7 +49,11 @@ export class EthersChainAdapter implements ChainAdapter {
     constructor(opts: EthersChainAdapterOpts) {
         this.provider = new JsonRpcProvider(opts.rpcUrl);
         if (opts.signer) {
-            this.signer = opts.signer.connect(this.provider);
+            // Some signer implementations (e.g. ethers JsonRpcSigner backed
+            // by a BrowserProvider) reject `.connect(provider)` with
+            // UNSUPPORTED_OPERATION. In that case the signer is already
+            // bound to its own provider, so use it as-is.
+            this.signer = trySignerConnect(opts.signer, this.provider);
         } else if (opts.signerKey) {
             this.signer = new Wallet(opts.signerKey, this.provider);
         } else {
@@ -115,5 +119,15 @@ export class EthersChainAdapter implements ChainAdapter {
 
     async maspAddress(): Promise<string> {
         return this._maspAddress;
+    }
+}
+
+function trySignerConnect(signer: Signer, provider: JsonRpcProvider): Signer {
+    try {
+        return signer.connect(provider);
+    } catch (e) {
+        const code = (e as { code?: string } | null)?.code;
+        if (code === "UNSUPPORTED_OPERATION" && signer.provider) return signer;
+        throw e;
     }
 }

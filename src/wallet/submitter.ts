@@ -12,8 +12,10 @@ export interface Submitter {
 export class HttpRelayerSubmitter implements Submitter {
     private readonly client: RelayerClient;
 
-    constructor(baseUrl: string, fetchImpl: typeof fetch = fetch) {
-        this.client = new RelayerClient(baseUrl, fetchImpl);
+    constructor(baseUrl: string, fetchImpl?: typeof fetch) {
+        // See FmdClient: bare `fetch` reference loses its `window` binding in
+        // browsers. Wrap so callers don't have to.
+        this.client = new RelayerClient(baseUrl, fetchImpl ?? ((...args) => fetch(...args)));
     }
 
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {

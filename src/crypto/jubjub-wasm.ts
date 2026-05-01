@@ -42,6 +42,30 @@ const esmImport = new Function("s", "return import(s)") as (s: string) => Promis
 
 let jubWasm: JubWasmMod | null = null;
 
+/// Browser apps that bundle the SDK can't rely on the relative-path fallback
+/// (`../../wasm/jubjub/pkg/jubjub_wasm.js`) — the bundler rewrites the path
+/// to a location that doesn't exist at runtime. Inject a loader that resolves
+/// the wasm-pack module + binary using the bundler's own asset-URL pipeline
+/// (e.g. Vite's `?url` imports) before calling `WasmJubjub.build()`.
+export interface JubjubWasmLoader {
+    /// Return the wasm-pack JS module (a dynamic `import("@lelantos-org/sdk/wasm/jubjub")`).
+    loadModule(): Promise<JubWasmMod>;
+    /// Optional: URL or bytes for the `.wasm` binary. If omitted, the
+    /// wasm-pack module's own auto-init is invoked, which fetches the
+    /// binary relative to the JS module URL (works under Vite + bundlers
+    /// that preserve sibling assets, fails when they don't).
+    wasm?: string | URL | ArrayBuffer | Uint8Array;
+}
+
+let injectedLoader: JubjubWasmLoader | null = null;
+
+/// Override the default loader. Call once at app boot, before
+/// `WasmJubjub.build()` / `Wallet.create()`.
+export function configureJubjubWasm(loader: JubjubWasmLoader): void {
+    injectedLoader = loader;
+    inited = null;
+}
+
 let inited: Promise<void> | null = null;
 function ensureInit(): Promise<void> {
     if (!inited) inited = doInit().then(() => undefined);
@@ -49,6 +73,14 @@ function ensureInit(): Promise<void> {
 }
 
 async function doInit(): Promise<void> {
+    if (injectedLoader) {
+        const mod = await injectedLoader.loadModule();
+        await mod.default(
+            injectedLoader.wasm !== undefined ? { module_or_path: injectedLoader.wasm } : undefined,
+        );
+        jubWasm = mod;
+        return;
+    }
     if (typeof process !== "undefined" && process.versions?.node) {
         const { readFile } = await import("node:fs/promises");
         const { join } = await import("node:path");

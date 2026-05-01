@@ -95,10 +95,15 @@ export interface ScannedNote {
 /// here is the SDK's expectation — every relayer service speaking it MUST
 /// match these shapes.
 export class RelayerClient {
+    private readonly fetchImpl: typeof fetch;
+
     constructor(
         private readonly baseUrl: string,
-        private readonly fetchImpl: typeof fetch = fetch,
-    ) {}
+        fetchImpl?: typeof fetch,
+    ) {
+        // Detached `fetch` triggers "Illegal invocation" in browsers — bind.
+        this.fetchImpl = fetchImpl ?? ((...args) => fetch(...args));
+    }
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
         return this.postJson("/v1/transact", serializeSubmit(payload));

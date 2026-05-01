@@ -10,6 +10,15 @@ import type { ProverPaths } from "../prover";
 import type { ChainAdapter } from "./chain-adapter";
 import type { NoteStore } from "./note-store";
 import type { NoteSource } from "./note-source";
+
+/// Strategy for the default `NoteSource` builder. `full` hits `/v1/notes`
+/// (firehose). `matches` hits `/v1/matches?subscription=…` — server runs
+/// FMD detection and returns only the false-positive subset for a
+/// previously-registered subscription. Ignored when `noteSource` is set
+/// directly.
+export type SyncStrategy =
+    | { kind: "full" }
+    | { kind: "matches"; subscriptionId: number };
 import type { Submitter } from "./submitter";
 import type { Prover } from "./prover";
 import type { CoinSelector } from "./selection";
@@ -40,6 +49,9 @@ export interface WalletConfig {
     noteStore?: NoteStore;
     /// Source of encrypted notes + merkle paths. Defaults to fmd-webserver.
     noteSource?: NoteSource;
+    /// Selects the default `NoteSource` flavor when `noteSource` isn't set.
+    /// Defaults to `{ kind: "full" }`.
+    syncStrategy?: SyncStrategy;
     /// Transact-bundle submission target. Defaults to HTTP relayer.
     submitter?: Submitter;
     /// Groth16 prover. Defaults to in-process snarkjs.

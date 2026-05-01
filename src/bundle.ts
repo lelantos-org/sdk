@@ -26,6 +26,7 @@ import { prove, type ProverPaths, type Groth16Proof } from "./prover";
 import type { Prover } from "./wallet/prover";
 import { EMPTY_AUX, buildOutputAux, flagKeyFromAddressDk, type OutputAux } from "./aux";
 import type { SubmitTransactPayload, TransactPubInputs } from "./relayer";
+import { randomFr } from "./wallet/randomness";
 
 export interface OutputRecipient {
     pk_d: Point;
@@ -81,8 +82,8 @@ export interface DepositArgs extends BundleCommon {
 
 export async function buildDeposit(a: DepositArgs): Promise<BuiltBundle> {
     const { P, J } = a;
-    const dA = dummyInputAt(P, a.treeDepth, a.output0.rho ^ 0xa1n);
-    const dB = dummyInputAt(P, a.treeDepth, a.output1Pad.rho ^ 0xb2n);
+    const dA = dummyInputAt(P, a.treeDepth, randomFr());
+    const dB = dummyInputAt(P, a.treeDepth, randomFr());
 
     const realOut: Note = {
         asset: a.asset,
@@ -146,7 +147,7 @@ export async function buildTransfer(a: TransferArgs): Promise<BuiltBundle> {
         throw new Error(`transfer balance: in=${sumIn} out=${sumOut}`);
     }
 
-    const realIns = buildInputs(P, a.inputs, a.treeDepth, 0xc3n);
+    const realIns = buildInputs(P, a.inputs, a.treeDepth);
     const aux0 = buildAuxForReal(J, a.outputs[0], a.outputRecipients[0], a.outputRandomness[0]);
     const aux1 = buildAuxForReal(J, a.outputs[1], a.outputRecipients[1], a.outputRandomness[1]);
 
@@ -178,7 +179,7 @@ export async function buildWithdraw(a: WithdrawArgs): Promise<BuiltBundle> {
         );
     }
 
-    const realIns = buildInputs(P, a.inputs, a.treeDepth, 0xd4n);
+    const realIns = buildInputs(P, a.inputs, a.treeDepth);
     const aux0 = buildAuxForReal(J, a.change[0], a.changeRecipients[0], a.changeRandomness[0]);
     const aux1 = buildAuxForReal(J, a.change[1], a.changeRecipients[1], a.changeRandomness[1]);
 
@@ -189,12 +190,11 @@ function buildInputs(
     P: Poseidon,
     slots: InputSlots,
     treeDepth: number,
-    salt: bigint,
 ): ReturnType<typeof toSpentNoteFromPath>[] {
-    return slots.map((s, i) =>
+    return slots.map((s) =>
         s
             ? toSpentNoteFromPath(P, s.cached, s.pathElements, s.pathIndices)
-            : dummyInputAt(P, treeDepth, salt ^ BigInt(i + 1)),
+            : dummyInputAt(P, treeDepth, randomFr()),
     );
 }
 

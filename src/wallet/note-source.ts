@@ -28,6 +28,10 @@ export interface ListNotesOpts {
 export interface NoteSource {
     listNotes(opts?: ListNotesOpts): Promise<ScanInput[]>;
     fetchPath(cmHex: string): Promise<MerklePath>;
+    /// Batch query the on-chain spent-nullifier set. Returns the subset of
+    /// `nfs` consumed on chain so the Wallet can mark stale local notes
+    /// as spent on sync.
+    spentSet(nfs: bigint[]): Promise<Set<bigint>>;
 }
 
 function hexToBytes(h: string): Uint8Array {
@@ -71,5 +75,54 @@ export class FmdNoteSource implements NoteSource {
 
     async fetchPath(cmHex: string): Promise<MerklePath> {
         return this.fmd.fetchPath(cmHex);
+    }
+
+    async spentSet(nfs: bigint[]): Promise<Set<bigint>> {
+        return this.fmd.spentSet(nfs);
+    }
+}
+
+/// `NoteSource` backed by `/v1/matches`. Fetches only the server-side
+/// FMD-filtered subset for a registered subscription. Trades anonymity
+/// (server learns the false-positive set bound by `gamma`) for big
+/// bandwidth + scan-time savings.
+///
+/// Subscription lifecycle is app-level: create one with
+/// `FmdClient.createSubscription({ detectionKeyHex, gamma })`, persist
+/// the returned `id`, and pass it here.
+export class FmdMatchesNoteSource implements NoteSource {
+    private readonly fmd: FmdClient;
+    private readonly J: { packPoint: (p: [bigint, bigint]) => Uint8Array };
+    private readonly subscriptionId: number;
+
+    constructor(args: {
+        fmd: FmdClient;
+        J: { packPoint: (p: [bigint, bigint]) => Uint8Array };
+        subscriptionId: number;
+    }) {
+        this.fmd = args.fmd;
+        this.J = args.J;
+        this.subscriptionId = args.subscriptionId;
+    }
+
+    async listNotes(opts: ListNotesOpts = {}): Promise<ScanInput[]> {
+        const rows = await this.fmd.listMatches({ subscription: this.subscriptionId, ...opts });
+        return rows.map((n) => {
+            const ephPub = this.J.packPoint([BigInt(n.ephPubX), BigInt(n.ephPubY)]);
+            return {
+                ciphertext: hexToBytes(n.ciphertextHex),
+                epk: ephPub,
+                cm: hexToBigint(n.commitmentHex),
+                leafIndex: n.leafIndex,
+            };
+        });
+    }
+
+    async fetchPath(cmHex: string): Promise<MerklePath> {
+        return this.fmd.fetchPath(cmHex);
+    }
+
+    async spentSet(nfs: bigint[]): Promise<Set<bigint>> {
+        return this.fmd.spentSet(nfs);
     }
 }

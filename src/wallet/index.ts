@@ -13,7 +13,7 @@
 // Apps can swap any one for tests, alt transports, hardware wallets,
 // custom strategies — without touching the rest.
 
-import { Poseidon, type Jubjub, type Field } from "../crypto/index";
+import { Poseidon, type Jubjub, type Field, buildNullifier } from "../crypto/index";
 import { WasmJubjub } from "../crypto/jubjub-wasm";
 import { buildSpendingKey, addressFromSpendingKey, type SpendingKey } from "../keys";
 import { decodeAddress } from "../address";
@@ -36,7 +36,7 @@ import {
     type SelectOpts,
 } from "./selection";
 import { FmdClient } from "./fmd-client";
-import { FmdNoteSource, type NoteSource } from "./note-source";
+import { FmdNoteSource, FmdMatchesNoteSource, type NoteSource } from "./note-source";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter";
 import { SnarkjsProver, type Prover } from "./prover";
 import { LocalScanner } from "./scanner-local";
@@ -110,6 +110,7 @@ export interface TransactionResult {
 export interface WalletApi {
     readonly address: string;
     readonly keys: SpendingKey;
+    readonly noteStore: NoteStore;
 
     sync(opts?: { limit?: number }): Promise<SyncResult>;
     refresh(): Promise<void>;
@@ -227,8 +228,36 @@ export class Wallet implements WalletApi {
             },
             opts ?? {},
         );
+        await this.reconcileSpentOnChain();
         this.file = await this.noteStore.load();
         return result;
+    }
+
+    /// Walk locally-unspent notes and mark any whose nullifier is already
+    /// consumed on chain as spent. Catches state where the contract burned
+    /// a note in a prior session that the local store never recorded.
+    /// Single batch roundtrip via `noteSource.spentSet`.
+    private async reconcileSpentOnChain(): Promise<void> {
+        const file = await this.noteStore.load();
+        const candidates: { note: StoredNote; nf: bigint }[] = [];
+        for (const n of file.notes) {
+            if (n.spent) continue;
+            candidates.push({
+                note: n,
+                nf: buildNullifier(this.P, this.keys.nsk, BigInt(n.rho)),
+            });
+        }
+        if (candidates.length === 0) return;
+        const spent = await this.noteSource.spentSet(candidates.map((c) => c.nf));
+        if (spent.size === 0) return;
+        let mutated = false;
+        for (const c of candidates) {
+            if (spent.has(c.nf)) {
+                c.note.spent = true;
+                mutated = true;
+            }
+        }
+        if (mutated) await this.noteStore.save(file);
     }
 
     /// Reload the in-memory note cache from `NoteStore`. Useful after an
@@ -502,7 +531,11 @@ function defaultNoteSource(cfg: WalletConfig, J: Jubjub): NoteSource {
     if (!cfg.fmdUrl) {
         throw new WalletConfigError("WalletConfig: provide `fmdUrl` or `noteSource`");
     }
-    return new FmdNoteSource({ fmd: new FmdClient(cfg.fmdUrl, cfg.chainId), J });
+    const fmd = new FmdClient(cfg.fmdUrl, cfg.chainId);
+    if (cfg.syncStrategy?.kind === "matches") {
+        return new FmdMatchesNoteSource({ fmd, J, subscriptionId: cfg.syncStrategy.subscriptionId });
+    }
+    return new FmdNoteSource({ fmd, J });
 }
 
 function defaultSubmitter(cfg: WalletConfig): Submitter {

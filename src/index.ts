@@ -45,8 +45,17 @@ export * from "./wallet/scanner";
 export * from "./wallet/scanner-local";
 export * from "./wallet/scanner-worker-pool";
 export * from "./wallet/scanner-worker-protocol";
-export { WasmJubjub } from "./crypto/jubjub-wasm";
-export { WasmProver } from "./wallet/wasm-prover";
+export {
+    WasmJubjub,
+    configureJubjubWasm,
+    type JubjubWasmLoader,
+} from "./crypto/jubjub-wasm";
+export {
+    WasmProver,
+    configureProverWasm,
+    configureProverThreads,
+    type ProverWasmLoader,
+} from "./wallet/wasm-prover";
 export * from "./wallet/scanner-browser";
 export * from "./wallet/adapters/ethers-chain";
 export * from "./preload";
