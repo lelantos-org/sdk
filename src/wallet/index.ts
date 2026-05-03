@@ -196,7 +196,7 @@ export class Wallet implements WalletApi {
     /// `opts.onProgress` receives sync-phase updates for UI spinners.
     async sync(opts?: {
         limit?: number;
-        onProgress?: (p: import("./sync.js").SyncProgress) => void;
+        onProgress?: (p: SyncProgress) => void;
     }): Promise<SyncResult> {
         const result = await syncWallet(
             {
