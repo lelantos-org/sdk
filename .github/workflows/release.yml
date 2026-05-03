@@ -33,11 +33,6 @@ jobs:
         working-directory: wasm
         run: just build
 
-      - name: Override pkg .gitignore for npm pack
-        run: |
-          : > wasm/prover/pkg/.npmignore
-          : > wasm/jubjub/pkg/.npmignore
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
