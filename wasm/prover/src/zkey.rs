@@ -290,7 +290,10 @@ fn parse_fq(bytes: &[u8]) -> IoResult<Fq> {
 }
 
 fn parse_fq2(bytes: &[u8]) -> IoResult<Fq2> {
-    Ok(Fq2::new(parse_fq(&bytes[..FQ_BYTES])?, parse_fq(&bytes[FQ_BYTES..])?))
+    Ok(Fq2::new(
+        parse_fq(&bytes[..FQ_BYTES])?,
+        parse_fq(&bytes[FQ_BYTES..])?,
+    ))
 }
 
 fn parse_g1(bytes: &[u8]) -> IoResult<G1Affine> {

@@ -19,18 +19,22 @@ build-dev: prover-build-dev jubjub-build-dev
 prover-build:
     ( command -v wasm-pack >/dev/null || cargo install wasm-pack )
     cd {{PROVER}} && wasm-pack build --target web --release --out-dir pkg
+    rm -f {{PROVER}}/pkg/.gitignore
 
 prover-build-dev:
     ( command -v wasm-pack >/dev/null || cargo install wasm-pack )
     cd {{PROVER}} && wasm-pack build --target web --dev --out-dir pkg
+    rm -f {{PROVER}}/pkg/.gitignore
 
 jubjub-build:
     ( command -v wasm-pack >/dev/null || cargo install wasm-pack )
     cd {{JUBJUB}} && wasm-pack build --target web --release --out-dir pkg
+    rm -f {{JUBJUB}}/pkg/.gitignore
 
 jubjub-build-dev:
     ( command -v wasm-pack >/dev/null || cargo install wasm-pack )
     cd {{JUBJUB}} && wasm-pack build --target web --dev --out-dir pkg
+    rm -f {{JUBJUB}}/pkg/.gitignore
 
 check:
     cargo check --workspace --release --target wasm32-unknown-unknown

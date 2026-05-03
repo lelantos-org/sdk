@@ -49,8 +49,8 @@ pub fn parse_bn254(bytes: &[u8]) -> Result<Vec<Fr>, String> {
     // little-endian limbs directly into Montgomery form.
     let mut out = Vec::with_capacity(header.n_witness as usize);
     for _ in 0..header.n_witness {
-        let bigint =
-            <Fr as PrimeField>::BigInt::deserialize_uncompressed(&mut cur).map_err(|e| e.to_string())?;
+        let bigint = <Fr as PrimeField>::BigInt::deserialize_uncompressed(&mut cur)
+            .map_err(|e| e.to_string())?;
         out.push(Fr::new(bigint));
     }
     Ok(out)
