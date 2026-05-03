@@ -8,11 +8,15 @@
 //   (delegates to the existing `metamask.reduceSignatureToScalar`).
 // Raw nsk: trust the caller; assumes already in-range.
 
-import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english";
 import { blake2b } from "@noble/hashes/blake2";
-import { BN254_FR, fromLeBytes, type Field } from "../crypto/index";
-import * as metamask from "../metamask";
+import {
+    generateMnemonic as bip39GenerateMnemonic,
+    mnemonicToSeedSync,
+    validateMnemonic,
+} from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english";
+import { BN254_FR, type Field, fromLeBytes } from "../crypto/index.js";
+import * as metamask from "../metamask.js";
 
 const NSK_DOMAIN = new TextEncoder().encode("lelantos.nsk.v1");
 
@@ -51,9 +55,18 @@ export function resolveNsk(source: KeySource): Field {
     }
 }
 
-/// Generate a fresh BIP39 mnemonic. Strength 128 → 12 words, 256 → 24.
+/// Generate a fresh BIP39 mnemonic. Pass `{ words: 24 }` (default) for
+/// 256-bit entropy, or `{ words: 12 }` for 128-bit. Strings count, not bits.
+export function generateMnemonic(opts: { words?: 12 | 24 } = {}): string {
+    const strength = (opts.words ?? 24) === 12 ? 128 : 256;
+    return bip39GenerateMnemonic(wordlist, strength);
+}
+
+/// @deprecated Use `generateMnemonic({ words: 12 | 24 })` — argument was
+/// entropy bits which is easy to confuse with word count. Kept for
+/// back-compat; will be removed in a future major.
 export function generateNewMnemonic(strength: 128 | 256 = 256): string {
-    return generateMnemonic(wordlist, strength);
+    return bip39GenerateMnemonic(wordlist, strength);
 }
 
 export function isValidMnemonic(mnemonic: string): boolean {

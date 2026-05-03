@@ -5,7 +5,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe } from "vitest";
-import type { WasmJubjub } from "./jubjub-wasm";
+import type { WasmJubjub } from "./jubjub-wasm.js";
 
 const PKG_PATH = resolve(__dirname, "../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm");
 export const HAS_WASM = existsSync(PKG_PATH);
@@ -17,6 +17,6 @@ export const wasmDescribe = HAS_WASM ? describe : describe.skip;
 /// Lazily construct a `WasmJubjub` instance. Imported dynamically so the
 /// module isn't loaded when wasm is missing (skipped suites stay clean).
 export async function loadWasmJubjub(): Promise<WasmJubjub> {
-    const mod = await import("./jubjub-wasm");
+    const mod = await import("./jubjub-wasm.js");
     return mod.WasmJubjub.build();
 }

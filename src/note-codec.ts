@@ -8,7 +8,7 @@
 // This format is what the rust indexer + e2e runner already speak; do not
 // change without bumping the encryption KDF domain.
 
-import { fromLeBytes, toLeBytes, FIELD_BYTES, type Field } from "./crypto/index";
+import { FIELD_BYTES, type Field, fromLeBytes, toLeBytes } from "./crypto/index.js";
 
 export const NOTE_ASSET_BYTES = 8;
 export const NOTE_VALUE_BYTES = 8;

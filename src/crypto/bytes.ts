@@ -1,7 +1,7 @@
 // Little-endian byte conversions for field elements.
 // All on-chain serialisation uses 32-byte LE; centralise it here.
 
-import type { Field } from "./poseidon";
+import type { Field } from "./poseidon.js";
 
 export const FIELD_BYTES = 32;
 

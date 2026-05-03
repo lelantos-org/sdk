@@ -6,10 +6,10 @@
 // the root from `(leaf, pathElements, pathIndices)` and asserting the
 // result is on-chain `isKnownRoot`. Soundness gives no path-forgery vector.
 
-import { type Jubjub, type Poseidon, type Field, TAG_MERKLE } from "./crypto/index";
-import { decryptNote } from "./note-encrypt";
-import { decodeNotePayload, stripClueBitsPrefix, type NotePayload } from "./note-codec";
-import { fmdTest, type FmdClue, type FmdDetectionKey } from "./fmd";
+import { type Field, type Jubjub, type Poseidon, TAG_MERKLE } from "./crypto/index.js";
+import { type FmdClue, type FmdDetectionKey, fmdTest } from "./fmd.js";
+import { decodeNotePayload, type NotePayload, stripClueBitsPrefix } from "./note-codec.js";
+import { decryptNote } from "./note-encrypt.js";
 
 const ARITY = 4;
 
@@ -38,6 +38,7 @@ export interface ScanHit extends NotePayload {
 /// to skip clearly-not-mine notes without paying the ECDH+ChaCha cost.
 export function scanNotes(
     J: Jubjub,
+    P: Poseidon,
     ivk: Field,
     inputs: ScanInput[],
     detectionKey?: FmdDetectionKey,
@@ -45,7 +46,7 @@ export function scanNotes(
     const hits: ScanHit[] = [];
     for (const inp of inputs) {
         if (detectionKey && inp.clue) {
-            if (!fmdTest(J, detectionKey, inp.clue)) continue;
+            if (!fmdTest(J, P, detectionKey, inp.clue)) continue;
         }
         const { body } = stripClueBitsPrefix(inp.ciphertext);
         const plain = decryptNote({ J, ivk, note: { epk: inp.epk, ciphertext: body } });

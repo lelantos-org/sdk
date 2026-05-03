@@ -21,6 +21,13 @@ use ark_serialize::{CanonicalDeserialize, SerializationError};
 use byteorder::{LittleEndian, ReadBytesExt};
 use num_traits::Zero;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
+const G1_BYTES: usize = 64;
+const G2_BYTES: usize = 128;
+const FQ_BYTES: usize = 32;
+
 type IoResult<T> = Result<T, SerializationError>;
 
 // Section IDs are 1..=10 in snarkjs groth16 zkey. Index 0 unused.
@@ -45,7 +52,7 @@ pub fn read_zkey<R: Read + Seek>(
     Ok((pk, matrices))
 }
 
-type ConstraintMatricesFr = ark_relations::r1cs::ConstraintMatrices<Fr>;
+pub type ConstraintMatricesFr = ark_relations::r1cs::ConstraintMatrices<Fr>;
 
 struct Section {
     position: u64,
@@ -123,9 +130,11 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         self.seek_to(SEC_COEFFS)?;
         let num_coeffs = self.reader.read_u32::<LittleEndian>()?;
 
-        let domain = h.domain_size as usize;
-        let mut a_rows: Vec<Vec<(Fr, usize)>> = vec![vec![]; domain];
-        let mut b_rows: Vec<Vec<(Fr, usize)>> = vec![vec![]; domain];
+        // Grow rows on demand instead of preallocating `domain_size` empty Vec slots.
+        // snarkjs domains can be 2^20+, so the dense preallocation wastes >10MB
+        // of outer-Vec headers in wasm32 even though most slots stay empty.
+        let mut a_rows: Vec<Vec<(Fr, usize)>> = Vec::new();
+        let mut b_rows: Vec<Vec<(Fr, usize)>> = Vec::new();
         let mut max_constraint = 0u32;
 
         for _ in 0..num_coeffs {
@@ -134,17 +143,24 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
             let signal = self.reader.read_u32::<LittleEndian>()?;
             let value = read_fr(&mut self.reader)?;
             max_constraint = max_constraint.max(constraint);
-            match matrix {
-                0 => a_rows[constraint as usize].push((value, signal as usize)),
-                1 => b_rows[constraint as usize].push((value, signal as usize)),
-                _ => {} // snarkjs only emits 0/1 for groth16
+            let rows = match matrix {
+                0 => &mut a_rows,
+                1 => &mut b_rows,
+                _ => continue, // snarkjs only emits 0/1 for groth16
+            };
+            let idx = constraint as usize;
+            if idx >= rows.len() {
+                rows.resize_with(idx + 1, Vec::new);
             }
+            rows[idx].push((value, signal as usize));
         }
 
         // Drop the trailing rows snarkjs adds for public-input constraints; arkworks re-adds them.
         let num_constraints = max_constraint as usize - h.n_public;
         a_rows.truncate(num_constraints);
         b_rows.truncate(num_constraints);
+        a_rows.shrink_to_fit();
+        b_rows.shrink_to_fit();
 
         let a_num_non_zero = a_rows.iter().map(Vec::len).sum();
         let b_num_non_zero = b_rows.iter().map(Vec::len).sum();
@@ -163,13 +179,34 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
 
     fn read_g1_section(&mut self, id: u32, count: usize) -> IoResult<Vec<G1Affine>> {
         self.seek_to(id)?;
-        (0..count).map(|_| read_g1(&mut self.reader)).collect()
+        let mut buf = vec![0u8; count * G1_BYTES];
+        self.reader.read_exact(&mut buf)?;
+        parse_points(&buf, G1_BYTES, parse_g1)
     }
 
     fn read_g2_section(&mut self, id: u32, count: usize) -> IoResult<Vec<G2Affine>> {
         self.seek_to(id)?;
-        (0..count).map(|_| read_g2(&mut self.reader)).collect()
+        let mut buf = vec![0u8; count * G2_BYTES];
+        self.reader.read_exact(&mut buf)?;
+        parse_points(&buf, G2_BYTES, parse_g2)
     }
+}
+
+#[cfg(feature = "parallel")]
+fn parse_points<T, F>(buf: &[u8], stride: usize, f: F) -> IoResult<Vec<T>>
+where
+    T: Send,
+    F: Fn(&[u8]) -> IoResult<T> + Sync + Send,
+{
+    buf.par_chunks_exact(stride).map(f).collect()
+}
+
+#[cfg(not(feature = "parallel"))]
+fn parse_points<T, F>(buf: &[u8], stride: usize, f: F) -> IoResult<Vec<T>>
+where
+    F: Fn(&[u8]) -> IoResult<T>,
+{
+    buf.chunks_exact(stride).map(f).collect()
 }
 
 struct VkPoints {
@@ -234,19 +271,31 @@ fn read_fr<R: Read>(reader: &mut R) -> IoResult<Fr> {
     Ok(Fr::new_unchecked(Fr::new_unchecked(bigint).into_bigint()))
 }
 
-/// Circom serializes Fq already in Montgomery form, so skip the implicit R multiplication.
-fn read_fq<R: Read>(reader: &mut R) -> IoResult<Fq> {
-    let bigint = <Fq as PrimeField>::BigInt::deserialize_uncompressed(reader)?;
+fn read_g1<R: Read>(reader: &mut R) -> IoResult<G1Affine> {
+    let mut buf = [0u8; G1_BYTES];
+    reader.read_exact(&mut buf)?;
+    parse_g1(&buf)
+}
+
+fn read_g2<R: Read>(reader: &mut R) -> IoResult<G2Affine> {
+    let mut buf = [0u8; G2_BYTES];
+    reader.read_exact(&mut buf)?;
+    parse_g2(&buf)
+}
+
+fn parse_fq(bytes: &[u8]) -> IoResult<Fq> {
+    let mut slice = bytes;
+    let bigint = <Fq as PrimeField>::BigInt::deserialize_uncompressed(&mut slice)?;
     Ok(Fq::new_unchecked(bigint))
 }
 
-fn read_fq2<R: Read>(reader: &mut R) -> IoResult<Fq2> {
-    Ok(Fq2::new(read_fq(reader)?, read_fq(reader)?))
+fn parse_fq2(bytes: &[u8]) -> IoResult<Fq2> {
+    Ok(Fq2::new(parse_fq(&bytes[..FQ_BYTES])?, parse_fq(&bytes[FQ_BYTES..])?))
 }
 
-fn read_g1<R: Read>(reader: &mut R) -> IoResult<G1Affine> {
-    let x = read_fq(reader)?;
-    let y = read_fq(reader)?;
+fn parse_g1(bytes: &[u8]) -> IoResult<G1Affine> {
+    let x = parse_fq(&bytes[..FQ_BYTES])?;
+    let y = parse_fq(&bytes[FQ_BYTES..])?;
     if x.is_zero() && y.is_zero() {
         Ok(G1Affine::identity())
     } else {
@@ -255,9 +304,9 @@ fn read_g1<R: Read>(reader: &mut R) -> IoResult<G1Affine> {
     }
 }
 
-fn read_g2<R: Read>(reader: &mut R) -> IoResult<G2Affine> {
-    let x = read_fq2(reader)?;
-    let y = read_fq2(reader)?;
+fn parse_g2(bytes: &[u8]) -> IoResult<G2Affine> {
+    let x = parse_fq2(&bytes[..2 * FQ_BYTES])?;
+    let y = parse_fq2(&bytes[2 * FQ_BYTES..])?;
     if x.is_zero() && y.is_zero() {
         Ok(G2Affine::identity())
     } else {

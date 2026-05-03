@@ -6,23 +6,22 @@
 // (chain, source, submitter, prover, selector, store) for tests or
 // alternative transports.
 
-import type { ProverPaths } from "../prover";
-import type { ChainAdapter } from "./chain-adapter";
-import type { NoteStore } from "./note-store";
-import type { NoteSource } from "./note-source";
+import type { ProverPaths } from "../prover.js";
+import type { ChainAdapter } from "./chain-adapter.js";
+import type { NoteSource } from "./note-source.js";
+import type { NoteStore } from "./note-store.js";
 
 /// Strategy for the default `NoteSource` builder. `full` hits `/v1/notes`
 /// (firehose). `matches` hits `/v1/matches?subscription=…` — server runs
 /// FMD detection and returns only the false-positive subset for a
 /// previously-registered subscription. Ignored when `noteSource` is set
 /// directly.
-export type SyncStrategy =
-    | { kind: "full" }
-    | { kind: "matches"; subscriptionId: number };
-import type { Submitter } from "./submitter";
-import type { Prover } from "./prover";
-import type { CoinSelector } from "./selection";
-import type { Scanner } from "./scanner";
+export type SyncStrategy = { kind: "full" } | { kind: "matches"; subscriptionId: number };
+
+import type { Prover } from "./prover.js";
+import type { Scanner } from "./scanner.js";
+import type { CoinSelector } from "./selection.js";
+import type { Submitter } from "./submitter.js";
 
 export interface WalletConfig {
     /// EVM chain id; bound into the SNARK and the FMD-webserver query.

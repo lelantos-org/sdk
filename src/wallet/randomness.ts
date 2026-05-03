@@ -4,7 +4,7 @@
 // is the WHATWG Crypto API). Uses rejection sampling for uniform field
 // elements + non-zero subgroup scalars.
 
-import { BABYJUB_SUBGROUP_ORDER, BN254_FR, fromLeBytes, type Field } from "../crypto/index";
+import { BABYJUB_SUBGROUP_ORDER, BN254_FR, type Field, fromLeBytes } from "../crypto/index.js";
 
 function randomBytes32(): Uint8Array {
     const out = new Uint8Array(32);

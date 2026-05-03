@@ -6,11 +6,21 @@
 // `sdk/wasm/prover/`, with rayon multi-threading on COI pages.
 
 import { WitnessCalculatorBuilder } from "circom_runtime";
-
-import type { Prover } from "./prover";
-import type { ProveResult, Groth16Proof, ProverPaths } from "../prover";
+import type { Groth16Proof, ProveResult, ProverPaths } from "../prover.js";
+import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
+import type { Prover } from "./prover.js";
 
 const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
+
+// `node:*` specifiers held in variables so Vite stops trying to resolve
+// them statically in browser builds. Reached only on Node.
+const NODE_URL = "node:url";
+const NODE_OS = "node:os";
+const NODE_WORKER_THREADS = "node:worker_threads";
+const NODE_FS_PROMISES = "node:fs/promises";
+
+// `pkg/` URLs resolved via the SDK's package `imports` map and own ESM URL.
+// Bundlers honour the same map, so consumers do not need to wire paths.
 
 // ── runtime types ──────────────────────────────────────────────────────────
 interface ProverSession {
@@ -18,10 +28,7 @@ interface ProverSession {
 }
 type ProverCtor = new (zkeyBytes: Uint8Array) => ProverSession;
 
-interface ProverModule {
-    default: (input?: {
-        module_or_path?: string | URL | ArrayBuffer | Uint8Array;
-    }) => Promise<unknown>;
+interface ProverModule extends WasmModuleBase {
     ProverSession: ProverCtor;
     initThreadPool?: (n: number) => Promise<unknown>;
 }
@@ -37,33 +44,12 @@ interface RawProofOutput {
     publicSignals: string[];
 }
 
-// ── lazy singleton: load wasm-pack module + init the wasm binary ───────────
-let proverPromise: Promise<ProverCtor> | null = null;
-function loadProver(): Promise<ProverCtor> {
-    if (!proverPromise) proverPromise = initProver();
-    return proverPromise;
-}
-
-// Indirect eval: bypasses TS CJS lowering so `import()` stays a real ESM
-// import. wasm-pack `--target web` output is ESM and require() rejects it.
-const esmImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-
 /// Browser apps that bundle the SDK can't rely on the relative-path fallback
 /// (`../../wasm/prover/pkg/prover.js`) — the bundler rewrites it to a path
 /// that doesn't exist at runtime. Inject a loader that resolves the wasm-pack
 /// module + binary using the bundler's own asset-URL pipeline before
 /// `WasmProver.build()`.
-export interface ProverWasmLoader {
-    loadModule(): Promise<ProverModule>;
-    wasm?: string | URL | ArrayBuffer | Uint8Array;
-}
-
-let injectedLoader: ProverWasmLoader | null = null;
-
-export function configureProverWasm(loader: ProverWasmLoader): void {
-    injectedLoader = loader;
-    proverPromise = null;
-}
+export type ProverWasmLoader = WasmLoaderOverride<ProverModule>;
 
 /// Override the rayon thread count. Default in Node = `availableParallelism()`.
 /// Pass 0 (or 1) to keep the prover single-threaded. Must be called before
@@ -74,30 +60,81 @@ export function configureProverThreads(n: number): void {
     proverThreadCount = n;
 }
 
-async function initProver(): Promise<ProverCtor> {
+const PKG_JS_URL = new URL("../../wasm/prover/pkg/prover.js", import.meta.url);
+const PKG_WASM_URL = new URL("../../wasm/prover/pkg/prover_bg.wasm", import.meta.url);
+
+const proverLoader = createWasmLoader<ProverModule>({
+    name: "prover",
+    defaultImport: () => import("#wasm/prover") as Promise<ProverModule>,
+    nodeJsUrl: async () => PKG_JS_URL.href,
+    nodeWasmPath: async () => {
+        const { fileURLToPath } = await import(/* @vite-ignore */ NODE_URL);
+        return fileURLToPath(PKG_WASM_URL);
+    },
+    postInit: async (mod, ctx) => {
+        if (ctx.isNode) {
+            nodePkgUrl = ctx.nodePkgUrl;
+            await maybeInitNodeThreadPool(mod);
+        } else {
+            await maybeInitBrowserThreadPool(mod);
+        }
+    },
+});
+
+export function configureProverWasm(loader: ProverWasmLoader): void {
+    proverLoader.configure(loader);
+}
+
+function loadProver(): Promise<ProverCtor> {
     if (IS_NODE) polyfillSelfForNode();
-    let mod: ProverModule;
-    if (injectedLoader) {
-        mod = await injectedLoader.loadModule();
-        await mod.default(
-            injectedLoader.wasm !== undefined
-                ? { module_or_path: injectedLoader.wasm }
-                : undefined,
-        );
-    } else if (IS_NODE) {
-        const { join } = await import("node:path");
-        const { pathToFileURL } = await import("node:url");
-        const pkgDir = join(__dirname, "..", "..", "wasm", "prover", "pkg");
-        const pkgUrl = pathToFileURL(join(pkgDir, "prover.js")).href;
-        nodePkgUrl = pkgUrl;
-        mod = (await esmImport(pkgUrl)) as ProverModule;
-        await mod.default({ module_or_path: await readProverWasm() });
-    } else {
-        mod = (await esmImport("../../wasm/prover/pkg/prover.js")) as ProverModule;
-        await mod.default();
+    return proverLoader.load().then((m) => m.ProverSession);
+}
+
+async function maybeInitBrowserThreadPool(mod: ProverModule): Promise<void> {
+    if (!mod.initThreadPool) {
+        // eslint-disable-next-line no-console
+        console.warn("[WasmProver] mod.initThreadPool missing — running single-threaded");
+        return;
     }
-    if (IS_NODE) await maybeInitNodeThreadPool(mod);
-    return mod.ProverSession;
+    // Requires `crossOriginIsolated` (COOP+COEP headers). Without it
+    // `SharedArrayBuffer` is unavailable and rayon falls back to the
+    // current thread — slow but correct, so we just warn.
+    const coi = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated;
+    if (!coi) {
+        // eslint-disable-next-line no-console
+        console.warn(
+            "[WasmProver] crossOriginIsolated=false — running single-threaded. " +
+                "Set COOP=same-origin + COEP=require-corp on the page (and worker) to enable rayon.",
+        );
+        return;
+    }
+    const hw =
+        (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+            ?.hardwareConcurrency ?? 4;
+    // Empirically rayon scales linearly past 8 cores on transact_2x2
+    // (16 threads → ~32% faster than 8 on a 16-core machine), so default
+    // to all reported logical cores. `configureProverThreads(n)` overrides.
+    const n = proverThreadCount ?? Math.max(2, hw);
+    if (n <= 1) {
+        // eslint-disable-next-line no-console
+        console.warn(`[WasmProver] thread pool size ${n} — running single-threaded`);
+        return;
+    }
+    const t0 = performance.now();
+    try {
+        const initPromise = mod.initThreadPool(n);
+        const timeout = new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error("initThreadPool timeout (10s)")), 10_000),
+        );
+        await Promise.race([initPromise, timeout]);
+        // eslint-disable-next-line no-console
+        console.log(
+            `[WasmProver] rayon thread pool ready: ${n} threads (${(performance.now() - t0).toFixed(0)}ms, hw=${hw})`,
+        );
+    } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[WasmProver] rayon thread pool init failed; running single-threaded:", err);
+    }
 }
 
 async function maybeInitNodeThreadPool(mod: ProverModule): Promise<void> {
@@ -106,7 +143,7 @@ async function maybeInitNodeThreadPool(mod: ProverModule): Promise<void> {
     // Override via `configureProverThreads(n)` or `LELANTOS_PROVER_THREADS=n`.
     // Set to 1 to disable.
     const envN = parseInt(process.env.LELANTOS_PROVER_THREADS ?? "", 10);
-    const n = proverThreadCount ?? (Number.isFinite(envN) ? envN : defaultThreadCount());
+    const n = proverThreadCount ?? (Number.isFinite(envN) ? envN : await defaultThreadCount());
     if (n <= 1) return;
     try {
         await installNodeRayonWorker();
@@ -138,78 +175,29 @@ function polyfillSelfForNode(): void {
 
 // Adapt browser-Worker API to `node:worker_threads` so wasm-bindgen-rayon's
 // `startWorkers` (which does `new Worker(url, {type:"module"})`) functions in
-// Node. Each spawned Node worker first runs a small ESM bootstrap that
-// shims `self`/`addEventListener`/`postMessage`, then dynamic-imports the
-// real workerHelpers.js URL. Memory is `WebAssembly.Memory({shared:true})`,
+// Node. Each spawned Node worker first runs a static ESM bootstrap shipped
+// alongside the SDK (`rayon-worker-bootstrap.mjs`) that shims `self`/
+// `addEventListener`/`postMessage`, then dynamic-imports the real
+// workerHelpers.js URL. Memory is `WebAssembly.Memory({shared:true})`,
 // which Node supports.
+const RAYON_BOOTSTRAP_URL = new URL("../wasm/rayon-worker-bootstrap.mjs", import.meta.url);
 let nodeRayonInstalled = false;
-let bootstrapPath: string | null = null;
 let nodePkgUrl: string | null = null;
 
-function defaultThreadCount(): number {
+async function defaultThreadCount(): Promise<number> {
     try {
-        // biome-ignore lint/suspicious/noExplicitAny: dynamic require
-        const os = require("node:os") as {
-            availableParallelism?: () => number;
-            cpus: () => unknown[];
-        };
+        const os = await import(/* @vite-ignore */ NODE_OS);
         return os.availableParallelism?.() ?? os.cpus().length;
     } catch {
         return 4;
     }
 }
 
-async function ensureBootstrapFile(): Promise<string> {
-    if (bootstrapPath) return bootstrapPath;
-    const { writeFile, mkdir } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const dir = join(tmpdir(), "lelantos-wasm-rayon");
-    await mkdir(dir, { recursive: true });
-    const file = join(dir, "rayon-worker-bootstrap.mjs");
-    // Implements wasm-bindgen-rayon worker protocol directly. Spec:
-    //   main → worker: { type:'wasm_bindgen_worker_init', init, receiver }
-    //   worker → main: { type:'wasm_bindgen_worker_ready' }
-    //   worker then calls pkg.wbg_rayon_start_worker(receiver) which
-    //   blocks the rayon dispatcher (Atomics.wait inside wasm).
-    const src = `import { parentPort, threadId } from "node:worker_threads";
-const dbg = (m) => { if (process.env.LELANTOS_RAYON_DEBUG) console.error("[rayon-worker " + threadId + "]", m); };
-// Stub browser-Worker globals so workerHelpers.js (loaded transitively by
-// pkg/prover.js) doesn't ReferenceError. We don't route messages through
-// these — bootstrap talks to parentPort directly per the rayon protocol.
-globalThis.self = globalThis;
-globalThis.addEventListener = () => {};
-globalThis.removeEventListener = () => {};
-globalThis.postMessage = () => {};
-const pkgUrl = process.env.LELANTOS_RAYON_PKG_URL;
-if (!pkgUrl) throw new Error("LELANTOS_RAYON_PKG_URL missing");
-dbg("waiting init");
-parentPort.once("message", async (data) => {
-    try {
-        dbg("got " + (data && data.type));
-        if (data?.type !== "wasm_bindgen_worker_init") return;
-        const pkg = await import(pkgUrl);
-        await pkg.default(data.init);
-        dbg("wasm initialized; posting ready");
-        parentPort.postMessage({ type: "wasm_bindgen_worker_ready" });
-        pkg.wbg_rayon_start_worker(data.receiver);
-        dbg("start_worker returned");
-    } catch (err) {
-        dbg("worker error: " + (err && err.stack || err));
-        throw err;
-    }
-});
-`;
-    await writeFile(file, src);
-    bootstrapPath = file;
-    return file;
-}
-
 async function installNodeRayonWorker(): Promise<void> {
     if (nodeRayonInstalled) return;
     if (!nodePkgUrl) throw new Error("nodePkgUrl not set; call after wasm init");
-    const { Worker: NodeWorker } = await import("node:worker_threads");
-    const bootstrap = await ensureBootstrapFile();
+    const { Worker: NodeWorker } = await import(/* @vite-ignore */ NODE_WORKER_THREADS);
+    const bootstrap = RAYON_BOOTSTRAP_URL;
     const pkgUrl = nodePkgUrl;
 
     class NodeBrowserWorker {
@@ -264,18 +252,9 @@ async function installNodeRayonWorker(): Promise<void> {
     nodeRayonInstalled = true;
 }
 
-
-async function readProverWasm(): Promise<Uint8Array> {
-    const { readFile } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    return new Uint8Array(
-        await readFile(join(__dirname, "..", "..", "wasm", "prover", "pkg", "prover_bg.wasm")),
-    );
-}
-
 async function loadBytes(path: string): Promise<Uint8Array> {
     if (IS_NODE) {
-        const { readFile } = await import("node:fs/promises");
+        const { readFile } = await import(/* @vite-ignore */ NODE_FS_PROMISES);
         return new Uint8Array(await readFile(path));
     }
     const res = await fetch(path);
@@ -307,8 +286,19 @@ export class WasmProver implements Prover {
     }
 
     async prove(input: Record<string, unknown>): Promise<ProveResult> {
+        const perf =
+            (globalThis as { __lelantos_prover_perf?: boolean }).__lelantos_prover_perf !== false;
+        const t0 = perf ? performance.now() : 0;
         const wtns = await this.wc.calculateWTNSBin(input, 0);
+        const t1 = perf ? performance.now() : 0;
         const out = this.session.prove(wtns);
+        const t2 = perf ? performance.now() : 0;
+        if (perf) {
+            const fmt = (ms: number) =>
+                ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms.toFixed(1)}ms`;
+            // eslint-disable-next-line no-console
+            console.log(`[worker-perf] witness: ${fmt(t1 - t0)} | groth16: ${fmt(t2 - t1)}`);
+        }
         const proof: Groth16Proof = {
             pi_a: out.piA,
             pi_b: out.piB,

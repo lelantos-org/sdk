@@ -1,62 +1,95 @@
-// Top-level barrel.
-
-export * from "./version";
-export * from "./crypto/index";
-export * from "./notes";
-export * from "./keys";
-export * from "./address";
-export * from "./fmd";
-export * from "./note-encrypt";
-export * from "./cache";
-export * from "./prover";
-export * from "./witness";
-export * from "./witness/tree-update";
-export * from "./snark-compression";
-export * from "./relayer";
-export * from "./operator";
-export * from "./sync";
-export * from "./note-codec";
-export * from "./aux";
-export * from "./bundle";
-export * from "./permit";
-export * as metamask from "./metamask";
-
-// High-level Wallet API for application integration. Primitives above stay
-// public; this layer is purely additive.
+// Top-level barrel for `@lelantos-org/sdk`.
 //
-// All five external dependencies are pluggable interfaces:
-//   ChainAdapter, NoteSource, Submitter, Prover, CoinSelector, NoteStore.
-// Defaults: EthersChainAdapter, FmdNoteSource, HttpRelayerSubmitter,
-// SnarkjsProver, SfrtCoinSelector, InMemoryNoteStore.
-export * from "./wallet";
-export * from "./wallet/errors";
-export * from "./wallet/config";
-export * from "./wallet/key-source";
-export * from "./wallet/note-store";
-export * from "./wallet/selection";
-export * from "./wallet/randomness";
-export * from "./wallet/fmd-client";
-export * from "./wallet/chain-adapter";
-export * from "./wallet/note-source";
-export * from "./wallet/submitter";
-export * from "./wallet/prover";
-export * from "./wallet/sync";
-export * from "./wallet/scanner";
-export * from "./wallet/scanner-local";
-export * from "./wallet/scanner-worker-pool";
-export * from "./wallet/scanner-worker-protocol";
+// Organised by layer so autocomplete groups predictable concepts together.
+// Most apps need only the "Connect" + "Wallet" sections; reach for "Crypto
+// primitives" when building custom flows or testing circuit parity.
+
+export * from "./address.js";
+export * from "./aux.js";
+// ── Bundles + relayer wire format ───────────────────────────────────────
+export * from "./bundle.js";
+export * from "./cache.js";
+export * from "./crypto/index.js";
+// ── WASM modules (Baby-Jubjub + Groth16) ────────────────────────────────
 export {
-    WasmJubjub,
+    buildJubjub,
     configureJubjubWasm,
     type JubjubWasmLoader,
-} from "./crypto/jubjub-wasm";
+    WasmJubjub,
+} from "./crypto/jubjub-wasm.js";
+export * from "./fmd.js";
+export * from "./keys.js";
+export * as metamask from "./metamask.js";
+export * from "./note-codec.js";
+export * from "./note-encrypt.js";
+export * from "./notes.js";
+export * from "./operator.js";
+export * from "./permit.js";
+export * from "./preload.js";
+export * from "./presets.js";
+export * from "./prover.js";
+export * from "./relayer.js";
+export * from "./snark-compression.js";
+export * from "./sync.js";
 export {
-    WasmProver,
-    configureProverWasm,
-    configureProverThreads,
-    type ProverWasmLoader,
-} from "./wallet/wasm-prover";
-export * from "./wallet/scanner-browser";
-export * from "./wallet/adapters/ethers-chain";
-export * from "./preload";
-export * from "./presets";
+    type EthAddress,
+    type Hex,
+    type ProverArtifacts,
+    parseEthAddress,
+    parseHex,
+    parseUrl,
+    type ShieldedAddress,
+    type Url,
+    urlToString,
+} from "./types.js";
+// ── Crypto primitives + circuit parity ──────────────────────────────────
+// Building blocks reused by the Wallet class. Exposed for tests, e2e
+// runners, and apps that need to construct bundles by hand.
+export * from "./version.js";
+export * from "./wallet/adapters/ethers-chain.js";
+// ── Pluggables (interfaces + ship-with defaults) ─────────────────────────
+// All six wallet dependencies are interfaces; SDK ships an in-process
+// default for each. Swap any one without touching the rest.
+export * from "./wallet/chain-adapter.js";
+export * from "./wallet/config.js";
+// ── Connect (high-level entrypoint) ──────────────────────────────────────
+export {
+    type ConnectKeyOptions,
+    type ConnectOptions,
+    connect,
+} from "./wallet/connect.js";
+export * from "./wallet/errors.js";
+export * from "./wallet/fmd-client.js";
+// ── Wallet API ───────────────────────────────────────────────────────────
+export * from "./wallet/index.js";
+export * from "./wallet/key-source.js";
+export {
+    NETWORKS,
+    type NetworkName,
+    type NetworkPreset,
+    resolveNetwork,
+} from "./wallet/networks.js";
+export * from "./wallet/note-source.js";
+export * from "./wallet/note-store.js";
+export * from "./wallet/prover.js";
+export {
+    type BrowserWorkerProverOpts,
+    browserWorkerProver,
+    WorkerProver,
+    type WorkerProverOpts,
+} from "./wallet/prover-worker-client.js";
+export * from "./wallet/randomness.js";
+export * from "./wallet/scanner.js";
+export * from "./wallet/scanner-worker-pool.js";
+export * from "./wallet/scanner-worker-protocol.js";
+export * from "./wallet/selection.js";
+export * from "./wallet/submitter.js";
+export * from "./wallet/sync.js";
+// `WasmProver` lives at the `@lelantos-org/sdk/wasm-prover` subpath so the
+// main barrel does not transitively drag in `wasm-bindgen-rayon` worker
+// glue. Browser apps that opt out via `useWasmProver: false` (Wallet.connect)
+// pay zero bundle cost. Apps that want the rust prover import the subpath
+// directly.
+export * from "./wasm/config.js";
+export * from "./witness/tree-update.js";
+export * from "./witness.js";

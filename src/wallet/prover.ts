@@ -2,7 +2,7 @@
 // in a remote prover (HTTP RPC), a Worker-based prover (off-main-thread),
 // or a mock.
 
-import { prove, type ProveResult, type ProverPaths } from "../prover";
+import { type ProveResult, type ProverPaths, prove } from "../prover.js";
 
 export interface Prover {
     /// Prove a witness against the configured circuit.

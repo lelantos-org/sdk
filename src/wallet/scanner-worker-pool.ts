@@ -10,21 +10,21 @@
 //       ),
 //   });
 
-import type { Field } from "../crypto/index";
-import type { ScanInput, ScanHit } from "../sync";
-import type { FmdDetectionKey } from "../fmd";
-import type { Scanner } from "./scanner";
+import type { Field } from "../crypto/index.js";
+import type { FmdDetectionKey } from "../fmd.js";
+import type { ScanHit, ScanInput } from "../sync.js";
+import type { Scanner } from "./scanner.js";
 import {
-    encodeInput,
-    encodeDetection,
     decodeHit,
-    transferablesOf,
+    encodeDetection,
+    encodeInput,
     type InitReq,
     type InitRes,
+    type ScanErr,
     type ScanReq,
     type ScanRes,
-    type ScanErr,
-} from "./scanner-worker-protocol";
+    transferablesOf,
+} from "./scanner-worker-protocol.js";
 
 export interface WorkerLike {
     postMessage(msg: unknown, transfer?: Transferable[]): void;
@@ -141,4 +141,28 @@ function defaultPoolSize(): number {
         (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
             ?.hardwareConcurrency ?? 4;
     return Math.max(2, Math.min(8, hw));
+}
+
+// ── browser convenience factory ────────────────────────────────────────
+//
+// Hides the bundler-specific Worker URL plumbing. Browser apps using
+// Vite/webpack/esbuild/Rspack pass a `workerUrl` resolved from the call
+// site's `import.meta.url`. Modern bundlers recognise the
+// `new Worker(new URL(..., import.meta.url), { type: "module" })` pattern
+// and emit a separate worker chunk automatically.
+
+export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "factory"> {
+    /// Worker module URL. Pass it from your ESM call site:
+    ///   `workerUrl: new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`
+    workerUrl: string | URL;
+}
+
+export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPoolScanner {
+    return new WorkerPoolScanner({
+        // Native Worker is structurally compatible with WorkerLike modulo
+        // MessageEvent typing — cast through unknown.
+        factory: () => new Worker(opts.workerUrl, { type: "module" }) as unknown as WorkerLike,
+        size: opts.size,
+        chunkSize: opts.chunkSize,
+    });
 }

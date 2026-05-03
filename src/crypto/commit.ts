@@ -1,5 +1,5 @@
-import type { Poseidon, Field } from "./poseidon";
-import { POW_2_64 } from "./tags";
+import type { Field, Poseidon } from "./poseidon.js";
+import { POW_2_64 } from "./tags.js";
 
 export interface NoteCommitInput {
     asset: Field;

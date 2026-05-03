@@ -4,9 +4,9 @@
 // Returns SDK-canonical shapes (`ScanInput`, `FmdPath`) so the Wallet's
 // scanning + spending paths don't care where the data came from.
 
-import type { Field } from "../crypto/index";
-import type { ScanInput } from "../sync";
-import type { FmdClient } from "./fmd-client";
+import type { Field } from "../crypto/index.js";
+import type { ScanInput } from "../sync.js";
+import type { FmdClient } from "./fmd-client.js";
 
 export interface MerklePath {
     leafIndex: number;

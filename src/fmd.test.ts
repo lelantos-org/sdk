@@ -1,18 +1,20 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { Jubjub, BABYJUB_SUBGROUP_ORDER } from "./crypto/index";
+import { beforeAll, describe, expect, it } from "vitest";
+import { BABYJUB_SUBGROUP_ORDER, Jubjub, Poseidon } from "./crypto/index.js";
 import {
+    decodeClue,
+    encodeClue,
+    FMD_DEFAULT_GAMMA,
     fmdFlag,
     fmdFlagKeyFromDetection,
     fmdTest,
-    encodeClue,
-    decodeClue,
-    FMD_DEFAULT_GAMMA,
-} from "./fmd";
+} from "./fmd.js";
 
 describe("FMD (Niwl)", () => {
     let J: Jubjub;
+    let P: Poseidon;
     beforeAll(async () => {
         J = await Jubjub.build();
+        P = await Poseidon.build();
     });
 
     function rng(seed: bigint) {
@@ -28,8 +30,8 @@ describe("FMD (Niwl)", () => {
         const dk = { x: [r(), r(), r(), r(), r()] };
         const fk = fmdFlagKeyFromDetection(J, dk);
         for (let trial = 0; trial < 16; trial++) {
-            const clue = fmdFlag(J, fk, r());
-            expect(fmdTest(J, dk, clue)).toBe(true);
+            const clue = fmdFlag(J, P, fk, r());
+            expect(fmdTest(J, P, dk, clue)).toBe(true);
         }
     });
 
@@ -43,8 +45,8 @@ describe("FMD (Niwl)", () => {
         const fkA = fmdFlagKeyFromDetection(J, dkA);
         let hits = 0;
         for (let i = 0; i < N; i++) {
-            const clue = fmdFlag(J, fkA, ra());
-            if (fmdTest(J, dkB, clue)) hits++;
+            const clue = fmdFlag(J, P, fkA, ra());
+            if (fmdTest(J, P, dkB, clue)) hits++;
         }
         // E[hits] = N · 2^-γ = 256/32 = 8. Tolerate up to 4× expectation.
         expect(hits).toBeLessThan(N / 2);
@@ -54,12 +56,12 @@ describe("FMD (Niwl)", () => {
         const r = rng(42n);
         const dk = { x: [r(), r(), r()] };
         const fk = fmdFlagKeyFromDetection(J, dk);
-        const clue = fmdFlag(J, fk, r());
+        const clue = fmdFlag(J, P, fk, r());
         const enc = encodeClue(clue);
         const dec = decodeClue(enc);
         expect(dec.gamma).toBe(clue.gamma);
         expect(Array.from(dec.R)).toEqual(Array.from(clue.R));
         expect(Array.from(dec.bits)).toEqual(Array.from(clue.bits));
-        expect(fmdTest(J, dk, dec)).toBe(true);
+        expect(fmdTest(J, P, dk, dec)).toBe(true);
     });
 });

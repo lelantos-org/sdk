@@ -1,7 +1,7 @@
 // In-memory note cache. Persistence is the application's job.
 
-import type { Field } from "./crypto/index";
-import type { Note } from "./notes";
+import type { Field } from "./crypto/index.js";
+import type { Note } from "./notes.js";
 
 export interface CachedNote {
     note: Note;

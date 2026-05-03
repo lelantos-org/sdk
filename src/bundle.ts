@@ -7,26 +7,31 @@
 // to the relayer's `/v1/transact`.
 
 import {
-    type Poseidon,
-    type Jubjub,
-    MerkleTree,
+    buildOutputAux,
+    flagKeyFromAddressDk,
+    type OutputAux,
+    type OutputAuxWithWitness,
+} from "./aux.js";
+import {
     buildNoteCommitment,
     type Field,
+    type Jubjub,
+    MerkleTree,
     type Point,
-} from "./crypto/index";
-import type { Note } from "./notes";
+    type Poseidon,
+} from "./crypto/index.js";
+import type { Note } from "./notes.js";
+import { type Groth16Proof, type ProverPaths, prove } from "./prover.js";
+import type { SubmitTransactPayload, TransactPubInputs } from "./relayer.js";
+import { type FlattenInput, fiatShamirZ, flatten } from "./snark-compression.js";
+import type { Prover } from "./wallet/prover.js";
+import { randomFr } from "./wallet/randomness.js";
 import {
-    toCircomInput,
     dummyInputAt,
-    toSpentNoteFromPath,
     type SpendableCachedNote,
-} from "./witness";
-import { flatten, fiatShamirZ } from "./snark-compression";
-import { prove, type ProverPaths, type Groth16Proof } from "./prover";
-import type { Prover } from "./wallet/prover";
-import { EMPTY_AUX, buildOutputAux, flagKeyFromAddressDk, type OutputAux } from "./aux";
-import type { SubmitTransactPayload, TransactPubInputs } from "./relayer";
-import { randomFr } from "./wallet/randomness";
+    toCircomInput,
+    toSpentNoteFromPath,
+} from "./witness.js";
 
 export interface OutputRecipient {
     pk_d: Point;
@@ -104,8 +109,16 @@ export async function buildDeposit(a: DepositArgs): Promise<BuiltBundle> {
 
     const merkleRoot = new MerkleTree(P, a.treeDepth).root();
 
-    const aux0 = buildAuxForReal(J, realOut, a.recipient, a.output0.aux);
-    return finalize(a, [dA, dB], [realOut, padOut], merkleRoot, a.publicIn, 0n, [aux0, EMPTY_AUX]);
+    const aux0 = buildAuxForReal(J, P, realOut, a.recipient, a.output0.aux);
+    // Pad output also gets a real clue. Cheapest: same recipient as real
+    // output, fresh randomness. Indexer matches it on `a.recipient`'s
+    // subscription same as the real note — a (value=0) ghost note that
+    // the recipient's wallet recognizes as a self-pad and discards.
+    const aux1 = buildAuxForReal(J, P, padOut, a.recipient, {
+        esk: randomFr(),
+        fmdR: randomFr(),
+    });
+    return finalize(a, [dA, dB], [realOut, padOut], merkleRoot, a.publicIn, 0n, [aux0, aux1]);
 }
 
 // ---------- INPUT SLOT ----------
@@ -148,8 +161,8 @@ export async function buildTransfer(a: TransferArgs): Promise<BuiltBundle> {
     }
 
     const realIns = buildInputs(P, a.inputs, a.treeDepth);
-    const aux0 = buildAuxForReal(J, a.outputs[0], a.outputRecipients[0], a.outputRandomness[0]);
-    const aux1 = buildAuxForReal(J, a.outputs[1], a.outputRecipients[1], a.outputRandomness[1]);
+    const aux0 = buildAuxForReal(J, P, a.outputs[0], a.outputRecipients[0], a.outputRandomness[0]);
+    const aux1 = buildAuxForReal(J, P, a.outputs[1], a.outputRecipients[1], a.outputRandomness[1]);
 
     return finalize(a, realIns, a.outputs, a.merkleRoot, 0n, 0n, [aux0, aux1]);
 }
@@ -180,8 +193,8 @@ export async function buildWithdraw(a: WithdrawArgs): Promise<BuiltBundle> {
     }
 
     const realIns = buildInputs(P, a.inputs, a.treeDepth);
-    const aux0 = buildAuxForReal(J, a.change[0], a.changeRecipients[0], a.changeRandomness[0]);
-    const aux1 = buildAuxForReal(J, a.change[1], a.changeRecipients[1], a.changeRandomness[1]);
+    const aux0 = buildAuxForReal(J, P, a.change[0], a.changeRecipients[0], a.changeRandomness[0]);
+    const aux1 = buildAuxForReal(J, P, a.change[1], a.changeRecipients[1], a.changeRandomness[1]);
 
     return finalize(a, realIns, a.change, a.merkleRoot, 0n, a.publicOut, [aux0, aux1]);
 }
@@ -202,13 +215,15 @@ function buildInputs(
 
 function buildAuxForReal(
     J: Jubjub,
+    P: Poseidon,
     note: Note,
     recipient: OutputRecipient,
     rng: OutputRandomness,
-): OutputAux {
+): OutputAuxWithWitness {
     const { flag } = flagKeyFromAddressDk(J, recipient.dk);
     return buildOutputAux({
         J,
+        P,
         recipientFlagKey: flag,
         recipientPkD: recipient.pk_d,
         note: { asset: note.asset, value: note.value, rho: note.rho, rcm: note.rcm },
@@ -217,30 +232,43 @@ function buildAuxForReal(
     });
 }
 
+// ── finalize: pure pipeline (witness → flatten → prove → wire payload) ──
+
+/// Shape produced by `toCircomInput`. Decimal strings — fed to the prover
+/// verbatim; we only re-parse the public-input subset for the wire format.
+type CircomInput = ReturnType<typeof toCircomInput>;
+
 async function finalize(
     common: BundleCommon,
-    inputs: ReturnType<typeof dummyInputAt>[] | any,
+    inputs: ReturnType<typeof dummyInputAt>[],
     outputs: Note[],
     merkleRoot: Field,
     publicIn: bigint,
     publicOut: bigint,
-    aux: [OutputAux, OutputAux],
+    auxAndWitness: [OutputAuxWithWitness, OutputAuxWithWitness],
 ): Promise<BuiltBundle> {
-    const { P, J, asset } = common;
+    if (!common.prover && !common.proverPaths) {
+        throw new Error("BundleCommon: either `prover` or `proverPaths` is required");
+    }
+    const aux: [OutputAux, OutputAux] = [auxAndWitness[0].aux, auxAndWitness[1].aux];
+    const outputClues = auxAndWitness.map((a) => a.witness);
+
+    const { J, asset } = common;
     // Warm WasmJubjub's circomlibjs fallback once; subsequent sync
     // hashToAssetGen calls inside toCircomInput depend on it.
-    if (typeof (J as any).hashToAssetGenAsync === "function") {
-        await (J as any).hashToAssetGenAsync(asset);
-    }
+    const maybeAsync = (J as { hashToAssetGenAsync?: (a: bigint) => Promise<unknown> })
+        .hashToAssetGenAsync;
+    if (typeof maybeAsync === "function") await maybeAsync.call(J, asset);
     const pubGen = J.hashToAssetGen(asset);
 
-    const baseInput = toCircomInput(P, J, {
+    const baseInput = toCircomInput(common.P, J, {
         publicAssetId: asset,
         publicAssetGen: pubGen,
         publicIn,
         publicOut,
         inputs,
         outputs,
+        outputClues,
         merkleRoot,
         recipientAddress: addrToField(common.recipientAddress),
         chainId: common.chainId,
@@ -249,62 +277,97 @@ async function finalize(
         z: 0n,
     });
 
-    const coeffs = flatten(baseInput as any);
-    const z = fiatShamirZ(coeffs);
-    const input = { ...baseInput, z: z.toString() };
+    const z = computeFiatShamirZ(baseInput, aux, outputClues);
+    const proof = await runProver(common, { ...baseInput, z: z.toString() });
 
+    return {
+        payload: {
+            chainId: common.chainId,
+            proof2x2: groth16ToWire(proof),
+            pubInputs: extractPubInputs(common, baseInput, asset, pubGen, publicIn, publicOut),
+            aux: [auxToWire(aux[0]), auxToWire(aux[1])],
+        },
+        cm: [buildNoteCommitment(common.P, outputs[0]), buildNoteCommitment(common.P, outputs[1])],
+        producedNotes: [outputs[0], outputs[1]],
+    };
+}
+
+function computeFiatShamirZ(
+    baseInput: CircomInput,
+    aux: [OutputAux, OutputAux],
+    outputClues: OutputAuxWithWitness["witness"][],
+): bigint {
+    // `baseInput` is the generic Record returned by `toCircomInput`; structurally
+    // matches FlattenInput's required slots but TS can't prove it without the
+    // unknown bridge.
+    const flattenInput: FlattenInput = {
+        ...(baseInput as unknown as FlattenInput),
+        out_clue_Rx: aux.map((a) => a.clueR[0]),
+        out_clue_Ry: aux.map((a) => a.clueR[1]),
+        out_clue_bits: outputClues.map((c) => c.clueBits),
+    };
+    return fiatShamirZ(flatten(flattenInput));
+}
+
+async function runProver(
+    common: BundleCommon,
+    input: Record<string, unknown>,
+): Promise<Groth16Proof> {
     const { proof } = common.prover
         ? await common.prover.prove(input)
         : await prove(input, common.proverPaths);
-    if (!common.prover && !common.proverPaths) {
-        throw new Error("BundleCommon: either `prover` or `proverPaths` is required");
-    }
+    return proof;
+}
 
-    const pubInputs: TransactPubInputs = {
-        merkleRoot: BigInt((baseInput as any).merkle_root),
-        nullifier: [
-            BigInt((baseInput as any).nullifier[0]),
-            BigInt((baseInput as any).nullifier[1]),
-        ],
-        outCm: [BigInt((baseInput as any).out_cm[0]), BigInt((baseInput as any).out_cm[1])],
+/// Lift the public-input subset of the (decimal-string) circom witness back
+/// into native bigints for the relayer wire format.
+function extractPubInputs(
+    common: BundleCommon,
+    base: CircomInput,
+    asset: bigint,
+    pubGen: Point,
+    publicIn: bigint,
+    publicOut: bigint,
+): TransactPubInputs {
+    const b = base as Record<string, string | string[] | string[][]>;
+    const big = (v: string | string[] | string[][]): bigint => BigInt(v as string);
+    const tuple2 = (v: string[]): [bigint, bigint] => [BigInt(v[0]), BigInt(v[1])];
+    const point = (v: string[]): [bigint, bigint] => [BigInt(v[0]), BigInt(v[1])];
+
+    const nullifier = b.nullifier as string[];
+    const outCm = b.out_cm as string[];
+    const inCv = b.in_cv as string[][];
+    const outCv = b.out_cv as string[][];
+
+    return {
+        merkleRoot: big(b.merkle_root),
+        nullifier: tuple2(nullifier),
+        outCm: tuple2(outCm),
         publicAssetId: asset,
         pubAssetGen: pubGen,
         publicIn,
         publicOut,
-        inCv: [
-            [BigInt((baseInput as any).in_cv[0][0]), BigInt((baseInput as any).in_cv[0][1])],
-            [BigInt((baseInput as any).in_cv[1][0]), BigInt((baseInput as any).in_cv[1][1])],
-        ],
-        outCv: [
-            [BigInt((baseInput as any).out_cv[0][0]), BigInt((baseInput as any).out_cv[0][1])],
-            [BigInt((baseInput as any).out_cv[1][0]), BigInt((baseInput as any).out_cv[1][1])],
-        ],
+        inCv: [point(inCv[0]), point(inCv[1])],
+        outCv: [point(outCv[0]), point(outCv[1])],
         recipient: common.recipientAddress,
         chainId: common.chainId,
         payer: common.payerAddress,
         relayer: common.relayerAddress,
     };
-
-    const payload: SubmitTransactPayload = {
-        chainId: common.chainId,
-        proof2x2: groth16ToWire(proof),
-        pubInputs,
-        aux: [auxToWire(aux[0]), auxToWire(aux[1])],
-    };
-
-    const cm0 = buildNoteCommitment(P, outputs[0]);
-    const cm1 = buildNoteCommitment(P, outputs[1]);
-    return { payload, cm: [cm0, cm1], producedNotes: [outputs[0], outputs[1]] };
 }
 
-function addrToField(hex: string): Field {
-    return BigInt(hex);
-}
+const addrToField = (hex: string): Field => BigInt(hex);
 
-function groth16ToWire(p: Groth16Proof): SubmitTransactPayload["proof2x2"] {
-    return { piA: p.pi_a, piB: p.pi_b, piC: p.pi_c, protocol: p.protocol, curve: p.curve };
-}
+const groth16ToWire = (p: Groth16Proof): SubmitTransactPayload["proof2x2"] => ({
+    piA: p.pi_a,
+    piB: p.pi_b,
+    piC: p.pi_c,
+    protocol: p.protocol,
+    curve: p.curve,
+});
 
-function auxToWire(a: OutputAux): SubmitTransactPayload["aux"][number] {
-    return { clueR: a.clueR, ephPub: a.ephPub, ciphertext: a.ciphertext };
-}
+const auxToWire = (a: OutputAux): SubmitTransactPayload["aux"][number] => ({
+    clueR: a.clueR,
+    ephPub: a.ephPub,
+    ciphertext: a.ciphertext,
+});

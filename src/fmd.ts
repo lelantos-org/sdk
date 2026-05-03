@@ -1,5 +1,12 @@
 // Fuzzy Message Detection — FMD2 (Beck & Len, 2021), a.k.a. Niwl.
 //
+// Scheme variant: lelantos.fmd.v2 (poseidon).
+// Bit derivation switched from blake2b to Poseidon over field elements so
+// the in-circuit `ClueCheck` (circuits/src/lib/clue.circom) can prove
+// well-formedness in ~200 constraints/hash. v1 (blake2b) was retired;
+// callers must regenerate detection-keys against the new scheme — the
+// bit-mixing changed but on-curve / packing format is unchanged.
+//
 // Tunable false-positive rate p = 2^-γ. Default γ = 5 ⇒ 1/32 FP.
 //
 // Receiver keys:
@@ -9,30 +16,42 @@
 // Sender flags a message for fk:
 //   r ← Z_q*
 //   R = B · r
-//   for i ∈ [γ]: bit_i = lsb(H(domain, R, i, r·X_i))   ;   c_i = bit_i ⊕ 1
+//   for i ∈ [γ]: bit_i = lsb1(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
+//                S_i = r·X_i
+//                c_i = bit_i ⊕ 1
 //   clue = (R, c_1 || ... || c_γ)
 //
 // Receiver tests with dk:
-//   for i ∈ [γ]: bit_i = lsb(H(domain, R, i, x_i·R))
+//   S_i = x_i · R
+//   for i ∈ [γ]: bit_i = lsb1(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
 //                if bit_i ⊕ c_i ≠ 1 → reject
 //
 // Honest recipient: r·X_i == x_i·R, so all γ checks pass.
 // Anyone else: each check independent random ⇒ accept with prob 2^-γ.
 //
-// Wire format:
+// Wire format (unchanged from v1):
 //   encoded clue = γ (1B) || R_packed (32B) || c_bits (⌈γ/8⌉ B, LSB-first)
 //
 // `scripts/gen-fmd-vectors.ts` writes deterministic vectors that lock byte
-// order against the Rust indexer impl. Do not change format without bumping
-// FMD_DOMAIN.
+// order against the Rust indexer impl. Bumping FMD_DOMAIN signals scheme
+// change.
 
-import { blake2b } from "@noble/hashes/blake2";
-import { type Jubjub, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./crypto/index";
-import { WasmJubjub } from "./crypto/jubjub-wasm";
-import { toLeBytes, FIELD_BYTES } from "./crypto/bytes";
+import {
+    BABYJUB_SUBGROUP_ORDER,
+    FIELD_BYTES,
+    type Field,
+    type Jubjub,
+    type Point,
+    toLeBytes,
+} from "./crypto/index.js";
+import type { Poseidon } from "./crypto/poseidon.js";
 
 export const FMD_DEFAULT_GAMMA = 5;
-export const FMD_DOMAIN = new TextEncoder().encode("lelantos.fmd.v1");
+export const FMD_DOMAIN = "lelantos.fmd.v2";
+/// Domain-separation tag for FMD bit derivation. Mirrors `TAG_FMD_BIT` in
+/// circuits/src/lib/tags.circom and `TAG_FMD_BIT` in
+/// backend/crates/fmd-crypto/src/clue.rs. Must NOT collide with other tags.
+export const TAG_FMD_BIT: bigint = 8n;
 
 export interface FmdDetectionKey {
     x: Field[];
@@ -44,6 +63,27 @@ export interface FmdClue {
     R: Uint8Array;
     bits: Uint8Array;
     gamma: number;
+}
+
+/// Encode a `FmdDetectionKey` as the `γ * 32`-byte little-endian blob the
+/// fmd-webserver subscription endpoint expects. Each scalar is reduced
+/// mod `BABYJUB_SUBGROUP_ORDER` then serialized LE-32. Matches the
+/// `Buffer::concat` over `to_le_bytes()` encoding on the rust side.
+export function detectionKeyToBytes(dk: FmdDetectionKey): Uint8Array {
+    const out = new Uint8Array(dk.x.length * FIELD_BYTES);
+    for (let i = 0; i < dk.x.length; i++) {
+        out.set(toLeBytes(dk.x[i] % BABYJUB_SUBGROUP_ORDER, FIELD_BYTES), i * FIELD_BYTES);
+    }
+    return out;
+}
+
+/// Hex-encode a detection key for transport (no `0x` prefix — that's what
+/// the server expects on `POST /v1/subscriptions`).
+export function detectionKeyToHex(dk: FmdDetectionKey): string {
+    const b = detectionKeyToBytes(dk);
+    let h = "";
+    for (const x of b) h += x.toString(16).padStart(2, "0");
+    return h;
 }
 
 export function fmdGenDetectionKey(
@@ -61,7 +101,7 @@ export function fmdFlagKeyFromDetection(J: Jubjub, dk: FmdDetectionKey): FmdFlag
     return { X: dk.x.map((xi) => J.mulPointEscalar(J.base8, xi)) };
 }
 
-export function fmdFlag(J: Jubjub, fk: FmdFlagKey, r: Field): FmdClue {
+export function fmdFlag(J: Jubjub, P: Poseidon, fk: FmdFlagKey, r: Field): FmdClue {
     const gamma = fk.X.length;
     const rMod = r % BABYJUB_SUBGROUP_ORDER;
     if (rMod === 0n) throw new Error("fmd flag: r must be non-zero mod q");
@@ -71,28 +111,21 @@ export function fmdFlag(J: Jubjub, fk: FmdFlagKey, r: Field): FmdClue {
 
     const cBits = fk.X.map((Xi, i) => {
         const shared = J.mulPointEscalar(Xi, rMod);
-        return sharedBit(J, Rpacked, i, shared) ^ 1;
+        return sharedBit(P, R, i, shared) ^ 1;
     });
 
     return { R: Rpacked, bits: packBits(cBits), gamma };
 }
 
-export function fmdTest(J: Jubjub, dk: FmdDetectionKey, clue: FmdClue): boolean {
+export function fmdTest(J: Jubjub, P: Poseidon, dk: FmdDetectionKey, clue: FmdClue): boolean {
     if (dk.x.length !== clue.gamma) return false;
-    if (J instanceof WasmJubjub) {
-        const dkLe = new Uint8Array(clue.gamma * FIELD_BYTES);
-        for (let i = 0; i < clue.gamma; i++) {
-            dkLe.set(toLeBytes(dk.x[i] % BABYJUB_SUBGROUP_ORDER, FIELD_BYTES), i * FIELD_BYTES);
-        }
-        return J.fmdTest(dkLe, clue.R, clue.bits, clue.gamma);
-    }
     const R = J.unpackPoint(clue.R);
     if (!R || !J.inSubgroup(R)) return false;
 
     const cBits = unpackBits(clue.bits, clue.gamma);
     for (let i = 0; i < clue.gamma; i++) {
         const shared = J.mulPointEscalar(R, dk.x[i]);
-        if ((sharedBit(J, clue.R, i, shared) ^ cBits[i]) !== 1) return false;
+        if ((sharedBit(P, R, i, shared) ^ cBits[i]) !== 1) return false;
     }
     return true;
 }
@@ -116,20 +149,12 @@ export function decodeClue(buf: Uint8Array): FmdClue {
 
 // ---- internals ----
 
-// Domain-separated bit extracted from H(domain, R, i, sharedPoint).
-function sharedBit(J: Jubjub, R: Uint8Array, i: number, shared: Point): number {
-    const h = blake2b.create({ dkLen: 32 });
-    h.update(FMD_DOMAIN);
-    h.update(R);
-    h.update(u32LE(i));
-    h.update(J.packPoint(shared));
-    return h.digest()[0] & 1;
-}
-
-function u32LE(n: number): Uint8Array {
-    const out = new Uint8Array(4);
-    new DataView(out.buffer).setUint32(0, n, true);
-    return out;
+// LSB of Poseidon([TAG_FMD_BIT, R.x, R.y, i, S.x, S.y]). Same six-input
+// layout as the in-circuit `ClueCheck` template; bit-equivalent to the Rust
+// `shared_bit` in fmd-crypto/src/clue.rs.
+function sharedBit(P: Poseidon, R: Point, i: number, shared: Point): number {
+    const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), shared[0], shared[1]]);
+    return Number(h & 1n);
 }
 
 function packBits(bits: number[]): Uint8Array {

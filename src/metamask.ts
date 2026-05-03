@@ -7,8 +7,8 @@
 // `LELANTOS_NSK_DOMAIN.version` invalidates all derived keys, which is
 // exactly what you want if the derivation pipeline changes.
 
-import { keccak256, TypedDataEncoder, type Signer, type TypedDataField } from "ethers";
-import { BABYJUB_SUBGROUP_ORDER, type Field } from "./crypto/index";
+import { keccak256, type Signer, TypedDataEncoder, type TypedDataField } from "ethers";
+import { BABYJUB_SUBGROUP_ORDER, type Field } from "./crypto/index.js";
 
 export const LELANTOS_NSK_DOMAIN = {
     name: "Lelantos",

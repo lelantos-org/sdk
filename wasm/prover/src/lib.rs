@@ -28,6 +28,17 @@ use crate::zkey::read_zkey;
 #[cfg(feature = "parallel")]
 pub use wasm_bindgen_rayon::init_thread_pool;
 
+// Faster wasm allocator than dlmalloc default. Build always has `+atomics`
+// (see `.cargo/config.toml`) and rayon workers share linear memory, so use the
+// thread-safe `TalcLock` variant. Trades ~10–15% peak memory for speed.
+#[cfg(target_family = "wasm")]
+#[global_allocator]
+static TALC: talc::sync::TalcLock<
+    spinning_top::RawSpinlock,
+    talc::wasm::WasmGrowAndClaim,
+    talc::wasm::WasmBinning,
+> = talc::sync::TalcLock::new(talc::wasm::WasmGrowAndClaim);
+
 #[wasm_bindgen(start)]
 pub fn _start() {
     console_error_panic_hook::set_once();

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER } from "./crypto/index";
-import { buildSpendingKey } from "./keys";
-import { encryptNote, decryptNote } from "./note-encrypt";
+import { beforeAll, describe, expect, it } from "vitest";
+import { BABYJUB_SUBGROUP_ORDER, Jubjub, Poseidon } from "./crypto/index.js";
+import { buildSpendingKey } from "./keys.js";
+import { decryptNote, encryptNote } from "./note-encrypt.js";
 
 describe("note encryption", () => {
     let P: Poseidon;

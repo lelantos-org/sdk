@@ -5,13 +5,24 @@
 // where Web Workers cost more than they save (sync workload, no event loop
 // to free up).
 
-import { Wallet } from "./wallet";
-import type { WalletConfig } from "./wallet/config";
-import type { KeySource } from "./wallet/key-source";
-import { browserWorkerScanner, type BrowserWorkerScannerOpts } from "./wallet/scanner-browser";
-import { WasmProver } from "./wallet/wasm-prover";
-import type { ProverPaths } from "./prover";
-import { preloadWasm } from "./preload";
+import { preloadWasm } from "./preload.js";
+import type { ProverPaths } from "./prover.js";
+import type { WalletConfig } from "./wallet/config.js";
+import { Wallet } from "./wallet/index.js";
+import type { KeySource } from "./wallet/key-source.js";
+import {
+    type BrowserWorkerScannerOpts,
+    browserWorkerScanner,
+} from "./wallet/scanner-worker-pool.js";
+
+// Dynamic import keeps the wasm-pack `prover` module + `wasm-bindgen-rayon`
+// worker glue out of bundles that don't actually instantiate `fastWallet`/
+// `nodeWallet`. Bundlers that statically resolve `import` would otherwise
+// drag the whole rust artifact set (~360 KB) into the main chunk.
+async function buildWasmProver(paths: ProverPaths) {
+    const { WasmProver } = await import("./wallet/wasm-prover.js");
+    return WasmProver.build(paths);
+}
 
 export interface FastWalletOpts {
     keys: KeySource;
@@ -39,7 +50,7 @@ export async function fastWallet(opts: FastWalletOpts): Promise<Wallet> {
     });
 
     const prover = opts.config.proverPaths
-        ? await WasmProver.build(opts.config.proverPaths)
+        ? await buildWasmProver(opts.config.proverPaths)
         : undefined;
 
     return Wallet.create(opts.keys, {
@@ -61,7 +72,7 @@ export async function nodeWallet(opts: NodeWalletOpts): Promise<Wallet> {
     if (!opts.skipWarmup) await preloadWasm({ prover: !!opts.config.proverPaths });
 
     const prover = opts.config.proverPaths
-        ? await WasmProver.build(opts.config.proverPaths)
+        ? await buildWasmProver(opts.config.proverPaths)
         : undefined;
 
     return Wallet.create(opts.keys, {

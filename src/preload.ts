@@ -4,7 +4,7 @@
 // Idempotent — both jubjub and prover modules cache themselves after first
 // build, so calling `preloadWasm()` multiple times is free.
 
-import { WasmJubjub } from "./crypto/jubjub-wasm";
+import { WasmJubjub } from "./crypto/jubjub-wasm.js";
 
 export interface PreloadOpts {
     /// Warm the prover wasm too. Default true. Set false on read-only wallets
@@ -17,7 +17,7 @@ export interface PreloadOpts {
 export async function preloadWasm(opts: PreloadOpts = {}): Promise<void> {
     const tasks: Promise<unknown>[] = [WasmJubjub.build()];
     if (opts.prover !== false) {
-        const { WasmProver } = await import("./wallet/wasm-prover");
+        const { WasmProver } = await import("./wallet/wasm-prover.js");
         tasks.push(WasmProver.preload());
     }
     await Promise.all(tasks);

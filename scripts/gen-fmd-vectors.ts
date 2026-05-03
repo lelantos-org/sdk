@@ -11,14 +11,14 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../src/crypto/index";
+import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../src/crypto/index.js";
 import {
+    encodeClue,
+    type FmdDetectionKey,
     fmdFlag,
     fmdFlagKeyFromDetection,
     fmdTest,
-    encodeClue,
-    type FmdDetectionKey,
-} from "../src/fmd";
+} from "../src/fmd.js";
 
 function bytesHex(b: Uint8Array): string {
     return `0x${Array.from(b, (v) => v.toString(16).padStart(2, "0")).join("")}`;
@@ -48,6 +48,7 @@ interface Vector {
 
 async function main() {
     const J = await Jubjub.build();
+    const P = await Poseidon.build();
     const rngA = makeRng(0xa11cen);
     const rngB = makeRng(0xb0bn);
     const gammas = [3, 5, 8];
@@ -58,7 +59,7 @@ async function main() {
         const dkB: FmdDetectionKey = { x: Array.from({ length: gamma }, () => rngB()) };
         const fkA = fmdFlagKeyFromDetection(J, dkA);
         const r = rngA();
-        const clue = fmdFlag(J, fkA, r);
+        const clue = fmdFlag(J, P, fkA, r);
 
         vectors.push({
             label: `gamma=${gamma}`,
@@ -69,16 +70,17 @@ async function main() {
             clue_R: bytesHex(clue.R),
             clue_bits: bytesHex(clue.bits),
             clue_encoded: bytesHex(encodeClue(clue)),
-            detect_self: fmdTest(J, dkA, clue),
-            detect_other: fmdTest(J, dkB, clue),
+            detect_self: fmdTest(J, P, dkA, clue),
+            detect_other: fmdTest(J, P, dkB, clue),
         });
     }
 
     const out = {
-        version: 1,
-        domain: "lelantos.fmd.v1",
+        version: 2,
+        domain: "lelantos.fmd.v2",
         curve: "babyjubjub",
-        hash: "blake2b",
+        hash: "poseidon",
+        scheme: "poseidon-v1",
         vectors,
     };
 

@@ -9,6 +9,7 @@ use std::io::{Cursor, Read};
 
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
+use ark_serialize::CanonicalDeserialize;
 use byteorder::{LittleEndian, ReadBytesExt};
 
 const MAGIC: &[u8; 4] = b"wtns";
@@ -43,11 +44,14 @@ pub fn parse_bn254(bytes: &[u8]) -> Result<Vec<Fr>, String> {
     }
 
     cur.set_position(off);
-    let mut limbs = [0u8; FIELD_BYTES as usize];
+    // snarkjs guarantees witness values are already canonical (< r), so skip
+    // the conditional reduction in `from_le_bytes_mod_order` and import the
+    // little-endian limbs directly into Montgomery form.
     let mut out = Vec::with_capacity(header.n_witness as usize);
     for _ in 0..header.n_witness {
-        cur.read_exact(&mut limbs).map_err(io_err)?;
-        out.push(Fr::from_le_bytes_mod_order(&limbs));
+        let bigint =
+            <Fr as PrimeField>::BigInt::deserialize_uncompressed(&mut cur).map_err(|e| e.to_string())?;
+        out.push(Fr::new(bigint));
     }
     Ok(out)
 }

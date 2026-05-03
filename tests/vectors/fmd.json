@@ -1,8 +1,9 @@
 {
-  "version": 1,
-  "domain": "lelantos.fmd.v1",
+  "version": 2,
+  "domain": "lelantos.fmd.v2",
   "curve": "babyjubjub",
-  "hash": "blake2b",
+  "hash": "poseidon",
+  "scheme": "poseidon-v1",
   "vectors": [
     {
       "label": "gamma=3",
@@ -28,10 +29,10 @@
       ],
       "r": "98700932450972426271224689820870552674",
       "clue_R": "0x2e328d3fde9e94a1a469bd7711e510cc003e90972309e2295915af03ad333e85",
-      "clue_bits": "0x04",
-      "clue_encoded": "0x032e328d3fde9e94a1a469bd7711e510cc003e90972309e2295915af03ad333e8504",
+      "clue_bits": "0x06",
+      "clue_encoded": "0x032e328d3fde9e94a1a469bd7711e510cc003e90972309e2295915af03ad333e8506",
       "detect_self": true,
-      "detect_other": true
+      "detect_other": false
     },
     {
       "label": "gamma=5",
@@ -67,8 +68,8 @@
       ],
       "r": "122036117941307074627662023859834791000",
       "clue_R": "0x1040c277cd300e4c703cc72db7d5b5b07f70dae1b8e563dae84f13f41ec8d92f",
-      "clue_bits": "0x13",
-      "clue_encoded": "0x051040c277cd300e4c703cc72db7d5b5b07f70dae1b8e563dae84f13f41ec8d92f13",
+      "clue_bits": "0x14",
+      "clue_encoded": "0x051040c277cd300e4c703cc72db7d5b5b07f70dae1b8e563dae84f13f41ec8d92f14",
       "detect_self": true,
       "detect_other": false
     },
@@ -121,8 +122,8 @@
       ],
       "r": "233748231355905558597671556311299979087",
       "clue_R": "0x4d5a68f63235ded11f62b41abe727bca78d84ecd37455f894bd1c3383032c11b",
-      "clue_bits": "0x83",
-      "clue_encoded": "0x084d5a68f63235ded11f62b41abe727bca78d84ecd37455f894bd1c3383032c11b83",
+      "clue_bits": "0x60",
+      "clue_encoded": "0x084d5a68f63235ded11f62b41abe727bca78d84ecd37455f894bd1c3383032c11b60",
       "detect_self": true,
       "detect_other": false
     }

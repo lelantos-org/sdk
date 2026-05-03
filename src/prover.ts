@@ -4,16 +4,29 @@
 // trusted-setup ceremony output is materialised.
 
 import * as snarkjs from "snarkjs";
+import type { ProverArtifacts } from "./types.js";
+import { urlToString } from "./types.js";
 
+/// @deprecated Use `ProverArtifacts` from `./types`. Kept for back-compat.
 export interface ProverPaths {
     wasmPath: string; // e.g. "circuits/build/2x2_js/2x2.wasm"
     zkeyPath: string; // e.g. "circuits/build/2x2_final.zkey"
 }
 
+/// Coerce either shape (legacy `ProverPaths` or new `ProverArtifacts`) to
+/// the snarkjs-friendly path strings used internally.
+export function resolveArtifacts(input: ProverPaths | ProverArtifacts): {
+    wasmPath: string;
+    zkeyPath: string;
+} {
+    if ("wasmPath" in input) return input;
+    return { wasmPath: urlToString(input.circuit), zkeyPath: urlToString(input.zkey) };
+}
+
 let DEFAULT_PATHS: ProverPaths | null = null;
 
-export function configureProver(paths: ProverPaths): void {
-    DEFAULT_PATHS = paths;
+export function configureProver(paths: ProverPaths | ProverArtifacts): void {
+    DEFAULT_PATHS = resolveArtifacts(paths);
 }
 
 export interface Groth16Proof {

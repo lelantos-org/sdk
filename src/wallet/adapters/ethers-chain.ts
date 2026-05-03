@@ -5,9 +5,9 @@
 // contract. SDK already depends on ethers v6 (used by metamask + permit
 // modules), so this is a free addition.
 
-import { Contract, JsonRpcProvider, Wallet, type Signer } from "ethers";
-import { signErc2612Permit, type Erc2612Permit } from "../../permit";
-import type { AssetEntry, ChainAdapter, PermitSignArgs } from "../chain-adapter";
+import { Contract, JsonRpcProvider, type Signer, Wallet } from "ethers";
+import { type Erc2612Permit, signErc2612Permit } from "../../permit.js";
+import type { AssetEntry, ChainAdapter, PermitSignArgs, TokenMeta } from "../chain-adapter.js";
 
 const MASP_ABI = [
     "function asset(uint64) view returns (address token, uint256 scale, uint256 genX, uint256 genY)",
@@ -111,6 +111,12 @@ export class EthersChainAdapter implements ChainAdapter {
     /// Bonus accessor; useful for CLI debug commands (balance, allowance).
     erc20Contract(addr: string): Contract {
         return new Contract(addr, ERC20_PERMIT_ABI, this.provider);
+    }
+
+    async tokenMeta(tokenAddr: string): Promise<TokenMeta> {
+        const c = this.erc20Contract(tokenAddr);
+        const [sym, dec] = await Promise.all([c.symbol(), c.decimals()]);
+        return { symbol: sym as string, decimals: Number(dec) };
     }
 
     get masp(): Contract {

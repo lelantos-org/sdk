@@ -41,49 +41,38 @@ Published privately on **GitHub Packages**. Consumers need a token with `read:pa
 ## Quickstart
 
 ```ts
-import {
-    Wallet,
-    EthersChainAdapter,
-    InMemoryNoteStore,
-    generateNewMnemonic,
-} from "@lelantos-org/sdk";
+import { Wallet, generateMnemonic } from "@lelantos-org/sdk";
 
-const wallet = await Wallet.create(
-    { type: "mnemonic", mnemonic: generateNewMnemonic(256) },
-    {
-        chainId: 31337n,
-        treeDepth: 10,
-        fmdUrl: "http://localhost:3001",
-        relayerUrl: "http://localhost:3000",
-        relayerAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-        proverPaths: {
-            wasmPath: "/path/to/circuits/build/2x2_js/2x2.wasm",
-            zkeyPath: "/path/to/circuits/build/2x2_final.zkey",
-        },
-        chain: new EthersChainAdapter({
-            rpcUrl: "http://localhost:8545",
-            signerKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-            maspAddress: "0x0165878A594ca255338adfa4d48449f69242Eb8F",
-            chainId: 31337n,
-        }),
-        noteStore: new InMemoryNoteStore(),
+const wallet = await Wallet.connect({
+    network: "anvil",            // resolves chainId, MASP, relayer, fmd, treeDepth
+    mnemonic: generateMnemonic(),
+    privateKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    rpcUrl: "http://localhost:8545",
+    proverArtifacts: {
+        circuit: "/path/to/circuits/build/2x2_js/2x2.wasm",
+        zkey: "/path/to/circuits/build/2x2_final.zkey",
     },
-);
+});
 
 console.log("address:", wallet.address);
 
-const dep = await wallet.deposit({ amount: 1000n, asset: 1n });
-console.log("deposit tx:", dep.txHash);
-
-await wallet.sync();
+await wallet.deposit({ amount: 1000n, asset: 1n });
+await wallet.sync({ onProgress: (p) => console.log(p.phase, p.fetched) });
 console.log("balance:", wallet.balance(1n).toString());
 
-const xfer = await wallet.transfer({ to: peerBech32, amount: 100n });
-console.log("transfer tx:", xfer.txHash);
-
-const wd = await wallet.withdraw({ to: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", amount: 200n });
-console.log("withdraw tx:", wd.txHash);
+await wallet.transfer({ to: peerBech32, amount: 100n, asset: 1n, autoConsolidate: true });
+await wallet.withdraw({ to: "0xf39…", amount: 200n, asset: 1n });
 ```
+
+Pass `autoConsolidate: true` so transfer/withdraw self-spends the two
+smallest notes and retries instead of throwing `InsufficientCoverError`.
+
+### Advanced — full-control wiring
+
+When you need to inject every pluggable yourself (custom indexer, alt
+chain library, mocked submitter), reach for `Wallet.create(source, cfg)`
+which takes the explicit `WalletConfig`. The single-call `Wallet.connect`
+above is built on top of it.
 
 ---
 
@@ -498,12 +487,54 @@ Pre-1.0. **No semver guarantees** until `v1.0.0`. Minor versions may include bre
 
 ## Browser CSP
 
-WASM modules are loaded via a real dynamic `import()` (TS lowering bypassed via indirect `Function("...")`). Strict `script-src` policies that forbid `'unsafe-eval'` will block module init. Allow `'wasm-unsafe-eval'` (and `'unsafe-eval'` if your bundler does not preserve the dynamic import).
+WASM modules are loaded via real ESM dynamic `import()` calls (no `new
+Function`/`eval` — the SDK migrated off that hack). Allow
+`'wasm-unsafe-eval'` in your `script-src` directive; nothing else is
+needed under the default CSP. If you bundle the SDK and your bundler
+rewrites the package's `#wasm/*` subpath imports, pass a `wasm: { … }`
+loader to `Wallet.connect()` so the runtime resolves modules through your
+bundler's asset pipeline.
 
 ## Errors
 
-Programmatic flows should catch typed errors via `instanceof`:
+Every typed SDK error inherits from `WalletError` and carries a stable
+`code` you can switch on (no string parsing). Catch `WalletError` to
+handle every SDK error in one place; reach for the subclass when you
+need extra fields:
 
-- `InsufficientCoverError` — thrown by `transfer` / `withdraw` when no 1- or 2-note cover exists. Properties: `target`, `asset`, `consolidate: StoredNote[]`, `consolidateSum`. Self-spend `consolidate` first, then re-sync and retry.
-- `WalletConfigError` — thrown by `Wallet.create` when a default pluggable is needed but its config field is missing. Suggests `presets` (`fastWallet`, `nodeWallet`) for opinionated defaults.
+```ts
+import { WalletError, InsufficientCoverError } from "@lelantos-org/sdk/errors";
+
+try {
+    await wallet.transfer({ to, amount });
+} catch (e) {
+    if (e instanceof InsufficientCoverError) { /* … */ }
+    else if (e instanceof WalletError) {
+        switch (e.code) {
+            case "RELAYER_TIMEOUT": ...
+            case "FMD_FAILED":      ...
+            case "PROVER_FAILED":   ...
+            case "PERMIT_REJECTED": ...
+            case "WALLET_CONFIG":   ...
+        }
+    } else throw e;
+}
+```
+
+- `InsufficientCoverError` (`code: "INSUFFICIENT_COVER"`) — thrown by
+  `transfer`/`withdraw` when no 1- or 2-note cover exists. Either pass
+  `autoConsolidate: true` to have the SDK self-spend + retry, or read
+  `consolidate: StoredNote[]` and orchestrate manually.
+- `WalletConfigError` (`code: "WALLET_CONFIG"`) — `missing: string[]`
+  lists every problem at once, not one per round-trip.
+- `NetworkError` (`code: "RELAYER_*" | "FMD_*"`) — wraps fetch failures
+  + timeouts. Reads `url`, `status?`, `cause?`. HTTP clients retry 5xx +
+  network errors twice with exponential backoff before throwing.
+- `ProverError` (`code: "PROVER_FAILED"`) — proof generation failed.
+- `PermitRejectedError` (`code: "PERMIT_REJECTED"`) — user rejected the
+  EIP-2612 signature in their wallet.
+
+`HttpClientOptions` (passed via `connect({ http: { timeoutMs, retries } })`
+or directly to `FmdClient` / `RelayerClient`) tunes timeout (default
+30 000 ms) and retry count (default 2).
 

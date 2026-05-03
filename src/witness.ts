@@ -4,15 +4,15 @@
 // byte-identical.
 
 import {
-    type Poseidon,
+    buildNoteCommitment,
+    buildNullifierFromNsk,
+    type Field,
     type Jubjub,
     type MerkleTree,
-    buildNoteCommitment,
-    buildNullifier,
-    type Field,
     type Point,
-} from "./crypto/index";
-import type { Note, SpentNote } from "./notes";
+    type Poseidon,
+} from "./crypto/index.js";
+import type { Note, SpentNote } from "./notes.js";
 
 export interface SpendableCachedNote {
     note: Note;
@@ -37,7 +37,7 @@ export function toSpentNoteFromPath(
     pathIndices: number[],
 ): SpentNote {
     const cm = buildNoteCommitment(P, cached.note);
-    const nf = buildNullifier(P, cached.nsk, cached.note.rho);
+    const nf = buildNullifierFromNsk(P, cached.nsk, cached.note.rho);
     return {
         ...cached.note,
         nsk: cached.nsk,
@@ -50,6 +50,15 @@ export function toSpentNoteFromPath(
     };
 }
 
+export interface OutputClueWitness {
+    /// FMD blinding scalar r ∈ Z_q*. R = r·G_8 = (clueRx, clueRy).
+    r: Field;
+    /// γ recipient flag-key points fk[i] = dk[i]·G_8.
+    fk: Point[];
+    /// 14-bit packed clueBits, LSB first. First γ bits = 1 - lsb1(Poseidon(...)).
+    clueBits: Field;
+}
+
 export interface BuildOpts {
     publicAssetId: Field;
     publicAssetGen?: Point;
@@ -57,6 +66,9 @@ export interface BuildOpts {
     publicOut: Field;
     inputs: SpentNote[];
     outputs: Note[];
+    /// FMD clue witnesses per output. Required: pad/dummy outputs also need
+    /// a real (r, fk) — circuit constraints fire unconditionally.
+    outputClues: OutputClueWitness[];
     merkleRoot: Field;
     recipientAddress?: Field;
     chainId?: Field;
@@ -68,7 +80,8 @@ export interface BuildOpts {
     /// SNARK to prevent front-running by other relayers.
     relayerAddress?: Field;
     // SnarkCompression Fiat-Shamir challenge. Tests default to 1n; in prod
-    // the contract derives this from a transcript over the 22 logical PIs.
+    // the contract derives this from a transcript over the 28 logical PIs
+    // (22 base + 6 clue).
     z?: Field;
 }
 
@@ -136,6 +149,10 @@ export function toCircomInput(
         out_rho: outputs.map((o) => o.rho.toString()),
         out_rcm: outputs.map((o) => o.rcm.toString()),
         out_rcv: outputs.map((o) => o.rcv.toString()),
+
+        out_r: opts.outputClues.map((c) => c.r.toString()),
+        out_fk: opts.outputClues.map((c) => c.fk.map((p) => [p[0].toString(), p[1].toString()])),
+        out_clue_bits: opts.outputClues.map((c) => c.clueBits.toString()),
     };
 }
 
@@ -144,11 +161,12 @@ export function dummyOutput(asset: Field = 1n): Note {
 }
 
 // Dummy spent slot. is_dummy=1 bypasses Merkle membership and pk check inside
-// the circuit. nf is computed normally as Poseidon(TAG_NF, 0, rho); pick a
-// fresh `rho` to keep nf distinct from prior dummies and any real spend.
+// the circuit. nf is computed normally as Poseidon(TAG_NF, nk, rho) where
+// nk = Poseidon(TAG_NK, 0); pick a fresh `rho` to keep nf distinct from
+// prior dummies and any real spend.
 export function dummyInputAt(P: Poseidon, depth: number, rho: Field = 0n): SpentNote {
     const nsk = 0n;
-    const nf = buildNullifier(P, nsk, rho);
+    const nf = buildNullifierFromNsk(P, nsk, rho);
     const pathElements: Field[][] = [];
     for (let i = 0; i < depth; i++) pathElements.push([0n, 0n, 0n]);
     return {

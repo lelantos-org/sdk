@@ -6,9 +6,9 @@
 
 // @ts-expect-error — circomlibjs ships without TS types
 import { buildBabyjub, buildPedersenHash } from "circomlibjs";
-import type { Field } from "./poseidon";
-import { toLeBytes } from "./bytes";
-import { TAG_ASSET } from "./tags";
+import { toLeBytes } from "./bytes.js";
+import type { Field } from "./poseidon.js";
+import { TAG_ASSET } from "./tags.js";
 
 export type Point = [Field, Field];
 

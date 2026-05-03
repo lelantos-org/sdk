@@ -5,14 +5,19 @@
 // Reports: total ms, ms/note, notes/sec for a few batch sizes and FMD
 // hit-rate scenarios. Establishes baseline before tuning.
 
-import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../src/crypto/index";
-import { buildSpendingKey } from "../src/keys";
-import { encryptNote } from "../src/note-encrypt";
-import { encodeNotePayload, withClueBitsPrefix, clueBitsToPrefix } from "../src/note-codec";
-import { fmdFlag, fmdGenDetectionKey, fmdFlagKeyFromDetection, type FmdFlagKey } from "../src/fmd";
-import { LocalScanner } from "../src/wallet/scanner-local";
-import { WasmJubjub } from "../src/crypto/jubjub-wasm";
-import type { ScanInput } from "../src/sync";
+import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../src/crypto/index.js";
+import { WasmJubjub } from "../src/crypto/jubjub-wasm.js";
+import {
+    type FmdFlagKey,
+    fmdFlag,
+    fmdFlagKeyFromDetection,
+    fmdGenDetectionKey,
+} from "../src/fmd.js";
+import { buildSpendingKey } from "../src/keys.js";
+import { clueBitsToPrefix, encodeNotePayload, withClueBitsPrefix } from "../src/note-codec.js";
+import { encryptNote } from "../src/note-encrypt.js";
+import type { ScanInput } from "../src/sync.js";
+import { LocalScanner } from "../src/wallet/scanner-local.js";
 
 interface Scenario {
     label: string;

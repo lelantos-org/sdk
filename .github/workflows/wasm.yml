@@ -44,19 +44,6 @@ jobs:
       - uses: extractions/setup-just@v2
       - run: just clippy
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-06-23
-          components: rust-src
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: wasm
-      - uses: jetli/wasm-pack-action@v0.4.0
-      - uses: extractions/setup-just@v2
-      - run: just build
-      - run: just size
+# `build` + size moved to .github/workflows/ci.yml so the Node parity
+# tests run against freshly-built artifacts on every PR. This workflow
+# keeps only Rust-specific gates (fmt, clippy).

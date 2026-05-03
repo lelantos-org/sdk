@@ -1,12 +1,12 @@
 // Parity: WasmJubjub.tryDecryptNote ≡ circomlibjs decryptNote, byte-for-byte.
 // Auto-skipping when wasm artifact absent.
 
-import { it, expect, beforeAll } from "vitest";
-import { Poseidon, Jubjub } from "./crypto/index";
-import { wasmDescribe, loadWasmJubjub } from "./crypto/wasm-test-utils";
-import { buildSpendingKey } from "./keys";
-import { encryptNote, decryptNote } from "./note-encrypt";
-import { encodeNotePayload } from "./note-codec";
+import { beforeAll, expect, it } from "vitest";
+import { Jubjub, Poseidon } from "./crypto/index.js";
+import { loadWasmJubjub, wasmDescribe } from "./crypto/wasm-test-utils.js";
+import { buildSpendingKey } from "./keys.js";
+import { encodeNotePayload } from "./note-codec.js";
+import { decryptNote, encryptNote } from "./note-encrypt.js";
 
 wasmDescribe("WasmJubjub fused decrypt parity vs circomlibjs", () => {
     let P: Poseidon;

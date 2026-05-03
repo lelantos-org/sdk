@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { selectNotes, type SelectOpts } from "./selection";
-import type { StoredNote } from "./note-store";
+import { describe, expect, it } from "vitest";
+import type { StoredNote } from "./note-store.js";
+import { type SelectOpts, selectNotes } from "./selection.js";
 
 function note(
     id: string,

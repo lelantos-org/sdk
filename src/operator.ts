@@ -8,10 +8,10 @@
 // optimistically-advanced local state, builds its tree_update proof, and
 // submits with the next sequential ETH nonce. EVM serializes by nonce.
 
-import type { Poseidon, Field, Point } from "./crypto/index";
-import { MerkleTree } from "./crypto/index";
-import { prove, type Groth16Proof, type ProverPaths } from "./prover";
-import { buildTreeUpdateInput, compressTreeUpdatePI } from "./witness/tree-update";
+import type { Field, Point, Poseidon } from "./crypto/index.js";
+import { MerkleTree } from "./crypto/index.js";
+import { type Groth16Proof, type ProverPaths, prove } from "./prover.js";
+import { buildTreeUpdateInput, compressTreeUpdatePI } from "./witness/tree-update.js";
 
 export interface OperatorConfig {
     P: Poseidon;

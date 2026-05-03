@@ -52,12 +52,14 @@ just size        # build, then print bg.wasm size
 import init, { ProverSession, initThreadPool } from "./pkg/prover.js";
 
 await init();
-// Spin up rayon worker pool. Only effective if cross-origin isolated.
+// IMPORTANT: must `await` before any prove() — without it, FFT/MSM run
+// single-threaded silently. No-op (and harmless) when not cross-origin isolated.
 if (crossOriginIsolated) await initThreadPool(navigator.hardwareConcurrency);
 
 const session = new ProverSession(zkeyU8);          // parse zkey once
 const { piA, piB, piC, publicSignals } = session.prove(wtnsU8);
 ```
+
 
 Output mirrors snarkjs `Groth16Proof` (decimal strings):
 - `piA: [x, y, "1"]` — G1 affine

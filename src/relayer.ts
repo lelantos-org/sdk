@@ -9,8 +9,9 @@
 // forge: every merkle path it serves must verify against an on-chain
 // `isKnownRoot` before the wallet trusts it for spending.
 
-import type { Field, Point } from "./crypto/index";
-import type { Erc2612Permit } from "./permit";
+import type { Field, Point } from "./crypto/index.js";
+import type { Erc2612Permit } from "./permit.js";
+import { createHttpClient, type HttpClient, type HttpClientOptions } from "./wallet/http.js";
 
 export interface SubmitTransactPayload {
     /// Target chain id; relayer routes to the per-chain pipeline by this key.
@@ -95,14 +96,16 @@ export interface ScannedNote {
 /// here is the SDK's expectation — every relayer service speaking it MUST
 /// match these shapes.
 export class RelayerClient {
-    private readonly fetchImpl: typeof fetch;
+    private readonly http: HttpClient;
 
     constructor(
         private readonly baseUrl: string,
-        fetchImpl?: typeof fetch,
+        opts?: HttpClientOptions | typeof fetch,
     ) {
-        // Detached `fetch` triggers "Illegal invocation" in browsers — bind.
-        this.fetchImpl = fetchImpl ?? ((...args) => fetch(...args));
+        // Back-compat: second arg used to be a raw `fetch` impl.
+        const httpOpts: HttpClientOptions =
+            typeof opts === "function" ? { fetchImpl: opts } : (opts ?? {});
+        this.http = createHttpClient("RELAYER_TIMEOUT", "RELAYER_FAILED", httpOpts);
     }
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
@@ -136,18 +139,16 @@ export class RelayerClient {
     }
 
     private async getJson<T>(pathSuffix: string): Promise<T> {
-        const r = await this.fetchImpl(this.baseUrl + pathSuffix);
-        if (!r.ok) throw new Error(`relayer GET ${pathSuffix} failed: ${r.status}`);
+        const r = await this.http.fetch(this.baseUrl + pathSuffix);
         return r.json() as Promise<T>;
     }
 
     private async postJson<T>(pathSuffix: string, body: unknown): Promise<T> {
-        const r = await this.fetchImpl(this.baseUrl + pathSuffix, {
+        const r = await this.http.fetch(this.baseUrl + pathSuffix, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(body),
         });
-        if (!r.ok) throw new Error(`relayer POST ${pathSuffix} failed: ${r.status}`);
         return r.json() as Promise<T>;
     }
 }

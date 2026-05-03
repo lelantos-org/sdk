@@ -13,116 +13,69 @@
 // Apps can swap any one for tests, alt transports, hardware wallets,
 // custom strategies — without touching the rest.
 
-import { Poseidon, type Jubjub, type Field, buildNullifier } from "../crypto/index";
-import { WasmJubjub } from "../crypto/jubjub-wasm";
-import { buildSpendingKey, addressFromSpendingKey, type SpendingKey } from "../keys";
-import { decodeAddress } from "../address";
+import { decodeAddress } from "../address.js";
 import {
     buildDeposit,
     buildTransfer,
     buildWithdraw,
     type InputSlot,
     type InputSlots,
-    type BuiltBundle,
-} from "../bundle";
-import type { SpendableCachedNote } from "../witness";
-import type { Note } from "../notes";
-import { resolveNsk, type KeySource } from "./key-source";
-import { randomFr, randomJubjubScalar } from "./randomness";
+} from "../bundle.js";
+import { buildNullifierFromNsk, type Jubjub, Poseidon } from "../crypto/index.js";
+import { buildJubjub } from "../crypto/jubjub-wasm.js";
+import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../keys.js";
+import type { Note } from "../notes.js";
+import type { SpendableCachedNote } from "../witness.js";
+import type {
+    DepositOptions,
+    NotesFilter,
+    TransactionResult,
+    TransferOptions,
+    WalletApi,
+    WalletNote,
+    WithdrawOptions,
+} from "./api.js";
+import type { WalletConfig } from "./config.js";
+import { defaultNoteSource, defaultProver, defaultSubmitter, validateConfig } from "./defaults.js";
+import { InsufficientCoverError } from "./errors.js";
 import {
-    SfrtCoinSelector,
+    freshNoteRandomness,
+    freshOutput,
+    makeTransactionResult,
+    toWalletNote,
+} from "./internal.js";
+import { type KeySource, resolveNsk } from "./key-source.js";
+import type { NoteSource } from "./note-source.js";
+import {
+    decodeStoredNote,
+    InMemoryNoteStore,
+    type NoteStore,
+    type NotesFile,
+    type StoredNote,
+} from "./note-store.js";
+import type { Prover } from "./prover.js";
+import { randomFr, randomJubjubScalar } from "./randomness.js";
+import { LocalScanner, type Scanner } from "./scanner.js";
+import {
     type CoinSelector,
     type SelectionResult,
     type SelectOpts,
-} from "./selection";
-import { FmdClient } from "./fmd-client";
-import { FmdNoteSource, FmdMatchesNoteSource, type NoteSource } from "./note-source";
-import { HttpRelayerSubmitter, type Submitter } from "./submitter";
-import { SnarkjsProver, type Prover } from "./prover";
-import { LocalScanner } from "./scanner-local";
-import type { Scanner } from "./scanner";
-import {
-    InMemoryNoteStore,
-    decodeStoredNote,
-    type NotesFile,
-    type StoredNote,
-    type NoteStore,
-} from "./note-store";
-import { syncWallet, type SyncResult } from "./sync";
-import type { WalletConfig } from "./config";
-import { InsufficientCoverError, WalletConfigError } from "./errors";
+    SfrtCoinSelector,
+} from "./selection.js";
+import type { Submitter } from "./submitter.js";
+import { type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
 
-/// Args for `Wallet.deposit`. Shields ERC20 from caller's eth account into
-/// the MASP. Caller must hold an EIP-2612-permit-capable ERC20 balance ≥
-/// `amount * assetEntry.scale + fee`.
-export interface DepositOptions {
-    /// Amount in *circuit units* (post-scale-down). Multiplied by the asset's
-    /// `scale` to get the ERC20 base-unit deposit.
-    amount: bigint;
-    /// Asset id (default 1n).
-    asset?: bigint;
-    /// Shielded recipient (bech32m). Defaults to own address (deposit to self).
-    to?: string;
-    /// EIP-2612 permit deadline (unix-seconds). Default: `now + 3600`.
-    deadline?: bigint;
-}
-
-/// Args for `Wallet.transfer`. Spends 1-2 unspent notes covering `amount`
-/// and creates a send-note for `to` plus a change-note back to self.
-/// Throws `InsufficientCoverError` if no 1- or 2-note cover exists; caller
-/// should self-spend the smallest two notes (consolidate) and retry.
-export interface TransferOptions {
-    /// Recipient bech32m shielded address (any wallet, including own).
-    to: string;
-    /// Amount in circuit units.
-    amount: bigint;
-    /// Asset id (default 1n).
-    asset?: bigint;
-    /// Optional selection tuning (fee, dust threshold, RNG, etc.).
-    selectOpts?: SelectOpts;
-}
-
-/// Args for `Wallet.withdraw`. Spends 1-2 notes; releases `amount` ERC20 to
-/// `to` on-chain; remainder split into two change-notes back to self.
-/// Throws `InsufficientCoverError` on no cover (see `TransferOptions`).
-export interface WithdrawOptions {
-    /// On-chain ETH recipient (0x address).
-    to: string;
-    /// Amount in circuit units.
-    amount: bigint;
-    /// Asset id (default 1n).
-    asset?: bigint;
-    /// Optional selection tuning.
-    selectOpts?: SelectOpts;
-}
-
-export interface TransactionResult {
-    txHash: string;
-    cm: [string, string]; // 0x-hex
-    spentNoteIds?: string[];
-    inputSum?: bigint;
-    sent?: bigint;
-    change?: bigint;
-}
-
-/// Public interface — apps can mock this in tests, or build alternative
-/// implementations (HSM-backed wallet, multi-sig, MPC) without subclassing.
-export interface WalletApi {
-    readonly address: string;
-    readonly keys: SpendingKey;
-    readonly noteStore: NoteStore;
-
-    sync(opts?: { limit?: number }): Promise<SyncResult>;
-    refresh(): Promise<void>;
-    notes(filter?: { asset?: bigint; spent?: boolean }): StoredNote[];
-    balance(asset: bigint): bigint;
-    selectNotes(asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
-
-    deposit(args: DepositOptions): Promise<TransactionResult>;
-    transfer(args: TransferOptions): Promise<TransactionResult>;
-    withdraw(args: WithdrawOptions): Promise<TransactionResult>;
-    markSpent(noteIds: string[]): Promise<void>;
-}
+// Re-export the public types so existing
+// `import { ..., DepositOptions } from "@lelantos-org/sdk"` keeps working.
+export type {
+    DepositOptions,
+    NotesFilter,
+    TransactionResult,
+    TransferOptions,
+    WalletApi,
+    WalletNote,
+    WithdrawOptions,
+};
 
 const PERMIT_DEFAULT_DEADLINE_SECS = 3600;
 
@@ -140,6 +93,12 @@ export class Wallet implements WalletApi {
     readonly selector: CoinSelector;
     readonly scanner: Scanner;
     private file: NotesFile;
+
+    /// Chain adapter the wallet is bound to. Same instance as `cfg.chain`
+    /// — exposed at the top level so consumers don't reach through `cfg`.
+    get chain(): WalletConfig["chain"] {
+        return this.cfg.chain;
+    }
 
     private constructor(args: {
         P: Poseidon;
@@ -169,18 +128,36 @@ export class Wallet implements WalletApi {
         this.scanner = args.scanner;
     }
 
-    /// Build a wallet from any key source. Wires defaults for any
-    /// pluggable not supplied in `cfg`.
+    /// Single-call wallet builder for the common path. Resolves a network
+    /// preset, builds the chain adapter from a signer/privateKey, picks
+    /// scanner + prover by runtime. See `./connect.ts` for full options.
     ///
-    /// Throws `WalletConfigError` if a default is needed but the URL/path
-    /// it requires (`fmdUrl`, `relayerUrl`, `proverPaths`) is absent. To
-    /// skip a default entirely, supply the corresponding pluggable
-    /// (`noteSource`, `submitter`, `prover`) directly.
+    /// ```ts
+    /// const wallet = await Wallet.connect({
+    ///     network: "anvil",
+    ///     mnemonic,
+    ///     privateKey: "0x...",
+    ///     rpcUrl: "http://localhost:8545",
+    ///     proverArtifacts: { circuit: "/2x2.wasm", zkey: "/2x2.zkey" },
+    /// });
+    /// ```
+    static async connect(opts: import("./connect.js").ConnectOptions): Promise<WalletApi> {
+        const { connect } = await import("./connect.js");
+        return connect(opts);
+    }
+
+    /// Build a wallet from any key source. Wires defaults for any
+    /// pluggable not supplied in `cfg`. Use `Wallet.connect()` for the
+    /// common path; reach for `Wallet.create` when you need to inject all
+    /// pluggables yourself.
+    ///
+    /// Collects every config problem in `WalletConfigError.missing` so
+    /// callers see the full picture rather than fixing them one at a time.
     static async create(source: KeySource, cfg: WalletConfig): Promise<Wallet> {
+        validateConfig(cfg);
+
         const P = await Poseidon.build();
-        // WasmJubjub mirrors Jubjub's public surface (parity-locked by
-        // jubjub-wasm.test.ts); cast to satisfy the nominal type downstream.
-        const J = (await WasmJubjub.build()) as unknown as Jubjub;
+        const J = await buildJubjub();
         const nsk = resolveNsk(source);
         const keys = buildSpendingKey(P, J, nsk);
         const address = addressFromSpendingKey(J, keys);
@@ -192,7 +169,7 @@ export class Wallet implements WalletApi {
         const submitter = cfg.submitter ?? defaultSubmitter(cfg);
         const prover = cfg.prover ?? defaultProver(cfg);
         const selector = cfg.selector ?? new SfrtCoinSelector();
-        const scanner = cfg.scanner ?? new LocalScanner(J);
+        const scanner = cfg.scanner ?? new LocalScanner(J, P);
 
         return new Wallet({
             P,
@@ -216,7 +193,11 @@ export class Wallet implements WalletApi {
     /// with `ivk + dk`, persist hits to `NoteStore`. Idempotent — re-runs
     /// resume from the store's `lastIndex` cursor.
     /// `opts.limit` caps the number of new notes scanned this call.
-    async sync(opts?: { limit?: number }): Promise<SyncResult> {
+    /// `opts.onProgress` receives sync-phase updates for UI spinners.
+    async sync(opts?: {
+        limit?: number;
+        onProgress?: (p: import("./sync.js").SyncProgress) => void;
+    }): Promise<SyncResult> {
         const result = await syncWallet(
             {
                 J: this.J,
@@ -239,21 +220,19 @@ export class Wallet implements WalletApi {
     /// Single batch roundtrip via `noteSource.spentSet`.
     private async reconcileSpentOnChain(): Promise<void> {
         const file = await this.noteStore.load();
-        const candidates: { note: StoredNote; nf: bigint }[] = [];
-        for (const n of file.notes) {
-            if (n.spent) continue;
-            candidates.push({
-                note: n,
-                nf: buildNullifier(this.P, this.keys.nsk, BigInt(n.rho)),
-            });
-        }
+        const candidates = file.notes
+            .filter((n) => !n.spent)
+            .map((note) => ({
+                note,
+                nf: buildNullifierFromNsk(this.P, this.keys.nsk, BigInt(note.rho)),
+            }));
         if (candidates.length === 0) return;
         const spent = await this.noteSource.spentSet(candidates.map((c) => c.nf));
         if (spent.size === 0) return;
         let mutated = false;
-        for (const c of candidates) {
-            if (spent.has(c.nf)) {
-                c.note.spent = true;
+        for (const { note, nf } of candidates) {
+            if (spent.has(nf)) {
+                note.spent = true;
                 mutated = true;
             }
         }
@@ -266,12 +245,20 @@ export class Wallet implements WalletApi {
         this.file = await this.noteStore.load();
     }
 
-    notes(filter?: { asset?: bigint; spent?: boolean }): StoredNote[] {
-        return this.file.notes.filter((n) => {
-            if (filter?.spent !== undefined && n.spent !== filter.spent) return false;
-            if (filter?.asset !== undefined && BigInt(n.asset) !== filter.asset) return false;
-            return true;
-        });
+    notes(filter: NotesFilter): WalletNote[] {
+        return this.file.notes
+            .filter((n) => {
+                if (filter.spent !== undefined && n.spent !== filter.spent) return false;
+                if (BigInt(n.asset) !== filter.asset) return false;
+                return true;
+            })
+            .map(toWalletNote);
+    }
+
+    allNotes(filter: { spent?: boolean } = {}): WalletNote[] {
+        return this.file.notes
+            .filter((n) => filter.spent === undefined || n.spent === filter.spent)
+            .map(toWalletNote);
     }
 
     balance(asset: bigint): bigint {
@@ -335,7 +322,7 @@ export class Wallet implements WalletApi {
 
         built.payload.permit = permit;
         const { txHash } = await this.submitter.submit(built.payload);
-        return makeTransactionResult(txHash, built);
+        return makeTransactionResult({ txHash, built, sent: args.amount, inputSum: 0n });
     }
 
     /// Internal shielded transfer. Selects 1-2 unspent notes covering
@@ -349,14 +336,26 @@ export class Wallet implements WalletApi {
         const asset = args.asset ?? 1n;
         const sendValue = args.amount;
 
-        const selection = this.selectNotes(asset, sendValue, args.selectOpts);
+        let selection = this.selectNotes(asset, sendValue, args.selectOpts);
         if (selection.plan === "consolidate-first") {
-            throw new InsufficientCoverError({
-                target: sendValue,
-                asset,
-                consolidate: selection.consolidate,
-                consolidateSum: selection.consolidateSum,
-            });
+            if (!args.autoConsolidate) {
+                throw new InsufficientCoverError({
+                    target: sendValue,
+                    asset,
+                    consolidate: selection.consolidate,
+                    consolidateSum: selection.consolidateSum,
+                });
+            }
+            await this.autoConsolidate(asset, selection);
+            selection = this.selectNotes(asset, sendValue, args.selectOpts);
+            if (selection.plan === "consolidate-first") {
+                throw new InsufficientCoverError({
+                    target: sendValue,
+                    asset,
+                    consolidate: selection.consolidate,
+                    consolidateSum: selection.consolidateSum,
+                });
+            }
         }
 
         const recipient = decodeAddress(this.J, args.to);
@@ -404,13 +403,16 @@ export class Wallet implements WalletApi {
         });
 
         const { txHash } = await this.submitter.submit(built.payload);
-        await this.markSpent(selection.notes.map((n) => n.id));
-        const result = makeTransactionResult(txHash, built);
-        result.spentNoteIds = selection.notes.map((n) => n.id);
-        result.inputSum = selection.sum;
-        result.sent = sendValue;
-        result.change = changeValue;
-        return result;
+        const spent = selection.notes.map((n) => n.id);
+        await this.markSpent(spent);
+        return makeTransactionResult({
+            txHash,
+            built,
+            spent,
+            inputSum: selection.sum,
+            sent: sendValue,
+            change: changeValue,
+        });
     }
 
     /// Unshield ERC20 to `args.to` (eth address). Selects 1-2 notes,
@@ -421,14 +423,26 @@ export class Wallet implements WalletApi {
         const asset = args.asset ?? 1n;
         const publicOut = args.amount;
 
-        const selection = this.selectNotes(asset, publicOut, args.selectOpts);
+        let selection = this.selectNotes(asset, publicOut, args.selectOpts);
         if (selection.plan === "consolidate-first") {
-            throw new InsufficientCoverError({
-                target: publicOut,
-                asset,
-                consolidate: selection.consolidate,
-                consolidateSum: selection.consolidateSum,
-            });
+            if (!args.autoConsolidate) {
+                throw new InsufficientCoverError({
+                    target: publicOut,
+                    asset,
+                    consolidate: selection.consolidate,
+                    consolidateSum: selection.consolidateSum,
+                });
+            }
+            await this.autoConsolidate(asset, selection);
+            selection = this.selectNotes(asset, publicOut, args.selectOpts);
+            if (selection.plan === "consolidate-first") {
+                throw new InsufficientCoverError({
+                    target: publicOut,
+                    asset,
+                    consolidate: selection.consolidate,
+                    consolidateSum: selection.consolidateSum,
+                });
+            }
         }
 
         const ownAddr = decodeAddress(this.J, this.address);
@@ -477,13 +491,16 @@ export class Wallet implements WalletApi {
         });
 
         const { txHash } = await this.submitter.submit(built.payload);
-        await this.markSpent(selection.notes.map((n) => n.id));
-        const result = makeTransactionResult(txHash, built);
-        result.spentNoteIds = selection.notes.map((n) => n.id);
-        result.inputSum = selection.sum;
-        result.sent = publicOut;
-        result.change = remainder;
-        return result;
+        const spent = selection.notes.map((n) => n.id);
+        await this.markSpent(spent);
+        return makeTransactionResult({
+            txHash,
+            built,
+            spent,
+            inputSum: selection.sum,
+            sent: publicOut,
+            change: remainder,
+        });
     }
 
     /// Mark notes as spent in `NoteStore`. Called automatically by
@@ -491,8 +508,37 @@ export class Wallet implements WalletApi {
     /// implementing alternative spend flows.
     async markSpent(noteIds: string[]): Promise<void> {
         const ids = new Set(noteIds);
-        for (const n of this.file.notes) if (ids.has(n.id)) n.spent = true;
+        this.file.notes.forEach((n) => {
+            if (ids.has(n.id)) n.spent = true;
+        });
         await this.noteStore.save(this.file);
+    }
+
+    /// Self-spend the two smallest notes for `asset` to consolidate them
+    /// into a single change note, then re-sync. Called by `transfer` /
+    /// `withdraw` when `autoConsolidate: true` is set on
+    /// `InsufficientCoverError`.
+    ///
+    /// Uses `consolidateSum - 1n` as the send amount so a 1-unit change
+    /// note pops out (sum-exact targets degenerate into a zero-value change
+    /// note that some selectors discard).
+    private async autoConsolidate(
+        asset: bigint,
+        selection: Extract<SelectionResult, { plan: "consolidate-first" }>,
+    ): Promise<void> {
+        const target =
+            selection.consolidateSum > 1n
+                ? selection.consolidateSum - 1n
+                : selection.consolidateSum;
+        await this.transfer({
+            to: this.address,
+            amount: target,
+            asset,
+            // Inner call must NOT recurse — if the selector still can't find
+            // a cover for `target`, surface the error instead of looping.
+            autoConsolidate: false,
+        });
+        await this.sync();
     }
 
     // ---------- internals ----------
@@ -523,63 +569,4 @@ export class Wallet implements WalletApi {
         while (slots.length < 2) slots.push(null);
         return [slots[0], slots[1]] as InputSlots;
     }
-}
-
-// ---------- defaults ----------
-
-function defaultNoteSource(cfg: WalletConfig, J: Jubjub): NoteSource {
-    if (!cfg.fmdUrl) {
-        throw new WalletConfigError("WalletConfig: provide `fmdUrl` or `noteSource`");
-    }
-    const fmd = new FmdClient(cfg.fmdUrl, cfg.chainId);
-    if (cfg.syncStrategy?.kind === "matches") {
-        return new FmdMatchesNoteSource({ fmd, J, subscriptionId: cfg.syncStrategy.subscriptionId });
-    }
-    return new FmdNoteSource({ fmd, J });
-}
-
-function defaultSubmitter(cfg: WalletConfig): Submitter {
-    if (!cfg.relayerUrl) {
-        throw new WalletConfigError("WalletConfig: provide `relayerUrl` or `submitter`");
-    }
-    return new HttpRelayerSubmitter(cfg.relayerUrl);
-}
-
-function defaultProver(cfg: WalletConfig): Prover {
-    if (!cfg.proverPaths) {
-        throw new WalletConfigError("WalletConfig: provide `proverPaths` or `prover`");
-    }
-    return new SnarkjsProver(cfg.proverPaths);
-}
-
-// ---------- helpers ----------
-
-interface OutputRandomness {
-    rho: Field;
-    rcm: Field;
-    rcv: Field;
-    aux: { esk: Field; fmdR: Field };
-}
-
-function freshOutput(): OutputRandomness {
-    return {
-        rho: randomFr(),
-        rcm: randomFr(),
-        rcv: randomJubjubScalar(),
-        aux: { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() },
-    };
-}
-
-function freshNoteRandomness(): { rho: Field; rcm: Field; rcv: Field } {
-    return { rho: randomFr(), rcm: randomFr(), rcv: randomJubjubScalar() };
-}
-
-function makeTransactionResult(txHash: string, built: BuiltBundle): TransactionResult {
-    return {
-        txHash,
-        cm: [
-            `0x${built.cm[0].toString(16).padStart(64, "0")}`,
-            `0x${built.cm[1].toString(16).padStart(64, "0")}`,
-        ],
-    };
 }

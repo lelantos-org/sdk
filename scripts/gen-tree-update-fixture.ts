@@ -9,9 +9,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { Poseidon } from "../src/crypto/index";
-import { MerkleTree } from "../src/crypto/merkle";
-import { buildTreeUpdateInput } from "../src/witness/tree-update";
+import { Poseidon } from "../src/crypto/index.js";
+import { MerkleTree } from "../src/crypto/merkle.js";
+import { buildTreeUpdateInput } from "../src/witness/tree-update.js";
 
 const DEPTH = 10;
 const OUT = resolve(__dirname, "..", "tests", "fixtures", "tree_update.input.json");

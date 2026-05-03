@@ -1,26 +1,29 @@
 // Parity tests. Pin SDK primitives byte-for-byte against the values they
 // MUST produce. If circuits change the tag scheme, these tests fail.
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
-    Poseidon,
-    Jubjub,
-    H_BASE,
-    deriveIvk,
-    derivePk,
-    derivePkFromIvk,
-    deriveDk,
     buildNoteCommitment,
     buildNullifier,
+    buildNullifierFromNsk,
+    deriveDk,
+    deriveIvk,
+    deriveNk,
+    derivePk,
+    derivePkFromIvk,
+    H_BASE,
+    Jubjub,
     MerkleTree,
-    TAG_NF,
-    TAG_PK,
+    POW_2_64,
+    Poseidon,
+    TAG_ASSET,
+    TAG_DK,
     TAG_IVK,
     TAG_MERKLE,
-    TAG_DK,
-    TAG_ASSET,
-    POW_2_64,
-} from "./index";
+    TAG_NF,
+    TAG_NK,
+    TAG_PK,
+} from "./index.js";
 
 describe("crypto parity with circuits/src/lib", () => {
     let P: Poseidon;
@@ -38,6 +41,7 @@ describe("crypto parity with circuits/src/lib", () => {
         expect(TAG_MERKLE).toBe(5n);
         expect(TAG_DK).toBe(6n);
         expect(TAG_ASSET).toBe(7n);
+        expect(TAG_NK).toBe(9n);
     });
 
     it("ivk = Poseidon(4, nsk); pk = Poseidon(3, ivk)", () => {
@@ -54,10 +58,17 @@ describe("crypto parity with circuits/src/lib", () => {
         expect(deriveDk(P, ivk)).toBe(P.hash([6n, ivk]));
     });
 
-    it("nf = Poseidon(2, nsk, rho)", () => {
+    it("nk = Poseidon(9, nsk)", () => {
+        const nsk = 7n;
+        expect(deriveNk(P, nsk)).toBe(P.hash([9n, nsk]));
+    });
+
+    it("nf = Poseidon(2, nk, rho); buildNullifierFromNsk derives nk", () => {
         const nsk = 7n,
             rho = 11n;
-        expect(buildNullifier(P, nsk, rho)).toBe(P.hash([2n, nsk, rho]));
+        const nk = deriveNk(P, nsk);
+        expect(buildNullifier(P, nk, rho)).toBe(P.hash([2n, nk, rho]));
+        expect(buildNullifierFromNsk(P, nsk, rho)).toBe(buildNullifier(P, nk, rho));
     });
 
     it("cm = Poseidon(asset*2^64+value, pk, rho, rcm)", () => {

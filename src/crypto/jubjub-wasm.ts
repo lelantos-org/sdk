@@ -9,20 +9,28 @@
 //
 // Wire conventions are described in `sdk/wasm/jubjub/src/lib.rs`.
 
-import { H_BASE, type Point } from "./jubjub";
-import type { Jubjub as CircomlibJubjub } from "./jubjub";
-import { toLeBytes, fromLeBytes, FIELD_BYTES } from "./bytes";
-import type { Field } from "./poseidon";
+import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
+import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
+import type { Jubjub as CircomlibJubjub } from "./jubjub.js";
+import { H_BASE, type Jubjub, type Point } from "./jubjub.js";
+import type { Field, Poseidon } from "./poseidon.js";
+
+// Resolve the wasm-pack `pkg/` JS module + binary URL via Node's package
+// `imports` map (`#wasm/jubjub` → `./wasm/jubjub/pkg/jubjub_wasm.js`).
+// Bundlers honour the same map, so this works everywhere without further
+// configuration.
+
+// Domain-separation tag for FMD bit derivation. Mirrors `TAG_FMD_BIT` in
+// `sdk/src/fmd.ts` and `circuits/src/lib/tags.circom`.
+const TAG_FMD_BIT: bigint = 8n;
 
 // Local type for the wasm-pack output. The real `.d.ts` ships at
 // `wasm/jubjub/pkg/jubjub_wasm.d.ts` after `just build`, but is gitignored,
 // so we describe the consumed surface inline to keep `tsc --noEmit` green
 // in CI without a wasm build step.
-interface JubWasmMod {
-    default: (input?: { module_or_path?: Uint8Array | unknown }) => Promise<unknown>;
+interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
     base8(): Uint8Array;
-    fmd_test(dk_le: Uint8Array, clue_r: Uint8Array, clue_bits: Uint8Array, gamma: number): boolean;
     in_subgroup(p: Uint8Array): boolean;
     mul_point_escalar(p: Uint8Array, scalar_le: Uint8Array): Uint8Array;
     pack_point(p: Uint8Array): Uint8Array;
@@ -37,66 +45,40 @@ interface JubWasmMod {
 
 const POINT_BYTES = 64;
 
-// Indirect eval: bypasses TS CJS lowering so `import()` stays a real ESM import.
-const esmImport = new Function("s", "return import(s)") as (s: string) => Promise<any>;
-
-let jubWasm: JubWasmMod | null = null;
-
 /// Browser apps that bundle the SDK can't rely on the relative-path fallback
 /// (`../../wasm/jubjub/pkg/jubjub_wasm.js`) — the bundler rewrites the path
 /// to a location that doesn't exist at runtime. Inject a loader that resolves
 /// the wasm-pack module + binary using the bundler's own asset-URL pipeline
 /// (e.g. Vite's `?url` imports) before calling `WasmJubjub.build()`.
-export interface JubjubWasmLoader {
-    /// Return the wasm-pack JS module (a dynamic `import("@lelantos-org/sdk/wasm/jubjub")`).
-    loadModule(): Promise<JubWasmMod>;
-    /// Optional: URL or bytes for the `.wasm` binary. If omitted, the
-    /// wasm-pack module's own auto-init is invoked, which fetches the
-    /// binary relative to the JS module URL (works under Vite + bundlers
-    /// that preserve sibling assets, fails when they don't).
-    wasm?: string | URL | ArrayBuffer | Uint8Array;
-}
+export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
-let injectedLoader: JubjubWasmLoader | null = null;
+const PKG_JS_URL = new URL("../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url);
+const PKG_WASM_URL = new URL("../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url);
+
+// `node:*` specifiers held in variables so Vite stops trying to resolve
+// them statically in browser builds. Reached only on Node.
+const NODE_URL = "node:url";
+
+const loader = createWasmLoader<JubWasmMod>({
+    name: "jubjub",
+    defaultImport: () => import("#wasm/jubjub") as Promise<JubWasmMod>,
+    nodeJsUrl: async () => PKG_JS_URL.href,
+    nodeWasmPath: async () => {
+        const { fileURLToPath } = await import(/* @vite-ignore */ NODE_URL);
+        return fileURLToPath(PKG_WASM_URL);
+    },
+});
 
 /// Override the default loader. Call once at app boot, before
 /// `WasmJubjub.build()` / `Wallet.create()`.
-export function configureJubjubWasm(loader: JubjubWasmLoader): void {
-    injectedLoader = loader;
-    inited = null;
+export function configureJubjubWasm(override: JubjubWasmLoader): void {
+    loader.configure(override);
 }
 
-let inited: Promise<void> | null = null;
-function ensureInit(): Promise<void> {
-    if (!inited) inited = doInit().then(() => undefined);
-    return inited;
-}
+let jubWasm: JubWasmMod | null = null;
 
-async function doInit(): Promise<void> {
-    if (injectedLoader) {
-        const mod = await injectedLoader.loadModule();
-        await mod.default(
-            injectedLoader.wasm !== undefined ? { module_or_path: injectedLoader.wasm } : undefined,
-        );
-        jubWasm = mod;
-        return;
-    }
-    if (typeof process !== "undefined" && process.versions?.node) {
-        const { readFile } = await import("node:fs/promises");
-        const { join } = await import("node:path");
-        const { pathToFileURL } = await import("node:url");
-        const pkgDir = join(__dirname, "..", "..", "wasm", "jubjub", "pkg");
-        const mod = (await esmImport(
-            pathToFileURL(join(pkgDir, "jubjub_wasm.js")).href,
-        )) as JubWasmMod;
-        const bytes = await readFile(join(pkgDir, "jubjub_wasm_bg.wasm"));
-        await mod.default({ module_or_path: bytes });
-        jubWasm = mod;
-        return;
-    }
-    const mod = (await esmImport("../../wasm/jubjub/pkg/jubjub_wasm.js")) as JubWasmMod;
-    await mod.default();
-    jubWasm = mod;
+async function ensureInit(): Promise<void> {
+    jubWasm = await loader.load();
 }
 
 function w(): JubWasmMod {
@@ -132,7 +114,7 @@ export class WasmJubjub {
 
     private async getFallback(): Promise<CircomlibJubjub> {
         if (this.fallback) return this.fallback;
-        const { Jubjub } = await import("./jubjub");
+        const { Jubjub } = await import("./jubjub.js");
         this.fallback = await Jubjub.build();
         return this.fallback;
     }
@@ -197,8 +179,30 @@ export class WasmJubjub {
         );
     }
 
-    fmdTest(dkLe: Uint8Array, clueR: Uint8Array, clueBits: Uint8Array, gamma: number): boolean {
-        return w().fmd_test(dkLe, clueR, clueBits, gamma);
+    // FMD2 (Niwl) v2 detection. Bit derivation is Poseidon over field
+    // elements — mirrors `fmdTest` in `sdk/src/fmd.ts` and the in-circuit
+    // `ClueCheck`. Point ops use the WASM crate; the hash stays in JS so
+    // the wasm artifact does not need a Poseidon dependency.
+    fmdTest(
+        P: Poseidon,
+        dk: Field[],
+        cluePackedR: Uint8Array,
+        clueBits: Uint8Array,
+        gamma: number,
+    ): boolean {
+        if (dk.length !== gamma) return false;
+        if (clueBits.length !== Math.ceil(gamma / 8)) return false;
+        const R = this.unpackPoint(cluePackedR);
+        if (!R || !this.inSubgroup(R)) return false;
+
+        for (let i = 0; i < gamma; i++) {
+            const shared = this.mulPointEscalar(R, dk[i]);
+            const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), shared[0], shared[1]]);
+            const bit = Number(h & 1n);
+            const cBit = (clueBits[i >> 3] >> (i & 7)) & 1;
+            if ((bit ^ cBit) !== 1) return false;
+        }
+        return true;
     }
 
     tryDecryptNote(ivk: Field, epkPacked: Uint8Array, ciphertext: Uint8Array): Uint8Array | null {
@@ -209,4 +213,13 @@ export class WasmJubjub {
         );
         return out ? new Uint8Array(out) : null;
     }
+}
+
+/// Build the WASM-backed jubjub typed as the nominal `Jubjub` class so it
+/// drops into APIs declared as `Jubjub` without a cast. Centralises the
+/// `as unknown as Jubjub` hack: parity is locked by `jubjub-wasm.test.ts`,
+/// so the structural compatibility is safe — TS just can't see it across
+/// nominal class types.
+export async function buildJubjub(): Promise<Jubjub> {
+    return (await WasmJubjub.build()) as unknown as Jubjub;
 }

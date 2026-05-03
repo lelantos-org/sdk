@@ -9,22 +9,23 @@
 //
 // Pad slots use `EMPTY_AUX`. Real outputs go through `buildOutputAux`.
 
-import { type Jubjub, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./crypto/index";
+import { BABYJUB_SUBGROUP_ORDER, type Field, type Jubjub, type Point } from "./crypto/index.js";
+import type { Poseidon } from "./crypto/poseidon.js";
 import {
+    FMD_DEFAULT_GAMMA,
+    type FmdDetectionKey,
+    type FmdFlagKey,
     fmdFlag,
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,
-    type FmdDetectionKey,
-    type FmdFlagKey,
-    FMD_DEFAULT_GAMMA,
-} from "./fmd";
-import { encryptNote } from "./note-encrypt";
+} from "./fmd.js";
 import {
-    encodeNotePayload,
     clueBitsToPrefix,
-    withClueBitsPrefix,
+    encodeNotePayload,
     type NotePayload,
-} from "./note-codec";
+    withClueBitsPrefix,
+} from "./note-codec.js";
+import { encryptNote } from "./note-encrypt.js";
 
 export interface OutputAux {
     clueR: Point;
@@ -33,14 +34,35 @@ export interface OutputAux {
     ciphertext: Uint8Array;
 }
 
+export interface OutputAuxWithWitness {
+    aux: OutputAux;
+    /// Witnesses fed to the in-circuit ClueCheck. Must match `aux.clueR`
+    /// (R = r·G_8) and the `clueBits` packed in `aux.ciphertext[0..2]`.
+    witness: {
+        r: Field;
+        fk: Point[];
+        clueBits: Field;
+    };
+}
+
+/// Twisted-Edwards identity. Use as a placeholder for fields where on-curve
+/// is required but the value is unused (e.g. pad-output `aux.ephPub` when
+/// no plaintext exists). Note: SNARK-bound `clueR` cannot use this — the
+/// circuit forces `R = r·G_8` for any witnessed `r ≠ 0`.
+export const ON_CURVE_IDENTITY: Point = [0n, 1n];
+
 export const EMPTY_AUX: OutputAux = {
-    clueR: [0n, 0n],
-    ephPub: [0n, 0n],
+    clueR: ON_CURVE_IDENTITY,
+    ephPub: ON_CURVE_IDENTITY,
     ciphertext: new Uint8Array([0, 0]),
 };
 
 export interface BuildAuxArgs {
     J: Jubjub;
+    /// Poseidon hasher (BN254 circomlib parameters). Used by fmdFlag for
+    /// SNARK-friendly bit derivation; must match the in-circuit `ClueCheck`
+    /// template instance.
+    P: Poseidon;
     /// Recipient flag-key (group elements). Caller derives via:
     ///   fmdFlagKeyFromDetection(J, fmdGenDetectionKey(seedFn, gamma)).
     /// For convenience pass the Detection-key seed scalar in `dkSeed` and
@@ -54,10 +76,10 @@ export interface BuildAuxArgs {
     fmdR: Field;
 }
 
-export function buildOutputAux(args: BuildAuxArgs): OutputAux {
-    const { J, recipientFlagKey, recipientPkD, note, esk, fmdR } = args;
+export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
+    const { J, P, recipientFlagKey, recipientPkD, note, esk, fmdR } = args;
 
-    const clue = fmdFlag(J, recipientFlagKey, fmdR);
+    const clue = fmdFlag(J, P, recipientFlagKey, fmdR);
     const clueRPoint = J.unpackPoint(clue.R);
     if (!clueRPoint) throw new Error("aux: clue.R failed to unpack");
 
@@ -74,7 +96,21 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAux {
     const prefix = clueBitsToPrefix(clue.bits, clue.gamma);
     const ciphertext = withClueBitsPrefix(prefix, enc.ciphertext);
 
-    return { clueR: clueRPoint, ephPub, ciphertext };
+    // Re-pack clueBits as a single field element (LSB-first within γ bits).
+    let clueBitsField: bigint = 0n;
+    for (let i = 0; i < clue.gamma; i++) {
+        const b = (clue.bits[i >> 3] >> (i & 7)) & 1;
+        if (b) clueBitsField |= 1n << BigInt(i);
+    }
+
+    return {
+        aux: { clueR: clueRPoint, ephPub, ciphertext },
+        witness: {
+            r: fmdR,
+            fk: recipientFlagKey.X,
+            clueBits: clueBitsField,
+        },
+    };
 }
 
 /// Convenience: derive a deterministic flag-key from a single scalar `dkSeed`

@@ -3,7 +3,7 @@
 // Lifted from the CLI; pure logic, browser-safe (uses Web Crypto for the
 // default rng). Exposes `selectNotes` which the Wallet class wraps.
 
-import type { StoredNote } from "./note-store";
+import type { StoredNote } from "./note-store.js";
 
 export interface SelectOpts {
     /// Fee added to target before selection. Caller supplies; selector treats

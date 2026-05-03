@@ -16,7 +16,6 @@ extern crate rand;
 mod common;
 mod curve;
 mod decrypt;
-mod fmd;
 
 use common::{in_subgroup, scalar_from_le, FIELD_BYTES};
 use curve::{decompress_point, Fr, FrRepr, Point};

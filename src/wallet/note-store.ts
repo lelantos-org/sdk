@@ -4,7 +4,7 @@
 // concrete backends (file, IndexedDB, SQLite, encrypted store) by
 // implementing the small `NoteStore` interface.
 
-import type { ScanHit } from "../sync";
+import type { ScanHit } from "../sync.js";
 
 /// JSON-safe wire/storage shape. BigInts serialised as decimal strings,
 /// `cm` as 0x-hex (32 bytes). Persistable verbatim to disk / IndexedDB /

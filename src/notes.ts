@@ -1,7 +1,7 @@
 // Note plaintext + encrypted-note types. Mirror circuits/src/test/helpers.ts
 // `Note` / `SpentNote` so SDK and circuit witnesses share a single shape.
 
-import type { Field } from "./crypto/index";
+import type { Field } from "./crypto/index.js";
 
 export interface Note {
     asset: Field;

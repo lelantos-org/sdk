@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { Wallet, verifyTypedData, getAddress } from "ethers";
-import { signErc2612Permit } from "./permit";
+import { getAddress, verifyTypedData, Wallet } from "ethers";
+import { describe, expect, it } from "vitest";
+import { signErc2612Permit } from "./permit.js";
 
 const PERMIT_TYPES = {
     Permit: [

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { Poseidon, Jubjub } from "./crypto/index";
-import { addressFromSpendingKey, buildSpendingKey } from "./keys";
 import { bech32m } from "bech32";
-import { encodeAddress, decodeAddress, ADDRESS_HRP } from "./address";
-import { FIELD_BYTES, toLeBytes } from "./crypto/bytes";
+import { beforeAll, describe, expect, it } from "vitest";
+import { ADDRESS_HRP, decodeAddress, encodeAddress } from "./address.js";
+import { FIELD_BYTES, toLeBytes } from "./crypto/bytes.js";
+import { Jubjub, Poseidon } from "./crypto/index.js";
+import { addressFromSpendingKey, buildSpendingKey } from "./keys.js";
 
 describe("bech32m address", () => {
     let P: Poseidon;

@@ -5,23 +5,30 @@
 //   new Worker(new URL("@lelantos-org/sdk/scanner-worker", import.meta.url),
 //              { type: "module" })
 
-import { WasmJubjub } from "../crypto/jubjub-wasm";
-import { scanNotes } from "../sync";
+import { WasmJubjub } from "../crypto/jubjub-wasm.js";
+import { Poseidon } from "../crypto/poseidon.js";
+import { scanNotes } from "../sync.js";
 import {
-    decodeInput,
     decodeDetection,
+    decodeInput,
     encodeHit,
     type InitReq,
     type InitRes,
+    type ScanErr,
     type ScanReq,
     type ScanRes,
-    type ScanErr,
-} from "./scanner-worker-protocol";
+} from "./scanner-worker-protocol.js";
 
 let jubPromise: Promise<WasmJubjub> | null = null;
 function jub(): Promise<WasmJubjub> {
     if (!jubPromise) jubPromise = WasmJubjub.build();
     return jubPromise;
+}
+
+let posPromise: Promise<Poseidon> | null = null;
+function pos(): Promise<Poseidon> {
+    if (!posPromise) posPromise = Poseidon.build();
+    return posPromise;
 }
 
 const ctx: { onmessage: ((ev: { data: unknown }) => void) | null } = globalThis as unknown as {
@@ -37,19 +44,19 @@ ctx.onmessage = async (ev: { data: unknown }): Promise<void> => {
     if (!msg) return;
 
     if (msg.type === "init") {
-        await jub();
+        await Promise.all([jub(), pos()]);
         post({ type: "init-res", id: msg.id });
         return;
     }
 
     if (msg.type === "scan") {
         try {
-            const J = await jub();
+            const [J, P] = await Promise.all([jub(), pos()]);
             const ivk = BigInt(msg.ivk);
             const inputs = msg.inputs.map(decodeInput);
             const dk = decodeDetection(msg.detectionKey);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const hits = scanNotes(J as any, ivk, inputs, dk);
+            const hits = scanNotes(J as any, P, ivk, inputs, dk);
             post({ type: "scan-res", id: msg.id, hits: hits.map(encodeHit) });
         } catch (e) {
             post({

@@ -6,8 +6,8 @@
 // The circuit recomputes start_index decompositions internally, so callers
 // only need to pass the integer index — no path_indices field.
 
-import type { Field } from "../crypto/index";
-import { fiatShamirZ, hornerEval, flattenTreeUpdate } from "../snark-compression";
+import type { Field } from "../crypto/index.js";
+import { fiatShamirZ, flattenTreeUpdate, hornerEval } from "../snark-compression.js";
 
 export interface TreeUpdateBuildOpts {
     oldRoot: Field;

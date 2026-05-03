@@ -1,12 +1,12 @@
 // Wallet sync — fetch encrypted notes from a `NoteSource`, trial-decrypt
 // with this wallet's ivk, persist hits to the `NoteStore`.
 
-import type { Jubjub, Field } from "../crypto/index";
-import { flagKeyFromAddressDk } from "../aux";
-import type { NoteSource } from "./note-source";
-import type { NoteStore } from "./note-store";
-import { addHits } from "./note-store";
-import type { Scanner } from "./scanner";
+import { flagKeyFromAddressDk } from "../aux.js";
+import type { Field, Jubjub } from "../crypto/index.js";
+import type { NoteSource } from "./note-source.js";
+import type { NoteStore } from "./note-store.js";
+import { addHits } from "./note-store.js";
+import type { Scanner } from "./scanner.js";
 
 export interface SyncResult {
     fetched: number;
@@ -24,17 +24,32 @@ export interface SyncDeps {
     scanner: Scanner;
 }
 
+export interface SyncProgress {
+    /// Phase: where we are in the sync pipeline.
+    phase: "fetching" | "scanning" | "persisting" | "done";
+    /// Notes pulled from the `NoteSource` so far.
+    fetched: number;
+    /// Trial-decryption hits found so far.
+    hits: number;
+}
+
 export async function syncWallet(
     deps: SyncDeps,
-    opts: { limit?: number } = {},
+    opts: { limit?: number; onProgress?: (p: SyncProgress) => void } = {},
 ): Promise<SyncResult> {
     const { detection } = flagKeyFromAddressDk(deps.J, deps.dk);
+
+    opts.onProgress?.({ phase: "fetching", fetched: 0, hits: 0 });
     const inputs = await deps.source.listNotes({ limit: opts.limit ?? 1000 });
 
+    opts.onProgress?.({ phase: "scanning", fetched: inputs.length, hits: 0 });
     const hits = await deps.scanner.scan(deps.ivk, inputs, detection);
+
+    opts.onProgress?.({ phase: "persisting", fetched: inputs.length, hits: hits.length });
     const file = await deps.store.load();
     const { added, skipped } = addHits(file, hits);
     await deps.store.save(file);
 
+    opts.onProgress?.({ phase: "done", fetched: inputs.length, hits: hits.length });
     return { fetched: inputs.length, hits: hits.length, added: added.length, skipped };
 }

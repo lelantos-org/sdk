@@ -7,7 +7,7 @@
 // snarkjs publicSignals order written by fixture generators.
 
 import { AbiCoder, keccak256 } from "ethers";
-import type { Field } from "./crypto/index";
+import type { Field } from "./crypto/index.js";
 
 // BN254 scalar field (Groth16 curve).
 export const BN254_R =
@@ -29,11 +29,15 @@ export interface FlattenInput {
     chain_id: string | bigint;
     payer_address: string | bigint;
     relayer_address: string | bigint;
+    /// Per-output FMD clue PIs. Required: matches circuit slots 22..27.
+    out_clue_Rx?: (string | bigint)[];
+    out_clue_Ry?: (string | bigint)[];
+    out_clue_bits?: (string | bigint)[];
 }
 
-// 22-slot flatten in MASP._flatten order.
+// 28-slot flatten in MASP._flatten order: 22 base + 3·N_OUT clue.
 export function flatten(input: FlattenInput): Field[] {
-    return [
+    const base: Field[] = [
         BigInt(input.merkle_root),
         BigInt(input.nullifier[0]),
         BigInt(input.nullifier[1]),
@@ -57,6 +61,18 @@ export function flatten(input: FlattenInput): Field[] {
         BigInt(input.payer_address),
         BigInt(input.relayer_address),
     ];
+    const Rx = input.out_clue_Rx ?? [];
+    const Ry = input.out_clue_Ry ?? [];
+    const cb = input.out_clue_bits ?? [];
+    if (Rx.length !== Ry.length || Rx.length !== cb.length) {
+        throw new Error("flatten: out_clue_{Rx,Ry,bits} length mismatch");
+    }
+    for (let j = 0; j < Rx.length; j++) {
+        base.push(BigInt(Rx[j]));
+        base.push(BigInt(Ry[j]));
+        base.push(BigInt(cb[j]));
+    }
+    return base;
 }
 
 // Tree-update circuit PI shape. 5 slots in the order the contract's

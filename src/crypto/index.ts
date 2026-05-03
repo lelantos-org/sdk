@@ -1,23 +1,24 @@
-export { Poseidon } from "./poseidon";
-export type { Field } from "./poseidon";
-export { Jubjub, H_BASE } from "./jubjub";
-export type { Point } from "./jubjub";
-export { deriveIvk, derivePk, derivePkFromIvk, deriveDk } from "./derive";
-export { buildNoteCommitment } from "./commit";
-export type { NoteCommitInput } from "./commit";
-export { buildNullifier } from "./nullifier";
-export { MerkleTree } from "./merkle";
-export type { MerkleProof } from "./merkle";
-export { toLeBytes, fromLeBytes, FIELD_BYTES } from "./bytes";
+export { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
+export type { NoteCommitInput } from "./commit.js";
+export { buildNoteCommitment } from "./commit.js";
+export { deriveDk, deriveIvk, deriveNk, derivePk, derivePkFromIvk } from "./derive.js";
+export type { Point } from "./jubjub.js";
+export { H_BASE, Jubjub } from "./jubjub.js";
+export type { MerkleProof } from "./merkle.js";
+export { MerkleTree } from "./merkle.js";
+export { buildNullifier, buildNullifierFromNsk } from "./nullifier.js";
+export type { Field } from "./poseidon.js";
+export { Poseidon } from "./poseidon.js";
 export {
+    BABYJUB_SUBGROUP_ORDER,
+    BN254_FR,
+    POW_2_64,
+    TAG_ASSET,
     TAG_CM,
-    TAG_NF,
-    TAG_PK,
+    TAG_DK,
     TAG_IVK,
     TAG_MERKLE,
-    TAG_DK,
-    TAG_ASSET,
-    POW_2_64,
-    BN254_FR,
-    BABYJUB_SUBGROUP_ORDER,
-} from "./tags";
+    TAG_NF,
+    TAG_NK,
+    TAG_PK,
+} from "./tags.js";

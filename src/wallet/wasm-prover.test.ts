@@ -10,15 +10,14 @@
 // not env var, so local devs with `circuits/build/` set up get coverage for
 // free).
 
-import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 // @ts-expect-error — snarkjs ships without types
 import * as snarkjs from "snarkjs";
-
-import { WasmProver } from "./wasm-prover";
-import { SnarkjsProver } from "./prover";
-import { buildTreeUpdateInput } from "../witness/tree-update";
+import { describe, expect, it } from "vitest";
+import { buildTreeUpdateInput } from "../witness/tree-update.js";
+import { SnarkjsProver } from "./prover.js";
+import { WasmProver } from "./wasm-prover.js";
 
 const CIRCUITS_BUILD = resolve(__dirname, "../../../circuits/build");
 const TU_WASM = resolve(CIRCUITS_BUILD, "tree_update_js/tree_update.wasm");

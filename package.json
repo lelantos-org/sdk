@@ -4,6 +4,11 @@
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
+  "type": "module",
+  "imports": {
+    "#wasm/jubjub": "./wasm/jubjub/pkg/jubjub_wasm.js",
+    "#wasm/prover": "./wasm/prover/pkg/prover.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lelantos-org/sdk.git"
@@ -23,6 +28,26 @@
       "types": "./dist/crypto/index.d.ts",
       "default": "./dist/crypto/index.js"
     },
+    "./witness": {
+      "types": "./dist/witness.d.ts",
+      "default": "./dist/witness.js"
+    },
+    "./networks": {
+      "types": "./dist/wallet/networks.d.ts",
+      "default": "./dist/wallet/networks.js"
+    },
+    "./errors": {
+      "types": "./dist/wallet/errors.d.ts",
+      "default": "./dist/wallet/errors.js"
+    },
+    "./wasm-prover": {
+      "types": "./dist/wallet/wasm-prover.d.ts",
+      "default": "./dist/wallet/wasm-prover.js"
+    },
+    "./prover-worker": {
+      "types": "./dist/wallet/prover-worker.d.ts",
+      "default": "./dist/wallet/prover-worker.js"
+    },
     "./wasm/prover": {
       "types": "./wasm/prover/pkg/prover.d.ts",
       "default": "./wasm/prover/pkg/prover.js"
@@ -40,7 +65,7 @@
     "wasm/jubjub/pkg"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/wasm && cp src/wasm/rayon-worker-bootstrap.mjs dist/wasm/rayon-worker-bootstrap.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
@@ -49,7 +74,7 @@
     "format:check": "biome format .",
     "lint": "biome lint .",
     "check": "biome check .",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-wasm-size.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",

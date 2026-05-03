@@ -2,25 +2,24 @@
 // Worker pool is browser-only — covered by smoke test in CI/browser env,
 // not vitest.
 
-import { describe, it, expect, beforeAll } from "vitest";
-import { Poseidon, Jubjub, BABYJUB_SUBGROUP_ORDER, type Field } from "../crypto/index";
-import { buildSpendingKey } from "../keys";
-import { encryptNote } from "../note-encrypt";
-import { encodeNotePayload, withClueBitsPrefix, clueBitsToPrefix } from "../note-codec";
-import { fmdFlag, fmdGenDetectionKey, fmdFlagKeyFromDetection } from "../fmd";
-import { scanNotes, type ScanInput } from "../sync";
-import { LocalScanner } from "./scanner-local";
-import { WorkerPoolScanner, type WorkerLike } from "./scanner-worker-pool";
-import { scanNotes as workerScanNotes } from "../sync";
+import { beforeAll, describe, expect, it } from "vitest";
+import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../crypto/index.js";
+import { fmdFlag, fmdFlagKeyFromDetection, fmdGenDetectionKey } from "../fmd.js";
+import { buildSpendingKey } from "../keys.js";
+import { clueBitsToPrefix, encodeNotePayload, withClueBitsPrefix } from "../note-codec.js";
+import { encryptNote } from "../note-encrypt.js";
+import { type ScanInput, scanNotes, scanNotes as workerScanNotes } from "../sync.js";
+import { LocalScanner } from "./scanner.js";
+import { type WorkerLike, WorkerPoolScanner } from "./scanner-worker-pool.js";
 import {
-    decodeInput,
     decodeDetection,
+    decodeInput,
     encodeHit,
     type InitReq,
+    type InitRes,
     type ScanReq,
     type ScanRes,
-    type InitRes,
-} from "./scanner-worker-protocol";
+} from "./scanner-worker-protocol.js";
 
 describe("LocalScanner", () => {
     let P: Poseidon;
@@ -53,7 +52,7 @@ describe("LocalScanner", () => {
                 esk,
                 plaintext: encodeNotePayload({ asset: 1n, value, rho: 3n, rcm: 4n }),
             });
-            const clue = fmdFlag(J, flagKey, r);
+            const clue = fmdFlag(J, P, flagKey, r);
             const wire = withClueBitsPrefix(
                 clueBitsToPrefix(clue.bits, clue.gamma),
                 enc.ciphertext,
@@ -72,8 +71,8 @@ describe("LocalScanner", () => {
         mkInput(me, fk, 55n % BABYJUB_SUBGROUP_ORDER, 66n, 300n, 2);
         mkInput(eve, eveFk, 77n, 88n, 400n, 3);
 
-        const direct = scanNotes(J, me.ivk, inputs, dk);
-        const scanner = new LocalScanner(J);
+        const direct = scanNotes(J, P, me.ivk, inputs, dk);
+        const scanner = new LocalScanner(J, P);
         const viaScanner = await scanner.scan(me.ivk, inputs, dk);
 
         expect(viaScanner).toEqual(direct);
@@ -84,7 +83,7 @@ describe("LocalScanner", () => {
     // In-process fake of `WorkerLike`: runs the scanner-worker logic
     // synchronously on the same thread. Validates the postMessage protocol
     // wiring without spinning real Web Workers (which vitest/Node lack).
-    function makeFakeWorker(J: Jubjub): WorkerLike {
+    function makeFakeWorker(J: Jubjub, P: Poseidon): WorkerLike {
         let onmessage: ((ev: { data: unknown }) => void) | null = null;
         const w: WorkerLike = {
             postMessage(msg: unknown): void {
@@ -98,7 +97,7 @@ describe("LocalScanner", () => {
                     if (m.type === "scan") {
                         const inputs = m.inputs.map(decodeInput);
                         const dk = decodeDetection(m.detectionKey);
-                        const hits = workerScanNotes(J, BigInt(m.ivk), inputs, dk);
+                        const hits = workerScanNotes(J, P, BigInt(m.ivk), inputs, dk);
                         const res: ScanRes = {
                             type: "scan-res",
                             id: m.id,
@@ -144,7 +143,7 @@ describe("LocalScanner", () => {
                 esk,
                 plaintext: encodeNotePayload({ asset: 1n, value, rho: 3n, rcm: 4n }),
             });
-            const clue = fmdFlag(J, flagKey, r);
+            const clue = fmdFlag(J, P, flagKey, r);
             inputs.push({
                 ciphertext: withClueBitsPrefix(
                     clueBitsToPrefix(clue.bits, clue.gamma),
@@ -168,10 +167,10 @@ describe("LocalScanner", () => {
             );
         }
 
-        const local = await new LocalScanner(J).scan(me.ivk, inputs, dk);
+        const local = await new LocalScanner(J, P).scan(me.ivk, inputs, dk);
 
         const pool = new WorkerPoolScanner({
-            factory: () => makeFakeWorker(J),
+            factory: () => makeFakeWorker(J, P),
             size: 3,
             chunkSize: 3,
         });

@@ -2,8 +2,8 @@
 //   node = Poseidon(TAG_MERKLE, c0, c1, c2, c3)
 // Mirrors `circuits/src/lib/merkle.circom`.
 
-import type { Poseidon, Field } from "./poseidon";
-import { TAG_MERKLE } from "./tags";
+import type { Field, Poseidon } from "./poseidon.js";
+import { TAG_MERKLE } from "./tags.js";
 
 const ARITY = 4;
 

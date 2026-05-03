@@ -17,9 +17,9 @@
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
 import { blake2b } from "@noble/hashes/blake2";
-import { type Jubjub, BABYJUB_SUBGROUP_ORDER, type Field, type Point } from "./crypto/index";
-import { WasmJubjub } from "./crypto/jubjub-wasm";
-import type { EncryptedNote } from "./notes";
+import { BABYJUB_SUBGROUP_ORDER, type Field, type Jubjub, type Point } from "./crypto/index.js";
+import { WasmJubjub } from "./crypto/jubjub-wasm.js";
+import type { EncryptedNote } from "./notes.js";
 
 const KDF_DOMAIN = new TextEncoder().encode("lelantos.note.kdf.v1");
 const ZERO_NONCE = new Uint8Array(12);

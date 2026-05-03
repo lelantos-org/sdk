@@ -2,9 +2,9 @@
 // op that touches wire bytes. Auto-skips when the WASM artifact has not
 // been built (CI runs `just build` in `wasm/` before tests).
 
-import { it, expect, beforeAll } from "vitest";
-import { Jubjub, BABYJUB_SUBGROUP_ORDER, type Point } from "./index";
-import { wasmDescribe, loadWasmJubjub } from "./wasm-test-utils";
+import { beforeAll, expect, it } from "vitest";
+import { BABYJUB_SUBGROUP_ORDER, Jubjub, type Point } from "./index.js";
+import { loadWasmJubjub, wasmDescribe } from "./wasm-test-utils.js";
 
 wasmDescribe("WasmJubjub parity vs circomlibjs", () => {
     let J: Jubjub;

@@ -1,0 +1,155 @@
+// Public Wallet API surface — types only.
+//
+// `WalletApi` is the seam apps mock in tests; `Wallet` (in `./index.ts`)
+// is the default implementation. Splitting types out of the impl keeps
+// the import graph shallow for consumers that need only the shape.
+
+import type { SpendingKey } from "../keys.js";
+import type { ChainAdapter } from "./chain-adapter.js";
+import type { NoteSource } from "./note-source.js";
+import type { NoteStore, StoredNote } from "./note-store.js";
+import type { Prover } from "./prover.js";
+import type { Scanner } from "./scanner.js";
+import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
+import type { Submitter } from "./submitter.js";
+import type { SyncProgress, SyncResult } from "./sync.js";
+
+/// Args for `Wallet.deposit`. Shields ERC20 from caller's eth account into
+/// the MASP. Caller must hold an EIP-2612-permit-capable ERC20 balance ≥
+/// `amount * assetEntry.scale + fee`.
+export interface DepositOptions {
+    /// Amount in *circuit units* (post-scale-down). Multiplied by the asset's
+    /// `scale` to get the ERC20 base-unit deposit.
+    amount: bigint;
+    /// Asset id (default 1n).
+    asset?: bigint;
+    /// Shielded recipient (bech32m). Defaults to own address (deposit to self).
+    to?: string;
+    /// EIP-2612 permit deadline (unix-seconds). Default: `now + 3600`.
+    deadline?: bigint;
+}
+
+/// Args for `Wallet.transfer`. Spends 1-2 unspent notes covering `amount`
+/// and creates a send-note for `to` plus a change-note back to self.
+/// Throws `InsufficientCoverError` if no 1- or 2-note cover exists, unless
+/// `autoConsolidate: true` is set.
+export interface TransferOptions {
+    /// Recipient bech32m shielded address (any wallet, including own).
+    to: string;
+    /// Amount in circuit units.
+    amount: bigint;
+    /// Asset id (default 1n).
+    asset?: bigint;
+    /// Optional selection tuning (fee, dust threshold, RNG, etc.).
+    selectOpts?: SelectOpts;
+    /// On `InsufficientCoverError`, transparently self-spend the two
+    /// smallest notes, re-sync, and retry the transfer once. Default false.
+    autoConsolidate?: boolean;
+}
+
+/// Args for `Wallet.withdraw`. Spends 1-2 notes; releases `amount` ERC20
+/// to `to` on-chain; remainder split into two change-notes back to self.
+/// Throws `InsufficientCoverError` on no cover, unless `autoConsolidate:
+/// true` is set.
+export interface WithdrawOptions {
+    /// On-chain ETH recipient (0x address).
+    to: string;
+    /// Amount in circuit units.
+    amount: bigint;
+    /// Asset id (default 1n).
+    asset?: bigint;
+    /// Optional selection tuning.
+    selectOpts?: SelectOpts;
+    /// On `InsufficientCoverError`, transparently self-spend the two
+    /// smallest notes, re-sync, and retry the withdraw once. Default false.
+    autoConsolidate?: boolean;
+}
+
+/// Normalised receipt returned by `deposit` / `transfer` / `withdraw`. All
+/// fields are always populated (empty arrays / `0n` instead of
+/// `undefined`) so consumers can drop the optional-chaining boilerplate.
+export interface TransactionResult {
+    /// On-chain transaction hash.
+    txHash: string;
+    /// Commitments created by the transaction (0x-hex). Always length 2.
+    commitments: [string, string];
+    /// Note IDs spent by this transaction. Empty for `deposit`.
+    spent: string[];
+    /// Total input value (`0n` on deposit).
+    inputSum: bigint;
+    /// Value sent to the recipient (deposit/transfer/withdraw amount).
+    sent: bigint;
+    /// Value returned to the wallet as change.
+    change: bigint;
+    /// @deprecated Use `commitments`. Tuple alias kept for back-compat.
+    cm: [string, string];
+    /// @deprecated Use `spent`. Old optional alias kept for back-compat.
+    spentNoteIds?: string[];
+}
+
+/// Friendly note view returned by `wallet.notes()`. Internal storage uses
+/// decimal-string `bigint`s + 0x-hex `cm`; this view exposes native
+/// `bigint`s and a `.raw` accessor for callers that need the storage form.
+export interface WalletNote {
+    /// Stable short id assigned by the SDK on discovery.
+    id: string;
+    /// Native bigint asset id.
+    asset: bigint;
+    /// Native bigint value (in circuit units).
+    value: bigint;
+    /// Whether the note has been spent on chain.
+    spent: boolean;
+    /// First chain block at which the note was observed (when known).
+    firstSeenBlock?: number;
+    /// Wall-clock discovery time (ISO-8601).
+    discoveredAt: string;
+    /// 0x-hex commitment (32 bytes).
+    cm: string;
+    /// Raw `StoredNote` (decimal strings, hex), useful for serialisation.
+    raw: StoredNote;
+}
+
+/// Filter for `wallet.notes()`. `asset` is required so callers in
+/// multi-asset deployments can't accidentally read across assets.
+export interface NotesFilter {
+    asset: bigint;
+    spent?: boolean;
+}
+
+/// Public interface — apps can mock this in tests, or build alternative
+/// implementations (HSM-backed wallet, multi-sig, MPC) without subclassing.
+export interface WalletApi {
+    readonly address: string;
+    readonly keys: SpendingKey;
+    readonly noteStore: NoteStore;
+    /// Active chain adapter — exposed for token lookups, balance reads,
+    /// and any direct RPC needs. Cast to your adapter's concrete type
+    /// (e.g. `EthersChainAdapter`) for adapter-specific accessors.
+    readonly chain: ChainAdapter;
+    /// Active pluggables. Useful for tooling that wants to wrap them with
+    /// timing / retry / observability (see CLI's `instrumentWallet`).
+    readonly noteSource: NoteSource;
+    readonly submitter: Submitter;
+    readonly prover: Prover;
+    readonly scanner: Scanner;
+    readonly selector: CoinSelector;
+
+    sync(opts?: { limit?: number; onProgress?: (p: SyncProgress) => void }): Promise<SyncResult>;
+    refresh(): Promise<void>;
+    /// Friendly note view filtered by asset. `spent` is optional; omit to
+    /// include both spent + unspent.
+    notes(filter: NotesFilter): WalletNote[];
+    /// Same view, but across all assets — for dashboards / multi-asset
+    /// summaries. `spent` filters spent / unspent (omit for both).
+    allNotes(filter?: { spent?: boolean }): WalletNote[];
+    /// Unspent balance for `asset`.
+    balance(asset: bigint): bigint;
+    selectNotes(asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
+
+    deposit(args: DepositOptions): Promise<TransactionResult>;
+    transfer(args: TransferOptions): Promise<TransactionResult>;
+    withdraw(args: WithdrawOptions): Promise<TransactionResult>;
+    markSpent(noteIds: string[]): Promise<void>;
+}
+
+export type { CoinSelector, SelectionResult, SelectOpts };
