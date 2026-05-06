@@ -40,6 +40,7 @@ jobs:
           toolchain: nightly-2025-06-23
           components: clippy, rust-src
           target: wasm32-unknown-unknown
+          rustflags: ""
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: wasm
