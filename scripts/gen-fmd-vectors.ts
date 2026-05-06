@@ -11,7 +11,10 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../src/crypto/index.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 import {
     encodeClue,
     type FmdDetectionKey,
@@ -76,11 +79,11 @@ async function main() {
     }
 
     const out = {
-        version: 2,
-        domain: "lelantos.fmd.v2",
+        version: 3,
+        domain: "lelantos.fmd.v3",
         curve: "babyjubjub",
         hash: "poseidon",
-        scheme: "poseidon-v1",
+        scheme: "poseidon-legendre",
         vectors,
     };
 

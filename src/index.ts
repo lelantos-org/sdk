@@ -8,7 +8,6 @@ export * from "./address.js";
 export * from "./aux.js";
 // ── Bundles + relayer wire format ───────────────────────────────────────
 export * from "./bundle.js";
-export * from "./cache.js";
 export * from "./crypto/index.js";
 // ── WASM modules (Baby-Jubjub + Groth16) ────────────────────────────────
 export {

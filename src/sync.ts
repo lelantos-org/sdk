@@ -53,6 +53,10 @@ export function scanNotes(
         if (!plain) continue;
         try {
             const payload = decodeNotePayload(plain);
+            // Drop self-pad outputs (value=0n) emitted by deposits for FMD
+            // privacy. They decrypt cleanly but are not spendable and would
+            // otherwise pile up as phantom unspent notes.
+            if (payload.value === 0n) continue;
             hits.push({ ...payload, cm: inp.cm, leafIndex: inp.leafIndex });
         } catch {
             /* tag passed but body did not decode as a NotePayload — skip. */

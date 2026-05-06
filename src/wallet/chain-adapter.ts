@@ -52,4 +52,10 @@ export interface ChainAdapter {
     /// adapters that can't speak ERC20 (mocks, non-EVM) omit it. CLIs/UIs
     /// should feature-check before calling.
     tokenMeta?(tokenAddr: string): Promise<TokenMeta>;
+    /// Read ERC20 `balanceOf(account)` for `tokenAddr`. Optional, same
+    /// rationale as `tokenMeta`. Used by UIs to display the caller's
+    /// transparent (unshielded) holdings alongside their note balances.
+    tokenBalanceOf?(tokenAddr: string, account: string): Promise<bigint>;
+    /// Native-asset (ETH) balance of `account`, in wei. Optional.
+    nativeBalance?(account: string): Promise<bigint>;
 }

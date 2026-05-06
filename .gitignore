@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+wasm/target/
+wasm/*/target/
 coverage/
 *.log
 npm-debug.log*

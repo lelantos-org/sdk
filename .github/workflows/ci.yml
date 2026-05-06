@@ -22,11 +22,12 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: rui314/setup-mold@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: nightly-2025-06-23
           components: rust-src
-          targets: wasm32-unknown-unknown
+          target: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:

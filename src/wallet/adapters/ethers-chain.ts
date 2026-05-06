@@ -119,6 +119,14 @@ export class EthersChainAdapter implements ChainAdapter {
         return { symbol: sym as string, decimals: Number(dec) };
     }
 
+    async tokenBalanceOf(tokenAddr: string, account: string): Promise<bigint> {
+        return (await this.erc20Contract(tokenAddr).balanceOf(account)) as bigint;
+    }
+
+    async nativeBalance(account: string): Promise<bigint> {
+        return this.provider.getBalance(account);
+    }
+
     get masp(): Contract {
         return this.maspContract;
     }

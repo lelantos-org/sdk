@@ -11,6 +11,15 @@
 
 import type { Field, Point } from "./crypto/index.js";
 import type { Erc2612Permit } from "./permit.js";
+import {
+    deserializeMerkleProof,
+    deserializeScannedNote,
+    deserializeTreeState,
+    type SerializedMerkleProof,
+    type SerializedScannedNote,
+    type SerializedTreeState,
+    serializeSubmit,
+} from "./relayer-codec.js";
 import { createHttpClient, type HttpClient, type HttpClientOptions } from "./wallet/http.js";
 
 export interface SubmitTransactPayload {
@@ -35,6 +44,12 @@ export interface SubmitTransactPayload {
     /// Absent → relayer falls back to legacy `MASP.transact` (caller must
     /// have approved beforehand).
     permit?: Erc2612Permit;
+    /// Optional WETH bridge directive. `"withdrawEth"` instructs the
+    /// submitter to call `MASP.withdrawEth` (the contract unwraps WETH and
+    /// forwards raw ETH to `pi.recipient`). Absent → standard `transact` /
+    /// `transactWithPermit` path. Deposit-side bridging was removed; users
+    /// wrap ETH→WETH off-pool before depositing.
+    bridge?: "withdrawEth";
 }
 
 export interface TransactPubInputs {
@@ -120,22 +135,13 @@ export class RelayerClient {
     }
 
     async path(cm: Field): Promise<MerkleProofResponse> {
-        const data = await this.getJson<SerializedMerkleProof>(`/path?cm=${cm.toString()}`);
-        return {
-            leafIndex: data.leafIndex,
-            pathElements: data.pathElements.map((lvl) => lvl.map(BigInt)),
-            pathIndices: data.pathIndices,
-            root: BigInt(data.root),
-        };
+        return deserializeMerkleProof(
+            await this.getJson<SerializedMerkleProof>(`/path?cm=${cm.toString()}`),
+        );
     }
 
     async treeState(): Promise<TreeStateResponse> {
-        const data = await this.getJson<SerializedTreeState>("/tree-state");
-        return {
-            leafCount: data.leafCount,
-            root: BigInt(data.root),
-            frontier: data.frontier.map((lvl) => lvl.map(BigInt)),
-        };
+        return deserializeTreeState(await this.getJson<SerializedTreeState>("/tree-state"));
     }
 
     private async getJson<T>(pathSuffix: string): Promise<T> {
@@ -153,95 +159,3 @@ export class RelayerClient {
     }
 }
 
-interface SerializedScannedNote {
-    ciphertext: string; // hex
-    clueR: [string, string];
-    ephPub: [string, string];
-    cm: string;
-    leafIndex: number;
-}
-
-interface SerializedMerkleProof {
-    leafIndex: number;
-    pathElements: string[][];
-    pathIndices: number[];
-    root: string;
-}
-
-interface SerializedTreeState {
-    leafCount: number;
-    root: string;
-    frontier: string[][];
-}
-
-function serializeSubmit(p: SubmitTransactPayload): unknown {
-    const out: Record<string, unknown> = {
-        chainId: Number(p.chainId),
-        proof2x2: p.proof2x2,
-        pubInputs: serializePubInputs(p.pubInputs),
-        aux: p.aux.map(serializeAux),
-    };
-    if (p.permit) {
-        out.permit = {
-            value: p.permit.value,
-            deadline: p.permit.deadline,
-            v: p.permit.v,
-            r: p.permit.r,
-            s: p.permit.s,
-        };
-    }
-    return out;
-}
-
-function pointToObj(p: Point): { x: string; y: string } {
-    return { x: p[0].toString(), y: p[1].toString() };
-}
-
-function serializePubInputs(pi: TransactPubInputs): unknown {
-    return {
-        merkleRoot: pi.merkleRoot.toString(),
-        nullifier: pi.nullifier.map((n) => n.toString()),
-        outCm: pi.outCm.map((c) => c.toString()),
-        publicAssetId: Number(pi.publicAssetId),
-        pubAssetGen: pointToObj(pi.pubAssetGen),
-        publicIn: Number(pi.publicIn),
-        publicOut: Number(pi.publicOut),
-        inCv: pi.inCv.map(pointToObj),
-        outCv: pi.outCv.map(pointToObj),
-        recipient: pi.recipient,
-        chainId: Number(pi.chainId),
-        payer: pi.payer,
-        relayer: pi.relayer,
-    };
-}
-
-function serializeAux(a: TransactAux): unknown {
-    return {
-        clueR: pointToObj(a.clueR),
-        ephPub: pointToObj(a.ephPub),
-        ciphertext: bytesToHex(a.ciphertext),
-    };
-}
-
-function deserializeScannedNote(s: SerializedScannedNote): ScannedNote {
-    return {
-        ciphertext: hexToBytes(s.ciphertext),
-        clueR: [BigInt(s.clueR[0]), BigInt(s.clueR[1])] as Point,
-        ephPub: [BigInt(s.ephPub[0]), BigInt(s.ephPub[1])] as Point,
-        cm: BigInt(s.cm),
-        leafIndex: s.leafIndex,
-    };
-}
-
-function bytesToHex(b: Uint8Array): string {
-    let h = "0x";
-    for (const x of b) h += x.toString(16).padStart(2, "0");
-    return h;
-}
-
-function hexToBytes(h: string): Uint8Array {
-    const s = h.startsWith("0x") ? h.slice(2) : h;
-    const out = new Uint8Array(s.length / 2);
-    for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(2 * i, 2 * i + 2), 16);
-    return out;
-}

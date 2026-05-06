@@ -28,3 +28,8 @@ export const BN254_FR =
 // Baby-Jubjub subgroup order (used to reduce derived scalars).
 export const BABYJUB_SUBGROUP_ORDER =
     2736030358979909402780800718157159386076813972158567259200215660948447373041n;
+
+// Public quadratic non-residue in BN254 scalar field, used by FMD
+// Legendre-symbol bit-extraction gadget. Verified: 5^((r-1)/2) ≡ -1 (mod r).
+// Mirrors `FMD_LEGENDRE_QNR` in circuits/src/lib/hash_to_bit.circom.
+export const FMD_LEGENDRE_QNR = 5n;

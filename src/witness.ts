@@ -7,11 +7,13 @@ import {
     buildNoteCommitment,
     buildNullifierFromNsk,
     type Field,
+    fmdLegendreWitness,
     type Jubjub,
     type MerkleTree,
     type Point,
     type Poseidon,
 } from "./crypto/index.js";
+import { TAG_FMD_BIT } from "./fmd.js";
 import type { Note, SpentNote } from "./notes.js";
 
 export interface SpendableCachedNote {
@@ -153,7 +155,36 @@ export function toCircomInput(
         out_r: opts.outputClues.map((c) => c.r.toString()),
         out_fk: opts.outputClues.map((c) => c.fk.map((p) => [p[0].toString(), p[1].toString()])),
         out_clue_bits: opts.outputClues.map((c) => c.clueBits.toString()),
+        ...fmdLegendreInputs(P, J, opts.outputClues),
     };
+}
+
+// Compute the (bit, y) Legendre witness pair per (output, γ-slot) so the
+// in-circuit `HashToBit` gadget has the prover-side data it needs. Mirrors
+// the hash layout of `ClueCheck` exactly: Poseidon(TAG_FMD_BIT, R.x, R.y,
+// i, S.x, S.y).
+function fmdLegendreInputs(
+    P: Poseidon,
+    J: Jubjub,
+    clues: OutputClueWitness[],
+): { out_legendre_bit: string[][]; out_legendre_y: string[][] } {
+    const bits: string[][] = [];
+    const ys: string[][] = [];
+    for (const c of clues) {
+        const R = J.mulPointEscalar(J.base8, c.r);
+        const rowBits: string[] = [];
+        const rowYs: string[] = [];
+        for (let i = 0; i < c.fk.length; i++) {
+            const S = J.mulPointEscalar(c.fk[i], c.r);
+            const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), S[0], S[1]]);
+            const w = fmdLegendreWitness(h);
+            rowBits.push(w.bit.toString());
+            rowYs.push(w.y.toString());
+        }
+        bits.push(rowBits);
+        ys.push(rowYs);
+    }
+    return { out_legendre_bit: bits, out_legendre_y: ys };
 }
 
 export function dummyOutput(asset: Field = 1n): Note {

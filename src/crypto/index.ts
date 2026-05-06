@@ -9,9 +9,11 @@ export { MerkleTree } from "./merkle.js";
 export { buildNullifier, buildNullifierFromNsk } from "./nullifier.js";
 export type { Field } from "./poseidon.js";
 export { Poseidon } from "./poseidon.js";
+export { fmdLegendreWitness, legendreSymbol, modInverse, modSqrt } from "./sqrt.js";
 export {
     BABYJUB_SUBGROUP_ORDER,
     BN254_FR,
+    FMD_LEGENDRE_QNR,
     POW_2_64,
     TAG_ASSET,
     TAG_CM,

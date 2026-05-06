@@ -14,12 +14,12 @@ import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import type { SyncProgress, SyncResult } from "./sync.js";
 
-/// Args for `Wallet.deposit`. Shields ERC20 from caller's eth account into
-/// the MASP. Caller must hold an EIP-2612-permit-capable ERC20 balance ≥
-/// `amount * assetEntry.scale + fee`.
+/// Args for `Wallet.deposit`. Shields an ERC-20 from caller's eth account
+/// into the MASP. Caller must hold an EIP-2612-permit-capable ERC-20
+/// balance ≥ `amount * scale + fee`. For native ETH, use `depositEth`.
 export interface DepositOptions {
-    /// Amount in *circuit units* (post-scale-down). Multiplied by the asset's
-    /// `scale` to get the ERC20 base-unit deposit.
+    /// Amount in *circuit units* (post-scale-down). Multiplied by the
+    /// asset's `scale` to get the ERC-20 base-unit deposit.
     amount: bigint;
     /// Asset id (default 1n).
     asset?: bigint;
@@ -27,6 +27,22 @@ export interface DepositOptions {
     to?: string;
     /// EIP-2612 permit deadline (unix-seconds). Default: `now + 3600`.
     deadline?: bigint;
+}
+
+/// Args for `Wallet.withdrawEth`. Unshields a WETH-asset note and forwards
+/// raw ETH to `to` via `MASP.withdrawEth` (unwraps inside the contract).
+/// The selected asset id MUST be registered against the chain's WETH.
+export interface WithdrawEthOptions {
+    /// On-chain ETH recipient (0x address). Must be EOA or payable contract.
+    to: string;
+    /// Amount in circuit units.
+    amount: bigint;
+    /// Asset id of WETH in the MASP registry.
+    asset: bigint;
+    /// Optional selection tuning.
+    selectOpts?: SelectOpts;
+    /// On `InsufficientCoverError`, transparently self-spend then retry.
+    autoConsolidate?: boolean;
 }
 
 /// Args for `Wallet.transfer`. Spends 1-2 unspent notes covering `amount`
@@ -49,10 +65,11 @@ export interface TransferOptions {
 
 /// Args for `Wallet.withdraw`. Spends 1-2 notes; releases `amount` ERC20
 /// to `to` on-chain; remainder split into two change-notes back to self.
-/// Throws `InsufficientCoverError` on no cover, unless `autoConsolidate:
-/// true` is set.
+/// For native ETH unshield, use `withdrawEth`. Throws
+/// `InsufficientCoverError` on no cover, unless `autoConsolidate: true` is
+/// set.
 export interface WithdrawOptions {
-    /// On-chain ETH recipient (0x address).
+    /// On-chain ERC-20 recipient (0x address).
     to: string;
     /// Amount in circuit units.
     amount: bigint;
@@ -149,6 +166,8 @@ export interface WalletApi {
     deposit(args: DepositOptions): Promise<TransactionResult>;
     transfer(args: TransferOptions): Promise<TransactionResult>;
     withdraw(args: WithdrawOptions): Promise<TransactionResult>;
+    /// Unshield to raw ETH via the WETH bridge.
+    withdrawEth(args: WithdrawEthOptions): Promise<TransactionResult>;
     markSpent(noteIds: string[]): Promise<void>;
 }
 

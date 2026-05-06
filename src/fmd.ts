@@ -1,11 +1,12 @@
 // Fuzzy Message Detection — FMD2 (Beck & Len, 2021), a.k.a. Niwl.
 //
-// Scheme variant: lelantos.fmd.v2 (poseidon).
-// Bit derivation switched from blake2b to Poseidon over field elements so
-// the in-circuit `ClueCheck` (circuits/src/lib/clue.circom) can prove
-// well-formedness in ~200 constraints/hash. v1 (blake2b) was retired;
-// callers must regenerate detection-keys against the new scheme — the
-// bit-mixing changed but on-curve / packing format is unchanged.
+// Scheme variant: lelantos.fmd.v3 (poseidon + Legendre symbol).
+// v2 used `lsb1(Poseidon(...))` for bit derivation. v3 swaps to the
+// Legendre symbol of the Poseidon output: bit = 1 iff the hash is a
+// quadratic residue in 𝔽_r. This cuts the in-circuit cost from
+// ~254 constraints/γ (Num2Bits) to ~4 (HashToBit gadget) while
+// preserving uniform-bit security under Poseidon-as-RO. Old v2 detection
+// keys produce different bits and are NOT interoperable with v3.
 //
 // Tunable false-positive rate p = 2^-γ. Default γ = 5 ⇒ 1/32 FP.
 //
@@ -16,14 +17,15 @@
 // Sender flags a message for fk:
 //   r ← Z_q*
 //   R = B · r
-//   for i ∈ [γ]: bit_i = lsb1(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
+//   for i ∈ [γ]: bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
 //                S_i = r·X_i
 //                c_i = bit_i ⊕ 1
 //   clue = (R, c_1 || ... || c_γ)
+//   where legendre_bit(h) = 1 iff h is a quadratic residue in 𝔽_r.
 //
 // Receiver tests with dk:
 //   S_i = x_i · R
-//   for i ∈ [γ]: bit_i = lsb1(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
+//   for i ∈ [γ]: bit_i = legendre_bit(Poseidon([TAG_FMD_BIT, R.x, R.y, i, S_i.x, S_i.y]))
 //                if bit_i ⊕ c_i ≠ 1 → reject
 //
 // Honest recipient: r·X_i == x_i·R, so all γ checks pass.
@@ -38,16 +40,18 @@
 
 import {
     BABYJUB_SUBGROUP_ORDER,
+    BN254_FR,
     FIELD_BYTES,
     type Field,
     type Jubjub,
+    legendreSymbol,
     type Point,
     toLeBytes,
 } from "./crypto/index.js";
 import type { Poseidon } from "./crypto/poseidon.js";
 
 export const FMD_DEFAULT_GAMMA = 5;
-export const FMD_DOMAIN = "lelantos.fmd.v2";
+export const FMD_DOMAIN = "lelantos.fmd.v3";
 /// Domain-separation tag for FMD bit derivation. Mirrors `TAG_FMD_BIT` in
 /// circuits/src/lib/tags.circom and `TAG_FMD_BIT` in
 /// backend/crates/fmd-crypto/src/clue.rs. Must NOT collide with other tags.
@@ -149,12 +153,14 @@ export function decodeClue(buf: Uint8Array): FmdClue {
 
 // ---- internals ----
 
-// LSB of Poseidon([TAG_FMD_BIT, R.x, R.y, i, S.x, S.y]). Same six-input
-// layout as the in-circuit `ClueCheck` template; bit-equivalent to the Rust
-// `shared_bit` in fmd-crypto/src/clue.rs.
+// Legendre-symbol bit of Poseidon([TAG_FMD_BIT, R.x, R.y, i, S.x, S.y]).
+// Same six-input layout as the in-circuit `ClueCheck` template; matches the
+// `HashToBit` gadget convention (bit=1 ⟺ QR).
 function sharedBit(P: Poseidon, R: Point, i: number, shared: Point): number {
     const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), shared[0], shared[1]]);
-    return Number(h & 1n);
+    const sym = legendreSymbol(h, BN254_FR);
+    if (sym === 0) throw new Error("FMD shared bit: hash collided to zero");
+    return sym === 1 ? 1 : 0;
 }
 
 function packBits(bits: number[]): Uint8Array {

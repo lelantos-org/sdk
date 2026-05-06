@@ -14,18 +14,11 @@
 // custom strategies — without touching the rest.
 
 import { decodeAddress } from "../address.js";
-import {
-    buildDeposit,
-    buildTransfer,
-    buildWithdraw,
-    type InputSlot,
-    type InputSlots,
-} from "../bundle.js";
+import { buildDeposit, buildTransfer, buildWithdraw } from "../bundle.js";
 import { buildNullifierFromNsk, type Jubjub, Poseidon } from "../crypto/index.js";
 import { buildJubjub } from "../crypto/jubjub-wasm.js";
 import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../keys.js";
 import type { Note } from "../notes.js";
-import type { SpendableCachedNote } from "../witness.js";
 import type {
     DepositOptions,
     NotesFilter,
@@ -33,11 +26,13 @@ import type {
     TransferOptions,
     WalletApi,
     WalletNote,
+    WithdrawEthOptions,
     WithdrawOptions,
 } from "./api.js";
 import type { WalletConfig } from "./config.js";
+import { ensureCover } from "./cover.js";
 import { defaultNoteSource, defaultProver, defaultSubmitter, validateConfig } from "./defaults.js";
-import { InsufficientCoverError } from "./errors.js";
+import { buildInputSlots } from "./inputs.js";
 import {
     freshNoteRandomness,
     freshOutput,
@@ -46,13 +41,7 @@ import {
 } from "./internal.js";
 import { type KeySource, resolveNsk } from "./key-source.js";
 import type { NoteSource } from "./note-source.js";
-import {
-    decodeStoredNote,
-    InMemoryNoteStore,
-    type NoteStore,
-    type NotesFile,
-    type StoredNote,
-} from "./note-store.js";
+import { InMemoryNoteStore, type NoteStore, type NotesFile } from "./note-store.js";
 import type { Prover } from "./prover.js";
 import { randomFr, randomJubjubScalar } from "./randomness.js";
 import { LocalScanner, type Scanner } from "./scanner.js";
@@ -74,6 +63,7 @@ export type {
     TransferOptions,
     WalletApi,
     WalletNote,
+    WithdrawEthOptions,
     WithdrawOptions,
 };
 
@@ -273,16 +263,14 @@ export class Wallet implements WalletApi {
 
     // ---------- transactions ----------
 
-    /// Shield ERC20 from caller's eth account into the MASP. Steps:
-    /// fetch asset entry + fee, sign EIP-2612 permit, build transact bundle
-    /// with one fresh output to `args.to` and one padding output, submit
-    /// via `Submitter`. Returns the on-chain tx hash + commitment hashes.
-    /// Does NOT touch `NoteStore` — caller should `sync()` afterwards.
+    /// Shield an ERC-20 into the MASP. Steps: fetch asset entry + fee, sign
+    /// EIP-2612 permit, build transact bundle, submit. Relayer routes to
+    /// `MASP.transactWithPermit`. For native ETH, the user wraps ETH→WETH
+    /// off-pool (canonical WETH9) and then calls this method with the WETH
+    /// asset id — there is no `depositEth` entry point on MASP.
     async deposit(args: DepositOptions): Promise<TransactionResult> {
         const asset = args.asset ?? 1n;
-        const toAddr = args.to ?? this.address;
-        const recipient = decodeAddress(this.J, toAddr);
-
+        const recipient = decodeAddress(this.J, args.to ?? this.address);
         const payer = await this.cfg.chain.payerAddress();
         const assetEntry = await this.cfg.chain.fetchAsset(asset);
         const feeBps = await this.cfg.chain.fetchFeeBps();
@@ -292,9 +280,7 @@ export class Wallet implements WalletApi {
 
         const deadline =
             args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT_DEFAULT_DEADLINE_SECS);
-
         const spender = await this.cfg.chain.maspAddress();
-
         const permit = await this.cfg.chain.signPermit({
             token: assetEntry.token,
             spender,
@@ -336,31 +322,16 @@ export class Wallet implements WalletApi {
         const asset = args.asset ?? 1n;
         const sendValue = args.amount;
 
-        let selection = this.selectNotes(asset, sendValue, args.selectOpts);
-        if (selection.plan === "consolidate-first") {
-            if (!args.autoConsolidate) {
-                throw new InsufficientCoverError({
-                    target: sendValue,
-                    asset,
-                    consolidate: selection.consolidate,
-                    consolidateSum: selection.consolidateSum,
-                });
-            }
-            await this.autoConsolidate(asset, selection);
-            selection = this.selectNotes(asset, sendValue, args.selectOpts);
-            if (selection.plan === "consolidate-first") {
-                throw new InsufficientCoverError({
-                    target: sendValue,
-                    asset,
-                    consolidate: selection.consolidate,
-                    consolidateSum: selection.consolidateSum,
-                });
-            }
-        }
+        const selection = await ensureCover(
+            this.selector,
+            () => this.file.notes,
+            { asset, target: sendValue, selectOpts: args.selectOpts, autoConsolidate: args.autoConsolidate },
+            (a, sel) => this.autoConsolidate(a, sel),
+        );
 
         const recipient = decodeAddress(this.J, args.to);
         const ownAddr = decodeAddress(this.J, this.address);
-        const inputs = await this.buildInputSlots(selection.notes, asset);
+        const inputs = await buildInputSlots(this.inputsCtx(), selection.notes, asset);
 
         const changeValue = selection.sum - sendValue;
         const sendNote: Note = {
@@ -420,33 +391,45 @@ export class Wallet implements WalletApi {
     /// change-notes back to self, submits, marks spent. Throws
     /// `InsufficientCoverError` on no cover.
     async withdraw(args: WithdrawOptions): Promise<TransactionResult> {
-        const asset = args.asset ?? 1n;
+        return this.withdrawCore(
+            { ...args, asset: args.asset ?? 1n },
+            undefined,
+        );
+    }
+
+    /// Unshield to raw ETH via the WETH bridge. Same selection + bundle
+    /// shape as `withdraw`; the payload is tagged `bridge: "withdrawEth"`
+    /// so the submitter targets `MASP.withdrawEth`, which unwraps WETH and
+    /// forwards raw ETH to `args.to`.
+    async withdrawEth(args: WithdrawEthOptions): Promise<TransactionResult> {
+        return this.withdrawCore(
+            {
+                to: args.to,
+                amount: args.amount,
+                asset: args.asset,
+                selectOpts: args.selectOpts,
+                autoConsolidate: args.autoConsolidate,
+            },
+            "withdrawEth",
+        );
+    }
+
+    private async withdrawCore(
+        args: WithdrawOptions & { asset: bigint },
+        bridge: "withdrawEth" | undefined,
+    ): Promise<TransactionResult> {
+        const { asset } = args;
         const publicOut = args.amount;
 
-        let selection = this.selectNotes(asset, publicOut, args.selectOpts);
-        if (selection.plan === "consolidate-first") {
-            if (!args.autoConsolidate) {
-                throw new InsufficientCoverError({
-                    target: publicOut,
-                    asset,
-                    consolidate: selection.consolidate,
-                    consolidateSum: selection.consolidateSum,
-                });
-            }
-            await this.autoConsolidate(asset, selection);
-            selection = this.selectNotes(asset, publicOut, args.selectOpts);
-            if (selection.plan === "consolidate-first") {
-                throw new InsufficientCoverError({
-                    target: publicOut,
-                    asset,
-                    consolidate: selection.consolidate,
-                    consolidateSum: selection.consolidateSum,
-                });
-            }
-        }
+        const selection = await ensureCover(
+            this.selector,
+            () => this.file.notes,
+            { asset, target: publicOut, selectOpts: args.selectOpts, autoConsolidate: args.autoConsolidate },
+            (a, sel) => this.autoConsolidate(a, sel),
+        );
 
         const ownAddr = decodeAddress(this.J, this.address);
-        const inputs = await this.buildInputSlots(selection.notes, asset);
+        const inputs = await buildInputSlots(this.inputsCtx(), selection.notes, asset);
 
         const remainder = selection.sum - publicOut;
         const half = remainder / 2n;
@@ -489,6 +472,8 @@ export class Wallet implements WalletApi {
                 { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() },
             ],
         });
+
+        if (bridge) built.payload.bridge = bridge;
 
         const { txHash } = await this.submitter.submit(built.payload);
         const spent = selection.notes.map((n) => n.id);
@@ -543,30 +528,7 @@ export class Wallet implements WalletApi {
 
     // ---------- internals ----------
 
-    private async buildInputSlots(selected: StoredNote[], asset: bigint): Promise<InputSlots> {
-        if (selected.length === 0 || selected.length > 2) {
-            throw new Error(`buildInputSlots: expected 1 or 2 notes, got ${selected.length}`);
-        }
-        const slots: (InputSlot | null)[] = await Promise.all(
-            selected.map(async (s): Promise<InputSlot> => {
-                const n = decodeStoredNote(s);
-                const path = await this.noteSource.fetchPath(n.cm);
-                const cached: SpendableCachedNote = {
-                    note: {
-                        asset,
-                        value: n.value,
-                        pk: this.keys.pk,
-                        rho: n.rho,
-                        rcm: n.rcm,
-                        rcv: 0n,
-                    },
-                    nsk: this.keys.nsk,
-                    leafIndex: n.leafIndex,
-                };
-                return { cached, pathElements: path.pathElements, pathIndices: path.pathIndices };
-            }),
-        );
-        while (slots.length < 2) slots.push(null);
-        return [slots[0], slots[1]] as InputSlots;
+    private inputsCtx() {
+        return { pk: this.keys.pk, nsk: this.keys.nsk, noteSource: this.noteSource };
     }
 }
