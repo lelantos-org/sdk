@@ -96,7 +96,6 @@ function serializePubInputs(pi: TransactPubInputs): unknown {
         nullifier: pi.nullifier.map((n) => n.toString()),
         outCm: pi.outCm.map((c) => c.toString()),
         publicAssetId: Number(pi.publicAssetId),
-        pubAssetGen: pointToObj(pi.pubAssetGen),
         publicIn: Number(pi.publicIn),
         publicOut: Number(pi.publicOut),
         inCv: pi.inCv.map(pointToObj),

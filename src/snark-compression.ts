@@ -1,6 +1,6 @@
 // SnarkCompression: collapse N logical Groth16 public inputs into the 2
 // signals (z, y) the verifier actually sees. Off-chain reference for
-// contracts/src/MASP.sol::_compressPubInputs (transact_2x2, 22 slots) and
+// contracts/src/MASP.sol::_compressPubInputs (transact_2x2, 20 slots) and
 // _compressTreeUpdatePI (tree_update, 5 slots).
 //
 // Slot order MUST match contracts/src/MASP.sol byte-for-byte AND the
@@ -19,8 +19,6 @@ export interface FlattenInput {
     nullifier: (string | bigint)[];
     out_cm: (string | bigint)[];
     public_asset_id: string | bigint;
-    pub_asset_gen_x: string | bigint;
-    pub_asset_gen_y: string | bigint;
     public_in: string | bigint;
     public_out: string | bigint;
     in_cv: (string | bigint)[][];
@@ -29,13 +27,13 @@ export interface FlattenInput {
     chain_id: string | bigint;
     payer_address: string | bigint;
     relayer_address: string | bigint;
-    /// Per-output FMD clue PIs. Required: matches circuit slots 22..27.
+    /// Per-output FMD clue PIs. Required: matches circuit slots 20..25.
     out_clue_Rx?: (string | bigint)[];
     out_clue_Ry?: (string | bigint)[];
     out_clue_bits?: (string | bigint)[];
 }
 
-// 28-slot flatten in MASP._flatten order: 22 base + 3·N_OUT clue.
+// 26-slot flatten in MASP._flatten order: 20 base + 3·N_OUT clue.
 export function flatten(input: FlattenInput): Field[] {
     const base: Field[] = [
         BigInt(input.merkle_root),
@@ -44,8 +42,6 @@ export function flatten(input: FlattenInput): Field[] {
         BigInt(input.out_cm[0]),
         BigInt(input.out_cm[1]),
         BigInt(input.public_asset_id),
-        BigInt(input.pub_asset_gen_x),
-        BigInt(input.pub_asset_gen_y),
         BigInt(input.public_in),
         BigInt(input.public_out),
         BigInt(input.in_cv[0][0]),

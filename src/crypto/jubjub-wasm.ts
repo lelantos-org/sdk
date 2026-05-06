@@ -153,8 +153,8 @@ export class WasmJubjub {
     }
 
     hashToAssetGen(assetId: Field): Point {
-        if (assetId >= 1n << 254n) {
-            throw new Error("asset_id must be < 2^254 for HashToAssetGen parity");
+        if (assetId >= 1n << 64n) {
+            throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
         }
         if (!this.fallback) {
             throw new Error(
@@ -165,8 +165,8 @@ export class WasmJubjub {
     }
 
     async hashToAssetGenAsync(assetId: Field): Promise<Point> {
-        if (assetId >= 1n << 254n) {
-            throw new Error("asset_id must be < 2^254 for HashToAssetGen parity");
+        if (assetId >= 1n << 64n) {
+            throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
         }
         const fb = await this.getFallback();
         return fb.hashToAssetGen(assetId);

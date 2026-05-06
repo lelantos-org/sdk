@@ -63,7 +63,6 @@ export interface OutputClueWitness {
 
 export interface BuildOpts {
     publicAssetId: Field;
-    publicAssetGen?: Point;
     publicIn: Field;
     publicOut: Field;
     inputs: SpentNote[];
@@ -82,8 +81,8 @@ export interface BuildOpts {
     /// SNARK to prevent front-running by other relayers.
     relayerAddress?: Field;
     // SnarkCompression Fiat-Shamir challenge. Tests default to 1n; in prod
-    // the contract derives this from a transcript over the 28 logical PIs
-    // (22 base + 6 clue).
+    // the contract derives this from a transcript over the 26 logical PIs
+    // (20 base + 6 clue).
     z?: Field;
 }
 
@@ -102,7 +101,6 @@ export function toCircomInput(
     const chainId = opts.chainId ?? 0n;
     const payerAddress = opts.payerAddress ?? 0n;
     const relayerAddress = opts.relayerAddress ?? 0n;
-    const pubGen = opts.publicAssetGen ?? J.hashToAssetGen(publicAssetId);
 
     const out_cm = outputs.map((o) => buildNoteCommitment(P, o));
 
@@ -121,8 +119,6 @@ export function toCircomInput(
         nullifier: inputs.map((i) => i.nf.toString()),
         out_cm: out_cm.map((c) => c.toString()),
         public_asset_id: publicAssetId.toString(),
-        pub_asset_gen_x: pubGen[0].toString(),
-        pub_asset_gen_y: pubGen[1].toString(),
         public_in: publicIn.toString(),
         public_out: publicOut.toString(),
         in_cv: in_cv.map((p) => [p[0].toString(), p[1].toString()]),

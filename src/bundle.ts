@@ -254,16 +254,14 @@ async function finalize(
     const outputClues = auxAndWitness.map((a) => a.witness);
 
     const { J, asset } = common;
-    // Warm WasmJubjub's circomlibjs fallback once; subsequent sync
-    // hashToAssetGen calls inside toCircomInput depend on it.
+    // Warm WasmJubjub's circomlibjs fallback once; per-note hashToAssetGen
+    // calls inside toCircomInput depend on it.
     const maybeAsync = (J as { hashToAssetGenAsync?: (a: bigint) => Promise<unknown> })
         .hashToAssetGenAsync;
     if (typeof maybeAsync === "function") await maybeAsync.call(J, asset);
-    const pubGen = J.hashToAssetGen(asset);
 
     const baseInput = toCircomInput(common.P, J, {
         publicAssetId: asset,
-        publicAssetGen: pubGen,
         publicIn,
         publicOut,
         inputs,
@@ -284,7 +282,7 @@ async function finalize(
         payload: {
             chainId: common.chainId,
             proof2x2: groth16ToWire(proof),
-            pubInputs: extractPubInputs(common, baseInput, asset, pubGen, publicIn, publicOut),
+            pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
             aux: [auxToWire(aux[0]), auxToWire(aux[1])],
         },
         cm: [buildNoteCommitment(common.P, outputs[0]), buildNoteCommitment(common.P, outputs[1])],
@@ -325,7 +323,6 @@ function extractPubInputs(
     common: BundleCommon,
     base: CircomInput,
     asset: bigint,
-    pubGen: Point,
     publicIn: bigint,
     publicOut: bigint,
 ): TransactPubInputs {
@@ -344,7 +341,6 @@ function extractPubInputs(
         nullifier: tuple2(nullifier),
         outCm: tuple2(outCm),
         publicAssetId: asset,
-        pubAssetGen: pubGen,
         publicIn,
         publicOut,
         inCv: [point(inCv[0]), point(inCv[1])],

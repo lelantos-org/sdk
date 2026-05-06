@@ -116,8 +116,8 @@ describe("crypto parity with circuits/src/lib", () => {
         expect(J.inSubgroup(H_BASE)).toBe(true);
     });
 
-    it("hashToAssetGen rejects asset_id ≥ 2^254", () => {
-        expect(() => J.hashToAssetGen(1n << 254n)).toThrow();
+    it("hashToAssetGen rejects asset_id ≥ 2^64", () => {
+        expect(() => J.hashToAssetGen(1n << 64n)).toThrow();
     });
 
     it("valueCommit is additively homomorphic", () => {

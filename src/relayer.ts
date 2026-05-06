@@ -57,7 +57,6 @@ export interface TransactPubInputs {
     nullifier: [Field, Field];
     outCm: [Field, Field];
     publicAssetId: bigint;
-    pubAssetGen: Point;
     publicIn: bigint;
     publicOut: bigint;
     inCv: [Point, Point];

@@ -57,21 +57,20 @@ export class Jubjub {
         return u ? this.toAffine(u) : null;
     }
 
-    // Mirrors HashToAssetGen in `asset_gen.circom`: Pedersen(264) over
-    //   bits[  0.. 7]  = TAG_ASSET (LSB-first byte)
-    //   bits[  8..261] = asset_id (254 LSB-first bits; high 2 bits of byte 31
-    //                              are 0 because asset_id < 2^254)
-    //   bits[262..263] = 0 (zero-pad to byte boundary)
+    // Mirrors HashToAssetGen in `asset_gen.circom`: Pedersen(72) over
+    //   bits[ 0.. 7] = TAG_ASSET (LSB-first byte)
+    //   bits[ 8..71] = asset_id  (64 LSB-first bits)
     // circomlibjs `pedersen.hash(buf)` operates on 8·buf.length bits LSB-first
-    // per byte, so the 33-byte input below reproduces the circuit bit stream
-    // byte-for-byte.
+    // per byte, so the 9-byte input below reproduces the circuit bit stream
+    // byte-for-byte. Circuit enforces asset_id < 2^64 via Num2Bits(64); SDK
+    // matches that bound (also matches contract `uint64 publicAssetId`).
     hashToAssetGen(assetId: Field): Point {
-        if (assetId >= 1n << 254n) {
-            throw new Error("asset_id must be < 2^254 for HashToAssetGen parity");
+        if (assetId >= 1n << 64n) {
+            throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
         }
-        const buf = new Uint8Array(33);
+        const buf = new Uint8Array(9);
         buf[0] = Number(TAG_ASSET);
-        buf.set(toLeBytes(assetId), 1);
+        buf.set(toLeBytes(assetId, 8), 1);
         const packed = this.pedersen.hash(buf);
         return this.toAffine(this.babyjub.unpackPoint(packed));
     }
