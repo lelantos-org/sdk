@@ -2,8 +2,10 @@
 // `relayer.ts` so the client surface stays focused on transport.
 
 import type { Field, Point } from "./crypto/index.js";
+import type { AuxOutput } from "./permit2.js";
 import type {
     ScannedNote,
+    SubmitIntentPayload,
     SubmitTransactPayload,
     TransactAux,
     TransactPubInputs,
@@ -30,24 +32,35 @@ export interface SerializedTreeState {
     frontier: string[][];
 }
 
-export function serializeSubmit(p: SubmitTransactPayload): unknown {
-    const out: Record<string, unknown> = {
+export function serializeSubmitTransact(p: SubmitTransactPayload): unknown {
+    return {
         chainId: Number(p.chainId),
+        kind: p.kind,
         proof2x2: p.proof2x2,
         pubInputs: serializePubInputs(p.pubInputs),
         aux: p.aux.map(serializeAux),
     };
-    if (p.permit) {
-        out.permit = {
-            value: p.permit.value,
-            deadline: p.permit.deadline,
-            v: p.permit.v,
-            r: p.permit.r,
-            s: p.permit.s,
-        };
-    }
-    if (p.bridge) out.bridge = p.bridge;
-    return out;
+}
+
+export function serializeSubmitIntent(p: SubmitIntentPayload): unknown {
+    return {
+        chainId: Number(p.chainId),
+        intent: {
+            chainId: p.intent.chainId.toString(),
+            publicAssetId: p.intent.publicAssetId.toString(),
+            publicIn: p.intent.publicIn.toString(),
+            payer: p.intent.payer,
+            recipient: p.intent.recipient,
+            outCm: p.intent.outCm,
+        },
+        permit2: {
+            nonce: p.permit2.nonce.toString(),
+            deadline: p.permit2.deadline.toString(),
+            maxTotal: p.permit2.maxTotal.toString(),
+            signature: p.permit2.signature,
+        },
+        aux: p.aux.map(serializeAuxOutput),
+    };
 }
 
 export function deserializeScannedNote(s: SerializedScannedNote): ScannedNote {
@@ -111,6 +124,16 @@ function serializeAux(a: TransactAux): unknown {
     return {
         clueR: pointToObj(a.clueR),
         ephPub: pointToObj(a.ephPub),
+        ciphertext: bytesToHex(a.ciphertext),
+    };
+}
+
+function serializeAuxOutput(a: AuxOutput): unknown {
+    return {
+        clueRx: a.clueRx.toString(),
+        clueRy: a.clueRy.toString(),
+        ephPubX: a.ephPubX.toString(),
+        ephPubY: a.ephPubY.toString(),
         ciphertext: bytesToHex(a.ciphertext),
     };
 }

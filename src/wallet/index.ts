@@ -14,7 +14,8 @@
 // custom strategies — without touching the rest.
 
 import { decodeAddress } from "../address.js";
-import { buildDeposit, buildTransfer, buildWithdraw } from "../bundle.js";
+import { buildDeposit, buildTransfer, buildWithdraw, buildWithdrawNative } from "../bundle.js";
+import { computePiHash } from "../permit2.js";
 import { buildNullifierFromNsk, type Jubjub, Poseidon } from "../crypto/index.js";
 import { buildJubjub } from "../crypto/jubjub-wasm.js";
 import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../keys.js";
@@ -31,7 +32,9 @@ import type {
 } from "./api.js";
 import type { WalletConfig } from "./config.js";
 import { ensureCover } from "./cover.js";
+import { supportsAllowanceTransfer, supportsNativeEth } from "./chain-adapter.js";
 import { defaultNoteSource, defaultProver, defaultSubmitter, validateConfig } from "./defaults.js";
+import { DepositAdapterError, type DepositStrategy } from "./errors.js";
 import { buildInputSlots } from "./inputs.js";
 import {
     freshNoteRandomness,
@@ -67,7 +70,21 @@ export type {
     WithdrawOptions,
 };
 
-const PERMIT_DEFAULT_DEADLINE_SECS = 3600;
+const PERMIT2_DEFAULT_DEADLINE_SECS = 3600;
+/// Refuse to use a Permit2 allowance window expiring within this many
+/// seconds. Avoids racing past expiration mid-tx.
+const ALLOWANCE_BUFFER_SECS = 60;
+
+/// Fire a progress phase, swallowing any callback errors so a misbehaving
+/// UI listener can't break a tx mid-flight.
+function safePhase<P>(cb: ((p: P) => void) | undefined, phase: P): void {
+    if (!cb) return;
+    try {
+        cb(phase);
+    } catch {
+        /* ignore */
+    }
+}
 
 /// Default `WalletApi` implementation.
 export class Wallet implements WalletApi {
@@ -235,6 +252,45 @@ export class Wallet implements WalletApi {
         this.file = await this.noteStore.load();
     }
 
+    /// Resolve once every commitment in `cms` is decrypted and persisted to
+    /// the local note store. Polls `sync()` with backoff until either all
+    /// commitments are observed or `signal` aborts. Useful for UIs that
+    /// want to update balances only after the FMD scanner caught up to
+    /// fresh change notes (post-transfer / -withdraw).
+    async awaitCommitments(
+        cms: string[],
+        opts: { signal?: AbortSignal; pollMs?: number; maxAttempts?: number } = {},
+    ): Promise<void> {
+        if (cms.length === 0) return;
+        const target = cms.map((c) => c.toLowerCase());
+        const pollMs = opts.pollMs ?? 1500;
+        const maxAttempts = opts.maxAttempts ?? 30;
+        const allSeen = (): boolean => {
+            const seen = new Set(this.file.notes.map((n) => n.cm.toLowerCase()));
+            return target.every((c) => seen.has(c));
+        };
+        const sleep = (ms: number) =>
+            new Promise<void>((resolve) => {
+                if (opts.signal?.aborted) return resolve();
+                const t = setTimeout(() => {
+                    opts.signal?.removeEventListener("abort", onAbort);
+                    resolve();
+                }, ms);
+                const onAbort = () => {
+                    clearTimeout(t);
+                    resolve();
+                };
+                opts.signal?.addEventListener("abort", onAbort, { once: true });
+            });
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (opts.signal?.aborted) return;
+            if (allSeen()) return;
+            await this.sync({ limit: 200 });
+            if (opts.signal?.aborted || allSeen()) return;
+            await sleep(pollMs);
+        }
+    }
+
     notes(filter: NotesFilter): WalletNote[] {
         return this.file.notes
             .filter((n) => {
@@ -263,52 +319,162 @@ export class Wallet implements WalletApi {
 
     // ---------- transactions ----------
 
-    /// Shield an ERC-20 into the MASP. Steps: fetch asset entry + fee, sign
-    /// EIP-2612 permit, build transact bundle, submit. Relayer routes to
-    /// `MASP.transactWithPermit`. For native ETH, the user wraps ETH→WETH
-    /// off-pool (canonical WETH9) and then calls this method with the WETH
-    /// asset id — there is no `depositEth` entry point on MASP.
+    /// Shield an ERC-20 into the MASP via Permit2 escrow. Steps: fetch asset
+    /// entry + fee, build DepositIntent + AuxValidation.Output[2], sign
+    /// Permit2 witness over their hash, submit. Either the chain adapter
+    /// (`chain.submitIntent`) or the relayer (`submitter.submitIntent`)
+    /// broadcasts `MASP.submitIntent`. Funds sit in escrow until the
+    /// relayer flushes a batch (or the depositor calls `cancelIntent`
+    /// after `cancelDelay` blocks). For native ETH, wrap to WETH off-pool
+    /// then deposit with the WETH asset id.
     async deposit(args: DepositOptions): Promise<TransactionResult> {
         const asset = args.asset ?? 1n;
         const recipient = decodeAddress(this.J, args.to ?? this.address);
         const payer = await this.cfg.chain.payerAddress();
         const assetEntry = await this.cfg.chain.fetchAsset(asset);
-        const feeBps = await this.cfg.chain.fetchFeeBps();
+        const feeBps = await this.resolveFeeBps();
         const inAmt = args.amount * assetEntry.scale;
         const fee = (inAmt * feeBps) / 10000n;
         const total = inAmt + fee;
 
-        const deadline =
-            args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT_DEFAULT_DEADLINE_SECS);
-        const spender = await this.cfg.chain.maspAddress();
-        const permit = await this.cfg.chain.signPermit({
-            token: assetEntry.token,
-            spender,
-            value: total,
-            deadline,
-        });
-
         const o0 = freshOutput();
         const o1 = freshNoteRandomness();
-        const built = await buildDeposit({
+        const built = buildDeposit({
             P: this.P,
             J: this.J,
             chainId: this.cfg.chainId,
             asset,
             payerAddress: payer,
-            relayerAddress: this.cfg.relayerAddress,
             recipientAddress: payer,
-            prover: this.prover,
-            treeDepth: this.cfg.treeDepth,
             publicIn: args.amount,
             recipient,
             output0: { rho: o0.rho, rcm: o0.rcm, rcv: o0.rcv, aux: o0.aux },
             output1Pad: { rho: o1.rho, rcm: o1.rcm, rcv: o1.rcv },
         });
 
-        built.payload.permit = permit;
-        const { txHash } = await this.submitter.submit(built.payload);
-        return makeTransactionResult({ txHash, built, sent: args.amount, inputSum: 0n });
+        const strategy = await this.pickDepositStrategy(args, payer, assetEntry.token);
+        const { txHash, intentId } = await this.runDepositStrategy(strategy, {
+            built,
+            args,
+            assetEntry,
+            total,
+        });
+
+        const result = makeTransactionResult({
+            txHash,
+            built: { cm: built.cm, producedNotes: built.producedNotes },
+            sent: args.amount,
+            inputSum: 0n,
+            // Both deposit outputs are credited to the depositor's own
+            // shielded address (recipient = payer in DepositForm).
+            ownIndices: [0, 1],
+        });
+        return { ...result, intentId };
+    }
+
+    /// Pick the cheapest deposit submission path the adapter supports for
+    /// `args`. Order: native ETH (msg.value, no Permit2) > Permit2
+    /// AllowanceTransfer (pre-signed window covers pull) > Permit2 witness
+    /// (per-deposit sig — fallback).
+    private async pickDepositStrategy(
+        args: DepositOptions,
+        payer: string,
+        token: string,
+    ): Promise<DepositStrategy> {
+        const chain = this.cfg.chain;
+        if (args.asEth) {
+            if (!supportsNativeEth(chain)) {
+                throw new DepositAdapterError("native", ["submitIntentNative"]);
+            }
+            return "native";
+        }
+        if (supportsAllowanceTransfer(chain)) {
+            const masp = await chain.maspAddress();
+            const allow = await chain.permit2Allowance(token, payer, masp);
+            const nowSec = Math.floor(Date.now() / 1000);
+            const total = await this.computeDepositTotal(args, token);
+            if (allow.amount >= total && allow.expiration > nowSec + ALLOWANCE_BUFFER_SECS) {
+                return "allowance";
+            }
+        }
+        if (!this.submitter.submitIntent && !chain.submitIntent) {
+            throw new DepositAdapterError("witness", [
+                "submitter.submitIntent | chain.submitIntent",
+            ]);
+        }
+        return "witness";
+    }
+
+    /// Run the picked deposit strategy. Single point of `chain.submit*` /
+    /// `submitter.submitIntent` invocation — every branch returns the same
+    /// `{ txHash, intentId }` shape.
+    private async runDepositStrategy(
+        strategy: DepositStrategy,
+        ctx: {
+            built: ReturnType<typeof buildDeposit>;
+            args: DepositOptions;
+            assetEntry: { token: string; scale: bigint };
+            total: bigint;
+        },
+    ): Promise<{ txHash: string; intentId?: bigint }> {
+        const { built, args, assetEntry, total } = ctx;
+        const chain = this.cfg.chain;
+
+        if (strategy === "native") {
+            safePhase(args.onPhase, "submitting");
+            return chain.submitIntentNative!({
+                intent: built.intent,
+                aux: built.aux,
+                value: total,
+            });
+        }
+        if (strategy === "allowance") {
+            safePhase(args.onPhase, "submitting");
+            return chain.submitIntentAuthorized!({ intent: built.intent, aux: built.aux });
+        }
+        // witness path
+        const deadline =
+            args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT2_DEFAULT_DEADLINE_SECS);
+        const piHash = computePiHash(built.intent, built.aux);
+        const nonce = chain.permit2Nonce ? await chain.permit2Nonce() : BigInt(Date.now());
+        safePhase(args.onPhase, "signing");
+        const permit2 = await chain.signPermit2({
+            token: assetEntry.token,
+            maxTotal: total,
+            deadline,
+            piHash,
+            nonce,
+        });
+        safePhase(args.onPhase, "submitting");
+        if (this.submitter.submitIntent) {
+            return this.submitter.submitIntent({
+                chainId: this.cfg.chainId,
+                intent: built.intent,
+                permit2,
+                aux: built.aux,
+            });
+        }
+        return chain.submitIntent!({ intent: built.intent, permit2, aux: built.aux });
+    }
+
+    /// Read on-chain fee + asset scale so we can recompute the exact total
+    /// the strategy picker compares against the allowance window. Re-reads
+    /// rather than threading state — these calls are cached/cheap.
+    private async computeDepositTotal(args: DepositOptions, _token: string): Promise<bigint> {
+        const asset = args.asset ?? 1n;
+        const entry = await this.cfg.chain.fetchAsset(asset);
+        const feeBps = await this.resolveFeeBps();
+        const inAmt = args.amount * entry.scale;
+        return inAmt + (inAmt * feeBps) / 10000n;
+    }
+
+    /// Cancel an escrowed-but-not-yet-flushed deposit. Permissionless after
+    /// `cancelDelay` blocks; funds + fees return to the original payer.
+    async cancelIntent(id: bigint): Promise<{ txHash: string }> {
+        if (!this.cfg.chain.cancelIntent) {
+            throw new DepositAdapterError("witness", ["cancelIntent"]);
+        }
+        return this.cfg.chain.cancelIntent(id);
     }
 
     /// Internal shielded transfer. Selects 1-2 unspent notes covering
@@ -322,10 +488,16 @@ export class Wallet implements WalletApi {
         const asset = args.asset ?? 1n;
         const sendValue = args.amount;
 
+        safePhase(args.onPhase, "preparing");
         const selection = await ensureCover(
             this.selector,
             () => this.file.notes,
-            { asset, target: sendValue, selectOpts: args.selectOpts, autoConsolidate: args.autoConsolidate },
+            {
+                asset,
+                target: sendValue,
+                selectOpts: args.selectOpts,
+                autoConsolidate: args.autoConsolidate,
+            },
             (a, sel) => this.autoConsolidate(a, sel),
         );
 
@@ -353,6 +525,7 @@ export class Wallet implements WalletApi {
 
         const merkleRoot = (await this.noteSource.fetchPath(selection.notes[0].cm)).root;
 
+        safePhase(args.onPhase, "proving");
         const built = await buildTransfer({
             P: this.P,
             J: this.J,
@@ -373,9 +546,13 @@ export class Wallet implements WalletApi {
             ],
         });
 
+        safePhase(args.onPhase, "submitting");
         const { txHash } = await this.submitter.submit(built.payload);
         const spent = selection.notes.map((n) => n.id);
         await this.markSpent(spent);
+        // Output 0 = recipient (not own unless self-transfer); output 1 = change to self.
+        const isSelf = args.to === this.address;
+        const ownIndices = isSelf ? [0, 1] : [1];
         return makeTransactionResult({
             txHash,
             built,
@@ -383,6 +560,7 @@ export class Wallet implements WalletApi {
             inputSum: selection.sum,
             sent: sendValue,
             change: changeValue,
+            ownIndices,
         });
     }
 
@@ -391,16 +569,13 @@ export class Wallet implements WalletApi {
     /// change-notes back to self, submits, marks spent. Throws
     /// `InsufficientCoverError` on no cover.
     async withdraw(args: WithdrawOptions): Promise<TransactionResult> {
-        return this.withdrawCore(
-            { ...args, asset: args.asset ?? 1n },
-            undefined,
-        );
+        return this.withdrawCore({ ...args, asset: args.asset ?? 1n }, "withdraw");
     }
 
-    /// Unshield to raw ETH via the WETH bridge. Same selection + bundle
-    /// shape as `withdraw`; the payload is tagged `bridge: "withdrawEth"`
-    /// so the submitter targets `MASP.withdrawEth`, which unwraps WETH and
-    /// forwards raw ETH to `args.to`.
+    /// Unshield to raw ETH via `MASP.withdrawNative`. Same selection + bundle
+    /// shape as `withdraw`; payload tagged `kind: "withdrawNative"` so the
+    /// relayer routes accordingly. MASP unwraps WETH and forwards raw ETH
+    /// to `args.to`.
     async withdrawEth(args: WithdrawEthOptions): Promise<TransactionResult> {
         return this.withdrawCore(
             {
@@ -409,22 +584,31 @@ export class Wallet implements WalletApi {
                 asset: args.asset,
                 selectOpts: args.selectOpts,
                 autoConsolidate: args.autoConsolidate,
+                onPhase: args.onPhase,
             },
-            "withdrawEth",
+            "withdrawNative",
         );
     }
 
     private async withdrawCore(
         args: WithdrawOptions & { asset: bigint },
-        bridge: "withdrawEth" | undefined,
+        kind: "withdraw" | "withdrawNative",
     ): Promise<TransactionResult> {
         const { asset } = args;
-        const publicOut = args.amount;
+        const feeBps = await this.resolveFeeBps();
+        const fee = (args.amount * feeBps) / 10000n;
+        const publicOut = args.amount + fee;
 
+        safePhase(args.onPhase, "preparing");
         const selection = await ensureCover(
             this.selector,
             () => this.file.notes,
-            { asset, target: publicOut, selectOpts: args.selectOpts, autoConsolidate: args.autoConsolidate },
+            {
+                asset,
+                target: publicOut,
+                selectOpts: args.selectOpts,
+                autoConsolidate: args.autoConsolidate,
+            },
             (a, sel) => this.autoConsolidate(a, sel),
         );
 
@@ -452,7 +636,9 @@ export class Wallet implements WalletApi {
 
         const merkleRoot = (await this.noteSource.fetchPath(selection.notes[0].cm)).root;
 
-        const built = await buildWithdraw({
+        safePhase(args.onPhase, "proving");
+        const builder = kind === "withdrawNative" ? buildWithdrawNative : buildWithdraw;
+        const built = await builder({
             P: this.P,
             J: this.J,
             chainId: this.cfg.chainId,
@@ -473,8 +659,7 @@ export class Wallet implements WalletApi {
             ],
         });
 
-        if (bridge) built.payload.bridge = bridge;
-
+        safePhase(args.onPhase, "submitting");
         const { txHash } = await this.submitter.submit(built.payload);
         const spent = selection.notes.map((n) => n.id);
         await this.markSpent(spent);
@@ -485,6 +670,8 @@ export class Wallet implements WalletApi {
             inputSum: selection.sum,
             sent: publicOut,
             change: remainder,
+            // Both outputs are change-to-self.
+            ownIndices: [0, 1],
         });
     }
 
@@ -527,6 +714,10 @@ export class Wallet implements WalletApi {
     }
 
     // ---------- internals ----------
+
+    private async resolveFeeBps(): Promise<bigint> {
+        return this.cfg.feeBps ?? (await this.cfg.chain.fetchFeeBps());
+    }
 
     private inputsCtx() {
         return { pk: this.keys.pk, nsk: this.keys.nsk, noteSource: this.noteSource };

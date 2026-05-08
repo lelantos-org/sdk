@@ -14,6 +14,11 @@ import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import type { SyncProgress, SyncResult } from "./sync.js";
 
+/// Per-op progress phases. Mirrors `SyncProgress.phase`. Surfaced via
+/// `onPhase` callbacks on each op's options so UIs can render a stepper.
+export type DepositPhase = "signing" | "submitting";
+export type SpendPhase = "preparing" | "proving" | "submitting";
+
 /// Args for `Wallet.deposit`. Shields an ERC-20 from caller's eth account
 /// into the MASP. Caller must hold an EIP-2612-permit-capable ERC-20
 /// balance ≥ `amount * scale + fee`. For native ETH, use `depositEth`.
@@ -27,6 +32,14 @@ export interface DepositOptions {
     to?: string;
     /// EIP-2612 permit deadline (unix-seconds). Default: `now + 3600`.
     deadline?: bigint;
+    /// Native-ETH deposit. When true, the asset must be the registered WETH
+    /// id; SDK calls `chain.submitIntentNative` with `msg.value = total` and
+    /// skips Permit2 entirely. Caller must have native ETH balance ≥ total.
+    asEth?: boolean;
+    /// Progress callback fired before each major step. Useful for UIs that
+    /// want to render a stepper. Errors thrown from this callback are
+    /// swallowed so they don't break the op.
+    onPhase?: (phase: DepositPhase) => void;
 }
 
 /// Args for `Wallet.withdrawEth`. Unshields a WETH-asset note and forwards
@@ -43,6 +56,8 @@ export interface WithdrawEthOptions {
     selectOpts?: SelectOpts;
     /// On `InsufficientCoverError`, transparently self-spend then retry.
     autoConsolidate?: boolean;
+    /// Progress callback for stepper UIs. See `DepositOptions.onPhase`.
+    onPhase?: (phase: SpendPhase) => void;
 }
 
 /// Args for `Wallet.transfer`. Spends 1-2 unspent notes covering `amount`
@@ -61,6 +76,8 @@ export interface TransferOptions {
     /// On `InsufficientCoverError`, transparently self-spend the two
     /// smallest notes, re-sync, and retry the transfer once. Default false.
     autoConsolidate?: boolean;
+    /// Progress callback for stepper UIs. See `DepositOptions.onPhase`.
+    onPhase?: (phase: SpendPhase) => void;
 }
 
 /// Args for `Wallet.withdraw`. Spends 1-2 notes; releases `amount` ERC20
@@ -80,6 +97,8 @@ export interface WithdrawOptions {
     /// On `InsufficientCoverError`, transparently self-spend the two
     /// smallest notes, re-sync, and retry the withdraw once. Default false.
     autoConsolidate?: boolean;
+    /// Progress callback for stepper UIs. See `DepositOptions.onPhase`.
+    onPhase?: (phase: SpendPhase) => void;
 }
 
 /// Normalised receipt returned by `deposit` / `transfer` / `withdraw`. All
@@ -102,6 +121,19 @@ export interface TransactionResult {
     cm: [string, string];
     /// @deprecated Use `spent`. Old optional alias kept for back-compat.
     spentNoteIds?: string[];
+    /// Deposit-only: the on-chain intent id allocated by `MASP.submitIntent`.
+    /// Webapp consumers track flush status by this id over the relayer SSE
+    /// stream. Undefined for spend ops.
+    intentId?: bigint;
+    /// Subset of `commitments` that this wallet expects to recover via FMD
+    /// scan (own change / self-deposit notes). Empty for transfers where
+    /// neither output goes to self. Use with `wallet.awaitCommitments`.
+    ownCommitments: string[];
+    /// Total value (in circuit units) of the produced outputs flagged as
+    /// own. Equals the amount that will land back in the local wallet
+    /// once the FMD scanner indexes them. UIs use this to render an
+    /// "incoming" pending balance until those notes are observed.
+    ownInflow: bigint;
 }
 
 /// Friendly note view returned by `wallet.notes()`. Internal storage uses
@@ -153,6 +185,14 @@ export interface WalletApi {
 
     sync(opts?: { limit?: number; onProgress?: (p: SyncProgress) => void }): Promise<SyncResult>;
     refresh(): Promise<void>;
+    /// Block until every commitment in `cms` is present in the local note
+    /// store, polling `sync()` between attempts. Resolves immediately if
+    /// they're already there. Use `signal` to cancel; `pollMs` controls
+    /// backoff between sync calls.
+    awaitCommitments(
+        cms: string[],
+        opts?: { signal?: AbortSignal; pollMs?: number; maxAttempts?: number },
+    ): Promise<void>;
     /// Friendly note view filtered by asset. `spent` is optional; omit to
     /// include both spent + unspent.
     notes(filter: NotesFilter): WalletNote[];

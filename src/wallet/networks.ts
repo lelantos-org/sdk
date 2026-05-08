@@ -20,6 +20,10 @@ export interface NetworkPreset {
     fmdUrl: string;
     /// MASP merkle tree depth.
     treeDepth: number;
+    /// Permit2 contract address. Defaults to the canonical CREATE2
+    /// deployment; override per-deployment if a non-standard Permit2 is
+    /// used (e.g. anvil snapshots that re-deploy at a different addr).
+    permit2Address?: string;
 }
 
 /// Builtin presets. Localnet/anvil match the `contracts/` deploy script

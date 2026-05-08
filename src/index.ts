@@ -23,7 +23,7 @@ export * from "./note-codec.js";
 export * from "./note-encrypt.js";
 export * from "./notes.js";
 export * from "./operator.js";
-export * from "./permit.js";
+export * from "./permit2.js";
 export * from "./preload.js";
 export * from "./presets.js";
 export * from "./prover.js";
@@ -61,6 +61,7 @@ export * from "./wallet/errors.js";
 export * from "./wallet/fmd-client.js";
 // ── Wallet API ───────────────────────────────────────────────────────────
 export * from "./wallet/index.js";
+export * from "./wallet/hd.js";
 export * from "./wallet/key-source.js";
 export {
     NETWORKS,

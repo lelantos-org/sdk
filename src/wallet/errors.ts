@@ -14,7 +14,10 @@ export type WalletErrorCode =
     | "FMD_TIMEOUT"
     | "FMD_FAILED"
     | "PROVER_FAILED"
-    | "PERMIT_REJECTED";
+    | "PERMIT_REJECTED"
+    | "DEPOSIT_ADAPTER"
+    | "TX_MINING"
+    | "SELECTION";
 
 /// Base class — every typed SDK error inherits from this. Allows
 /// `catch (e) { if (e instanceof WalletError) … }` without listing all
@@ -110,5 +113,48 @@ export class PermitRejectedError extends WalletError {
     constructor(message = "user rejected permit signature", opts?: { cause?: unknown }) {
         super("PERMIT_REJECTED", message, opts);
         this.name = "PermitRejectedError";
+    }
+}
+
+/// Thrown by `Wallet.deposit` when the configured `ChainAdapter` /
+/// `Submitter` cannot satisfy the requested deposit strategy (e.g. native
+/// ETH path requested but adapter lacks `submitIntentNative`). `strategy`
+/// names the path the wallet attempted to take.
+export type DepositStrategy = "native" | "allowance" | "witness";
+
+export class DepositAdapterError extends WalletError {
+    readonly strategy: DepositStrategy;
+    readonly missing: string[];
+    constructor(strategy: DepositStrategy, missing: string[]) {
+        super(
+            "DEPOSIT_ADAPTER",
+            `deposit(${strategy}): chain adapter is missing ${missing.join(", ")} — upgrade adapter or pick a different strategy`,
+        );
+        this.name = "DepositAdapterError";
+        this.strategy = strategy;
+        this.missing = missing;
+    }
+}
+
+/// Thrown by spend coin-selection when no plan can satisfy the request
+/// (zero spendable notes, RNG missing, etc). For "have balance but no
+/// 2-note cover" use `InsufficientCoverError` — that one's recoverable
+/// via consolidate-then-retry; this one isn't.
+export class SelectionError extends WalletError {
+    readonly asset?: bigint;
+    constructor(message: string, opts?: { asset?: bigint }) {
+        super("SELECTION", message);
+        this.name = "SelectionError";
+        this.asset = opts?.asset;
+    }
+}
+
+/// Thrown when an EVM transaction fails to mine or returns no receipt.
+export class TxMiningError extends WalletError {
+    readonly txHash?: string;
+    constructor(message: string, opts?: { txHash?: string; cause?: unknown }) {
+        super("TX_MINING", message, { cause: opts?.cause });
+        this.name = "TxMiningError";
+        this.txHash = opts?.txHash;
     }
 }

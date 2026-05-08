@@ -5,20 +5,25 @@
 
 import {
     RelayerClient,
+    type RelayerIntentResponse,
     type RelayerSubmitResponse,
+    type SubmitIntentPayload,
     type SubmitTransactPayload,
 } from "../relayer.js";
 
 export interface Submitter {
+    /// Spend op (transfer / withdraw / withdrawNative). Relayer attaches
+    /// the matching tree_update_batch SNARK + tpi from its own state.
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse>;
+    /// Deposit escrow. Optional — when absent, wallet falls back to
+    /// `chain.submitIntent` for direct-to-chain broadcast.
+    submitIntent?(payload: SubmitIntentPayload): Promise<RelayerIntentResponse>;
 }
 
 export class HttpRelayerSubmitter implements Submitter {
     private readonly client: RelayerClient;
 
     constructor(baseUrl: string, fetchImpl?: typeof fetch) {
-        // See FmdClient: bare `fetch` reference loses its `window` binding in
-        // browsers. Wrap so callers don't have to.
         this.client = new RelayerClient(baseUrl, fetchImpl ?? ((...args) => fetch(...args)));
     }
 

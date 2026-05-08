@@ -3,6 +3,7 @@
 // Lifted from the CLI; pure logic, browser-safe (uses Web Crypto for the
 // default rng). Exposes `selectNotes` which the Wallet class wraps.
 
+import { SelectionError } from "./errors.js";
 import type { StoredNote } from "./note-store.js";
 
 export interface SelectOpts {
@@ -87,7 +88,10 @@ export function selectNotes(
     });
 
     if (candidates.length === 0) {
-        throw new Error(`no spendable notes for asset ${asset} (after dust/cooldown filter)`);
+        throw new SelectionError(
+            `no spendable notes for asset ${asset} (after dust/cooldown filter)`,
+            { asset },
+        );
     }
 
     const asc = [...candidates].sort((a, b) => cmp(BigInt(a.value), BigInt(b.value)));
@@ -131,8 +135,9 @@ export function selectNotes(
         };
     }
 
-    throw new Error(
+    throw new SelectionError(
         `insufficient unspent value for asset ${asset}: have ${total}, need ${threshold}`,
+        { asset },
     );
 }
 

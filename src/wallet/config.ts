@@ -34,6 +34,10 @@ export interface WalletConfig {
     /// Concrete chain layer (RPC + permit signer). SDK ships an
     /// `EthersChainAdapter`; apps may plug in viem/web3.js.
     chain: ChainAdapter;
+    /// Basis-point fee applied on shield (deposit) and unshield (withdraw).
+    /// When set, overrides `chain.fetchFeeBps()` — saves a roundtrip and
+    /// pins the value if the caller already knows it. 1 bp = 0.01%.
+    feeBps?: bigint;
 
     // ---- sensible defaults built from these if pluggables omitted ----
     /// fmd-webserver base URL. Required if `noteSource` is not provided.

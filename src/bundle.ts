@@ -3,8 +3,14 @@
 // runner, the CLI, future wallet UIs) shares one witness/prove/encrypt
 // pipeline.
 //
-// Each builder returns a fully-formed `SubmitTransactPayload` ready to POST
-// to the relayer's `/v1/transact`.
+// Two flavors:
+//   - Spend builders (`buildTransfer`, `buildWithdraw`, `buildWithdrawNative`)
+//     prove the transact_2x2 SNARK and return a `SubmitTransactPayload` ready
+//     to POST to the relayer's `/v1/transact`.
+//   - `buildDeposit` does NOT prove — under the new escrow flow, deposits go
+//     through `MASP.submitIntent` (Permit2 witness, no SNARK at submit). It
+//     returns a `BuiltIntent` ready for the wallet to sign + POST to
+//     `/v1/intent`.
 
 import {
     buildOutputAux,
@@ -16,13 +22,13 @@ import {
     buildNoteCommitment,
     type Field,
     type Jubjub,
-    MerkleTree,
     type Point,
     type Poseidon,
 } from "./crypto/index.js";
 import type { Note } from "./notes.js";
+import type { AuxOutput, DepositIntent } from "./permit2.js";
 import { type Groth16Proof, type ProverPaths, prove } from "./prover.js";
-import type { SubmitTransactPayload, TransactPubInputs } from "./relayer.js";
+import type { SpendKind, SubmitTransactPayload, TransactPubInputs } from "./relayer.js";
 import { type FlattenInput, fiatShamirZ, flatten } from "./snark-compression.js";
 import type { Prover } from "./wallet/prover.js";
 import { randomFr } from "./wallet/randomness.js";
@@ -70,25 +76,41 @@ export interface BuiltBundle {
     producedNotes: [Note, Note];
 }
 
-// ---------- DEPOSIT ----------
+// ---------- DEPOSIT (escrow intent — no SNARK) ----------
 
-export interface DepositArgs extends BundleCommon {
+export interface DepositArgs {
+    P: Poseidon;
+    J: Jubjub;
+    chainId: bigint;
+    asset: bigint;
+    /// 0x ETH; payer's account (Permit2 transfer source).
+    payerAddress: string;
+    /// 0x ETH; on-chain recipient (binds DepositIntent.recipient).
+    recipientAddress: string;
     publicIn: bigint;
     /// Bech32m-decoded shielded address of the receiving wallet. The
     /// recipient's note-binding `pk` comes from this struct now that it is
     /// in the address payload.
     recipient: OutputRecipient;
-    /// Per-output randomness for the real output (slot 0). Pad slot uses
-    /// EMPTY_AUX so it does not need rng material.
+    /// Per-output randomness for the real output (slot 0).
     output0: { rho: Field; rcm: Field; rcv: Field; aux: OutputRandomness };
-    /// Pad output (slot 1) — sits on the cm tree but value=0, no aux.
+    /// Pad output (slot 1) — gets a real FMD clue + ECDH so the recipient's
+    /// indexer can match it the same way as the real note.
     output1Pad: { rho: Field; rcm: Field; rcv: Field };
 }
 
-export async function buildDeposit(a: DepositArgs): Promise<BuiltBundle> {
+export interface BuiltIntent {
+    /// Plaintext DepositIntent — the wallet hashes this with `aux` to derive
+    /// the Permit2 witness `piHash`, then signs the Permit2 typed-data.
+    intent: DepositIntent;
+    /// Per-output FMD clue + ECDH + ciphertext. Bound into `piHash`.
+    aux: [AuxOutput, AuxOutput];
+    cm: [Field, Field];
+    producedNotes: [Note, Note];
+}
+
+export function buildDeposit(a: DepositArgs): BuiltIntent {
     const { P, J } = a;
-    const dA = dummyInputAt(P, a.treeDepth, randomFr());
-    const dB = dummyInputAt(P, a.treeDepth, randomFr());
 
     const realOut: Note = {
         asset: a.asset,
@@ -107,18 +129,30 @@ export async function buildDeposit(a: DepositArgs): Promise<BuiltBundle> {
         rcv: a.output1Pad.rcv,
     };
 
-    const merkleRoot = new MerkleTree(P, a.treeDepth).root();
-
     const aux0 = buildAuxForReal(J, P, realOut, a.recipient, a.output0.aux);
-    // Pad output also gets a real clue. Cheapest: same recipient as real
-    // output, fresh randomness. Indexer matches it on `a.recipient`'s
-    // subscription same as the real note — a (value=0) ghost note that
-    // the recipient's wallet recognizes as a self-pad and discards.
     const aux1 = buildAuxForReal(J, P, padOut, a.recipient, {
         esk: randomFr(),
         fmdR: randomFr(),
     });
-    return finalize(a, [dA, dB], [realOut, padOut], merkleRoot, a.publicIn, 0n, [aux0, aux1]);
+
+    const cm0 = buildNoteCommitment(P, realOut);
+    const cm1 = buildNoteCommitment(P, padOut);
+
+    const intent: DepositIntent = {
+        chainId: a.chainId,
+        publicAssetId: a.asset,
+        publicIn: a.publicIn,
+        payer: a.payerAddress,
+        recipient: a.recipientAddress,
+        outCm: [fieldToBytes32(cm0), fieldToBytes32(cm1)],
+    };
+
+    return {
+        intent,
+        aux: [auxOutputToWire(aux0.aux), auxOutputToWire(aux1.aux)],
+        cm: [cm0, cm1],
+        producedNotes: [realOut, padOut],
+    };
 }
 
 // ---------- INPUT SLOT ----------
@@ -164,7 +198,7 @@ export async function buildTransfer(a: TransferArgs): Promise<BuiltBundle> {
     const aux0 = buildAuxForReal(J, P, a.outputs[0], a.outputRecipients[0], a.outputRandomness[0]);
     const aux1 = buildAuxForReal(J, P, a.outputs[1], a.outputRecipients[1], a.outputRandomness[1]);
 
-    return finalize(a, realIns, a.outputs, a.merkleRoot, 0n, 0n, [aux0, aux1]);
+    return finalize(a, "transfer", realIns, a.outputs, a.merkleRoot, 0n, 0n, [aux0, aux1]);
 }
 
 // ---------- WITHDRAW ----------
@@ -196,7 +230,38 @@ export async function buildWithdraw(a: WithdrawArgs): Promise<BuiltBundle> {
     const aux0 = buildAuxForReal(J, P, a.change[0], a.changeRecipients[0], a.changeRandomness[0]);
     const aux1 = buildAuxForReal(J, P, a.change[1], a.changeRecipients[1], a.changeRandomness[1]);
 
-    return finalize(a, realIns, a.change, a.merkleRoot, 0n, a.publicOut, [aux0, aux1]);
+    return finalize(a, "withdraw", realIns, a.change, a.merkleRoot, 0n, a.publicOut, [aux0, aux1]);
+}
+
+// ---------- WITHDRAW NATIVE (WETH → ETH) ----------
+
+export interface WithdrawNativeArgs extends WithdrawArgs {}
+
+/// Same shape as `buildWithdraw` but tags the payload `kind: "withdrawNative"`
+/// so the relayer routes to `MASP.withdrawNative`. The MASP contract unwraps
+/// WETH and forwards raw ETH to `recipientAddress`. Caller is responsible
+/// for ensuring `asset` is the registered WETH asset id.
+export async function buildWithdrawNative(a: WithdrawNativeArgs): Promise<BuiltBundle> {
+    const { P, J } = a;
+    if (a.inputs.every((s) => s == null))
+        throw new Error("withdrawNative: at least one real input required");
+
+    const sumIn = a.inputs.reduce((acc, s) => acc + (s?.cached.note.value ?? 0n), 0n);
+    const sumChange = a.change[0].value + a.change[1].value;
+    if (sumIn !== a.publicOut + sumChange) {
+        throw new Error(
+            `withdrawNative balance: in=${sumIn} publicOut=${a.publicOut} change=${sumChange}`,
+        );
+    }
+
+    const realIns = buildInputs(P, a.inputs, a.treeDepth);
+    const aux0 = buildAuxForReal(J, P, a.change[0], a.changeRecipients[0], a.changeRandomness[0]);
+    const aux1 = buildAuxForReal(J, P, a.change[1], a.changeRecipients[1], a.changeRandomness[1]);
+
+    return finalize(a, "withdrawNative", realIns, a.change, a.merkleRoot, 0n, a.publicOut, [
+        aux0,
+        aux1,
+    ]);
 }
 
 function buildInputs(
@@ -240,6 +305,7 @@ type CircomInput = ReturnType<typeof toCircomInput>;
 
 async function finalize(
     common: BundleCommon,
+    kind: SpendKind,
     inputs: ReturnType<typeof dummyInputAt>[],
     outputs: Note[],
     merkleRoot: Field,
@@ -281,6 +347,7 @@ async function finalize(
     return {
         payload: {
             chainId: common.chainId,
+            kind,
             proof2x2: groth16ToWire(proof),
             pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
             aux: [auxToWire(aux[0]), auxToWire(aux[1])],
@@ -288,6 +355,25 @@ async function finalize(
         cm: [buildNoteCommitment(common.P, outputs[0]), buildNoteCommitment(common.P, outputs[1])],
         producedNotes: [outputs[0], outputs[1]],
     };
+}
+
+/// Convert an internal `OutputAux` (pair of points + bytes) to the wire
+/// `AuxOutput` shape consumed by Permit2 piHash + relayer wire. Splits the
+/// Baby-Jubjub points into separate x/y coordinates to mirror the on-chain
+/// `AuxValidation.Output` struct.
+function auxOutputToWire(a: OutputAux): AuxOutput {
+    return {
+        clueRx: a.clueR[0],
+        clueRy: a.clueR[1],
+        ephPubX: a.ephPub[0],
+        ephPubY: a.ephPub[1],
+        ciphertext: a.ciphertext,
+    };
+}
+
+/// Field element → 0x-hex 32 B (matches MASP `bytes32` slot encoding).
+function fieldToBytes32(f: Field): string {
+    return `0x${f.toString(16).padStart(64, "0")}`;
 }
 
 function computeFiatShamirZ(

@@ -31,10 +31,7 @@ export function polyfillSelfForNode(): void {
     }
 }
 
-export async function initBrowserThreadPool(
-    mod: RayonModule,
-    opts: RayonInitOpts,
-): Promise<void> {
+export async function initBrowserThreadPool(mod: RayonModule, opts: RayonInitOpts): Promise<void> {
     if (!mod.initThreadPool) {
         // eslint-disable-next-line no-console
         console.warn(`[${opts.label}] mod.initThreadPool missing — running single-threaded`);
@@ -70,7 +67,10 @@ export async function initBrowserThreadPool(
         );
     } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn(`[${opts.label}] rayon thread pool init failed; running single-threaded:`, err);
+        console.warn(
+            `[${opts.label}] rayon thread pool init failed; running single-threaded:`,
+            err,
+        );
     }
 }
 
@@ -88,7 +88,10 @@ export async function initNodeThreadPool(
         await raceWithTimeout(mod.initThreadPool(n), 10_000);
     } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn(`[${opts.label}] rayon thread pool init failed; running single-threaded:`, err);
+        console.warn(
+            `[${opts.label}] rayon thread pool init failed; running single-threaded:`,
+            err,
+        );
     }
 }
 

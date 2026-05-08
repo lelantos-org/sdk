@@ -28,6 +28,7 @@ import {
     Poseidon,
 } from "./crypto/index.js";
 import { buildJubjub } from "./crypto/jubjub-wasm.js";
+import { mnemonicToAccountKey } from "./wallet/hd.js";
 
 export interface SpendingKey {
     nsk: Field;
@@ -96,4 +97,26 @@ export async function deriveKeysFromNsk(
     const J = deps?.J ?? (await buildJubjub());
     const keys = buildSpendingKey(P, J, nsk);
     return { keys, address: addressFromSpendingKey(J, keys) };
+}
+
+export interface DeriveFromMnemonicOpts {
+    mnemonic: string;
+    /// ZIP-32 account index. Default 0.
+    account?: number;
+    /// BIP39 passphrase. Default empty.
+    passphrase?: string;
+    /// Optional pre-built primitives (e.g. from `preloadWasm`).
+    P?: Poseidon;
+    J?: Jubjub;
+}
+
+/// One-shot mnemonic → `{ keys, address, nsk }`. Top-level convenience for
+/// SDK consumers that just want an account's keys without juggling
+/// `mnemonicToAccountKey` + `deriveKeysFromNsk` themselves.
+export async function deriveKeysFromMnemonic(
+    opts: DeriveFromMnemonicOpts,
+): Promise<DerivedWalletKeys & { nsk: Field }> {
+    const esk = mnemonicToAccountKey(opts.mnemonic, opts.account ?? 0, opts.passphrase ?? "");
+    const out = await deriveKeysFromNsk(esk.nsk, { P: opts.P, J: opts.J });
+    return { ...out, nsk: esk.nsk };
 }

@@ -28,7 +28,7 @@ import type { Submitter } from "./submitter.js";
 
 /// Supported key derivations. Apps pick exactly one.
 export type ConnectKeyOptions =
-    | { mnemonic: string; passphrase?: string }
+    | { mnemonic: string; account?: number; passphrase?: string }
     | { signature: string }
     | { nsk: bigint };
 
@@ -39,6 +39,8 @@ export interface ConnectOptions {
 
     // ── key derivation (exactly one) ────────────────────────────────────
     mnemonic?: string;
+    /// ZIP-32 account index for mnemonic-derived nsk. Default 0.
+    account?: number;
     passphrase?: string;
     signature?: string;
     nsk?: bigint;
@@ -78,6 +80,8 @@ export interface ConnectOptions {
     selector?: CoinSelector;
     scanner?: Scanner;
     syncStrategy?: SyncStrategy;
+    /// Override on-chain `feeBps()` lookup. See `WalletConfig.feeBps`.
+    feeBps?: bigint;
 
     // ── env ────────────────────────────────────────────────────────────
     /// Override runtime detection. Default: auto-detect via
@@ -106,7 +110,12 @@ function buildKeySource(opts: ConnectOptions): KeySource {
         );
     }
     if (opts.mnemonic !== undefined) {
-        return { type: "mnemonic", mnemonic: opts.mnemonic, passphrase: opts.passphrase };
+        return {
+            type: "mnemonic",
+            mnemonic: opts.mnemonic,
+            account: opts.account ?? 0,
+            passphrase: opts.passphrase,
+        };
     }
     if (opts.signature !== undefined) {
         return { type: "signature", signature: opts.signature };
@@ -136,6 +145,7 @@ function buildChainAdapter(opts: ConnectOptions, preset: NetworkPreset): ChainAd
         signerKey: opts.privateKey,
         maspAddress: preset.maspAddress,
         chainId: preset.chainId,
+        permit2Address: preset.permit2Address,
     });
 }
 
@@ -195,6 +205,7 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
         selector: opts.selector,
         scanner: opts.scanner,
         syncStrategy: opts.syncStrategy,
+        feeBps: opts.feeBps,
     };
 
     return Wallet.create(keySource, cfg);

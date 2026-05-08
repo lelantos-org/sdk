@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BN254_FR, FMD_LEGENDRE_QNR } from "./tags.js";
-import {
-    fmdLegendreWitness,
-    legendreSymbol,
-    modInverse,
-    modSqrt,
-} from "./sqrt.js";
+import { fmdLegendreWitness, legendreSymbol, modInverse, modSqrt } from "./sqrt.js";
 
 function mod(a: bigint, p: bigint): bigint {
     const r = a % p;

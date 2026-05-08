@@ -1,10 +1,9 @@
-// Witness builder for the tree_update circuit. Mirrors
-// circuits/src/tree_update.circom byte-for-byte: the relayer feeds the
-// frontier its local MerkleTree exposes, plus cm0/cm1/startIndex/oldRoot/
-// newRoot pulled from the tree before vs after the two inserts.
-//
-// The circuit recomputes start_index decompositions internally, so callers
-// only need to pass the integer index — no path_indices field.
+// DEPRECATED: tree_update.circom is removed from the project. This module
+// stays as a thin shim only so existing SDK consumers (wallet, operator,
+// relayer) continue to compile. New code should target
+// `tree-update-batch.ts` (when materialized) or build the
+// `tree_update_batch` witness directly. These helpers produce the legacy
+// 5-coeff PolyEval input shape which no contract entry consumes anymore.
 
 import type { Field } from "../crypto/index.js";
 import { fiatShamirZ, flattenTreeUpdate, hornerEval } from "../snark-compression.js";
@@ -15,16 +14,11 @@ export interface TreeUpdateBuildOpts {
     cm0: Field;
     cm1: Field;
     startIndex: number | bigint;
-    /// Depth × 3 frontier from the relayer's local MerkleTree. Slot k at
-    /// level lvl is read by the circuit only when k < (startIndex/4^lvl)%4;
-    /// other slots may be 0 but MUST be supplied.
     frontier: Field[][];
-    /// Optional Fiat-Shamir challenge. In production the contract derives
-    /// `z` deterministically from the 5 logical PIs; tests can pass any
-    /// value (the circuit will compute the matching `y` regardless).
     z?: Field;
 }
 
+/** @deprecated tree_update.circom removed. Migrate to tree_update_batch witnesses. */
 export function buildTreeUpdateInput(
     opts: TreeUpdateBuildOpts,
 ): Record<string, string | string[][]> {
@@ -53,11 +47,7 @@ export function buildTreeUpdateInput(
     };
 }
 
-/// Derive `(z, y)` for the contract's compressed verifier interface.
-/// The circuit consumes `z` as a public input and emits `y = horner(coeffs, z)`
-/// as its sole public output. This helper re-runs the same evaluation off-
-/// chain so callers can build the on-chain `verifyProof` call without going
-/// through snarkjs.
+/** @deprecated tree_update.circom removed. Use tree_update_batch compression. */
 export function compressTreeUpdatePI(
     opts: Pick<TreeUpdateBuildOpts, "oldRoot" | "newRoot" | "cm0" | "cm1" | "startIndex">,
 ): { z: Field; y: Field } {

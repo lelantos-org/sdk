@@ -1,16 +1,22 @@
 // Wallet-side HTTP client for the off-chain MASP relayer service.
 //
-// Lazy-root model: the relayer holds the canonical commitment tree, queues
-// incoming notes, builds tree-update SNARKs, and submits the on-chain
-// `transact` tx. Wallets POST their transact_2x2 proof + cms + ciphertexts
-// here and never touch the chain themselves.
+// New-flow split:
+//   - Deposits: wallet escrows funds via `MASP.submitIntent` (Permit2 witness
+//     bound to DepositIntent + aux). Wallet POSTs `SubmitIntentPayload` to
+//     `/v1/intent`; relayer broadcasts the on-chain submitIntent and later
+//     batches up to MAX_N=16 escrowed intents under one `flushBatch` SNARK.
+//   - Spends (transfer / withdraw / withdrawNative): wallet builds the
+//     transact_2x2 SNARK + transact pubInputs + per-output AuxValidation
+//     payload. Wallet POSTs `SubmitTransactPayload` to `/v1/transact`;
+//     relayer assembles the matching tree_update_batch SNARK (it owns the
+//     249 MB zkey and the tree state) and submits the on-chain spend.
 //
 // The relayer can censor (refuse to submit, withhold ciphertext) but cannot
 // forge: every merkle path it serves must verify against an on-chain
 // `isKnownRoot` before the wallet trusts it for spending.
 
 import type { Field, Point } from "./crypto/index.js";
-import type { Erc2612Permit } from "./permit.js";
+import type { AuxOutput, DepositIntent, Permit2Sig } from "./permit2.js";
 import {
     deserializeMerkleProof,
     deserializeScannedNote,
@@ -18,13 +24,22 @@ import {
     type SerializedMerkleProof,
     type SerializedScannedNote,
     type SerializedTreeState,
-    serializeSubmit,
+    serializeSubmitIntent,
+    serializeSubmitTransact,
 } from "./relayer-codec.js";
 import { createHttpClient, type HttpClient, type HttpClientOptions } from "./wallet/http.js";
+
+/// Spend op the relayer should route to on-chain. Maps 1:1 to the MASP
+/// entry point: `transfer` / `withdraw` / `withdrawNative`. The relayer
+/// attaches the matching `tree_update_batch` proof + tpi from its own
+/// state; wallet never proves that circuit.
+export type SpendKind = "transfer" | "withdraw" | "withdrawNative";
 
 export interface SubmitTransactPayload {
     /// Target chain id; relayer routes to the per-chain pipeline by this key.
     chainId: bigint;
+    /// On-chain entry point the relayer should call.
+    kind: SpendKind;
     /// Snarkjs-shaped Groth16 proof for the transact_2x2 circuit.
     proof2x2: {
         piA: string[];
@@ -33,23 +48,19 @@ export interface SubmitTransactPayload {
         protocol?: string;
         curve?: string;
     };
-    /// The 22 logical PIs in declaration order — the relayer needs these
-    /// (specifically cm0, cm1, payer, relayer, recipient, amounts, etc.)
-    /// to build the matching tree-update proof + the transact() calldata.
+    /// The 20 base logical PIs (6 clue PIs are derived by the relayer from `aux`).
     pubInputs: TransactPubInputs;
     /// Off-circuit FMD + ciphertext payload, one per output slot.
     aux: [TransactAux, TransactAux];
-    /// Optional EIP-2612 permit. Present → relayer routes to
-    /// `MASP.transactWithPermit`, lifting the deposit allowance atomically.
-    /// Absent → relayer falls back to legacy `MASP.transact` (caller must
-    /// have approved beforehand).
-    permit?: Erc2612Permit;
-    /// Optional WETH bridge directive. `"withdrawEth"` instructs the
-    /// submitter to call `MASP.withdrawEth` (the contract unwraps WETH and
-    /// forwards raw ETH to `pi.recipient`). Absent → standard `transact` /
-    /// `transactWithPermit` path. Deposit-side bridging was removed; users
-    /// wrap ETH→WETH off-pool before depositing.
-    bridge?: "withdrawEth";
+}
+
+/// Deposit-side payload: wallet pre-built DepositIntent + Permit2 signature
+/// + per-output FMD/ciphertext. Relayer broadcasts `MASP.submitIntent`.
+export interface SubmitIntentPayload {
+    chainId: bigint;
+    intent: DepositIntent;
+    permit2: Permit2Sig;
+    aux: [AuxOutput, AuxOutput];
 }
 
 export interface TransactPubInputs {
@@ -80,6 +91,14 @@ export interface TransactAux {
 export interface RelayerSubmitResponse {
     /// Tx hash once mined. Relayer awaits inclusion before responding.
     txHash: string;
+}
+
+export interface RelayerIntentResponse {
+    txHash: string;
+    /// Intent id allocated by `MASP.submitIntent` (== `nextIntentId` at
+    /// time of the call). Wallet uses this to track escrow lifecycle and
+    /// for `MASP.cancelIntent` if the relayer never flushes.
+    intentId: bigint;
 }
 
 export interface MerkleProofResponse {
@@ -123,7 +142,15 @@ export class RelayerClient {
     }
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
-        return this.postJson("/v1/transact", serializeSubmit(payload));
+        return this.postJson("/v1/spend", serializeSubmitTransact(payload));
+    }
+
+    async submitIntent(payload: SubmitIntentPayload): Promise<RelayerIntentResponse> {
+        const r = await this.postJson<{ txHash: string; intentId: string | number }>(
+            "/v1/intent",
+            serializeSubmitIntent(payload),
+        );
+        return { txHash: r.txHash, intentId: BigInt(r.intentId) };
     }
 
     async scan(fmdSecret: string): Promise<ScannedNote[]> {
@@ -157,4 +184,3 @@ export class RelayerClient {
         return r.json() as Promise<T>;
     }
 }
-
