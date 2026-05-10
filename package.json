@@ -80,7 +80,7 @@
     "lint": "biome lint .",
     "check": "biome check .",
     "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm",
-    "prepare": "lefthook install || true",
+    "prepare": "lefthook install >/dev/null 2>&1 || true",
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-wasm-size.mjs"
   },
   "dependencies": {
