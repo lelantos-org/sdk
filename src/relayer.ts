@@ -25,6 +25,7 @@ import {
     type SerializedScannedNote,
     type SerializedTreeState,
     serializeSubmitIntent,
+    serializeSubmitSwap,
     serializeSubmitTransact,
 } from "./relayer-codec.js";
 import { createHttpClient, type HttpClient, type HttpClientOptions } from "./wallet/http.js";
@@ -61,6 +62,44 @@ export interface SubmitIntentPayload {
     intent: DepositIntent;
     permit2: Permit2Sig;
     aux: [AuxOutput, AuxOutput];
+}
+
+/// Atomic shielded-swap payload. Carries the leg-1 transact_2x2 SNARK
+/// (same shape as a `withdraw` whose recipient is the SwapWrapper) plus
+/// the leg-2 escrow blob the wrapper forwards to `submitIntentAuthorized`
+/// in the same tx. Relayer adds the matching tree_update_batch proof and
+/// submits to `SwapWrapper.swap`.
+export interface SubmitSwapPayload {
+    chainId: bigint;
+    /// Identical layout to `SubmitTransactPayload` — the relayer reuses
+    /// the same shape validators on the leg-1 SNARK.
+    proof2x2: SubmitTransactPayload["proof2x2"];
+    pubInputs: TransactPubInputs;
+    aux: [TransactAux, TransactAux];
+    swap: SwapBlob;
+}
+
+/// Leg-2 escrow + venue routing.
+export interface SwapBlob {
+    /// Allowlisted `ISwapAdapter` deployed alongside the wrapper.
+    adapter: string;
+    /// Adapter-specific encoded calldata (UniV3: `abi.encode(uint24 fee)`
+    /// or path bytes). 0x-hex.
+    route: string;
+    /// Slim deposit intent for the B note. `payer` MUST equal the
+    /// `swap_wrapper_address` configured on the relayer.
+    intentD: DepositIntent;
+    /// FMD + ciphertext for the B-side outputs. Same shape as the leg-1
+    /// `aux` (matches the on-chain `OutputAux` struct).
+    auxD: [TransactAux, TransactAux];
+    /// 0x-hex ERC20 addresses.
+    tokenIn: string;
+    tokenOut: string;
+    /// Token base-units (`pi.publicOut * scale`). Wrapper re-asserts.
+    amountIn: bigint;
+    /// Slippage floor on the venue's output. Wrapper enforces
+    /// `actualOut >= minOut`.
+    minOut: bigint;
 }
 
 export interface TransactPubInputs {
@@ -143,6 +182,10 @@ export class RelayerClient {
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
         return this.postJson("/v1/spend", serializeSubmitTransact(payload));
+    }
+
+    async submitSwap(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse> {
+        return this.postJson("/v1/swap", serializeSubmitSwap(payload));
     }
 
     async submitIntent(payload: SubmitIntentPayload): Promise<RelayerIntentResponse> {

@@ -29,6 +29,7 @@ export * from "./presets.js";
 export * from "./prover.js";
 export * from "./relayer.js";
 export * from "./snark-compression.js";
+export * from "./swap.js";
 export * from "./sync.js";
 export {
     type EthAddress,

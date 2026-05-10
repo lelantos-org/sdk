@@ -6,7 +6,9 @@ import type { AuxOutput } from "./permit2.js";
 import type {
     ScannedNote,
     SubmitIntentPayload,
+    SubmitSwapPayload,
     SubmitTransactPayload,
+    SwapBlob,
     TransactAux,
     TransactPubInputs,
 } from "./relayer.js";
@@ -39,6 +41,36 @@ export function serializeSubmitTransact(p: SubmitTransactPayload): unknown {
         proof2x2: p.proof2x2,
         pubInputs: serializePubInputs(p.pubInputs),
         aux: p.aux.map(serializeAux),
+    };
+}
+
+export function serializeSubmitSwap(p: SubmitSwapPayload): unknown {
+    return {
+        chainId: Number(p.chainId),
+        proof2x2: p.proof2x2,
+        pubInputs: serializePubInputs(p.pubInputs),
+        aux: p.aux.map(serializeAux),
+        swap: serializeSwapBlob(p.swap),
+    };
+}
+
+function serializeSwapBlob(s: SwapBlob): unknown {
+    return {
+        adapter: s.adapter,
+        route: s.route,
+        intentD: {
+            chainId: s.intentD.chainId.toString(),
+            publicAssetId: s.intentD.publicAssetId.toString(),
+            publicIn: s.intentD.publicIn.toString(),
+            payer: s.intentD.payer,
+            recipient: s.intentD.recipient,
+            outCm: s.intentD.outCm,
+        },
+        auxD: s.auxD.map(serializeAux),
+        tokenIn: s.tokenIn,
+        tokenOut: s.tokenOut,
+        amountIn: s.amountIn.toString(),
+        minOut: s.minOut.toString(),
     };
 }
 
