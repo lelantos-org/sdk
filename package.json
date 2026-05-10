@@ -79,7 +79,7 @@
     "format:check": "biome format .",
     "lint": "biome lint .",
     "check": "biome check .",
-    "check:publish": "publint && attw --pack .",
+    "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm",
     "prepare": "lefthook install || true",
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-wasm-size.mjs"
   },
