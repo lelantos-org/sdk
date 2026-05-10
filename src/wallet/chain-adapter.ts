@@ -5,7 +5,7 @@
 // to: asset/fee lookup, Permit2 witness signing for deposits,
 // `cancelIntent` broadcasting, and `escrowed(id)` reads.
 
-import type { AuxOutput, DepositIntent, PermitSingle, Permit2Sig } from "../permit2.js";
+import type { AuxOutput, DepositIntent, Permit2Sig, PermitSingle } from "../permit2.js";
 
 export interface AssetEntry {
     token: string; // 0x ERC20 address

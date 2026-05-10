@@ -14,10 +14,12 @@ export type WalletErrorCode =
     | "FMD_TIMEOUT"
     | "FMD_FAILED"
     | "PROVER_FAILED"
+    | "PROVER_ARTIFACTS_MISSING"
     | "PERMIT_REJECTED"
     | "DEPOSIT_ADAPTER"
     | "TX_MINING"
-    | "SELECTION";
+    | "SELECTION"
+    | "NETWORK_NOT_DEPLOYED";
 
 /// Base class — every typed SDK error inherits from this. Allows
 /// `catch (e) { if (e instanceof WalletError) … }` without listing all
@@ -146,6 +148,49 @@ export class SelectionError extends WalletError {
         super("SELECTION", message);
         this.name = "SelectionError";
         this.asset = opts?.asset;
+    }
+}
+
+/// Thrown when no Groth16 prover artifacts are available — caller didn't
+/// pass `proverArtifacts`, the companion `@lelantos-org/circuits` package
+/// isn't installed, and no env-var hint was set. Browser callers also hit
+/// this when neither `proverArtifacts` nor `proverArtifactsCdn` is set,
+/// because the companion is published to GitHub Packages and there is no
+/// public CDN fallback.
+export class ProverArtifactsMissingError extends WalletError {
+    readonly tried: string[];
+    constructor(tried: string[]) {
+        super(
+            "PROVER_ARTIFACTS_MISSING",
+            `prover artifacts not found. Tried: ${tried.join(", ")}. ` +
+                `Fixes (any one): pass \`proverArtifacts: { circuit, zkey }\` to ` +
+                `Wallet.connect (browser must do this — no built-in CDN); install ` +
+                `\`@lelantos-org/circuits\` (Node, auto-resolves); set ` +
+                `\`LELANTOS_PROVER_ARTIFACTS_DIR\` to a directory containing ` +
+                `2x2.wasm + 2x2_final.zkey; pass \`proverArtifactsCdn\` to ` +
+                `point at a self-hosted CDN base URL.`,
+        );
+        this.name = "ProverArtifactsMissingError";
+        this.tried = tried;
+    }
+}
+
+/// Thrown when a `NetworkPreset` resolves but its `maspAddress` /
+/// `relayerAddress` is `null` — preset is a placeholder pending public
+/// deployment. Surfaces at `Wallet.connect` time so callers don't fail
+/// later with a misleading "invalid address" error from the chain
+/// adapter.
+export class NetworkNotDeployedError extends WalletError {
+    readonly network: string;
+    constructor(network: string) {
+        super(
+            "NETWORK_NOT_DEPLOYED",
+            `network "${network}" has no public deployment yet. Pass a ` +
+                `custom \`NetworkPreset\` with concrete addresses, or pick ` +
+                `\`anvil\`/\`localnet\` for local dev.`,
+        );
+        this.name = "NetworkNotDeployedError";
+        this.network = network;
     }
 }
 

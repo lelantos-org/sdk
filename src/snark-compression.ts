@@ -1,9 +1,8 @@
 // SnarkCompression: collapse N logical Groth16 public inputs into the 2
 // signals (z, y) the verifier actually sees. Off-chain reference for
-// contracts/src/MASP.sol::_compressPubInputs (transact_2x2, 20 slots) and
-// _compressTreeUpdatePI (tree_update, 5 slots).
+// contracts/src/lib/PubInputs.sol :: compress(Transact).
 //
-// Slot order MUST match contracts/src/MASP.sol byte-for-byte AND the
+// Slot order MUST match the on-chain compress() byte-for-byte AND the
 // snarkjs publicSignals order written by fixture generators.
 
 import { AbiCoder, keccak256 } from "ethers";
@@ -27,13 +26,17 @@ export interface FlattenInput {
     chain_id: string | bigint;
     payer_address: string | bigint;
     relayer_address: string | bigint;
-    /// Per-output FMD clue PIs. Required: matches circuit slots 20..25.
+    /// Per-output Pedersen value commitment that anchors (asset, value) into
+    /// the Merkle leaf. Required: matches circuit slots 20..23.
+    out_cv_dep: (string | bigint)[][];
+    /// Per-output FMD clue PIs. Required: matches circuit slots 24..29.
     out_clue_Rx?: (string | bigint)[];
     out_clue_Ry?: (string | bigint)[];
     out_clue_bits?: (string | bigint)[];
 }
 
-// 26-slot flatten in MASP._flatten order: 20 base + 3·N_OUT clue.
+// 30-slot flatten in PubInputs.compress(Transact) order:
+//   24 base (20 prior + 4 cv_dep coords) + 3·N_OUT clue.
 export function flatten(input: FlattenInput): Field[] {
     const base: Field[] = [
         BigInt(input.merkle_root),
@@ -56,6 +59,10 @@ export function flatten(input: FlattenInput): Field[] {
         BigInt(input.chain_id),
         BigInt(input.payer_address),
         BigInt(input.relayer_address),
+        BigInt(input.out_cv_dep[0][0]),
+        BigInt(input.out_cv_dep[0][1]),
+        BigInt(input.out_cv_dep[1][0]),
+        BigInt(input.out_cv_dep[1][1]),
     ];
     const Rx = input.out_clue_Rx ?? [];
     const Ry = input.out_clue_Ry ?? [];
@@ -71,28 +78,8 @@ export function flatten(input: FlattenInput): Field[] {
     return base;
 }
 
-// Tree-update circuit PI shape. 5 slots in the order the contract's
-// _compressTreeUpdatePI emits them.
-export interface TreeUpdateFlattenInput {
-    old_root: string | bigint;
-    new_root: string | bigint;
-    cm0: string | bigint;
-    cm1: string | bigint;
-    start_index: string | bigint | number;
-}
-
-export function flattenTreeUpdate(input: TreeUpdateFlattenInput): Field[] {
-    return [
-        BigInt(input.old_root),
-        BigInt(input.new_root),
-        BigInt(input.cm0),
-        BigInt(input.cm1),
-        BigInt(input.start_index),
-    ];
-}
-
-// Solidity equivalent (MASP._compressPubInputs):
-//   uint256[] memory s = new uint256[](20); ...
+// Solidity equivalent (PubInputs._finalize):
+//   uint256[] memory s = new uint256[](N); ...
 //   uint256 z = uint256(keccak256(abi.encode(s))) % R;
 // Dynamic uint256[] → length prefix + words. Match exactly.
 export function fiatShamirZ(coeffs: Field[]): Field {
@@ -101,13 +88,4 @@ export function fiatShamirZ(coeffs: Field[]): Field {
         [coeffs.map((c) => c.toString())],
     );
     return BigInt(keccak256(packed)) % BN254_R;
-}
-
-// y = c[0] + c[1]·z + c[2]·z² + … (low-to-high) mod R, via Horner.
-export function hornerEval(coeffs: Field[], z: Field): Field {
-    let acc = 0n;
-    for (let i = coeffs.length - 1; i >= 0; i--) {
-        acc = (acc * z + coeffs[i]) % BN254_R;
-    }
-    return acc;
 }

@@ -3,15 +3,18 @@
 
 import type { Field } from "../crypto/index.js";
 import type { Note } from "../notes.js";
+import type { AuxOutput } from "../permit2.js";
+import type { TransactAux } from "../relayer.js";
 import type { TransactionResult, WalletNote } from "./api.js";
 import type { StoredNote } from "./note-store.js";
 import { randomFr, randomJubjubScalar } from "./randomness.js";
 
-/// Deposit's slot-0 randomness: rho/rcm/rcv plus FMD aux randomness.
+/// Deposit's slot-0 randomness: rho/rcm/rcv/rcvDep plus FMD aux randomness.
 export interface OutputRandomness {
     rho: Field;
     rcm: Field;
     rcv: Field;
+    rcvDep: Field;
     aux: { esk: Field; fmdR: Field };
 }
 
@@ -20,16 +23,34 @@ export function freshOutput(): OutputRandomness {
         rho: randomFr(),
         rcm: randomFr(),
         rcv: randomJubjubScalar(),
+        rcvDep: randomJubjubScalar(),
         aux: { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() },
     };
 }
 
-export function freshNoteRandomness(): { rho: Field; rcm: Field; rcv: Field } {
-    return { rho: randomFr(), rcm: randomFr(), rcv: randomJubjubScalar() };
+export function freshNoteRandomness(): { rho: Field; rcm: Field; rcv: Field; rcvDep: Field } {
+    return {
+        rho: randomFr(),
+        rcm: randomFr(),
+        rcv: randomJubjubScalar(),
+        rcvDep: randomJubjubScalar(),
+    };
+}
+
+/// `buildDeposit` produces aux in the flat-scalar `AuxOutput` shape that
+/// hashes into Permit2 piHash; the relayer wire format (and `SwapBlob.auxD`)
+/// uses the point-as-tuple `TransactAux` shape. Bridge here for swap.
+export function auxOutputToTransactAux(a: AuxOutput): TransactAux {
+    return {
+        clueR: [a.clueRx, a.clueRy],
+        ephPub: [a.ephPubX, a.ephPubY],
+        ciphertext: a.ciphertext,
+    };
 }
 
 /// Lift a `StoredNote` (decimal strings, hex) to the friendlier
-/// `WalletNote` view (bigints, with a `.raw` escape hatch).
+/// `WalletNote` view. `notePayload()` recomputes on each call from the
+/// stored decimals — cheap, but cached if the integrator hammers it.
 export function toWalletNote(s: StoredNote): WalletNote {
     return {
         id: s.id,
@@ -39,7 +60,13 @@ export function toWalletNote(s: StoredNote): WalletNote {
         firstSeenBlock: s.firstSeenBlock,
         discoveredAt: s.discoveredAt,
         cm: s.cm,
-        raw: s,
+        notePayload: () => ({
+            asset: BigInt(s.asset),
+            value: BigInt(s.value),
+            rho: BigInt(s.rho),
+            rcm: BigInt(s.rcm),
+            rcvDep: BigInt(s.rcvDep),
+        }),
     };
 }
 

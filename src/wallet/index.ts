@@ -15,34 +15,38 @@
 
 import { decodeAddress } from "../address.js";
 import { buildDeposit, buildTransfer, buildWithdraw, buildWithdrawNative } from "../bundle.js";
-import { computePiHash } from "../permit2.js";
 import { buildNullifierFromNsk, type Jubjub, Poseidon } from "../crypto/index.js";
 import { buildJubjub } from "../crypto/jubjub-wasm.js";
 import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../keys.js";
 import type { Note } from "../notes.js";
+import { computePiHash } from "../permit2.js";
+import type { SubmitSwapPayload } from "../relayer.js";
 import type {
     DepositOptions,
     NotesFilter,
+    SwapOptions,
     TransactionResult,
     TransferOptions,
     WalletApi,
     WalletNote,
+    WalletNotePayload,
     WithdrawEthOptions,
     WithdrawOptions,
 } from "./api.js";
+import { supportsAllowanceTransfer, supportsNativeEth } from "./chain-adapter.js";
 import type { WalletConfig } from "./config.js";
 import { ensureCover } from "./cover.js";
-import { supportsAllowanceTransfer, supportsNativeEth } from "./chain-adapter.js";
 import { defaultNoteSource, defaultProver, defaultSubmitter, validateConfig } from "./defaults.js";
 import { DepositAdapterError, type DepositStrategy } from "./errors.js";
 import { buildInputSlots } from "./inputs.js";
 import {
+    auxOutputToTransactAux,
     freshNoteRandomness,
     freshOutput,
     makeTransactionResult,
     toWalletNote,
 } from "./internal.js";
-import { type KeySource, resolveNsk } from "./key-source.js";
+import { hexPrivateKeyToNsk, type KeySource, resolveNsk } from "./key-source.js";
 import type { NoteSource } from "./note-source.js";
 import { InMemoryNoteStore, type NoteStore, type NotesFile } from "./note-store.js";
 import type { Prover } from "./prover.js";
@@ -62,10 +66,12 @@ import { type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
 export type {
     DepositOptions,
     NotesFilter,
+    SwapOptions,
     TransactionResult,
     TransferOptions,
     WalletApi,
     WalletNote,
+    WalletNotePayload,
     WithdrawEthOptions,
     WithdrawOptions,
 };
@@ -153,6 +159,78 @@ export class Wallet implements WalletApi {
         return connect(opts);
     }
 
+    /// Convenience factory: derive nsk from a BIP39 mnemonic. Equivalent
+    /// to `Wallet.connect({ ...opts, mnemonic })`. The chain layer
+    /// (signer / privateKey / chain) must still come from `opts`.
+    ///
+    /// ```ts
+    /// const wallet = await Wallet.fromMnemonic(phrase, {
+    ///     network: "anvil",
+    ///     signer: await provider.getSigner(),
+    ///     rpcUrl: "http://localhost:8545",
+    /// });
+    /// ```
+    static async fromMnemonic(
+        mnemonic: string,
+        opts: Omit<import("./connect.js").ConnectOptions, "mnemonic" | "signature" | "nsk"> & {
+            account?: number;
+            passphrase?: string;
+        },
+    ): Promise<WalletApi> {
+        return Wallet.connect({ ...opts, mnemonic });
+    }
+
+    /// Convenience factory: a single 0x-hex EVM private key both signs
+    /// on-chain transactions AND derives the shielded nsk via
+    /// `hexPrivateKeyToNsk`. Most common "I already have a wallet, give
+    /// me shielded support" path.
+    ///
+    /// ```ts
+    /// const wallet = await Wallet.fromPrivateKey("0xabc…", {
+    ///     network: "anvil",
+    ///     rpcUrl: "http://localhost:8545",
+    /// });
+    /// ```
+    static async fromPrivateKey(
+        privateKey: string,
+        opts: Omit<
+            import("./connect.js").ConnectOptions,
+            "mnemonic" | "signature" | "nsk" | "privateKey"
+        >,
+    ): Promise<WalletApi> {
+        return Wallet.connect({
+            ...opts,
+            privateKey,
+            nsk: hexPrivateKeyToNsk(privateKey),
+        });
+    }
+
+    /// Convenience factory: derive nsk by asking an external signer
+    /// (MetaMask, Ledger, WalletConnect) to sign the canonical
+    /// EIP-712 message. Same signer is reused for on-chain txs.
+    ///
+    /// Requires one user-facing signature prompt at boot. After that
+    /// the wallet is identical to one built from a mnemonic.
+    ///
+    /// ```ts
+    /// const signer = await provider.getSigner();
+    /// const wallet = await Wallet.fromSigner(signer, {
+    ///     network: "anvil",
+    ///     rpcUrl: "http://localhost:8545",
+    /// });
+    /// ```
+    static async fromSigner(
+        signer: import("ethers").Signer,
+        opts: Omit<
+            import("./connect.js").ConnectOptions,
+            "mnemonic" | "signature" | "nsk" | "signer"
+        >,
+    ): Promise<WalletApi> {
+        const { deriveNskFromSigner } = await import("../metamask.js");
+        const nsk = await deriveNskFromSigner(signer);
+        return Wallet.connect({ ...opts, signer, nsk });
+    }
+
     /// Build a wallet from any key source. Wires defaults for any
     /// pluggable not supplied in `cfg`. Use `Wallet.connect()` for the
     /// common path; reach for `Wallet.create` when you need to inject all
@@ -174,7 +252,7 @@ export class Wallet implements WalletApi {
 
         const noteSource = cfg.noteSource ?? defaultNoteSource(cfg, J);
         const submitter = cfg.submitter ?? defaultSubmitter(cfg);
-        const prover = cfg.prover ?? defaultProver(cfg);
+        const prover = cfg.prover ?? (await defaultProver(cfg));
         const selector = cfg.selector ?? new SfrtCoinSelector();
         const scanner = cfg.scanner ?? new LocalScanner(J, P);
 
@@ -348,8 +426,19 @@ export class Wallet implements WalletApi {
             recipientAddress: payer,
             publicIn: args.amount,
             recipient,
-            output0: { rho: o0.rho, rcm: o0.rcm, rcv: o0.rcv, aux: o0.aux },
-            output1Pad: { rho: o1.rho, rcm: o1.rcm, rcv: o1.rcv },
+            output0: {
+                rho: o0.rho,
+                rcm: o0.rcm,
+                rcv: o0.rcv,
+                rcvDep: o0.rcvDep,
+                aux: o0.aux,
+            },
+            output1Pad: {
+                rho: o1.rho,
+                rcm: o1.rcm,
+                rcv: o1.rcv,
+                rcvDep: o1.rcvDep,
+            },
         });
 
         const strategy = await this.pickDepositStrategy(args, payer, assetEntry.token);
@@ -513,6 +602,7 @@ export class Wallet implements WalletApi {
             rho: randomFr(),
             rcm: randomFr(),
             rcv: randomJubjubScalar(),
+            rcvDep: randomJubjubScalar(),
         };
         const changeNote: Note = {
             asset,
@@ -521,6 +611,7 @@ export class Wallet implements WalletApi {
             rho: randomFr(),
             rcm: randomFr(),
             rcv: randomJubjubScalar(),
+            rcvDep: randomJubjubScalar(),
         };
 
         const merkleRoot = (await this.noteSource.fetchPath(selection.notes[0].cm)).root;
@@ -624,6 +715,7 @@ export class Wallet implements WalletApi {
             rho: randomFr(),
             rcm: randomFr(),
             rcv: randomJubjubScalar(),
+            rcvDep: randomJubjubScalar(),
         };
         const change1: Note = {
             asset,
@@ -632,6 +724,7 @@ export class Wallet implements WalletApi {
             rho: randomFr(),
             rcm: randomFr(),
             rcv: randomJubjubScalar(),
+            rcvDep: randomJubjubScalar(),
         };
 
         const merkleRoot = (await this.noteSource.fetchPath(selection.notes[0].cm)).root;
@@ -671,6 +764,188 @@ export class Wallet implements WalletApi {
             sent: publicOut,
             change: remainder,
             // Both outputs are change-to-self.
+            ownIndices: [0, 1],
+        });
+    }
+
+    /// Atomic shielded swap. Builds a leg-1 transact_2x2 SNARK whose
+    /// on-chain `recipient` is the SwapWrapper (binding the wrapper as the
+    /// only acceptor of the unshielded ERC20), plus a leg-2 deposit intent
+    /// for the B note (`payer = wrapper`). Bundled as `SubmitSwapPayload`
+    /// and posted via `submitter.submitSwap` — relayer attaches the
+    /// matching `tree_update_batch` SNARK and broadcasts `SwapWrapper.swap`.
+    ///
+    /// `args.amount` is the gross publicOut in circuit units of `assetIn`.
+    /// MASP skims `feeBps` off the gross before transferring to the wrapper,
+    /// so the adapter sees `amount * scaleIn - fee` token base units. The
+    /// B note value is fixed at `quote.minOut / scaleOut` (floor division);
+    /// any positive slippage between `expectedOut` and `minOut` is captured
+    /// downstream of this call (wrapper-defined).
+    async swap(args: SwapOptions): Promise<TransactionResult> {
+        if (!this.submitter.submitSwap) {
+            throw new Error("swap: submitter does not implement submitSwap");
+        }
+        if (args.assetIn === args.assetOut) {
+            throw new Error("swap: assetIn must differ from assetOut");
+        }
+
+        const { assetIn, assetOut, quote, wrapperAddress } = args;
+        const feeBps = await this.resolveFeeBps();
+        const fee = (args.amount * feeBps) / 10000n;
+        const publicOut = args.amount + fee;
+
+        safePhase(args.onPhase, "preparing");
+        const selection = await ensureCover(
+            this.selector,
+            () => this.file.notes,
+            {
+                asset: assetIn,
+                target: publicOut,
+                selectOpts: args.selectOpts,
+                autoConsolidate: args.autoConsolidate,
+            },
+            (a, sel) => this.autoConsolidate(a, sel),
+        );
+
+        const ownAddr = decodeAddress(this.J, this.address);
+        const bRecipient = decodeAddress(this.J, args.bRecipient ?? this.address);
+        const inputs = await buildInputSlots(this.inputsCtx(), selection.notes, assetIn);
+
+        const remainder = selection.sum - publicOut;
+        const half = remainder / 2n;
+        const change0: Note = {
+            asset: assetIn,
+            value: half,
+            pk: this.keys.pk,
+            rho: randomFr(),
+            rcm: randomFr(),
+            rcv: randomJubjubScalar(),
+            rcvDep: randomJubjubScalar(),
+        };
+        const change1: Note = {
+            asset: assetIn,
+            value: remainder - half,
+            pk: this.keys.pk,
+            rho: randomFr(),
+            rcm: randomFr(),
+            rcv: randomJubjubScalar(),
+            rcvDep: randomJubjubScalar(),
+        };
+
+        const merkleRoot = (await this.noteSource.fetchPath(selection.notes[0].cm)).root;
+
+        // Resolve token addresses + scales for both sides.
+        const [entryIn, entryOut] = await Promise.all([
+            this.cfg.chain.fetchAsset(assetIn),
+            this.cfg.chain.fetchAsset(assetOut),
+        ]);
+
+        // B-note value (circuit units of assetOut). MASP charges `feeBps`
+        // on the deposit leg's gross — Permit2 pulls `inAmt + fee` from the
+        // wrapper, where `inAmt = bValue * scaleOut`. Wrapper holds at most
+        // `actualOut`, which is bounded below by `minOut`. To guarantee
+        // wrapper covers the pull, choose bValue such that
+        // `bValue * scaleOut * (10_000 + feeBps) / 10_000 ≤ minOut`, i.e.
+        // `bValue ≤ minOut * 10_000 / (scaleOut * (10_000 + feeBps))`.
+        // Floor-div on both axes; remainder is wrapper-side dust forwarded
+        // to treasury.
+        const bValue = (quote.minOut * 10_000n) / (entryOut.scale * (10_000n + feeBps));
+        if (bValue <= 0n) {
+            throw new Error(`swap: minOut ${quote.minOut} below scaleOut*(1+fee) (zero B-note)`);
+        }
+
+        safePhase(args.onPhase, "proving");
+        // Leg 1: withdraw → wrapper. recipient + relayer both pinned to
+        // the wrapper (MASP enforces `pi.relayer == msg.sender`).
+        const built = await buildWithdraw({
+            P: this.P,
+            J: this.J,
+            chainId: this.cfg.chainId,
+            asset: assetIn,
+            payerAddress: wrapperAddress,
+            relayerAddress: wrapperAddress,
+            recipientAddress: wrapperAddress,
+            prover: this.prover,
+            treeDepth: this.cfg.treeDepth,
+            inputs,
+            merkleRoot,
+            publicOut,
+            change: [change0, change1],
+            changeRecipients: [ownAddr, ownAddr],
+            changeRandomness: [
+                { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() },
+                { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() },
+            ],
+        });
+
+        // Leg 2: B-note deposit intent. payer = wrapper (the on-chain caller
+        // of `submitIntentAuthorized`). Slot 0 = real B note, slot 1 = pad.
+        const o0 = freshOutput();
+        const o1 = freshNoteRandomness();
+        const intentBundle = buildDeposit({
+            P: this.P,
+            J: this.J,
+            chainId: this.cfg.chainId,
+            asset: assetOut,
+            payerAddress: wrapperAddress,
+            recipientAddress: wrapperAddress,
+            publicIn: bValue,
+            recipient: bRecipient,
+            output0: {
+                rho: o0.rho,
+                rcm: o0.rcm,
+                rcv: o0.rcv,
+                rcvDep: o0.rcvDep,
+                aux: o0.aux,
+            },
+            output1Pad: {
+                rho: o1.rho,
+                rcm: o1.rcm,
+                rcv: o1.rcv,
+                rcvDep: o1.rcvDep,
+            },
+        });
+
+        // MASP.withdraw skims fee off gross before transferring to wrapper.
+        const grossIn = publicOut * entryIn.scale;
+        const feeIn = (grossIn * feeBps) / 10000n;
+        const amountInUnits = grossIn - feeIn;
+
+        const payload: SubmitSwapPayload = {
+            chainId: this.cfg.chainId,
+            proof2x2: built.payload.proof2x2,
+            pubInputs: built.payload.pubInputs,
+            aux: built.payload.aux,
+            swap: {
+                adapter: quote.adapter,
+                route: quote.route,
+                intentD: intentBundle.intent,
+                auxD: [
+                    auxOutputToTransactAux(intentBundle.aux[0]),
+                    auxOutputToTransactAux(intentBundle.aux[1]),
+                ],
+                tokenIn: entryIn.token,
+                tokenOut: entryOut.token,
+                amountIn: amountInUnits,
+                minOut: quote.minOut,
+            },
+        };
+
+        safePhase(args.onPhase, "submitting");
+        const { txHash } = await this.submitter.submitSwap(payload);
+        const spent = selection.notes.map((n) => n.id);
+        await this.markSpent(spent);
+
+        // The B note materialises asynchronously via the relayer's
+        // flushBatch worker — not part of `built.commitments`. We only
+        // surface the leg-1 change commitments here, matching withdraw.
+        return makeTransactionResult({
+            txHash,
+            built,
+            spent,
+            inputSum: selection.sum,
+            sent: publicOut,
+            change: remainder,
             ownIndices: [0, 1],
         });
     }

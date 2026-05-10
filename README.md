@@ -10,6 +10,28 @@ Browser-safe: SDK uses Web Crypto + `fetch`; no `node:*` imports. Works in Node 
 
 > **Usage guide:** see [SDK.md](./SDK.md) for the full walkthrough — wallet creation, deposit/transfer/withdraw, sync + balance, custom storage, pluggables, browser, low-level primitives, and errors.
 
+```ts
+import { Wallet } from "@lelantos-org/sdk";
+
+const wallet = await Wallet.fromPrivateKey(privKeyHex, {
+    network: "anvil",
+    rpcUrl: "http://localhost:8545",
+});
+await wallet.deposit({ amount: 1000n, asset: 1n });
+```
+
+Three-line happy path. Install the companion `@lelantos-org/circuits`
+package alongside the SDK so `Wallet.connect()` auto-resolves prover
+artifacts on Node:
+
+```bash
+npm install @lelantos-org/sdk @lelantos-org/circuits
+```
+
+Browser callers pass `proverArtifacts: { circuit, zkey }` to
+`Wallet.connect` explicitly — see SDK.md for the bundler asset-import
+pattern.
+
 ---
 
 ## Installation

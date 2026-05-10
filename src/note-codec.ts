@@ -1,12 +1,14 @@
 // Note-payload codec — the plaintext that travels inside an EncryptedNote.
 //
-// Wire format (80 B, little-endian):
-//   asset (8) || value (8) || rho (32) || rcm (32)
+// Wire format (112 B, little-endian):
+//   asset (8) || value (8) || rho (32) || rcm (32) || rcv_dep (32)
 //
 // `pk` is reconstructed by the receiver from their own ivk; `rcv` is
 // per-spend (a fresh value commitment randomness) and is not transmitted.
-// This format is what the rust indexer + e2e runner already speak; do not
-// change without bumping the encryption KDF domain.
+// `rcv_dep` is the deposit-anchor Pedersen blinder bound into the Merkle
+// leaf at note creation; the spender needs it to recompute the leaf hash
+// at spend time. This format is what the rust indexer + e2e runner already
+// speak; do not change without bumping the encryption KDF domain.
 
 import { FIELD_BYTES, type Field, fromLeBytes, toLeBytes } from "./crypto/index.js";
 
@@ -14,22 +16,30 @@ export const NOTE_ASSET_BYTES = 8;
 export const NOTE_VALUE_BYTES = 8;
 export const NOTE_RHO_BYTES = FIELD_BYTES;
 export const NOTE_RCM_BYTES = FIELD_BYTES;
+export const NOTE_RCV_DEP_BYTES = FIELD_BYTES;
 export const NOTE_PLAINTEXT_BYTES =
-    NOTE_ASSET_BYTES + NOTE_VALUE_BYTES + NOTE_RHO_BYTES + NOTE_RCM_BYTES; // 80
+    NOTE_ASSET_BYTES + NOTE_VALUE_BYTES + NOTE_RHO_BYTES + NOTE_RCM_BYTES + NOTE_RCV_DEP_BYTES; // 112
 
 export interface NotePayload {
     asset: Field;
     value: Field;
     rho: Field;
     rcm: Field;
+    rcvDep: Field;
 }
 
 export function encodeNotePayload(p: NotePayload): Uint8Array {
     const out = new Uint8Array(NOTE_PLAINTEXT_BYTES);
-    out.set(toLeBytes(p.asset, NOTE_ASSET_BYTES), 0);
-    out.set(toLeBytes(p.value, NOTE_VALUE_BYTES), NOTE_ASSET_BYTES);
-    out.set(toLeBytes(p.rho, NOTE_RHO_BYTES), NOTE_ASSET_BYTES + NOTE_VALUE_BYTES);
-    out.set(toLeBytes(p.rcm, NOTE_RCM_BYTES), NOTE_ASSET_BYTES + NOTE_VALUE_BYTES + NOTE_RHO_BYTES);
+    let off = 0;
+    out.set(toLeBytes(p.asset, NOTE_ASSET_BYTES), off);
+    off += NOTE_ASSET_BYTES;
+    out.set(toLeBytes(p.value, NOTE_VALUE_BYTES), off);
+    off += NOTE_VALUE_BYTES;
+    out.set(toLeBytes(p.rho, NOTE_RHO_BYTES), off);
+    off += NOTE_RHO_BYTES;
+    out.set(toLeBytes(p.rcm, NOTE_RCM_BYTES), off);
+    off += NOTE_RCM_BYTES;
+    out.set(toLeBytes(p.rcvDep, NOTE_RCV_DEP_BYTES), off);
     return out;
 }
 
@@ -40,11 +50,13 @@ export function decodeNotePayload(buf: Uint8Array): NotePayload {
     const a = NOTE_ASSET_BYTES;
     const v = a + NOTE_VALUE_BYTES;
     const r = v + NOTE_RHO_BYTES;
+    const c = r + NOTE_RCM_BYTES;
     return {
         asset: fromLeBytes(buf.slice(0, a)),
         value: fromLeBytes(buf.slice(a, v)),
         rho: fromLeBytes(buf.slice(v, r)),
-        rcm: fromLeBytes(buf.slice(r, r + NOTE_RCM_BYTES)),
+        rcm: fromLeBytes(buf.slice(r, c)),
+        rcvDep: fromLeBytes(buf.slice(c, c + NOTE_RCV_DEP_BYTES)),
     };
 }
 

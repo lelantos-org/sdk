@@ -16,6 +16,10 @@ export interface StoredNote {
     value: string;
     rho: string;
     rcm: string;
+    /// Deposit-anchor Pedersen blinder. Required at spend so the SDK can
+    /// recompute `cv_dep = value · V^asset + rcv_dep · H` and the leaf
+    /// hash `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)`.
+    rcvDep: string;
     cm: string; // 0x-hex 32 B
     leafIndex: number;
     spent: boolean;
@@ -34,6 +38,7 @@ export interface NoteRecord {
     value: bigint;
     rho: bigint;
     rcm: bigint;
+    rcvDep: bigint;
     cm: string; // 0x-hex 32 B
     leafIndex: number;
     spent: boolean;
@@ -49,6 +54,7 @@ export function decodeStoredNote(s: StoredNote): NoteRecord {
         value: BigInt(s.value),
         rho: BigInt(s.rho),
         rcm: BigInt(s.rcm),
+        rcvDep: BigInt(s.rcvDep),
         cm: s.cm,
         leafIndex: s.leafIndex,
         spent: s.spent,
@@ -65,6 +71,7 @@ export function encodeStoredNote(n: NoteRecord): StoredNote {
         value: n.value.toString(),
         rho: n.rho.toString(),
         rcm: n.rcm.toString(),
+        rcvDep: n.rcvDep.toString(),
         cm: n.cm,
         leafIndex: n.leafIndex,
         spent: n.spent,
@@ -118,6 +125,7 @@ export function addHits(
             value: h.value.toString(),
             rho: h.rho.toString(),
             rcm: h.rcm.toString(),
+            rcvDep: h.rcvDep.toString(),
             cm: cmHex,
             leafIndex: h.leafIndex,
             spent: false,

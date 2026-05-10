@@ -44,6 +44,16 @@ export interface DepositIntent {
     recipient: string; // 0x address
     /// Two output commitments. 0x-hex 32 B each.
     outCm: [string, string];
+    /// Per-output Pedersen value commitment cv_dep_j = value_j · V^asset
+    /// + rcv_dep_j · H. Anchors (asset_id, value) into the Merkle leaf via
+    /// leaf_j = Poseidon(TAG_LEAF, cm_j, cv_dep_j_x, cv_dep_j_y).
+    cvDep0: [bigint, bigint];
+    cvDep1: [bigint, bigint];
+    /// Sum rcv_dep_0 + rcv_dep_1. Published in the IntentEscrowed event so
+    /// the relayer can build the tree_update_batch witness without learning
+    /// recipient pk/rho/rcm. Pedersen blinder is information-theoretically
+    /// independent of value/asset/identity, so leaks nothing useful.
+    rcvTotal: bigint;
 }
 
 /// `AuxValidation.Output` mirror.
@@ -107,7 +117,7 @@ export async function signPermit2Witness(args: SignPermit2Args): Promise<Permit2
 /// Mirrors MASP.submitIntent line `keccak256(abi.encode(d, aux))`.
 export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]): string {
     const intentTuple =
-        "tuple(uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm)";
+        "tuple(uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal)";
     const auxTuple =
         "tuple(uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2]";
     const encoded = AbiCoder.defaultAbiCoder().encode(
@@ -120,6 +130,9 @@ export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]
                 intent.payer,
                 intent.recipient,
                 intent.outCm,
+                intent.cvDep0,
+                intent.cvDep1,
+                intent.rcvTotal,
             ],
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
         ],

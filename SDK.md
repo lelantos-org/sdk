@@ -8,19 +8,16 @@ See [README.md](./README.md) for installation, layout, address format, and stabi
 
 ## Quickstart
 
-```ts
-import { Wallet, generateMnemonic } from "@lelantos-org/sdk";
+The shortest path from `npm install` to working wallet — one EVM private
+key signs on-chain transactions AND derives the shielded `nsk`:
 
-const wallet = await Wallet.connect({
-    network: "anvil",            // resolves chainId, MASP, relayer, fmd, treeDepth
-    mnemonic: generateMnemonic(),
-    privateKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-    rpcUrl: "http://localhost:8545",
-    proverArtifacts: {
-        circuit: "/path/to/circuits/build/2x2_js/2x2.wasm",
-        zkey: "/path/to/circuits/build/2x2_final.zkey",
-    },
-});
+```ts
+import { Wallet } from "@lelantos-org/sdk";
+
+const wallet = await Wallet.fromPrivateKey(
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    { network: "anvil", rpcUrl: "http://localhost:8545" },
+);
 
 console.log("address:", wallet.address);
 
@@ -32,8 +29,21 @@ await wallet.transfer({ to: peerBech32, amount: 100n, asset: 1n, autoConsolidate
 await wallet.withdraw({ to: "0xf39…", amount: 200n, asset: 1n });
 ```
 
-Pass `autoConsolidate: true` so transfer/withdraw self-spends the two
-smallest notes and retries instead of throwing `InsufficientCoverError`.
+Three things to know:
+
+- **Prover artifacts** auto-resolve on Node when the companion
+  `@lelantos-org/circuits` package is installed (`npm install
+  @lelantos-org/circuits` alongside the SDK). Browser callers must
+  pass `proverArtifacts: { circuit, zkey }` to `Wallet.connect`
+  explicitly — most bundlers can resolve the artifact URLs from
+  `node_modules/@lelantos-org/circuits/2x2/*`. There is no built-in
+  browser CDN because the companion lives on GitHub Packages, which
+  jsDelivr does not proxy.
+- **`autoConsolidate: true`** makes transfer/withdraw self-spend the two
+  smallest notes and retry instead of throwing `InsufficientCoverError`.
+- **`network: "sepolia" | "mainnet"`** are reserved placeholder presets.
+  Calling them today throws `NetworkNotDeployedError` until contracts
+  ship — the SDK upgrade is the only change needed once they do.
 
 ### Advanced — full-control wiring
 
@@ -46,47 +56,77 @@ above is built on top of it.
 
 ## Wallet creation
 
-Three key sources. All produce a deterministic `nsk` field element; the wallet keys (`ivk`, `pk`, `pk_d`, `dk`) and bech32m address derive from it.
+Four key sources. All produce a deterministic `nsk` field element; the
+wallet keys (`ivk`, `pk`, `pk_d`, `dk`) and bech32m address derive from
+it. Pick the factory that matches your call site.
 
-### From a BIP39 mnemonic
+### From a hex EVM private key — `Wallet.fromPrivateKey`
+
+The newcomer path. One key both signs on-chain transactions and derives
+the shielded `nsk` (via domain-separated `keccak256` reduction). Most
+common for backend services and dev scripts.
 
 ```ts
-import { Wallet, generateNewMnemonic, isValidMnemonic } from "@lelantos-org/sdk";
+const wallet = await Wallet.fromPrivateKey(
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    { network: "anvil", rpcUrl: "http://localhost:8545" },
+);
+```
 
-// Argument is BIP39 entropy bits, NOT word count.
-//   256 → 24 words (default, recommended)
-//   128 → 12 words
-const mnemonic = generateNewMnemonic(256);
+The derivation is exposed standalone as `hexPrivateKeyToNsk(hex)` for
+callers that want only the field element.
+
+### From a BIP39 mnemonic — `Wallet.fromMnemonic`
+
+The production path for end-user wallets. The mnemonic only derives
+`nsk`; on-chain signing still comes from `signer` / `privateKey` /
+`chain` in the options.
+
+```ts
+import { Wallet, generateMnemonic, isValidMnemonic } from "@lelantos-org/sdk";
+
+// Argument is `{ words: 12 | 24 }`. Default 24 words = 256 bits entropy.
+const mnemonic = generateMnemonic({ words: 24 });
 if (!isValidMnemonic(mnemonic)) throw new Error("bad seed");
 
-const wallet = await Wallet.create(
-    { type: "mnemonic", mnemonic, passphrase: "optional" },
-    config,
-);
+const wallet = await Wallet.fromMnemonic(mnemonic, {
+    network: "anvil",
+    privateKey: "0x...",          // chain-side signer
+    rpcUrl: "http://localhost:8545",
+    account: 0,                    // optional ZIP-32 sub-account
+});
 ```
 
-### From an EIP-712 signature (MetaMask / hardware wallet)
+### From an external signer (MetaMask / hardware wallet) — `Wallet.fromSigner`
+
+Triggers one EIP-712 signature prompt at boot, then reuses the same
+signer for on-chain transactions. After the first prompt the wallet
+behaves identically to one built from a mnemonic.
 
 ```ts
-import { Wallet, metamask } from "@lelantos-org/sdk";
+import { BrowserProvider } from "ethers";
 
-// Browser flow:
-const sig = await metamask.deriveNskFromSigner(ethersSigner);
-// → store sig somewhere; pass to Wallet.create:
+const provider = new BrowserProvider(window.ethereum);
+await provider.send("eth_requestAccounts", []);
+const signer = await provider.getSigner();
 
-const wallet = await Wallet.create(
-    { type: "signature", signature: sigHex },
-    config,
-);
+const wallet = await Wallet.fromSigner(signer, {
+    network: "mainnet",
+    rpcUrl: window.ethereum.rpcUrl,
+});
 ```
 
-The canonical EIP-712 typed-data hash is exposed via `metamask.lelantosTypedDataHash()` for offline signing.
+### Power user — `Wallet.connect` and `Wallet.create`
 
-### From a raw nsk field element
+Reach for `Wallet.connect(opts)` when you need to mix sources (e.g.
+mnemonic for nsk + an external signer for chain) or override pluggables.
+Reach for `Wallet.create(source, cfg)` when you need to inject every
+pluggable yourself (custom indexer, alt chain library, mocked
+submitter).
 
 ```ts
 const wallet = await Wallet.create(
-    { type: "nsk", nsk: 0xdeadbeefn },   // expert / test path
+    { type: "nsk", nsk: 0xdeadbeefn },   // raw — test only
     config,
 );
 ```
@@ -188,10 +228,16 @@ Pick `full` + client-FMD for max privacy on a fast link. Pick `matches` for mobi
 ### Inspect cache
 
 ```ts
-wallet.notes();                                    // all
+wallet.allNotes();                                 // every asset
 wallet.notes({ asset: 1n, spent: false });         // filter
 wallet.balance(1n);                                // bigint, unspent only
 ```
+
+`WalletNote` is the only note type integrators touch. Storage encoding
+(decimal-string `bigint`s) is internal. If you need the cryptographic
+fields for a custom proof — e.g. when assembling bundles via the
+low-level builders — call `note.notePayload()` for `{ asset, value, rho,
+rcm, rcvDep }` as native bigints.
 
 ### Select notes manually
 
@@ -348,6 +394,46 @@ class IndexerNoteSource implements NoteSource {
 
 ---
 
+## Networks
+
+Built-in presets cover local development and reserve names for public
+deployments. Unknown names throw immediately so typos surface at
+`connect` time.
+
+| Preset | chainId | Status | Notes |
+|--------|---------|--------|-------|
+| `anvil` | 31337 | live (local) | Foundry dev chain. |
+| `localnet` | 31337 | live (local) | Alias of `anvil`. Diverges later. |
+| `sepolia` | 11155111 | reserved | Throws `NetworkNotDeployedError` until contracts deploy. |
+| `mainnet` | 1 | reserved | Same. |
+
+### Custom network
+
+When you need a network the SDK doesn't ship a preset for, pass a
+`NetworkPreset` object directly in place of the name:
+
+```ts
+import { Wallet, type NetworkPreset } from "@lelantos-org/sdk";
+
+const myChain: NetworkPreset = {
+    chainId: 8453n,
+    maspAddress: "0xMASP…",
+    relayerAddress: "0xRelayer…",
+    relayerUrl: "https://relayer.my-deployment.example",
+    fmdUrl: "https://fmd.my-deployment.example",
+    treeDepth: 10,
+    permit2Address: "0x000000000022D473030F116dDEE9F6B43aC78BA3",  // optional
+};
+
+const wallet = await Wallet.fromPrivateKey(pk, { network: myChain, rpcUrl });
+```
+
+Set `maspAddress` or `relayerAddress` to `null` to mark the preset as a
+placeholder (useful for staging deploys); `connect()` then throws
+`NetworkNotDeployedError` so call sites fail loudly.
+
+---
+
 ## Browser usage
 
 ```ts
@@ -372,7 +458,25 @@ const wallet = await Wallet.create(
 );
 ```
 
-The prover (`proverPaths`) needs the snarkjs WASM + zkey served somewhere reachable by the browser (e.g. via fetch). Pass URLs.
+The companion `@lelantos-org/circuits` package ships the prover
+artifacts as static `.wasm` + `.zkey` files. Resolve their URLs through
+your bundler's asset pipeline and pass them to `Wallet.connect`:
+
+```ts
+// Vite / Next.js
+import wasmUrl from "@lelantos-org/circuits/2x2/2x2.wasm?url";
+import zkeyUrl from "@lelantos-org/circuits/2x2/2x2_final.zkey?url";
+
+const wallet = await Wallet.connect({
+    network: "mainnet",
+    signer,
+    rpcUrl,
+    proverArtifacts: { circuit: wasmUrl, zkey: zkeyUrl },
+});
+```
+
+For environments with a self-hosted asset CDN, pass the base URL via
+`proverArtifactsCdn` instead of resolving each file individually.
 
 ---
 
@@ -439,6 +543,16 @@ try {
 - `ProverError` (`code: "PROVER_FAILED"`) — proof generation failed.
 - `PermitRejectedError` (`code: "PERMIT_REJECTED"`) — user rejected the
   EIP-2612 signature in their wallet.
+- `ProverArtifactsMissingError` (`code: "PROVER_ARTIFACTS_MISSING"`) —
+  no `proverArtifacts` passed, no companion `@lelantos-org/circuits`
+  package installed, no `LELANTOS_PROVER_ARTIFACTS_DIR` env var. Reads
+  `tried: string[]` for every resolution path attempted. Fix with any
+  one of: pass `proverArtifacts`, install the companion package, set
+  the env var.
+- `NetworkNotDeployedError` (`code: "NETWORK_NOT_DEPLOYED"`) — preset
+  was found but its on-chain addresses are still `null` (placeholder
+  network). Reads `network: string`. Fix by picking a deployed preset
+  or passing a custom `NetworkPreset` literal.
 
 `HttpClientOptions` (passed via `connect({ http: { timeoutMs, retries } })`
 or directly to `FmdClient` / `RelayerClient`) tunes timeout (default

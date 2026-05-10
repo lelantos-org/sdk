@@ -154,6 +154,7 @@ function serializePubInputs(pi: TransactPubInputs): unknown {
         chainId: Number(pi.chainId),
         payer: pi.payer,
         relayer: pi.relayer,
+        outCvDep: pi.outCvDep.map(pointToObj),
     };
 }
 

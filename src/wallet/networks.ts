@@ -9,11 +9,15 @@
 export interface NetworkPreset {
     /// EVM chain id. Must match the contract + circuit build.
     chainId: bigint;
-    /// MASP contract address (used by the chain adapter).
-    maspAddress: string;
+    /// MASP contract address (used by the chain adapter). `null` marks
+    /// a placeholder preset (network is reserved but contracts are not
+    /// yet deployed); `connect()` throws `NetworkNotDeployedError` so
+    /// callers see a clear error instead of a cryptic "invalid address"
+    /// failure later.
+    maspAddress: string | null;
     /// Relayer signer address. SNARK-bound — must equal the deployment's
-    /// relayer pipeline address.
-    relayerAddress: string;
+    /// relayer pipeline address. Same `null` semantics as `maspAddress`.
+    relayerAddress: string | null;
     /// Relayer base URL.
     relayerUrl: string;
     /// fmd-webserver base URL.
@@ -24,10 +28,15 @@ export interface NetworkPreset {
     /// deployment; override per-deployment if a non-standard Permit2 is
     /// used (e.g. anvil snapshots that re-deploy at a different addr).
     permit2Address?: string;
+    /// Documentation URL surfaced in `NetworkNotDeployedError` so
+    /// integrators can find current deployment status.
+    deploymentStatusUrl?: string;
 }
 
 /// Builtin presets. Localnet/anvil match the `contracts/` deploy script
-/// defaults; mainnet/testnet are placeholders pending public deployment.
+/// defaults. `sepolia`/`mainnet` are reserved placeholders — addresses
+/// land here once the public deployment ships, so integrators can pick
+/// them by name today and the SDK upgrade is the only change needed.
 export const NETWORKS = {
     /// Foundry / anvil dev chain (chainId 31337). Matches
     /// `cast send` defaults from the contracts repo.
@@ -49,6 +58,26 @@ export const NETWORKS = {
         fmdUrl: "http://localhost:3001",
         treeDepth: 10,
     },
+    /// Ethereum Sepolia testnet. Placeholder — no public deployment yet.
+    sepolia: {
+        chainId: 11155111n,
+        maspAddress: null,
+        relayerAddress: null,
+        relayerUrl: "https://sepolia.relayer.lelantos.org",
+        fmdUrl: "https://sepolia.fmd.lelantos.org",
+        treeDepth: 10,
+        deploymentStatusUrl: "https://docs.lelantos.org/deployments",
+    },
+    /// Ethereum mainnet. Placeholder — no public deployment yet.
+    mainnet: {
+        chainId: 1n,
+        maspAddress: null,
+        relayerAddress: null,
+        relayerUrl: "https://relayer.lelantos.org",
+        fmdUrl: "https://fmd.lelantos.org",
+        treeDepth: 10,
+        deploymentStatusUrl: "https://docs.lelantos.org/deployments",
+    },
 } as const satisfies Record<string, NetworkPreset>;
 
 export type NetworkName = keyof typeof NETWORKS;
@@ -66,4 +95,17 @@ export function resolveNetwork(name: NetworkName | NetworkPreset): NetworkPreset
         return p;
     }
     return name;
+}
+
+/// Preset narrowed to a fully-deployed shape. Returned by
+/// `assertNetworkDeployed`; both addresses are guaranteed non-null.
+export interface DeployedNetworkPreset extends NetworkPreset {
+    maspAddress: string;
+    relayerAddress: string;
+}
+
+/// `true` when the preset has concrete on-chain addresses. Use to gate
+/// UI on the readiness of a placeholder network preset.
+export function isNetworkDeployed(preset: NetworkPreset): preset is DeployedNetworkPreset {
+    return preset.maspAddress !== null && preset.relayerAddress !== null;
 }

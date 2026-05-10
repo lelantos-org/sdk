@@ -8,12 +8,11 @@ import {
     type AuxOutput,
     type DepositIntent,
     PERMIT2_ADDRESS,
-    type PermitSingle,
     type Permit2Sig,
+    type PermitSingle,
     signPermit2Allowance,
     signPermit2Witness,
 } from "../../permit2.js";
-import { TxMiningError } from "../errors.js";
 import type {
     AssetEntry,
     ChainAdapter,
@@ -21,6 +20,7 @@ import type {
     Permit2SignArgs,
     TokenMeta,
 } from "../chain-adapter.js";
+import { TxMiningError } from "../errors.js";
 
 const MASP_ABI = [
     "function asset(uint64) view returns (address token, uint256 scale)",

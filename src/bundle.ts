@@ -29,7 +29,7 @@ import type { Note } from "./notes.js";
 import type { AuxOutput, DepositIntent } from "./permit2.js";
 import { type Groth16Proof, type ProverPaths, prove } from "./prover.js";
 import type { SpendKind, SubmitTransactPayload, TransactPubInputs } from "./relayer.js";
-import { type FlattenInput, fiatShamirZ, flatten } from "./snark-compression.js";
+import { BN254_R, type FlattenInput, fiatShamirZ, flatten } from "./snark-compression.js";
 import type { Prover } from "./wallet/prover.js";
 import { randomFr } from "./wallet/randomness.js";
 import {
@@ -93,10 +93,10 @@ export interface DepositArgs {
     /// in the address payload.
     recipient: OutputRecipient;
     /// Per-output randomness for the real output (slot 0).
-    output0: { rho: Field; rcm: Field; rcv: Field; aux: OutputRandomness };
+    output0: { rho: Field; rcm: Field; rcv: Field; rcvDep: Field; aux: OutputRandomness };
     /// Pad output (slot 1) — gets a real FMD clue + ECDH so the recipient's
     /// indexer can match it the same way as the real note.
-    output1Pad: { rho: Field; rcm: Field; rcv: Field };
+    output1Pad: { rho: Field; rcm: Field; rcv: Field; rcvDep: Field };
 }
 
 export interface BuiltIntent {
@@ -119,6 +119,7 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
         rho: a.output0.rho,
         rcm: a.output0.rcm,
         rcv: a.output0.rcv,
+        rcvDep: a.output0.rcvDep,
     };
     const padOut: Note = {
         asset: a.asset,
@@ -127,6 +128,7 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
         rho: a.output1Pad.rho,
         rcm: a.output1Pad.rcm,
         rcv: a.output1Pad.rcv,
+        rcvDep: a.output1Pad.rcvDep,
     };
 
     const aux0 = buildAuxForReal(J, P, realOut, a.recipient, a.output0.aux);
@@ -138,6 +140,15 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
     const cm0 = buildNoteCommitment(P, realOut);
     const cm1 = buildNoteCommitment(P, padOut);
 
+    // Deposit-anchor Pedersen value commitments. cv_dep_j = value_j · V^asset
+    // + rcv_dep_j · H. Baked into the leaf via Poseidon(TAG_LEAF, cm, cv_dep)
+    // so the spender cannot open the cm under a different (asset, value) at
+    // spend time. Closes C-1 (cm-preimage substitution on deposit path).
+    const assetGen = J.hashToAssetGen(a.asset);
+    const cvDep0 = J.valueCommit(realOut.value, assetGen, realOut.rcvDep);
+    const cvDep1 = J.valueCommit(padOut.value, assetGen, padOut.rcvDep);
+    const rcvTotal = (realOut.rcvDep + padOut.rcvDep) % BN254_R;
+
     const intent: DepositIntent = {
         chainId: a.chainId,
         publicAssetId: a.asset,
@@ -145,6 +156,9 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
         payer: a.payerAddress,
         recipient: a.recipientAddress,
         outCm: [fieldToBytes32(cm0), fieldToBytes32(cm1)],
+        cvDep0: [cvDep0[0], cvDep0[1]],
+        cvDep1: [cvDep1[0], cvDep1[1]],
+        rcvTotal,
     };
 
     return {
@@ -291,7 +305,13 @@ function buildAuxForReal(
         P,
         recipientFlagKey: flag,
         recipientPkD: recipient.pk_d,
-        note: { asset: note.asset, value: note.value, rho: note.rho, rcm: note.rcm },
+        note: {
+            asset: note.asset,
+            value: note.value,
+            rho: note.rho,
+            rcm: note.rcm,
+            rcvDep: note.rcvDep,
+        },
         esk: rng.esk,
         fmdR: rng.fmdR,
     });
@@ -421,6 +441,7 @@ function extractPubInputs(
     const outCm = b.out_cm as string[];
     const inCv = b.in_cv as string[][];
     const outCv = b.out_cv as string[][];
+    const outCvDep = b.out_cv_dep as string[][];
 
     return {
         merkleRoot: big(b.merkle_root),
@@ -435,6 +456,7 @@ function extractPubInputs(
         chainId: common.chainId,
         payer: common.payerAddress,
         relayer: common.relayerAddress,
+        outCvDep: [point(outCvDep[0]), point(outCvDep[1])],
     };
 }
 

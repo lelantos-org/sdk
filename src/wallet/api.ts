@@ -5,9 +5,10 @@
 // the import graph shallow for consumers that need only the shape.
 
 import type { SpendingKey } from "../keys.js";
+import type { SwapQuote } from "../swap.js";
 import type { ChainAdapter } from "./chain-adapter.js";
 import type { NoteSource } from "./note-source.js";
-import type { NoteStore, StoredNote } from "./note-store.js";
+import type { NoteStore } from "./note-store.js";
 import type { Prover } from "./prover.js";
 import type { Scanner } from "./scanner.js";
 import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
@@ -101,6 +102,35 @@ export interface WithdrawOptions {
     onPhase?: (phase: SpendPhase) => void;
 }
 
+/// Args for `Wallet.swap`. Atomic shielded swap: spends 1-2 notes of
+/// `assetIn`, releases `amount` (gross publicOut, MASP fee deducted) to
+/// the SwapWrapper, which adapter-swaps to `assetOut` and re-shields the
+/// result as a fresh B note for `bRecipient` (default own).
+export interface SwapOptions {
+    /// Asset id of the input notes to spend.
+    assetIn: bigint;
+    /// Asset id of the output (B) note.
+    assetOut: bigint;
+    /// Amount in circuit units of `assetIn`. Encoded as `pi.publicOut` on
+    /// the leg-1 withdraw — MASP transfers `amount * scaleIn` minus its
+    /// protocol fee to the wrapper.
+    amount: bigint;
+    /// Pre-fetched MetaQuoter quote pinning the route + minOut floor.
+    /// Caller fetches via `fetchSwapQuote`; refetch if `quoteAgeSecs > N`.
+    quote: SwapQuote;
+    /// SwapWrapper contract address. Bound into the leg-1 PI as
+    /// `recipient = relayer = wrapperAddress`, and as `payer` on leg-2.
+    wrapperAddress: string;
+    /// Shielded recipient (bech32m) for the B note. Defaults to own.
+    bRecipient?: string;
+    /// Optional selection tuning.
+    selectOpts?: SelectOpts;
+    /// Auto-consolidate on `InsufficientCoverError`. See `WithdrawOptions`.
+    autoConsolidate?: boolean;
+    /// Progress callback for stepper UIs.
+    onPhase?: (phase: SpendPhase) => void;
+}
+
 /// Normalised receipt returned by `deposit` / `transfer` / `withdraw`. All
 /// fields are always populated (empty arrays / `0n` instead of
 /// `undefined`) so consumers can drop the optional-chaining boilerplate.
@@ -136,9 +166,20 @@ export interface TransactionResult {
     ownInflow: bigint;
 }
 
-/// Friendly note view returned by `wallet.notes()`. Internal storage uses
-/// decimal-string `bigint`s + 0x-hex `cm`; this view exposes native
-/// `bigint`s and a `.raw` accessor for callers that need the storage form.
+/// Plaintext payload of a recovered note. Returned by
+/// `WalletNote.notePayload()` for callers that need the cryptographic
+/// fields (rho/rcm/rcvDep) — e.g. building custom proofs against the
+/// SDK's low-level builders.
+export interface WalletNotePayload {
+    asset: bigint;
+    value: bigint;
+    rho: bigint;
+    rcm: bigint;
+    rcvDep: bigint;
+}
+
+/// Friendly note view returned by `wallet.notes()`. The only note type
+/// integrators need to touch — storage encoding is internal.
 export interface WalletNote {
     /// Stable short id assigned by the SDK on discovery.
     id: string;
@@ -154,8 +195,10 @@ export interface WalletNote {
     discoveredAt: string;
     /// 0x-hex commitment (32 bytes).
     cm: string;
-    /// Raw `StoredNote` (decimal strings, hex), useful for serialisation.
-    raw: StoredNote;
+    /// Decoded payload (rho/rcm/rcvDep) — needed when assembling custom
+    /// bundles via the low-level `buildTransfer` / `buildWithdraw` paths.
+    /// Cheap accessor; recomputes on each call. Most apps never need this.
+    notePayload(): WalletNotePayload;
 }
 
 /// Filter for `wallet.notes()`. `asset` is required so callers in
@@ -208,6 +251,10 @@ export interface WalletApi {
     withdraw(args: WithdrawOptions): Promise<TransactionResult>;
     /// Unshield to raw ETH via the WETH bridge.
     withdrawEth(args: WithdrawEthOptions): Promise<TransactionResult>;
+    /// Atomic shielded swap (note `assetIn` → SwapWrapper → note `assetOut`).
+    /// Leg-1 unshield to wrapper + leg-2 escrow intent are bundled into
+    /// one tx via `submitter.submitSwap`.
+    swap(args: SwapOptions): Promise<TransactionResult>;
     markSpent(noteIds: string[]): Promise<void>;
 }
 

@@ -9,7 +9,6 @@ import {
     type Field,
     fmdLegendreWitness,
     type Jubjub,
-    type MerkleTree,
     type Point,
     type Poseidon,
 } from "./crypto/index.js";
@@ -22,16 +21,9 @@ export interface SpendableCachedNote {
     leafIndex: number;
 }
 
-/// Wallet-cached note + local merkle tree → SpentNote ready for the witness.
-/// Use when the wallet already has the canonical tree (tests / e2e).
-export function toSpentNote(P: Poseidon, cached: SpendableCachedNote, tree: MerkleTree): SpentNote {
-    const proof = tree.proof(cached.leafIndex);
-    return toSpentNoteFromPath(P, cached, proof.pathElements, proof.pathIndices);
-}
-
-/// Same shape, but path was supplied externally (e.g. by the relayer's
-/// `/path` endpoint). Caller is responsible for verifying the path against
-/// an on-chain `isKnownRoot` before trusting it for spending.
+/// Path supplied externally (e.g. by the relayer's `/path` endpoint).
+/// Caller is responsible for verifying the path against an on-chain
+/// `isKnownRoot` before trusting it for spending.
 export function toSpentNoteFromPath(
     P: Poseidon,
     cached: SpendableCachedNote,
@@ -111,6 +103,14 @@ export function toCircomInput(
         J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv),
     );
 
+    // Deposit-anchor cv_dep per output (and per input for spent.circom). Same
+    // Pedersen shape as cv but with the rcv_dep blinder so the leaf hash
+    // Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) re-derives consistently from
+    // the spender's side.
+    const out_cv_dep: Point[] = outputs.map((o) =>
+        J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep),
+    );
+
     const z = opts.z ?? 1n;
 
     return {
@@ -127,6 +127,7 @@ export function toCircomInput(
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
+        out_cv_dep: out_cv_dep.map((p) => [p[0].toString(), p[1].toString()]),
 
         in_asset: inputs.map((i) => i.asset.toString()),
         in_value: inputs.map((i) => i.value.toString()),
@@ -135,6 +136,7 @@ export function toCircomInput(
         in_rcm: inputs.map((i) => i.rcm.toString()),
         in_nsk: inputs.map((i) => i.nsk.toString()),
         in_rcv: inputs.map((i) => i.rcv.toString()),
+        in_rcv_dep: inputs.map((i) => i.rcvDep.toString()),
         in_path_elements: inputs.map((i) =>
             i.pathElements.map((level) => level.map((e) => e.toString())),
         ),
@@ -147,6 +149,7 @@ export function toCircomInput(
         out_rho: outputs.map((o) => o.rho.toString()),
         out_rcm: outputs.map((o) => o.rcm.toString()),
         out_rcv: outputs.map((o) => o.rcv.toString()),
+        out_rcv_dep: outputs.map((o) => o.rcvDep.toString()),
 
         out_r: opts.outputClues.map((c) => c.r.toString()),
         out_fk: opts.outputClues.map((c) => c.fk.map((p) => [p[0].toString(), p[1].toString()])),
@@ -184,7 +187,7 @@ function fmdLegendreInputs(
 }
 
 export function dummyOutput(asset: Field = 1n): Note {
-    return { asset, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n };
+    return { asset, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n, rcvDep: 0n };
 }
 
 // Dummy spent slot. is_dummy=1 bypasses Merkle membership and pk check inside
@@ -203,6 +206,7 @@ export function dummyInputAt(P: Poseidon, depth: number, rho: Field = 0n): Spent
         rho,
         rcm: 0n,
         rcv: 0n,
+        rcvDep: 0n,
         nsk,
         cm: 0n,
         nf,

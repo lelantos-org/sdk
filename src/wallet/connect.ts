@@ -8,16 +8,22 @@
 
 import type { Signer } from "ethers";
 import type { ProverPaths } from "../prover.js";
-import { resolveArtifacts } from "../prover.js";
+import { bundledProverArtifacts, resolveArtifacts } from "../prover.js";
 import type { ProverArtifacts } from "../types.js";
 import { configureWasm, type WasmConfig } from "../wasm/config.js";
 import { EthersChainAdapter } from "./adapters/ethers-chain.js";
 import type { ChainAdapter } from "./chain-adapter.js";
 import type { SyncStrategy, WalletConfig } from "./config.js";
-import { WalletConfigError } from "./errors.js";
+import { NetworkNotDeployedError, WalletConfigError } from "./errors.js";
 import { Wallet, type WalletApi } from "./index.js";
 import type { KeySource } from "./key-source.js";
-import { type NetworkName, type NetworkPreset, resolveNetwork } from "./networks.js";
+import {
+    type DeployedNetworkPreset,
+    isNetworkDeployed,
+    type NetworkName,
+    type NetworkPreset,
+    resolveNetwork,
+} from "./networks.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
 import type { Prover } from "./prover.js";
@@ -60,7 +66,19 @@ export interface ConnectOptions {
     // ── prover ──────────────────────────────────────────────────────────
     /// Snarkjs / WASM prover artifacts. Pass either the new
     /// `{ circuit, zkey }` shape or the legacy `{ wasmPath, zkeyPath }`.
+    /// When omitted, the SDK resolves bundled defaults via
+    /// `bundledProverArtifacts()`: companion `@lelantos-org/circuits`
+    /// package on Node (`import.meta.resolve`-based). There is NO
+    /// browser default — the companion is published to GitHub Packages
+    /// which jsDelivr cannot proxy. Browser callers must either pass
+    /// this value explicitly (typical: bundler asset import against
+    /// `node_modules/@lelantos-org/circuits/2x2/...`) or pass
+    /// `proverArtifactsCdn` to point at a self-hosted location.
     proverArtifacts?: ProverArtifacts | ProverPaths;
+    /// Self-hosted CDN base URL serving `2x2.wasm` + `2x2_final.zkey`
+    /// at the root. Used by `bundledProverArtifacts()` only when
+    /// `proverArtifacts` is unset on the browser path. No default.
+    proverArtifactsCdn?: string;
     /// Pre-built `Prover`. Skips `proverArtifacts` resolution.
     prover?: Prover;
     /// Use the SDK's WASM Groth16 prover. Default `true` in Node, `true`
@@ -123,7 +141,7 @@ function buildKeySource(opts: ConnectOptions): KeySource {
     return { type: "nsk", nsk: opts.nsk! };
 }
 
-function buildChainAdapter(opts: ConnectOptions, preset: NetworkPreset): ChainAdapter {
+function buildChainAdapter(opts: ConnectOptions, preset: DeployedNetworkPreset): ChainAdapter {
     if (opts.chain) return opts.chain;
 
     const errs: string[] = [];
@@ -154,10 +172,17 @@ async function buildProver(
     runtime: "node" | "browser",
 ): Promise<Prover | undefined> {
     if (opts.prover) return opts.prover;
-    if (!opts.proverArtifacts) return undefined;
 
-    const paths = resolveArtifacts(opts.proverArtifacts);
+    // No artifacts + snarkjs path: defer to `Wallet.create` →
+    // `defaultProver`, which calls `bundledProverArtifacts()`. Keeps
+    // the Node-companion-package + browser-CDN fallback in one place.
     const useWasm = opts.useWasmProver ?? runtime === "node";
+    if (!useWasm && !opts.proverArtifacts) return undefined;
+
+    const artifacts = opts.proverArtifacts
+        ? opts.proverArtifacts
+        : await bundledProverArtifacts({ runtime, cdn: opts.proverArtifactsCdn });
+    const paths = resolveArtifacts(artifacts);
     if (!useWasm) return new SnarkjsProver(paths);
     // Dynamic import keeps `WasmProver` (which transitively pulls in
     // `wasm-bindgen-rayon` worker glue) out of bundles that opt out via
@@ -185,6 +210,10 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
     const runtime =
         opts.runtime === "auto" || opts.runtime === undefined ? detectRuntime() : opts.runtime;
     const preset = resolveNetwork(opts.network);
+    if (!isNetworkDeployed(preset)) {
+        const name = typeof opts.network === "string" ? opts.network : "<custom>";
+        throw new NetworkNotDeployedError(name);
+    }
     const keySource = buildKeySource(opts);
     const chain = buildChainAdapter(opts, preset);
     const prover = await buildProver(opts, runtime);

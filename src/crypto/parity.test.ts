@@ -13,7 +13,6 @@ import {
     derivePkFromIvk,
     H_BASE,
     Jubjub,
-    MerkleTree,
     POW_2_64,
     Poseidon,
     TAG_ASSET,
@@ -24,6 +23,7 @@ import {
     TAG_NK,
     TAG_PK,
 } from "./index.js";
+import { MerkleTree } from "./merkle.js";
 
 describe("crypto parity with circuits/src/lib", () => {
     let P: Poseidon;

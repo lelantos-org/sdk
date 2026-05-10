@@ -22,7 +22,6 @@ export * as metamask from "./metamask.js";
 export * from "./note-codec.js";
 export * from "./note-encrypt.js";
 export * from "./notes.js";
-export * from "./operator.js";
 export * from "./permit2.js";
 export * from "./preload.js";
 export * from "./presets.js";
@@ -60,9 +59,9 @@ export {
 } from "./wallet/connect.js";
 export * from "./wallet/errors.js";
 export * from "./wallet/fmd-client.js";
+export * from "./wallet/hd.js";
 // ── Wallet API ───────────────────────────────────────────────────────────
 export * from "./wallet/index.js";
-export * from "./wallet/hd.js";
 export * from "./wallet/key-source.js";
 export {
     NETWORKS,
@@ -92,5 +91,4 @@ export * from "./wallet/sync.js";
 // pay zero bundle cost. Apps that want the rust prover import the subpath
 // directly.
 export * from "./wasm/config.js";
-export * from "./witness/tree-update.js";
 export * from "./witness.js";

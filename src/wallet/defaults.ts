@@ -2,7 +2,7 @@
 // `Wallet` class focused on flow, not on stitching defaults.
 
 import type { Jubjub } from "../crypto/index.js";
-import type { ProverPaths } from "../prover.js";
+import { bundledProverArtifacts, type ProverPaths, resolveArtifacts } from "../prover.js";
 import type { WalletConfig } from "./config.js";
 import { WalletConfigError } from "./errors.js";
 import { FmdClient } from "./fmd-client.js";
@@ -12,6 +12,10 @@ import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 
 /// Aggregate up-front config validation. Thrown error lists every problem
 /// at once so callers don't have to round-trip per missing field.
+///
+/// `prover`/`proverPaths` are NOT required: when omitted, `defaultProver`
+/// resolves bundled artifacts via `bundledProverArtifacts()`. Validation
+/// here only catches transport-layer omissions.
 export function validateConfig(cfg: WalletConfig): void {
     const missing: string[] = [];
     if (cfg.chainId === undefined || cfg.chainId === null) missing.push("`chainId`");
@@ -20,7 +24,6 @@ export function validateConfig(cfg: WalletConfig): void {
     if (cfg.treeDepth === undefined || cfg.treeDepth <= 0) missing.push("`treeDepth`");
     if (!cfg.noteSource && !cfg.fmdUrl) missing.push("`fmdUrl` (or `noteSource`)");
     if (!cfg.submitter && !cfg.relayerUrl) missing.push("`relayerUrl` (or `submitter`)");
-    if (!cfg.prover && !cfg.proverPaths) missing.push("`proverPaths` (or `prover`)");
     if (missing.length) throw new WalletConfigError(missing);
 }
 
@@ -40,6 +43,13 @@ export function defaultSubmitter(cfg: WalletConfig): Submitter {
     return new HttpRelayerSubmitter(cfg.relayerUrl as string);
 }
 
-export function defaultProver(cfg: WalletConfig): Prover {
-    return new SnarkjsProver(cfg.proverPaths as ProverPaths);
+/// Builds the default snarkjs prover. When `cfg.proverPaths` is set,
+/// uses it verbatim. When unset, resolves bundled artifacts via
+/// `bundledProverArtifacts()` — companion package on Node, jsDelivr
+/// CDN URLs in browser. Throws `ProverArtifactsMissingError` with
+/// actionable guidance when nothing resolves.
+export async function defaultProver(cfg: WalletConfig): Promise<Prover> {
+    if (cfg.proverPaths) return new SnarkjsProver(cfg.proverPaths);
+    const artifacts = await bundledProverArtifacts();
+    return new SnarkjsProver(resolveArtifacts(artifacts) as ProverPaths);
 }

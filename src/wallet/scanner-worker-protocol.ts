@@ -51,6 +51,7 @@ export interface WireScanHit {
     value: string;
     rho: string;
     rcm: string;
+    rcvDep: string;
     cm: string;
     leafIndex: number;
 }
@@ -89,6 +90,7 @@ export function encodeHit(h: ScanHit): WireScanHit {
         value: h.value.toString(),
         rho: h.rho.toString(),
         rcm: h.rcm.toString(),
+        rcvDep: h.rcvDep.toString(),
         cm: h.cm.toString(),
         leafIndex: h.leafIndex,
     };
@@ -100,6 +102,7 @@ export function decodeHit(w: WireScanHit): ScanHit {
         value: BigInt(w.value),
         rho: BigInt(w.rho),
         rcm: BigInt(w.rcm),
+        rcvDep: BigInt(w.rcvDep),
         cm: BigInt(w.cm),
         leafIndex: w.leafIndex,
     };

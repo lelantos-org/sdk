@@ -10,6 +10,10 @@ export interface Note {
     rho: Field;
     rcm: Field;
     rcv: Field;
+    /// Pedersen blinder for the deposit-anchor value commitment cv_dep.
+    /// Encoded into the encrypted note plaintext so the recipient can spend
+    /// the note without leaking pk/rho/rcm to the relayer at flush time.
+    rcvDep: Field;
 }
 
 export interface SpentNote extends Note {

@@ -115,6 +115,9 @@ export interface TransactPubInputs {
     chainId: bigint;
     payer: string; // 0x-hex address
     relayer: string; // 0x-hex address; must equal the relayer's own
+    /// Per-output Pedersen value commitment that anchors (asset, value) into
+    /// the Merkle leaf. Forwarded into the spend's tree_update_batch tpi.
+    outCvDep: [Point, Point];
 }
 
 export interface TransactAux {

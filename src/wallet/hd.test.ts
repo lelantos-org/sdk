@@ -9,8 +9,8 @@
 //   - nsk always in [1, BN254_FR)
 //   - end-to-end: mnemonicToNsk → buildSpendingKey → distinct addresses
 
-import { describe, expect, it } from "vitest";
 import { mnemonicToSeedSync } from "@scure/bip39";
+import { describe, expect, it } from "vitest";
 import { BN254_FR } from "../crypto/index.js";
 import { deriveKeysFromMnemonic } from "../keys.js";
 import {

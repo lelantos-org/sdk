@@ -4,8 +4,8 @@
 import type { InputSlot, InputSlots } from "../bundle.js";
 import type { Field } from "../crypto/index.js";
 import type { SpendableCachedNote } from "../witness.js";
-import { decodeStoredNote, type StoredNote } from "./note-store.js";
 import type { NoteSource } from "./note-source.js";
+import { decodeStoredNote, type StoredNote } from "./note-store.js";
 
 export interface InputsCtx {
     pk: Field;
@@ -33,6 +33,7 @@ export async function buildInputSlots(
                     rho: n.rho,
                     rcm: n.rcm,
                     rcv: 0n,
+                    rcvDep: n.rcvDep,
                 },
                 nsk: ctx.nsk,
                 leafIndex: n.leafIndex,

@@ -8,6 +8,7 @@ import {
     type RelayerIntentResponse,
     type RelayerSubmitResponse,
     type SubmitIntentPayload,
+    type SubmitSwapPayload,
     type SubmitTransactPayload,
 } from "../relayer.js";
 
@@ -18,6 +19,8 @@ export interface Submitter {
     /// Deposit escrow. Optional — when absent, wallet falls back to
     /// `chain.submitIntent` for direct-to-chain broadcast.
     submitIntent?(payload: SubmitIntentPayload): Promise<RelayerIntentResponse>;
+    /// Atomic shielded swap. Optional — `Wallet.swap` requires this.
+    submitSwap?(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse>;
 }
 
 export class HttpRelayerSubmitter implements Submitter {
@@ -29,5 +32,9 @@ export class HttpRelayerSubmitter implements Submitter {
 
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
         return this.client.submitTransact(payload);
+    }
+
+    submitSwap(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse> {
+        return this.client.submitSwap(payload);
     }
 }

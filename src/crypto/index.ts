@@ -4,8 +4,6 @@ export { buildNoteCommitment } from "./commit.js";
 export { deriveDk, deriveIvk, deriveNk, derivePk, derivePkFromIvk } from "./derive.js";
 export type { Point } from "./jubjub.js";
 export { H_BASE, Jubjub } from "./jubjub.js";
-export type { MerkleProof } from "./merkle.js";
-export { MerkleTree } from "./merkle.js";
 export { buildNullifier, buildNullifierFromNsk } from "./nullifier.js";
 export type { Field } from "./poseidon.js";
 export { Poseidon } from "./poseidon.js";
