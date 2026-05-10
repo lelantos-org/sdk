@@ -59,9 +59,12 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         adapter: s.adapter,
         route: s.route,
         intentD: {
-            chainId: s.intentD.chainId.toString(),
-            publicAssetId: s.intentD.publicAssetId.toString(),
-            publicIn: s.intentD.publicIn.toString(),
+            // Rust `DepositIntentDto` declares these as `u64`; serde
+            // rejects strings. JS Number is safe for uint64 up to 2^53,
+            // which covers every practical chainId / asset id / publicIn.
+            chainId: Number(s.intentD.chainId),
+            publicAssetId: Number(s.intentD.publicAssetId),
+            publicIn: Number(s.intentD.publicIn),
             payer: s.intentD.payer,
             recipient: s.intentD.recipient,
             outCm: s.intentD.outCm,
@@ -69,6 +72,8 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         auxD: s.auxD.map(serializeAux),
         tokenIn: s.tokenIn,
         tokenOut: s.tokenOut,
+        // Rust DTO wires `amountIn`/`minOut` as decimal `String` so
+        // U256 values >2^53 round-trip safely.
         amountIn: s.amountIn.toString(),
         minOut: s.minOut.toString(),
     };

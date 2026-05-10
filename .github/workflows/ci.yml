@@ -9,17 +9,13 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [20.x, 22.x, 24.x]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version-file: .nvmrc
           cache: npm
 
       - uses: rui314/setup-mold@v1
@@ -41,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit npm package signatures
+        run: npm audit signatures
+
       - name: Build WASM crates
         run: cd wasm && just build
 
@@ -56,11 +55,21 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
-        run: npm test
+      - name: Test (with coverage)
+        run: npm run test:coverage
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
 
       - name: WASM size budget
         run: node scripts/check-wasm-size.mjs
+
+      - name: Publish hygiene (publint + attw)
+        run: npm run check:publish
 
       - name: Verify packed contents
         run: |

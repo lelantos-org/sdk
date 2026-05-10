@@ -1,10 +1,14 @@
 {
   "name": "@lelantos-org/sdk",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
   "type": "module",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "imports": {
     "#wasm/jubjub": "./wasm/jubjub/pkg/jubjub_wasm.js",
     "#wasm/prover": "./wasm/prover/pkg/prover.js"
@@ -68,12 +72,15 @@
     "build": "tsc -p tsconfig.json && mkdir -p dist/wasm && cp src/wasm/rayon-worker-bootstrap.mjs dist/wasm/rayon-worker-bootstrap.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
     "bench:scan": "tsx scripts/bench-scan.ts",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
     "check": "biome check .",
+    "check:publish": "publint && attw --pack .",
+    "prepare": "lefthook install || true",
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-wasm-size.mjs"
   },
   "dependencies": {
@@ -86,10 +93,17 @@
     "snarkjs": "^0.7.4"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.17.0",
     "@biomejs/biome": "^2.4.13",
-    "@types/node": "^20.14.10",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "lefthook": "^1.8.0",
+    "publint": "^0.3.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.3",
-    "vitest": "^2.1.0"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.5"
+  },
+  "overrides": {
+    "underscore": "^1.13.8"
   }
 }

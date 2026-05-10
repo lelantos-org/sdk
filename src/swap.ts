@@ -114,6 +114,9 @@ export async function fetchSwapQuote(
 
 /// Quote age in seconds, computed from `quotedAt`. Frontend can pick its
 /// own staleness threshold for refetch UX.
-export function quoteAgeSecs(q: SwapQuote, nowSecs: number = Math.floor(Date.now() / 1000)): number {
+export function quoteAgeSecs(
+    q: SwapQuote,
+    nowSecs: number = Math.floor(Date.now() / 1000),
+): number {
     return Math.max(0, nowSecs - q.quotedAt);
 }
