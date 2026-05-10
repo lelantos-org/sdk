@@ -15,7 +15,6 @@ import { resolve } from "node:path";
 // @ts-expect-error — snarkjs ships without types
 import * as snarkjs from "snarkjs";
 import { describe, expect, it } from "vitest";
-import { buildTreeUpdateInput } from "../witness/tree-update.js";
 import { SnarkjsProver } from "./prover.js";
 import { WasmProver } from "./wasm-prover.js";
 
@@ -78,9 +77,5 @@ d("WasmProver parity (tree_update)", () => {
 describe("WasmProver structure", () => {
     it("WasmProver.build is a function", () => {
         expect(typeof WasmProver.build).toBe("function");
-    });
-
-    it("buildTreeUpdateInput is wired (sanity)", () => {
-        expect(typeof buildTreeUpdateInput).toBe("function");
     });
 });

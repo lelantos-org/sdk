@@ -50,7 +50,7 @@ describe("LocalScanner", () => {
                 J,
                 recipientPkD: recipient.pk_d,
                 esk,
-                plaintext: encodeNotePayload({ asset: 1n, value, rho: 3n, rcm: 4n }),
+                plaintext: encodeNotePayload({ asset: 1n, value, rho: 3n, rcm: 4n, rcvDep: 5n }),
             });
             const clue = fmdFlag(J, P, flagKey, r);
             const wire = withClueBitsPrefix(
@@ -141,7 +141,7 @@ describe("LocalScanner", () => {
                 J,
                 recipientPkD: recipient.pk_d,
                 esk,
-                plaintext: encodeNotePayload({ asset: 1n, value, rho: 3n, rcm: 4n }),
+                plaintext: encodeNotePayload({ asset: 1n, value, rho: 3n, rcm: 4n, rcvDep: 5n }),
             });
             const clue = fmdFlag(J, P, flagKey, r);
             inputs.push({

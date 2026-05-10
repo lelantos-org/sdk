@@ -29,6 +29,7 @@ wasmDescribe("WasmJubjub fused decrypt parity vs circomlibjs", () => {
                 value: BigInt(seed),
                 rho: BigInt(seed + 100),
                 rcm: BigInt(seed + 200),
+                rcvDep: BigInt(seed + 300),
             });
 
             for (const recipient of [me, eve]) {
@@ -51,7 +52,7 @@ wasmDescribe("WasmJubjub fused decrypt parity vs circomlibjs", () => {
             J: circomJ,
             recipientPkD: me.pk_d,
             esk: 7n,
-            plaintext: encodeNotePayload({ asset: 1n, value: 99n, rho: 3n, rcm: 4n }),
+            plaintext: encodeNotePayload({ asset: 1n, value: 99n, rho: 3n, rcm: 4n, rcvDep: 5n }),
         });
         enc.ciphertext[0] ^= 0xff;
         expect(decryptNote({ J: wasmJ, ivk: me.ivk, note: enc })).toBeNull();
@@ -63,7 +64,7 @@ wasmDescribe("WasmJubjub fused decrypt parity vs circomlibjs", () => {
             J: circomJ,
             recipientPkD: me.pk_d,
             esk: 7n,
-            plaintext: encodeNotePayload({ asset: 1n, value: 99n, rho: 3n, rcm: 4n }),
+            plaintext: encodeNotePayload({ asset: 1n, value: 99n, rho: 3n, rcm: 4n, rcvDep: 5n }),
         });
         const bad = new Uint8Array(32).fill(0xff);
         expect(
