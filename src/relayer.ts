@@ -4,7 +4,7 @@
 //   - Deposits: wallet escrows funds via `MASP.submitIntent` (Permit2 witness
 //     bound to DepositIntent + aux). Wallet POSTs `SubmitIntentPayload` to
 //     `/v1/intent`; relayer broadcasts the on-chain submitIntent and later
-//     batches up to MAX_N=16 escrowed intents under one `flushBatch` SNARK.
+//     batches up to MAX_N=8 escrowed intents under one `flushBatch` SNARK.
 //   - Spends (transfer / withdraw / withdrawNative): wallet builds the
 //     transact_2x2 SNARK + transact pubInputs + per-output AuxValidation
 //     payload. Wallet POSTs `SubmitTransactPayload` to `/v1/transact`;

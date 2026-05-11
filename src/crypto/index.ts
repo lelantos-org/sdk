@@ -18,6 +18,7 @@ export {
     TAG_CM,
     TAG_DK,
     TAG_IVK,
+    TAG_LEAF,
     TAG_MERKLE,
     TAG_NF,
     TAG_NK,
