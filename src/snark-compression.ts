@@ -82,6 +82,18 @@ export function flatten(input: FlattenInput): Field[] {
 //   uint256[] memory s = new uint256[](N); ...
 //   uint256 z = uint256(keccak256(abi.encode(s))) % R;
 // Dynamic uint256[] → length prefix + words. Match exactly.
+/// Horner-form polynomial evaluation in BN254 Fr. Mirrors the in-circuit
+/// `PolyEval` gadget and the on-chain `PubInputs._evalY` so off-chain code,
+/// tests, and the circuit compute identical `y`.
+export function hornerEval(coeffs: Field[], z: Field): Field {
+    let acc = 0n;
+    for (let i = coeffs.length - 1; i >= 0; i--) {
+        acc = (acc * z + coeffs[i]) % BN254_R;
+        if (acc < 0n) acc += BN254_R;
+    }
+    return acc;
+}
+
 export function fiatShamirZ(coeffs: Field[]): Field {
     const packed = AbiCoder.defaultAbiCoder().encode(
         ["uint256[]"],
