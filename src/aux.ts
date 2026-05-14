@@ -1,13 +1,6 @@
-// Per-output OutputAux builder.
-//
-// Joins the three things the relayer + indexers need off-circuit for each
-// real output slot:
-//   - ECDH ephemeral pub `epk` (so the receiver can recompute the KDF)
-//   - FMD clue `(R, c_bits)` so the indexer can fan-out to subscribers
-//   - ChaCha20-Poly1305 ciphertext of the 80B note plaintext, prefixed
-//     with the 2B big-endian clueBits the rust filter expects
-//
-// Pad slots use `EMPTY_AUX`. Real outputs go through `buildOutputAux`.
+// Per-output OutputAux builder. Joins ECDH `epk`, FMD clue `(R, c_bits)`,
+// and ChaCha20-Poly1305 ciphertext (prefixed with 2B big-endian clueBits).
+// Pad slots use `EMPTY_AUX`; real outputs go through `buildOutputAux`.
 
 import { BABYJUB_SUBGROUP_ORDER, type Field, type Jubjub, type Point } from "./crypto/index.js";
 import type { Poseidon } from "./crypto/poseidon.js";
@@ -96,7 +89,7 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
     const prefix = clueBitsToPrefix(clue.bits, clue.gamma);
     const ciphertext = withClueBitsPrefix(prefix, enc.ciphertext);
 
-    // Re-pack clueBits as a single field element (LSB-first within γ bits).
+    // Re-pack clueBits as a single field element, LSB-first within γ bits.
     let clueBitsField: bigint = 0n;
     for (let i = 0; i < clue.gamma; i++) {
         const b = (clue.bits[i >> 3] >> (i & 7)) & 1;

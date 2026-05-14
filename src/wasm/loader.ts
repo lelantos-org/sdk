@@ -1,23 +1,15 @@
-// Shared loader for wasm-pack (`--target web`) modules consumed by the SDK.
-// Centralises the Node vs browser vs injected-loader branch + the lazy
-// init-once promise that each wasm crate would otherwise duplicate.
-//
-// Specifiers passed to `defaultImport()` are package subpath imports
-// (`#wasm/<name>`) declared in the SDK's package.json. Both Node ESM and
-// bundlers (Vite, Webpack, Rollup) honour `imports`, so consumers do not
-// need to wire any per-crate path configuration.
+// Shared loader for wasm-pack (`--target web`) modules. Handles the Node vs browser vs
+// injected-loader branch + lazy init-once promise. Specifiers passed to `defaultImport()` are
+// package subpath imports (`#wasm/<name>`) declared in package.json `imports`.
 
 export interface WasmModuleBase {
     default: (input?: { module_or_path?: BufferSource | string | URL }) => Promise<unknown>;
 }
 
 export interface WasmLoaderOverride<M extends WasmModuleBase> {
-    /// Return the wasm-pack JS module (a dynamic
-    /// `import("@lelantos-org/sdk/wasm/<name>")`).
+    /// Return the wasm-pack JS module.
     loadModule(): Promise<M>;
-    /// URL or bytes for the `.wasm` binary. If omitted, the wasm-pack
-    /// module's own auto-init runs and fetches the binary relative to the
-    /// JS module URL.
+    /// URL or bytes for the `.wasm` binary. If omitted, auto-init fetches relative to the JS module.
     wasm?: BufferSource | string | URL;
 }
 
@@ -28,15 +20,13 @@ export interface WasmLoaderInitCtx {
 
 export interface WasmLoaderConfig<M extends WasmModuleBase> {
     name: string;
-    /// Loads the wasm-pack JS module. Caller closes over the subpath import
-    /// so the specifier is statically analyzable by bundlers.
+    /// Loads the wasm-pack JS module. Caller closes over the subpath import so the specifier
+    /// is statically analyzable by bundlers.
     defaultImport(): Promise<M>;
-    /// Returns the absolute filesystem path of the `.wasm` binary on Node
-    /// (read into bytes and passed to `mod.default`). Skipped on browser.
+    /// Absolute fs path of the `.wasm` binary on Node. Skipped on browser.
     nodeWasmPath(): Promise<string>;
-    /// Returns the JS module URL on Node (a `file://` href). Used for
-    /// `getNodePkgUrl()` so downstream features (wasm-bindgen-rayon) can
-    /// spawn workers pointing at the same module.
+    /// JS module URL on Node (`file://` href). Used by `getNodePkgUrl()` so wasm-bindgen-rayon
+    /// can spawn workers pointing at the same module.
     nodeJsUrl(): Promise<string>;
     /// Optional post-init hook (e.g. rayon thread-pool setup).
     postInit?(mod: M, ctx: WasmLoaderInitCtx): Promise<void>;
@@ -51,10 +41,8 @@ export interface WasmLoaderHandle<M extends WasmModuleBase> {
 
 const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
 
-// String constants assigned to variables so Vite's static analysis treats
-// the dynamic-import target as unknown and stops trying to resolve the
-// `node:*` specifier in browser bundles. Reachable only on Node (gated by
-// `IS_NODE`), so the externalization warning is a false positive.
+// `node:*` specifier held in a variable so Vite stops statically resolving it in browser
+// bundles. Reachable only on Node (gated by `IS_NODE`).
 const NODE_FS_PROMISES = "node:fs/promises";
 
 export function createWasmLoader<M extends WasmModuleBase>(

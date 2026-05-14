@@ -31,12 +31,11 @@
 // Honest recipient: r·X_i == x_i·R, so all γ checks pass.
 // Anyone else: each check independent random ⇒ accept with prob 2^-γ.
 //
-// Wire format (unchanged from v1):
+// Wire format:
 //   encoded clue = γ (1B) || R_packed (32B) || c_bits (⌈γ/8⌉ B, LSB-first)
 //
-// `scripts/gen-fmd-vectors.ts` writes deterministic vectors that lock byte
-// order against the Rust indexer impl. Bumping FMD_DOMAIN signals scheme
-// change.
+// Byte order locked against the Rust indexer impl via deterministic vectors.
+// Bumping FMD_DOMAIN signals scheme change.
 
 import {
     BABYJUB_SUBGROUP_ORDER,
@@ -151,11 +150,8 @@ export function decodeClue(buf: Uint8Array): FmdClue {
     };
 }
 
-// ---- internals ----
-
 // Legendre-symbol bit of Poseidon([TAG_FMD_BIT, R.x, R.y, i, S.x, S.y]).
-// Same six-input layout as the in-circuit `ClueCheck` template; matches the
-// `HashToBit` gadget convention (bit=1 ⟺ QR).
+// Same six-input layout as the in-circuit `ClueCheck` (bit=1 ⟺ QR).
 function sharedBit(P: Poseidon, R: Point, i: number, shared: Point): number {
     const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), shared[0], shared[1]]);
     const sym = legendreSymbol(h, BN254_FR);

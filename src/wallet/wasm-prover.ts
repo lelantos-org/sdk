@@ -1,8 +1,5 @@
-// WASM-backed Groth16 prover. Drop-in for `SnarkjsProver` — same `Prover`
-// interface, same `ProveResult` shape (snarkjs decimal strings).
-//
-// Witness calc reuses `circom_runtime` (transitive via snarkjs ≥ 0.7) so apps
-// need no new package. Proof runs in the rust ark-groth16 crate at
+// WASM-backed Groth16 prover. Drop-in for `SnarkjsProver`.
+// Witness calc via `circom_runtime`; proof via rust ark-groth16 at
 // `sdk/wasm/prover/`, with rayon multi-threading on COI pages.
 
 import { WitnessCalculatorBuilder } from "circom_runtime";
@@ -40,17 +37,13 @@ interface RawProofOutput {
     publicSignals: string[];
 }
 
-/// Browser apps that bundle the SDK can't rely on the relative-path fallback
-/// (`../../wasm/prover/pkg/prover.js`) — the bundler rewrites it to a path
-/// that doesn't exist at runtime. Inject a loader that resolves the wasm-pack
-/// module + binary using the bundler's own asset-URL pipeline before
-/// `WasmProver.build()`.
+/// Browser bundlers rewrite the relative-path fallback to a runtime-missing
+/// path. Inject a loader that resolves the wasm-pack module + binary via the
+/// bundler's asset-URL pipeline before `WasmProver.build()`.
 export type ProverWasmLoader = WasmLoaderOverride<ProverModule>;
 
-/// Override the rayon thread count. Default in Node = `availableParallelism()`.
-/// Pass 0 (or 1) to keep the prover single-threaded. Must be called before
-/// the first `WasmProver.build` / `WasmProver.preload` to take effect; later
-/// changes are ignored because the wasm pool is initialized once.
+/// Override rayon thread count. Pass 0 or 1 for single-threaded. Must be set
+/// before the first `WasmProver.build` / `preload`; later changes are ignored.
 let proverThreadCount: number | null = null;
 export function configureProverThreads(n: number): void {
     proverThreadCount = n;
@@ -110,8 +103,7 @@ export class WasmProver implements Prover {
         return new WasmProver(new Session(zkeyBytes), wc);
     }
 
-    /// Warm the wasm module (zkey-independent). Use from `preloadWasm()` to
-    /// avoid first-prove latency at the worst moment.
+    /// Warm the wasm module (zkey-independent) to avoid first-prove latency.
     static async preload(): Promise<void> {
         await loadProver();
     }

@@ -1,13 +1,10 @@
 // Uniswap Permit2 witness signing for MASP deposits.
 //
-// Wallet flow: build DepositIntent + AuxValidation.Output[2], hash them via
-// `abi.encode`-then-keccak (matching MASP._permit2Pull → keccak256(abi.encode(d, aux))),
-// wrap that piHash in the EIP-712 `MASPDeposit` witness, and sign the
-// outer Permit2 `PermitWitnessTransferFrom` typed-data. Contract calls
-// `permitWitnessTransferFrom(permit, transferDetails, payer, witness, typeString, signature)`.
+// Flow: build DepositIntent + AuxValidation.Output[2], hash via abi.encode +
+// keccak (matches MASP._permit2Pull), wrap piHash in EIP-712 `MASPDeposit`
+// witness, sign the outer Permit2 `PermitWitnessTransferFrom` typed-data.
 //
-// Witness type-string MUST match MASP._DEPOSIT_WITNESS_TYPE_STRING:
-//   "MASPDeposit witness)MASPDeposit(bytes32 piHash)TokenPermissions(address token,uint256 amount)"
+// Witness type-string MUST match MASP._DEPOSIT_WITNESS_TYPE_STRING.
 
 import { AbiCoder, keccak256, type Signer, type TypedDataDomain } from "ethers";
 
@@ -146,9 +143,7 @@ function bytesToHex(b: Uint8Array): string {
     return h;
 }
 
-// ============================================================================
-// AllowanceTransfer (Phase 2 — drops per-deposit Permit2 sig).
-// ============================================================================
+// AllowanceTransfer mode — drops per-deposit Permit2 sig.
 
 /// Mirror of `IAllowanceTransfer.PermitDetails`.
 export interface PermitDetails {

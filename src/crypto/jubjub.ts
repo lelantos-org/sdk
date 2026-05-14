@@ -1,5 +1,4 @@
 // Baby-Jubjub wrapper over circomlibjs. Affine coordinates as `[x, y]` bigints.
-//
 // `H_BASE` is the fixed independent generator for value-commitment blinding:
 //   cv = value · gen + rcv · H
 // Must match `circuits/src/lib/value_commit.circom` byte-for-byte.
@@ -46,8 +45,7 @@ export class Jubjub {
         return this.babyjub.inSubgroup(this.fromAffine(p));
     }
 
-    // circomlibjs `packPoint` reuses an internal buffer between calls, so
-    // consecutive packs alias and the older one gets clobbered. Always copy.
+    // circomlibjs `packPoint` reuses an internal buffer between calls; always copy to avoid aliasing.
     packPoint(p: Point): Uint8Array {
         return new Uint8Array(this.babyjub.packPoint(this.fromAffine(p)));
     }
@@ -60,10 +58,7 @@ export class Jubjub {
     // Mirrors HashToAssetGen in `asset_gen.circom`: Pedersen(72) over
     //   bits[ 0.. 7] = TAG_ASSET (LSB-first byte)
     //   bits[ 8..71] = asset_id  (64 LSB-first bits)
-    // circomlibjs `pedersen.hash(buf)` operates on 8·buf.length bits LSB-first
-    // per byte, so the 9-byte input below reproduces the circuit bit stream
-    // byte-for-byte. Circuit enforces asset_id < 2^64 via Num2Bits(64); SDK
-    // matches that bound (also matches contract `uint64 publicAssetId`).
+    // Circuit enforces asset_id < 2^64 via Num2Bits(64); matches contract `uint64 publicAssetId`.
     hashToAssetGen(assetId: Field): Point {
         if (assetId >= 1n << 64n) {
             throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
@@ -81,7 +76,6 @@ export class Jubjub {
         return this.addPoint(valueTerm, blindTerm);
     }
 
-    // ---- coordinate plumbing (Montgomery FE ↔ bigint) ----
     private toCoord(fe: any): Field {
         return BigInt(this.babyjub.F.toObject(fe));
     }

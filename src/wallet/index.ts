@@ -1,17 +1,6 @@
-// High-level Wallet — primary integration surface for `@lelantos-org/sdk`.
-//
-// Owns: keys, in-memory note cache, plus *injected* pluggables for every
-// external dependency:
-//
-//   - ChainAdapter   → RPC + permit signing
-//   - NoteSource     → encrypted-note feed + merkle paths (default: fmd-webserver)
-//   - Submitter      → transact-bundle delivery (default: HTTP relayer)
-//   - Prover         → Groth16 prover (default: snarkjs in-process)
-//   - CoinSelector   → coin selection strategy (default: SFRT)
-//   - NoteStore      → persistence (default: in-memory)
-//
-// Apps can swap any one for tests, alt transports, hardware wallets,
-// custom strategies — without touching the rest.
+// High-level Wallet. Owns keys + in-memory note cache; every external
+// dependency (ChainAdapter, NoteSource, Submitter, Prover, CoinSelector,
+// NoteStore) is injected.
 
 import { decodeAddress } from "../address.js";
 import { buildDeposit, buildTransfer, buildWithdraw, buildWithdrawNative } from "../bundle.js";
@@ -61,8 +50,6 @@ import {
 import type { Submitter } from "./submitter.js";
 import { type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
 
-// Re-export the public types so existing
-// `import { ..., DepositOptions } from "@lelantos-org/sdk"` keeps working.
 export type {
     DepositOptions,
     NotesFilter,
@@ -77,12 +64,11 @@ export type {
 };
 
 const PERMIT2_DEFAULT_DEADLINE_SECS = 3600;
-/// Refuse to use a Permit2 allowance window expiring within this many
-/// seconds. Avoids racing past expiration mid-tx.
+/// Refuse allowance windows expiring within this many seconds; avoids
+/// racing past expiration mid-tx.
 const ALLOWANCE_BUFFER_SECS = 60;
 
-/// Fire a progress phase, swallowing any callback errors so a misbehaving
-/// UI listener can't break a tx mid-flight.
+/// Swallow callback errors so a misbehaving listener can't break a tx.
 function safePhase<P>(cb: ((p: P) => void) | undefined, phase: P): void {
     if (!cb) return;
     try {
@@ -92,7 +78,6 @@ function safePhase<P>(cb: ((p: P) => void) | undefined, phase: P): void {
     }
 }
 
-/// Default `WalletApi` implementation.
 export class Wallet implements WalletApi {
     readonly P: Poseidon;
     readonly J: Jubjub;
@@ -107,8 +92,6 @@ export class Wallet implements WalletApi {
     readonly scanner: Scanner;
     private file: NotesFile;
 
-    /// Chain adapter the wallet is bound to. Same instance as `cfg.chain`
-    /// — exposed at the top level so consumers don't reach through `cfg`.
     get chain(): WalletConfig["chain"] {
         return this.cfg.chain;
     }
@@ -141,9 +124,7 @@ export class Wallet implements WalletApi {
         this.scanner = args.scanner;
     }
 
-    /// Single-call wallet builder for the common path. Resolves a network
-    /// preset, builds the chain adapter from a signer/privateKey, picks
-    /// scanner + prover by runtime. See `./connect.ts` for full options.
+    /// Single-call wallet builder. See `./connect.ts` for full options.
     ///
     /// ```ts
     /// const wallet = await Wallet.connect({
@@ -159,17 +140,8 @@ export class Wallet implements WalletApi {
         return connect(opts);
     }
 
-    /// Convenience factory: derive nsk from a BIP39 mnemonic. Equivalent
-    /// to `Wallet.connect({ ...opts, mnemonic })`. The chain layer
-    /// (signer / privateKey / chain) must still come from `opts`.
-    ///
-    /// ```ts
-    /// const wallet = await Wallet.fromMnemonic(phrase, {
-    ///     network: "anvil",
-    ///     signer: await provider.getSigner(),
-    ///     rpcUrl: "http://localhost:8545",
-    /// });
-    /// ```
+    /// Equivalent to `Wallet.connect({ ...opts, mnemonic })`. Chain layer
+    /// must still come from `opts`.
     static async fromMnemonic(
         mnemonic: string,
         opts: Omit<import("./connect.js").ConnectOptions, "mnemonic" | "signature" | "nsk"> & {
@@ -180,17 +152,7 @@ export class Wallet implements WalletApi {
         return Wallet.connect({ ...opts, mnemonic });
     }
 
-    /// Convenience factory: a single 0x-hex EVM private key both signs
-    /// on-chain transactions AND derives the shielded nsk via
-    /// `hexPrivateKeyToNsk`. Most common "I already have a wallet, give
-    /// me shielded support" path.
-    ///
-    /// ```ts
-    /// const wallet = await Wallet.fromPrivateKey("0xabc…", {
-    ///     network: "anvil",
-    ///     rpcUrl: "http://localhost:8545",
-    /// });
-    /// ```
+    /// 0x-hex EVM key both signs txs and derives nsk via `hexPrivateKeyToNsk`.
     static async fromPrivateKey(
         privateKey: string,
         opts: Omit<
@@ -205,20 +167,8 @@ export class Wallet implements WalletApi {
         });
     }
 
-    /// Convenience factory: derive nsk by asking an external signer
-    /// (MetaMask, Ledger, WalletConnect) to sign the canonical
-    /// EIP-712 message. Same signer is reused for on-chain txs.
-    ///
-    /// Requires one user-facing signature prompt at boot. After that
-    /// the wallet is identical to one built from a mnemonic.
-    ///
-    /// ```ts
-    /// const signer = await provider.getSigner();
-    /// const wallet = await Wallet.fromSigner(signer, {
-    ///     network: "anvil",
-    ///     rpcUrl: "http://localhost:8545",
-    /// });
-    /// ```
+    /// Derive nsk by asking the signer to sign the canonical EIP-712
+    /// message. One signature prompt at boot; same signer reused for txs.
     static async fromSigner(
         signer: import("ethers").Signer,
         opts: Omit<
@@ -231,13 +181,8 @@ export class Wallet implements WalletApi {
         return Wallet.connect({ ...opts, signer, nsk });
     }
 
-    /// Build a wallet from any key source. Wires defaults for any
-    /// pluggable not supplied in `cfg`. Use `Wallet.connect()` for the
-    /// common path; reach for `Wallet.create` when you need to inject all
-    /// pluggables yourself.
-    ///
-    /// Collects every config problem in `WalletConfigError.missing` so
-    /// callers see the full picture rather than fixing them one at a time.
+    /// Build from any key source. Wires defaults for omitted pluggables.
+    /// Collects every config problem into `WalletConfigError.missing`.
     static async create(source: KeySource, cfg: WalletConfig): Promise<Wallet> {
         validateConfig(cfg);
 
@@ -272,13 +217,8 @@ export class Wallet implements WalletApi {
         });
     }
 
-    // ---------- cache + sync ----------
-
-    /// Pull encrypted notes from the configured `NoteSource`, trial-decrypt
-    /// with `ivk + dk`, persist hits to `NoteStore`. Idempotent — re-runs
-    /// resume from the store's `lastIndex` cursor.
-    /// `opts.limit` caps the number of new notes scanned this call.
-    /// `opts.onProgress` receives sync-phase updates for UI spinners.
+    /// Pull encrypted notes, trial-decrypt with `ivk + dk`, persist hits.
+    /// Idempotent — resumes from `lastIndex` cursor.
     async sync(opts?: {
         limit?: number;
         onProgress?: (p: SyncProgress) => void;
@@ -299,10 +239,8 @@ export class Wallet implements WalletApi {
         return result;
     }
 
-    /// Walk locally-unspent notes and mark any whose nullifier is already
-    /// consumed on chain as spent. Catches state where the contract burned
-    /// a note in a prior session that the local store never recorded.
-    /// Single batch roundtrip via `noteSource.spentSet`.
+    /// Mark locally-unspent notes whose nullifiers are already consumed
+    /// on chain; single batch via `noteSource.spentSet`.
     private async reconcileSpentOnChain(): Promise<void> {
         const file = await this.noteStore.load();
         const candidates = file.notes
@@ -324,17 +262,13 @@ export class Wallet implements WalletApi {
         if (mutated) await this.noteStore.save(file);
     }
 
-    /// Reload the in-memory note cache from `NoteStore`. Useful after an
-    /// external process mutates the store (e.g. a worker thread).
+    /// Reload in-memory cache from `NoteStore` after external mutation.
     async refresh(): Promise<void> {
         this.file = await this.noteStore.load();
     }
 
-    /// Resolve once every commitment in `cms` is decrypted and persisted to
-    /// the local note store. Polls `sync()` with backoff until either all
-    /// commitments are observed or `signal` aborts. Useful for UIs that
-    /// want to update balances only after the FMD scanner caught up to
-    /// fresh change notes (post-transfer / -withdraw).
+    /// Resolve once every `cms` entry is persisted locally. Polls `sync()`
+    /// with backoff until observed or `signal` aborts.
     async awaitCommitments(
         cms: string[],
         opts: { signal?: AbortSignal; pollMs?: number; maxAttempts?: number } = {},
@@ -395,16 +329,9 @@ export class Wallet implements WalletApi {
         return this.selector.select(this.file.notes, asset, target, opts);
     }
 
-    // ---------- transactions ----------
-
-    /// Shield an ERC-20 into the MASP via Permit2 escrow. Steps: fetch asset
-    /// entry + fee, build DepositIntent + AuxValidation.Output[2], sign
-    /// Permit2 witness over their hash, submit. Either the chain adapter
-    /// (`chain.submitIntent`) or the relayer (`submitter.submitIntent`)
-    /// broadcasts `MASP.submitIntent`. Funds sit in escrow until the
-    /// relayer flushes a batch (or the depositor calls `cancelIntent`
-    /// after `cancelDelay` blocks). For native ETH, wrap to WETH off-pool
-    /// then deposit with the WETH asset id.
+    /// Shield ERC-20 into the MASP via Permit2 escrow. Funds sit in
+    /// escrow until the relayer flushes a batch (or `cancelIntent` after
+    /// `cancelDelay` blocks). For native ETH set `asEth: true`.
     async deposit(args: DepositOptions): Promise<TransactionResult> {
         const asset = args.asset ?? 1n;
         const recipient = decodeAddress(this.J, args.to ?? this.address);
@@ -454,17 +381,13 @@ export class Wallet implements WalletApi {
             built: { cm: built.cm, producedNotes: built.producedNotes },
             sent: args.amount,
             inputSum: 0n,
-            // Both deposit outputs are credited to the depositor's own
-            // shielded address (recipient = payer in DepositForm).
+            // Both outputs credited to depositor's own shielded address.
             ownIndices: [0, 1],
         });
         return { ...result, intentId };
     }
 
-    /// Pick the cheapest deposit submission path the adapter supports for
-    /// `args`. Order: native ETH (msg.value, no Permit2) > Permit2
-    /// AllowanceTransfer (pre-signed window covers pull) > Permit2 witness
-    /// (per-deposit sig — fallback).
+    /// Order: native ETH > AllowanceTransfer > witness (fallback).
     private async pickDepositStrategy(
         args: DepositOptions,
         payer: string,
@@ -494,9 +417,7 @@ export class Wallet implements WalletApi {
         return "witness";
     }
 
-    /// Run the picked deposit strategy. Single point of `chain.submit*` /
-    /// `submitter.submitIntent` invocation — every branch returns the same
-    /// `{ txHash, intentId }` shape.
+    /// Every branch returns the same `{ txHash, intentId }` shape.
     private async runDepositStrategy(
         strategy: DepositStrategy,
         ctx: {
@@ -546,9 +467,8 @@ export class Wallet implements WalletApi {
         return chain.submitIntent!({ intent: built.intent, permit2, aux: built.aux });
     }
 
-    /// Read on-chain fee + asset scale so we can recompute the exact total
-    /// the strategy picker compares against the allowance window. Re-reads
-    /// rather than threading state — these calls are cached/cheap.
+    /// Recompute the total the strategy picker compares to the allowance
+    /// window. Reads are cheap/cached.
     private async computeDepositTotal(args: DepositOptions, _token: string): Promise<bigint> {
         const asset = args.asset ?? 1n;
         const entry = await this.cfg.chain.fetchAsset(asset);
@@ -557,22 +477,21 @@ export class Wallet implements WalletApi {
         return inAmt + (inAmt * feeBps) / 10000n;
     }
 
-    /// Cancel an escrowed-but-not-yet-flushed deposit. Permissionless after
-    /// `cancelDelay` blocks; funds + fees return to the original payer.
-    async cancelIntent(id: bigint): Promise<{ txHash: string }> {
+    /// Cancel an escrowed deposit. Permissionless after `cancelDelay`
+    /// blocks. Caller supplies the `IntentEscrowed` event payload for the
+    /// on-chain digest check.
+    async cancelIntent(
+        id: bigint,
+        inputs: import("./chain-adapter.js").CancelIntentInputs,
+    ): Promise<{ txHash: string }> {
         if (!this.cfg.chain.cancelIntent) {
             throw new DepositAdapterError("witness", ["cancelIntent"]);
         }
-        return this.cfg.chain.cancelIntent(id);
+        return this.cfg.chain.cancelIntent(id, inputs);
     }
 
-    /// Internal shielded transfer. Selects 1-2 unspent notes covering
-    /// `args.amount`, builds transact bundle with one send-note to
-    /// `args.to` + one change-note back to self, submits, then marks the
-    /// spent notes in `NoteStore`. Throws `InsufficientCoverError` if the
-    /// SFRT selector can't find a 1- or 2-note cover (call `notes()` /
-    /// `selectNotes()` first if you want to inspect the plan without
-    /// triggering a transfer).
+    /// Shielded transfer: 1-2 notes → send-note + change-note → submit →
+    /// mark spent. Throws `InsufficientCoverError` on no 1/2-note cover.
     async transfer(args: TransferOptions): Promise<TransactionResult> {
         const asset = args.asset ?? 1n;
         const sendValue = args.amount;
@@ -641,7 +560,7 @@ export class Wallet implements WalletApi {
         const { txHash } = await this.submitter.submit(built.payload);
         const spent = selection.notes.map((n) => n.id);
         await this.markSpent(spent);
-        // Output 0 = recipient (not own unless self-transfer); output 1 = change to self.
+        // Output 0 = recipient (own only if self-transfer); output 1 = change.
         const isSelf = args.to === this.address;
         const ownIndices = isSelf ? [0, 1] : [1];
         return makeTransactionResult({
@@ -655,18 +574,12 @@ export class Wallet implements WalletApi {
         });
     }
 
-    /// Unshield ERC20 to `args.to` (eth address). Selects 1-2 notes,
-    /// releases `args.amount` on-chain, splits remainder into two
-    /// change-notes back to self, submits, marks spent. Throws
-    /// `InsufficientCoverError` on no cover.
+    /// Unshield ERC20 to `args.to`. Throws `InsufficientCoverError` on no cover.
     async withdraw(args: WithdrawOptions): Promise<TransactionResult> {
         return this.withdrawCore({ ...args, asset: args.asset ?? 1n }, "withdraw");
     }
 
-    /// Unshield to raw ETH via `MASP.withdrawNative`. Same selection + bundle
-    /// shape as `withdraw`; payload tagged `kind: "withdrawNative"` so the
-    /// relayer routes accordingly. MASP unwraps WETH and forwards raw ETH
-    /// to `args.to`.
+    /// Unshield to raw ETH via `MASP.withdrawNative`; MASP unwraps WETH.
     async withdrawEth(args: WithdrawEthOptions): Promise<TransactionResult> {
         return this.withdrawCore(
             {
@@ -768,19 +681,10 @@ export class Wallet implements WalletApi {
         });
     }
 
-    /// Atomic shielded swap. Builds a leg-1 transact_2x2 SNARK whose
-    /// on-chain `recipient` is the SwapWrapper (binding the wrapper as the
-    /// only acceptor of the unshielded ERC20), plus a leg-2 deposit intent
-    /// for the B note (`payer = wrapper`). Bundled as `SubmitSwapPayload`
-    /// and posted via `submitter.submitSwap` — relayer attaches the
-    /// matching `tree_update_batch` SNARK and broadcasts `SwapWrapper.swap`.
-    ///
-    /// `args.amount` is the gross publicOut in circuit units of `assetIn`.
-    /// MASP skims `feeBps` off the gross before transferring to the wrapper,
-    /// so the adapter sees `amount * scaleIn - fee` token base units. The
-    /// B note value is fixed at `quote.minOut / scaleOut` (floor division);
-    /// any positive slippage between `expectedOut` and `minOut` is captured
-    /// downstream of this call (wrapper-defined).
+    /// Atomic shielded swap. Leg-1 transact_2x2 unshields to SwapWrapper;
+    /// leg-2 deposit intent re-shields the B note. Bundled via
+    /// `submitter.submitSwap`. `args.amount` is gross publicOut in circuit
+    /// units of `assetIn`; MASP skims `feeBps` before transferring.
     async swap(args: SwapOptions): Promise<TransactionResult> {
         if (!this.submitter.submitSwap) {
             throw new Error("swap: submitter does not implement submitSwap");
@@ -834,29 +738,21 @@ export class Wallet implements WalletApi {
 
         const merkleRoot = (await this.noteSource.fetchPath(selection.notes[0].cm)).root;
 
-        // Resolve token addresses + scales for both sides.
         const [entryIn, entryOut] = await Promise.all([
             this.cfg.chain.fetchAsset(assetIn),
             this.cfg.chain.fetchAsset(assetOut),
         ]);
 
-        // B-note value (circuit units of assetOut). MASP charges `feeBps`
-        // on the deposit leg's gross — Permit2 pulls `inAmt + fee` from the
-        // wrapper, where `inAmt = bValue * scaleOut`. Wrapper holds at most
-        // `actualOut`, which is bounded below by `minOut`. To guarantee
-        // wrapper covers the pull, choose bValue such that
-        // `bValue * scaleOut * (10_000 + feeBps) / 10_000 ≤ minOut`, i.e.
-        // `bValue ≤ minOut * 10_000 / (scaleOut * (10_000 + feeBps))`.
-        // Floor-div on both axes; remainder is wrapper-side dust forwarded
-        // to treasury.
+        // B-note value bounded so the wrapper covers the Permit2 pull:
+        // `bValue * scaleOut * (10_000 + feeBps) / 10_000 ≤ minOut`.
+        // Floor-div remainder becomes wrapper-side dust to treasury.
         const bValue = (quote.minOut * 10_000n) / (entryOut.scale * (10_000n + feeBps));
         if (bValue <= 0n) {
             throw new Error(`swap: minOut ${quote.minOut} below scaleOut*(1+fee) (zero B-note)`);
         }
 
         safePhase(args.onPhase, "proving");
-        // Leg 1: withdraw → wrapper. recipient + relayer both pinned to
-        // the wrapper (MASP enforces `pi.relayer == msg.sender`).
+        // Leg 1: withdraw → wrapper. MASP enforces `pi.relayer == msg.sender`.
         const built = await buildWithdraw({
             P: this.P,
             J: this.J,
@@ -878,8 +774,7 @@ export class Wallet implements WalletApi {
             ],
         });
 
-        // Leg 2: B-note deposit intent. payer = wrapper (the on-chain caller
-        // of `submitIntentAuthorized`). Slot 0 = real B note, slot 1 = pad.
+        // Leg 2: B-note deposit intent. Slot 0 = real B note, slot 1 = pad.
         const o0 = freshOutput();
         const o1 = freshNoteRandomness();
         const intentBundle = buildDeposit({
@@ -906,7 +801,7 @@ export class Wallet implements WalletApi {
             },
         });
 
-        // MASP.withdraw skims fee off gross before transferring to wrapper.
+        // MASP skims fee off gross before transferring to wrapper.
         const grossIn = publicOut * entryIn.scale;
         const feeIn = (grossIn * feeBps) / 10000n;
         const amountInUnits = grossIn - feeIn;
@@ -936,9 +831,8 @@ export class Wallet implements WalletApi {
         const spent = selection.notes.map((n) => n.id);
         await this.markSpent(spent);
 
-        // The B note materialises asynchronously via the relayer's
-        // flushBatch worker — not part of `built.commitments`. We only
-        // surface the leg-1 change commitments here, matching withdraw.
+        // B note materialises asynchronously via the relayer's flushBatch;
+        // only leg-1 change commitments surface here.
         return makeTransactionResult({
             txHash,
             built,
@@ -950,9 +844,8 @@ export class Wallet implements WalletApi {
         });
     }
 
-    /// Mark notes as spent in `NoteStore`. Called automatically by
-    /// `transfer` / `withdraw` after successful submit. Expose for callers
-    /// implementing alternative spend flows.
+    /// Called automatically by `transfer` / `withdraw`; exposed for
+    /// alternative spend flows.
     async markSpent(noteIds: string[]): Promise<void> {
         const ids = new Set(noteIds);
         this.file.notes.forEach((n) => {
@@ -961,14 +854,9 @@ export class Wallet implements WalletApi {
         await this.noteStore.save(this.file);
     }
 
-    /// Self-spend the two smallest notes for `asset` to consolidate them
-    /// into a single change note, then re-sync. Called by `transfer` /
-    /// `withdraw` when `autoConsolidate: true` is set on
-    /// `InsufficientCoverError`.
-    ///
-    /// Uses `consolidateSum - 1n` as the send amount so a 1-unit change
-    /// note pops out (sum-exact targets degenerate into a zero-value change
-    /// note that some selectors discard).
+    /// Self-spend the two smallest notes for `asset` into one change note.
+    /// Sends `consolidateSum - 1n` so a 1-unit change note pops out (some
+    /// selectors discard zero-value change).
     private async autoConsolidate(
         asset: bigint,
         selection: Extract<SelectionResult, { plan: "consolidate-first" }>,
@@ -981,14 +869,11 @@ export class Wallet implements WalletApi {
             to: this.address,
             amount: target,
             asset,
-            // Inner call must NOT recurse — if the selector still can't find
-            // a cover for `target`, surface the error instead of looping.
+            // Inner call must NOT recurse.
             autoConsolidate: false,
         });
         await this.sync();
     }
-
-    // ---------- internals ----------
 
     private async resolveFeeBps(): Promise<bigint> {
         return this.cfg.feeBps ?? (await this.cfg.chain.fetchFeeBps());

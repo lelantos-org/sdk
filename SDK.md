@@ -8,8 +8,7 @@ See [README.md](./README.md) for installation, layout, address format, and stabi
 
 ## Quickstart
 
-The shortest path from `npm install` to working wallet — one EVM private
-key signs on-chain transactions AND derives the shielded `nsk`:
+One EVM private key signs on-chain txs and derives shielded `nsk`:
 
 ```ts
 import { Wallet } from "@lelantos-org/sdk";
@@ -29,42 +28,21 @@ await wallet.transfer({ to: peerBech32, amount: 100n, asset: 1n, autoConsolidate
 await wallet.withdraw({ to: "0xf39…", amount: 200n, asset: 1n });
 ```
 
-Three things to know:
+- Prover artifacts auto-resolve on Node when `@lelantos-org/circuits` is installed. Browser callers pass `proverArtifacts: { circuit, zkey }` to `Wallet.connect`.
+- `autoConsolidate: true` self-spends two smallest notes and retries instead of throwing `InsufficientCoverError`.
+- `network: "sepolia" | "mainnet"` are placeholder presets; throw `NetworkNotDeployedError` until contracts ship.
 
-- **Prover artifacts** auto-resolve on Node when the companion
-  `@lelantos-org/circuits` package is installed (`npm install
-  @lelantos-org/circuits` alongside the SDK). Browser callers must
-  pass `proverArtifacts: { circuit, zkey }` to `Wallet.connect`
-  explicitly — most bundlers can resolve the artifact URLs from
-  `node_modules/@lelantos-org/circuits/2x2/*`. There is no built-in
-  browser CDN because the companion lives on GitHub Packages, which
-  jsDelivr does not proxy.
-- **`autoConsolidate: true`** makes transfer/withdraw self-spend the two
-  smallest notes and retry instead of throwing `InsufficientCoverError`.
-- **`network: "sepolia" | "mainnet"`** are reserved placeholder presets.
-  Calling them today throws `NetworkNotDeployedError` until contracts
-  ship — the SDK upgrade is the only change needed once they do.
-
-### Advanced — full-control wiring
-
-When you need to inject every pluggable yourself (custom indexer, alt
-chain library, mocked submitter), reach for `Wallet.create(source, cfg)`
-which takes the explicit `WalletConfig`. The single-call `Wallet.connect`
-above is built on top of it.
+`Wallet.create(source, cfg)` takes explicit `WalletConfig` for full pluggable control. `Wallet.connect` wraps it.
 
 ---
 
 ## Wallet creation
 
-Four key sources. All produce a deterministic `nsk` field element; the
-wallet keys (`ivk`, `pk`, `pk_d`, `dk`) and bech32m address derive from
-it. Pick the factory that matches your call site.
+Four key sources. All produce a deterministic `nsk` field element. Wallet keys (`ivk`, `pk`, `pk_d`, `dk`) and bech32m address derive from it.
 
-### From a hex EVM private key — `Wallet.fromPrivateKey`
+### `Wallet.fromPrivateKey` — hex EVM key
 
-The newcomer path. One key both signs on-chain transactions and derives
-the shielded `nsk` (via domain-separated `keccak256` reduction). Most
-common for backend services and dev scripts.
+One key signs on-chain and derives `nsk` via domain-separated `keccak256` reduction.
 
 ```ts
 const wallet = await Wallet.fromPrivateKey(
@@ -73,35 +51,29 @@ const wallet = await Wallet.fromPrivateKey(
 );
 ```
 
-The derivation is exposed standalone as `hexPrivateKeyToNsk(hex)` for
-callers that want only the field element.
+`hexPrivateKeyToNsk(hex)` exposes derivation standalone.
 
-### From a BIP39 mnemonic — `Wallet.fromMnemonic`
+### `Wallet.fromMnemonic` — BIP39
 
-The production path for end-user wallets. The mnemonic only derives
-`nsk`; on-chain signing still comes from `signer` / `privateKey` /
-`chain` in the options.
+Mnemonic only derives `nsk`; chain signing comes from `signer` / `privateKey` / `chain`.
 
 ```ts
 import { Wallet, generateMnemonic, isValidMnemonic } from "@lelantos-org/sdk";
 
-// Argument is `{ words: 12 | 24 }`. Default 24 words = 256 bits entropy.
 const mnemonic = generateMnemonic({ words: 24 });
 if (!isValidMnemonic(mnemonic)) throw new Error("bad seed");
 
 const wallet = await Wallet.fromMnemonic(mnemonic, {
     network: "anvil",
-    privateKey: "0x...",          // chain-side signer
+    privateKey: "0x...",
     rpcUrl: "http://localhost:8545",
-    account: 0,                    // optional ZIP-32 sub-account
+    account: 0,
 });
 ```
 
-### From an external signer (MetaMask / hardware wallet) — `Wallet.fromSigner`
+### `Wallet.fromSigner` — MetaMask / hardware
 
-Triggers one EIP-712 signature prompt at boot, then reuses the same
-signer for on-chain transactions. After the first prompt the wallet
-behaves identically to one built from a mnemonic.
+One EIP-712 prompt at boot; subsequent on-chain txs reuse the signer.
 
 ```ts
 import { BrowserProvider } from "ethers";
@@ -116,17 +88,13 @@ const wallet = await Wallet.fromSigner(signer, {
 });
 ```
 
-### Power user — `Wallet.connect` and `Wallet.create`
+### `Wallet.connect` / `Wallet.create`
 
-Reach for `Wallet.connect(opts)` when you need to mix sources (e.g.
-mnemonic for nsk + an external signer for chain) or override pluggables.
-Reach for `Wallet.create(source, cfg)` when you need to inject every
-pluggable yourself (custom indexer, alt chain library, mocked
-submitter).
+`connect(opts)` mixes sources (mnemonic nsk + external chain signer) and overrides pluggables. `create(source, cfg)` takes explicit `WalletConfig` with every pluggable injected.
 
 ```ts
 const wallet = await Wallet.create(
-    { type: "nsk", nsk: 0xdeadbeefn },   // raw — test only
+    { type: "nsk", nsk: 0xdeadbeefn },
     config,
 );
 ```
@@ -139,7 +107,7 @@ const wallet = await Wallet.create(
 
 ```ts
 const tx = await wallet.deposit({
-    amount: 1000n,            // value in circuit units; on-chain inAmt = value * scale
+    amount: 1000n,            // circuit units; on-chain inAmt = value * scale
     asset: 1n,                // optional, default 1
     to: peerBech32,           // optional, default own address
     deadline: 1700000000n,    // optional permit expiry (default: now + 3600s)
@@ -147,7 +115,7 @@ const tx = await wallet.deposit({
 // tx: { txHash, cm: ["0x...", "0x..."] }
 ```
 
-The chain adapter signs an EIP-2612 permit so the deposit + ERC20 pull happen in **one** atomic on-chain tx — no separate `approve`.
+Chain adapter signs EIP-2612 permit so deposit + ERC20 pull happen in one atomic tx (no separate `approve`). Deposit strategies (`native`, `allowance`, `witness`) picked per-asset by the adapter; `DepositAdapterError` raised on mismatch.
 
 ### Transfer (shielded → shielded)
 
@@ -156,12 +124,13 @@ const tx = await wallet.transfer({
     to: peerBech32,
     amount: 100n,
     asset: 1n,
-    selectOpts: { dustThreshold: 10n },   // optional coin-selector tuning
+    selectOpts: { dustThreshold: 10n },
+    autoConsolidate: true,
 });
 // tx: { txHash, cm, spentNoteIds, inputSum, sent, change }
 ```
 
-CLI auto-selects up to 2 unspent notes; change returns to self. If no 2-note combination covers the amount, throws with a `consolidate-first` hint:
+Auto-selects up to 2 unspent notes; change returns to self. Without `autoConsolidate`, throws `InsufficientCoverError` when no 2-note cover exists:
 
 ```ts
 try {
@@ -172,9 +141,9 @@ try {
 }
 ```
 
-To consolidate, send to yourself: `wallet.transfer({ to: wallet.address, amount: smallSum })`.
+Manual consolidate: `wallet.transfer({ to: wallet.address, amount: smallSum })`.
 
-### Withdraw (shielded → on-chain)
+### Withdraw (shielded → ERC20)
 
 ```ts
 const tx = await wallet.withdraw({
@@ -182,10 +151,30 @@ const tx = await wallet.withdraw({
     amount: 200n,
     asset: 1n,
 });
-// tx: { txHash, cm, spentNoteIds, inputSum, sent, change }
 ```
 
-Same coin-selection model. Change goes back to self as two new notes (split). MASP sends `outAmt - fee` to the recipient; treasury keeps `fee`.
+Change splits into two new self-notes. MASP sends `outAmt - fee` to recipient; treasury keeps `fee`.
+
+### Withdraw ETH (shielded → native)
+
+```ts
+await wallet.withdrawEth({ to: "0xf39…", amount: 200n });
+```
+
+Unwraps WETH-shielded asset to native ETH in one tx.
+
+### Swap
+
+```ts
+await wallet.swap({
+    fromAsset: 1n,
+    toAsset: 2n,
+    amount: 100n,
+    minOut: 95n,
+});
+```
+
+Atomic shielded-to-shielded swap routed through the relayer's pool adapter.
 
 ---
 
@@ -198,11 +187,17 @@ const r = await wallet.sync({ limit: 1000 });
 // { fetched, hits, added, skipped }
 ```
 
-Pulls encrypted notes, trial-decrypts with the wallet's `ivk`, persists hits to the `NoteStore`.
+Pulls encrypted notes, trial-decrypts with wallet `ivk`, persists hits to `NoteStore`.
+
+Related methods:
+- `wallet.refresh()` — re-derive balances from store without network fetch.
+- `wallet.awaitCommitments(cms, opts?)` — block until commitments appear in chain index.
+- `wallet.markSpent(ids)` — mark notes spent manually (recovery flows).
+- `wallet.cancelIntent(id)` — cancel pending intent.
 
 #### Sync strategies
 
-Two strategies surfaced via `WalletConfig.syncStrategy` (selects default `NoteSource` flavor; ignored if `noteSource` set directly):
+Two strategies via `WalletConfig.syncStrategy` (selects default `NoteSource`; ignored if `noteSource` set directly):
 
 | Strategy | Endpoint | FMD runs | Anonymity | Bandwidth |
 |---|---|---|---|---|
@@ -217,13 +212,9 @@ const wallet = await Wallet.connect({ ...cfg, syncStrategy: { kind: "full" } });
 const wallet = await Wallet.connect({ ...cfg, syncStrategy: { kind: "matches", subscriptionId: 42 } });
 ```
 
-**Without FMD (no detection key)** — `scanNotes` trial-decrypts every fetched note. Highest CPU, no FMD info leak at all (clue field ignored).
-
-**With FMD client-side** — pass a detection key to `scanNotes`/`Wallet`; clues pre-filter locally before trial-decrypt. CPU cut, server still sees nothing.
-
-**With FMD server-side (`matches`)** — server holds detection key for the subscription, only sends false-positive subset. Lowest bandwidth + CPU, but server learns approximate recipient set (false-positive rate tunable on registration).
-
-Pick `full` + client-FMD for max privacy on a fast link. Pick `matches` for mobile/low-bandwidth where the linkability tradeoff is acceptable.
+- No detection key: `scanNotes` trial-decrypts every note. Highest CPU, zero FMD leak.
+- Client-side FMD: pass detection key; clues pre-filter locally. CPU cut, server sees nothing.
+- Server-side FMD (`matches`): server holds detection key, returns false-positive subset. Lowest bandwidth, server learns approximate recipient set.
 
 ### Inspect cache
 
@@ -233,11 +224,7 @@ wallet.notes({ asset: 1n, spent: false });         // filter
 wallet.balance(1n);                                // bigint, unspent only
 ```
 
-`WalletNote` is the only note type integrators touch. Storage encoding
-(decimal-string `bigint`s) is internal. If you need the cryptographic
-fields for a custom proof — e.g. when assembling bundles via the
-low-level builders — call `note.notePayload()` for `{ asset, value, rho,
-rcm, rcvDep }` as native bigints.
+`WalletNote` is the integrator-facing type. Storage encoding (decimal-string bigints) is internal. For cryptographic fields (custom proofs / low-level builders) call `note.notePayload()` → `{ asset, value, rho, rcm, rcvDep }` as native bigints.
 
 ### Select notes manually
 
@@ -259,7 +246,7 @@ if (result.plan === "direct") {
 }
 ```
 
-Strategy is **SFRT** — Smallest-First with Random Tiebreak. Avoids the largest-first fingerprint that leaks balance ordering across spends; drains dust over time.
+Default selector is SFRT (Smallest-First, Random Tiebreak). Avoids largest-first balance-ordering fingerprint; drains dust over time.
 
 ---
 
@@ -310,7 +297,7 @@ class ViemChainAdapter implements ChainAdapter {
 
 ## Pluggable interfaces
 
-Six injection points on `WalletConfig`. Each has a default; pass your own to swap.
+Six injection points on `WalletConfig`. Each has a default.
 
 | Interface | Default | Use case |
 |---|---|---|
@@ -321,7 +308,7 @@ Six injection points on `WalletConfig`. Each has a default; pass your own to swa
 | `CoinSelector` | `SfrtCoinSelector` | largest-first, Penumbra planner, deterministic test stub |
 | `NoteStore` | `InMemoryNoteStore` | file, IndexedDB, encrypted KV |
 
-Plus `WalletApi` itself is an interface — useful for mocking the whole wallet in upstream tests.
+`WalletApi` itself is an interface — mock whole wallet in upstream tests.
 
 ### Mock submitter for tests
 
@@ -396,21 +383,18 @@ class IndexerNoteSource implements NoteSource {
 
 ## Networks
 
-Built-in presets cover local development and reserve names for public
-deployments. Unknown names throw immediately so typos surface at
-`connect` time.
+Built-in presets. Unknown names throw at `connect` time.
 
-| Preset | chainId | Status | Notes |
-|--------|---------|--------|-------|
-| `anvil` | 31337 | live (local) | Foundry dev chain. |
-| `localnet` | 31337 | live (local) | Alias of `anvil`. Diverges later. |
-| `sepolia` | 11155111 | reserved | Throws `NetworkNotDeployedError` until contracts deploy. |
-| `mainnet` | 1 | reserved | Same. |
+| Preset | chainId | Status |
+|--------|---------|--------|
+| `anvil` | 31337 | local |
+| `localnet` | 31337 | local (anvil alias) |
+| `sepolia` | 11155111 | placeholder → `NetworkNotDeployedError` |
+| `mainnet` | 1 | placeholder → `NetworkNotDeployedError` |
 
 ### Custom network
 
-When you need a network the SDK doesn't ship a preset for, pass a
-`NetworkPreset` object directly in place of the name:
+Pass a `NetworkPreset` object in place of the name:
 
 ```ts
 import { Wallet, type NetworkPreset } from "@lelantos-org/sdk";
@@ -428,9 +412,7 @@ const myChain: NetworkPreset = {
 const wallet = await Wallet.fromPrivateKey(pk, { network: myChain, rpcUrl });
 ```
 
-Set `maspAddress` or `relayerAddress` to `null` to mark the preset as a
-placeholder (useful for staging deploys); `connect()` then throws
-`NetworkNotDeployedError` so call sites fail loudly.
+Set `maspAddress` or `relayerAddress` to `null` to mark preset as placeholder; `connect()` then throws `NetworkNotDeployedError`.
 
 ---
 
@@ -458,9 +440,7 @@ const wallet = await Wallet.create(
 );
 ```
 
-The companion `@lelantos-org/circuits` package ships the prover
-artifacts as static `.wasm` + `.zkey` files. Resolve their URLs through
-your bundler's asset pipeline and pass them to `Wallet.connect`:
+Companion `@lelantos-org/circuits` ships prover artifacts as static `.wasm` + `.zkey`. Resolve URLs via bundler asset pipeline and pass to `Wallet.connect`:
 
 ```ts
 // Vite / Next.js
@@ -475,14 +455,13 @@ const wallet = await Wallet.connect({
 });
 ```
 
-For environments with a self-hosted asset CDN, pass the base URL via
-`proverArtifactsCdn` instead of resolving each file individually.
+Self-hosted CDN: pass base URL via `proverArtifactsCdn` instead of per-file URLs.
 
 ---
 
 ## Low-level primitives
 
-Everything the `Wallet` class uses internally is also exported for direct use:
+Everything `Wallet` uses internally is exported:
 
 ```ts
 import {
@@ -501,16 +480,13 @@ import {
 } from "@lelantos-org/sdk";
 ```
 
-The `e2e/runner` consumes these directly without using the `Wallet` class.
+`e2e/runner` consumes these directly without `Wallet`.
 
 ---
 
 ## Errors
 
-Every typed SDK error inherits from `WalletError` and carries a stable
-`code` you can switch on (no string parsing). Catch `WalletError` to
-handle every SDK error in one place; reach for the subclass when you
-need extra fields:
+All typed errors inherit `WalletError` with stable `code` field. Catch `WalletError` for blanket handling; subclass for extra fields.
 
 ```ts
 import { WalletError, InsufficientCoverError } from "@lelantos-org/sdk/errors";
@@ -531,29 +507,17 @@ try {
 }
 ```
 
-- `InsufficientCoverError` (`code: "INSUFFICIENT_COVER"`) — thrown by
-  `transfer`/`withdraw` when no 1- or 2-note cover exists. Either pass
-  `autoConsolidate: true` to have the SDK self-spend + retry, or read
-  `consolidate: StoredNote[]` and orchestrate manually.
-- `WalletConfigError` (`code: "WALLET_CONFIG"`) — `missing: string[]`
-  lists every problem at once, not one per round-trip.
-- `NetworkError` (`code: "RELAYER_*" | "FMD_*"`) — wraps fetch failures
-  + timeouts. Reads `url`, `status?`, `cause?`. HTTP clients retry 5xx +
-  network errors twice with exponential backoff before throwing.
-- `ProverError` (`code: "PROVER_FAILED"`) — proof generation failed.
-- `PermitRejectedError` (`code: "PERMIT_REJECTED"`) — user rejected the
-  EIP-2612 signature in their wallet.
-- `ProverArtifactsMissingError` (`code: "PROVER_ARTIFACTS_MISSING"`) —
-  no `proverArtifacts` passed, no companion `@lelantos-org/circuits`
-  package installed, no `LELANTOS_PROVER_ARTIFACTS_DIR` env var. Reads
-  `tried: string[]` for every resolution path attempted. Fix with any
-  one of: pass `proverArtifacts`, install the companion package, set
-  the env var.
-- `NetworkNotDeployedError` (`code: "NETWORK_NOT_DEPLOYED"`) — preset
-  was found but its on-chain addresses are still `null` (placeholder
-  network). Reads `network: string`. Fix by picking a deployed preset
-  or passing a custom `NetworkPreset` literal.
+| Class | Code | Notes |
+|---|---|---|
+| `InsufficientCoverError` | `INSUFFICIENT_COVER` | No 1/2-note cover. Pass `autoConsolidate` or read `consolidate: StoredNote[]`. |
+| `WalletConfigError` | `WALLET_CONFIG` | `missing: string[]` lists all problems. |
+| `NetworkError` | `RELAYER_*` / `FMD_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `cause?`. HTTP clients retry 5xx + network errors twice (exp backoff). |
+| `ProverError` | `PROVER_FAILED` | Proof generation failed. |
+| `ProverArtifactsMissingError` | `PROVER_ARTIFACTS_MISSING` | Field `tried: string[]`. Fix: pass `proverArtifacts`, install companion, or set `LELANTOS_PROVER_ARTIFACTS_DIR`. |
+| `PermitRejectedError` | `PERMIT_REJECTED` | User rejected EIP-2612 sig. |
+| `DepositAdapterError` | `DEPOSIT_ADAPTER` | Strategy mismatch (`native`/`allowance`/`witness`). |
+| `SelectionError` | `SELECTION_FAILED` | Coin-selector failure. |
+| `TxMiningError` | `TX_MINING` | Chain tx submitted but not mined / reverted. |
+| `NetworkNotDeployedError` | `NETWORK_NOT_DEPLOYED` | Field `network: string`. Pick deployed preset or pass `NetworkPreset` literal. |
 
-`HttpClientOptions` (passed via `connect({ http: { timeoutMs, retries } })`
-or directly to `FmdClient` / `RelayerClient`) tunes timeout (default
-30 000 ms) and retry count (default 2).
+`HttpClientOptions` via `connect({ http: { timeoutMs, retries } })` or directly to `FmdClient` / `RelayerClient`. Defaults: timeout 30 000 ms, retries 2.

@@ -1,14 +1,7 @@
-// Web Worker entry — runs `WasmProver` off the main thread so the rust
-// Groth16 prover (rayon-parallel, ~1-3 s) doesn't freeze the UI. Spawn:
+// Web Worker entry — runs `WasmProver` off the main thread.
 //
-//   new Worker(
-//       new URL("@lelantos-org/sdk/prover-worker", import.meta.url),
-//       { type: "module" },
-//   );
-//
-// Wrap with `WorkerProver` (see `prover-worker-pool.ts`) to plug into
-// `Wallet.connect({ prover })`. Caller decides if/when the worker should
-// be terminated; the SDK does not retain a reference here.
+// Spawn with `new Worker(new URL("@lelantos-org/sdk/prover-worker", import.meta.url),
+// { type: "module" })` and wrap with `WorkerProver`. Caller owns termination.
 
 import type { ProverPaths } from "../prover.js";
 
@@ -17,10 +10,8 @@ interface ProveReq {
     id: number;
     paths: ProverPaths;
     input: Record<string, unknown>;
-    /// Pin the rayon thread count for this prover (forwarded to
-    /// `configureProverThreads` before the lazy WasmProver build). Only
-    /// honoured on the FIRST request — subsequent requests reuse the
-    /// pool.
+    /// Pin rayon thread count. Only honoured on the FIRST request; pool
+    /// is then reused across subsequent requests.
     threads?: number;
 }
 
@@ -28,7 +19,6 @@ interface PreloadReq {
     type: "preload";
     id: number;
     paths: ProverPaths;
-    /// See `ProveReq.threads`.
     threads?: number;
 }
 
@@ -51,7 +41,6 @@ interface ProveErr {
     message: string;
 }
 
-// Worker globals — `self` is `DedicatedWorkerGlobalScope` here.
 declare const self: {
     onmessage: ((ev: MessageEvent<Req>) => void) | null;
     postMessage(msg: ProveOk | PreloadOk | ProveErr): void;
@@ -76,9 +65,7 @@ async function getProver(
     return cached;
 }
 
-/// Per-phase timing. Logged from the worker so the user sees where the
-/// wall-clock goes (decode + getProver + witness + groth16 + post-encode).
-/// Set `globalThis.__lelantos_prover_perf = false` from the page to silence.
+/// Per-phase timing log. Disable via `globalThis.__lelantos_prover_perf = false`.
 const PERF = (globalThis as { __lelantos_prover_perf?: boolean }).__lelantos_prover_perf !== false;
 const fmt = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms.toFixed(1)}ms`);
 async function timed<T>(label: string, fn: () => Promise<T> | T): Promise<T> {

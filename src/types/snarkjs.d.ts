@@ -1,5 +1,4 @@
 // Minimal type surface for snarkjs (ships without TS types).
-// Covers only what this SDK calls. Extend as needed.
 
 declare module "snarkjs" {
     export interface Groth16Proof {

@@ -1,37 +1,27 @@
 // Persistent-note schema + storage abstraction.
-//
-// SDK ships an `InMemoryNoteStore` default. Application owners plug in
-// concrete backends (file, IndexedDB, SQLite, encrypted store) by
-// implementing the small `NoteStore` interface.
 
 import type { ScanHit } from "../sync.js";
 
-/// JSON-safe wire/storage shape. BigInts serialised as decimal strings,
-/// `cm` as 0x-hex (32 bytes). Persistable verbatim to disk / IndexedDB /
-/// SQLite TEXT columns. Use `decodeStoredNote` to lift to native types
-/// before doing arithmetic; use `encodeStoredNote` to round-trip back.
+/// JSON-safe wire/storage shape. BigInts as decimal strings, `cm` as 0x-hex (32 B).
 export interface StoredNote {
     id: string;
     asset: string; // bigint as decimal string
     value: string;
     rho: string;
     rcm: string;
-    /// Deposit-anchor Pedersen blinder. Required at spend so the SDK can
-    /// recompute `cv_dep = value · V^asset + rcv_dep · H` and the leaf
-    /// hash `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)`.
+    /// Deposit-anchor Pedersen blinder. Required at spend to recompute
+    /// `cv_dep = value · V^asset + rcv_dep · H` and the leaf hash.
     rcvDep: string;
     cm: string; // 0x-hex 32 B
     leafIndex: number;
     spent: boolean;
     discoveredAt: string;
-    /// Chain block at which the note was first observed by the wallet. Used
-    /// by the selector to enforce a spend cooldown that breaks same-block
-    /// change-link heuristics. Optional; when absent, cooldown is skipped.
+    /// Block of first observation. Drives the selector spend cooldown that
+    /// breaks same-block change-link heuristics. Skipped when absent.
     firstSeenBlock?: number;
 }
 
-/// In-memory shape with native BigInts. Returned by `decodeStoredNote`.
-/// Cheaper to work with than re-parsing decimal strings on every read.
+/// Decoded shape with native BigInts.
 export interface NoteRecord {
     id: string;
     asset: bigint;
@@ -46,7 +36,6 @@ export interface NoteRecord {
     firstSeenBlock?: number;
 }
 
-/// Decode a persisted `StoredNote` (decimal strings) to native BigInts.
 export function decodeStoredNote(s: StoredNote): NoteRecord {
     return {
         id: s.id,
@@ -63,7 +52,6 @@ export function decodeStoredNote(s: StoredNote): NoteRecord {
     };
 }
 
-/// Encode a `NoteRecord` (BigInts) to the JSON-safe `StoredNote` shape.
 export function encodeStoredNote(n: NoteRecord): StoredNote {
     return {
         id: n.id,
@@ -94,8 +82,7 @@ export class InMemoryNoteStore implements NoteStore {
     private file: NotesFile = { version: 2, notes: [] };
 
     async load(): Promise<NotesFile> {
-        // Return a deep-ish clone so callers mutating the result don't
-        // change our internal copy.
+        // Clone so caller mutations don't affect internal state.
         return { version: this.file.version, notes: [...this.file.notes] };
     }
 
@@ -104,8 +91,7 @@ export class InMemoryNoteStore implements NoteStore {
     }
 }
 
-/// Append `ScanHit[]` (from `scanNotes`) to a `NotesFile`. Idempotent: a hit
-/// whose `cm` already exists is skipped.
+/// Append `ScanHit[]` to a `NotesFile`. Idempotent: existing `cm`s are skipped.
 export function addHits(
     file: NotesFile,
     hits: ScanHit[],

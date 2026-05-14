@@ -1,8 +1,5 @@
-// Web-Crypto-backed CSPRNG helpers for fresh note + permit material.
-//
-// Works in browser, Node 19+, and Deno without polyfills (`globalThis.crypto`
-// is the WHATWG Crypto API). Uses rejection sampling for uniform field
-// elements + non-zero subgroup scalars.
+// Web-Crypto-backed CSPRNG helpers. Uses rejection sampling for uniform
+// field elements and non-zero subgroup scalars.
 
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR, type Field, fromLeBytes } from "../crypto/index.js";
 
@@ -15,7 +12,7 @@ function randomBytes32(): Uint8Array {
     return out;
 }
 
-/// Uniform Fr (BN254 scalar field) via rejection sampling.
+/// Uniform Fr (BN254 scalar field).
 export function randomFr(): Field {
     for (;;) {
         const b = randomBytes32();
@@ -25,7 +22,7 @@ export function randomFr(): Field {
     }
 }
 
-/// Uniform non-zero scalar mod the Baby-Jubjub subgroup order.
+/// Uniform non-zero scalar mod Baby-Jubjub subgroup order.
 export function randomJubjubScalar(): Field {
     for (;;) {
         const b = randomBytes32();

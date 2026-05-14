@@ -1,8 +1,4 @@
-// Eager WASM warmup. Lets apps surface a loading spinner instead of paying
-// first-decrypt latency at the worst moment (the user's first `wallet.sync()`).
-//
-// Idempotent — both jubjub and prover modules cache themselves after first
-// build, so calling `preloadWasm()` multiple times is free.
+// Eager WASM warmup. Idempotent — modules cache themselves after first build.
 
 import { WasmJubjub } from "./crypto/jubjub-wasm.js";
 

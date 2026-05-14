@@ -1,15 +1,9 @@
 // Top-level barrel for `@lelantos-org/sdk`.
-//
-// Organised by layer so autocomplete groups predictable concepts together.
-// Most apps need only the "Connect" + "Wallet" sections; reach for "Crypto
-// primitives" when building custom flows or testing circuit parity.
 
 export * from "./address.js";
 export * from "./aux.js";
-// ── Bundles + relayer wire format ───────────────────────────────────────
 export * from "./bundle.js";
 export * from "./crypto/index.js";
-// ── WASM modules (Baby-Jubjub + Groth16) ────────────────────────────────
 export {
     buildJubjub,
     configureJubjubWasm,
@@ -41,17 +35,10 @@ export {
     type Url,
     urlToString,
 } from "./types.js";
-// ── Crypto primitives + circuit parity ──────────────────────────────────
-// Building blocks reused by the Wallet class. Exposed for tests, e2e
-// runners, and apps that need to construct bundles by hand.
 export * from "./version.js";
 export * from "./wallet/adapters/ethers-chain.js";
-// ── Pluggables (interfaces + ship-with defaults) ─────────────────────────
-// All six wallet dependencies are interfaces; SDK ships an in-process
-// default for each. Swap any one without touching the rest.
 export * from "./wallet/chain-adapter.js";
 export * from "./wallet/config.js";
-// ── Connect (high-level entrypoint) ──────────────────────────────────────
 export {
     type ConnectKeyOptions,
     type ConnectOptions,
@@ -60,7 +47,6 @@ export {
 export * from "./wallet/errors.js";
 export * from "./wallet/fmd-client.js";
 export * from "./wallet/hd.js";
-// ── Wallet API ───────────────────────────────────────────────────────────
 export * from "./wallet/index.js";
 export * from "./wallet/key-source.js";
 export {
@@ -85,10 +71,8 @@ export * from "./wallet/scanner-worker-protocol.js";
 export * from "./wallet/selection.js";
 export * from "./wallet/submitter.js";
 export * from "./wallet/sync.js";
-// `WasmProver` lives at the `@lelantos-org/sdk/wasm-prover` subpath so the
-// main barrel does not transitively drag in `wasm-bindgen-rayon` worker
-// glue. Browser apps that opt out via `useWasmProver: false` (Wallet.connect)
-// pay zero bundle cost. Apps that want the rust prover import the subpath
-// directly.
+// `WasmProver` lives at `@lelantos-org/sdk/wasm-prover` so the main barrel
+// does not pull in `wasm-bindgen-rayon` worker glue. Browser apps that opt
+// out via `useWasmProver: false` pay zero bundle cost.
 export * from "./wasm/config.js";
 export * from "./witness.js";

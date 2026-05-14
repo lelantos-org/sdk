@@ -1,25 +1,11 @@
-// Client-side `Prover` implementation that posts work to a Web Worker
-// running `prover-worker.ts`. Lets browser apps run the rust Groth16
-// prover off the main thread without dragging `wasm-bindgen-rayon`'s
-// worker glue into the main bundle.
-//
-// Usage (Vite-style; webpack/Rspack/esbuild also recognise the pattern):
-//
-//   import { browserWorkerProver } from "@lelantos-org/sdk";
-//
-//   const prover = browserWorkerProver({
-//       workerUrl: new URL("@lelantos-org/sdk/prover-worker", import.meta.url),
-//       paths: proverArtifacts,
-//   });
-//   const wallet = await Wallet.connect({ ..., prover });
+// Client-side `Prover` that posts work to a Web Worker running `prover-worker.ts`.
 
 import type { ProveResult, ProverPaths } from "../prover.js";
 import { resolveArtifacts } from "../prover.js";
 import type { ProverArtifacts } from "../types.js";
 import type { Prover } from "./prover.js";
 
-/// Minimal Worker surface — accepts native browser `Worker` or any shim
-/// (e.g. `node:worker_threads` adapter) that exposes the same shape.
+/// Minimal Worker surface — accepts native `Worker` or any compatible shim.
 export interface WorkerLike {
     postMessage(msg: unknown, transfer?: Transferable[]): void;
     terminate(): void;
@@ -32,12 +18,9 @@ export interface WorkerLike {
 export interface WorkerProverOpts {
     /// Worker running `@lelantos-org/sdk/prover-worker`.
     worker: WorkerLike;
-    /// Snarkjs / wasm-pack artifact URLs. Sent to the worker on first
-    /// `prove()` call and cached there.
+    /// Artifact URLs. Sent to the worker on first `prove()` and cached.
     paths: ProverPaths | ProverArtifacts;
-    /// Pin the rayon thread count inside the worker. Defaults to
-    /// `min(8, navigator.hardwareConcurrency)`. Pass `1` to force
-    /// single-threaded for benchmarking; `>= 2` for parallel.
+    /// Pin rayon thread count. Default: `min(8, navigator.hardwareConcurrency)`.
     threads?: number;
 }
 
@@ -74,10 +57,8 @@ export class WorkerProver implements Prover {
         });
     }
 
-    /// Warm the worker: builds `WasmProver`, fetches zkey + circuit wasm,
-    /// initialises the rayon thread pool. Call ahead of the first
-    /// deposit/transfer so the user doesn't pay 5–10 s setup latency in
-    /// the middle of a transaction.
+    /// Warm the worker (build `WasmProver`, fetch zkey + wasm, init rayon).
+    /// Call ahead of first deposit/transfer to avoid 5–10s setup latency mid-tx.
     preload(): Promise<void> {
         const id = this.nextId++;
         return new Promise<void>((resolve, reject) => {
@@ -94,7 +75,7 @@ export class WorkerProver implements Prover {
         });
     }
 
-    /// Tear down the worker. Pending proves reject.
+    /// Tear down the worker; pending proves reject.
     dispose(): void {
         for (const [, p] of this.pending) p.reject(new Error("WorkerProver disposed"));
         this.pending.clear();
@@ -122,9 +103,7 @@ export class WorkerProver implements Prover {
             this.worker.onmessage = onMessage;
         }
 
-        // Surface uncaught worker errors (script load failures, top-level
-        // throws inside `wasm-prover` init) so they don't sit forever as
-        // silent stuck `pending` entries.
+        // Surface uncaught worker errors so pending entries don't hang silently.
         const onError = (ev: unknown): void => {
             const e = ev as { message?: string; filename?: string; lineno?: number };
             const msg =
@@ -144,15 +123,13 @@ export class WorkerProver implements Prover {
 }
 
 export interface BrowserWorkerProverOpts {
-    /// Worker module URL. Resolved by your bundler from the call site:
-    ///   `workerUrl: new URL("@lelantos-org/sdk/prover-worker", import.meta.url)`
+    /// `new URL("@lelantos-org/sdk/prover-worker", import.meta.url)`
     workerUrl: string | URL;
     paths: ProverPaths | ProverArtifacts;
-    /// See `WorkerProverOpts.threads`.
     threads?: number;
 }
 
-/// Convenience factory: spawns the Worker for you, returns a `WorkerProver`.
+/// Spawns the Worker and returns a `WorkerProver`.
 export function browserWorkerProver(opts: BrowserWorkerProverOpts): WorkerProver {
     const worker = new Worker(opts.workerUrl, { type: "module" }) as unknown as WorkerLike;
     return new WorkerProver({ worker, paths: opts.paths, threads: opts.threads });

@@ -1,5 +1,5 @@
-// Note plaintext + encrypted-note types. Mirror circuits/src/test/helpers.ts
-// `Note` / `SpentNote` so SDK and circuit witnesses share a single shape.
+// Note plaintext + encrypted-note types. Mirrors circuits/src/test/helpers.ts
+// so SDK and circuit witnesses share a single shape.
 
 import type { Field } from "./crypto/index.js";
 
@@ -11,8 +11,8 @@ export interface Note {
     rcm: Field;
     rcv: Field;
     /// Pedersen blinder for the deposit-anchor value commitment cv_dep.
-    /// Encoded into the encrypted note plaintext so the recipient can spend
-    /// the note without leaking pk/rho/rcm to the relayer at flush time.
+    /// Encoded into the encrypted plaintext so the recipient can spend
+    /// without leaking pk/rho/rcm to the relayer at flush time.
     rcvDep: Field;
 }
 
@@ -26,10 +26,9 @@ export interface SpentNote extends Note {
     isDummy: boolean;
 }
 
-// Encrypted on-chain note payload. epk is the sender's ephemeral Baby-Jubjub
-// public key (32-byte packed); ct = ChaCha20-Poly1305(plaintext) under
-// KDF(esk · pk_d_recipient).
+// Encrypted on-chain note. epk = sender's ephemeral Baby-Jubjub pubkey
+// (32B packed); ct = ChaCha20-Poly1305(plaintext) under KDF(esk·pk_d).
 export interface EncryptedNote {
-    epk: Uint8Array; // 32 bytes (Baby-Jubjub packed)
-    ciphertext: Uint8Array; // includes Poly1305 tag
+    epk: Uint8Array;
+    ciphertext: Uint8Array;
 }

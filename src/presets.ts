@@ -1,9 +1,7 @@
-// Single-call preset constructors. Wrap `Wallet.create` with the recommended
-// stack so app code stays one line.
+// Single-call preset constructors wrapping `Wallet.create`.
 //
-// Pick `fastWallet` for browser apps; `nodeWallet` for Node tests / scripts
-// where Web Workers cost more than they save (sync workload, no event loop
-// to free up).
+// `fastWallet` for browsers; `nodeWallet` for Node tests/scripts where Web
+// Workers cost more than they save.
 
 import { preloadWasm } from "./preload.js";
 import type { ProverPaths } from "./prover.js";
@@ -15,10 +13,8 @@ import {
     browserWorkerScanner,
 } from "./wallet/scanner-worker-pool.js";
 
-// Dynamic import keeps the wasm-pack `prover` module + `wasm-bindgen-rayon`
-// worker glue out of bundles that don't actually instantiate `fastWallet`/
-// `nodeWallet`. Bundlers that statically resolve `import` would otherwise
-// drag the whole rust artifact set (~360 KB) into the main chunk.
+// Dynamic import keeps the wasm-pack prover + rayon worker glue out of
+// bundles that don't instantiate `fastWallet`/`nodeWallet` (~360 KB saved).
 async function buildWasmProver(paths: ProverPaths) {
     const { WasmProver } = await import("./wallet/wasm-prover.js");
     return WasmProver.build(paths);
@@ -40,7 +36,7 @@ export interface FastWalletOpts {
 }
 
 /// Browser-optimal wallet: WasmJubjub + WorkerPool scanner + WasmProver,
-/// pre-warmed. Single call replaces ~15 lines of manual wiring.
+/// pre-warmed.
 export async function fastWallet(opts: FastWalletOpts): Promise<Wallet> {
     if (!opts.skipWarmup) await preloadWasm({ prover: !!opts.config.proverPaths });
 

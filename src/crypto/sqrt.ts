@@ -1,11 +1,7 @@
 // Modular square root + Legendre symbol over the BN254 scalar field.
-//
-// Used by FMD bit derivation (sdk/src/fmd.ts:sharedBit) and by the
-// proof-generator that supplies the (bit, y) witness consumed by the
-// `HashToBit` gadget in circuits/src/lib/hash_to_bit.circom.
-//
-// BN254 scalar field has 2-adicity 28 (r-1 = 2^28 · q), so we need full
-// Tonelli–Shanks; no shortcut formula applies.
+// Consumed by FMD bit derivation (sdk/src/fmd.ts:sharedBit) and by the (bit, y) witness for
+// the `HashToBit` gadget in circuits/src/lib/hash_to_bit.circom.
+// BN254 has 2-adicity 28 (r-1 = 2^28 · q): full Tonelli–Shanks required, no shortcut formula.
 
 import { BN254_FR, FMD_LEGENDRE_QNR } from "./tags.js";
 
@@ -76,9 +72,8 @@ export function modSqrt(n: bigint, p: bigint): bigint | null {
     }
 }
 
-// Witness pair for the HashToBit gadget. bit=1 ⇒ hash is QR and y² = hash.
-// bit=0 ⇒ hash is QNR and y² · Z = hash. Throws on hash=0 (probability 1/r,
-// indicates a bug if it ever fires).
+// Witness pair for HashToBit. bit=1 ⇒ hash is QR and y² = hash; bit=0 ⇒ hash is QNR and
+// y² · Z = hash. Throws on hash=0 (probability 1/r — indicates a bug).
 export function fmdLegendreWitness(h: bigint): { bit: 0 | 1; y: bigint } {
     const sym = legendreSymbol(h, BN254_FR);
     if (sym === 0) throw new Error("FMD legendre witness: hash collided to zero");

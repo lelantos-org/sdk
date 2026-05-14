@@ -1,7 +1,4 @@
-// Concrete `ChainAdapter` implementation using ethers v6.
-//
-// Provides: asset/fee lookup, Permit2 witness signing for deposits,
-// `submitIntent` / `cancelIntent` broadcasting, and `escrowed(id)` reads.
+// ethers v6 implementation of ChainAdapter.
 
 import { Contract, JsonRpcProvider, type Signer, Wallet } from "ethers";
 import {
@@ -15,8 +12,10 @@ import {
 } from "../../permit2.js";
 import type {
     AssetEntry,
+    CancelIntentInputs,
     ChainAdapter,
     EscrowedIntentView,
+    IntentEscrowedRecord,
     Permit2SignArgs,
     TokenMeta,
 } from "../chain-adapter.js";
@@ -29,12 +28,14 @@ const MASP_ABI = [
     "function cancelDelay() view returns (uint32)",
     "function WETH() view returns (address)",
     "function nextIntentId() view returns (uint256)",
-    "function escrowed(uint256) view returns (bytes32 cm0, bytes32 cm1, address payer, uint32 submittedAt, uint48 publicIn, uint16 feeBpsAtSubmit, uint64 publicAssetId)",
-    "function submitIntent((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm) d, (uint256 nonce,uint256 deadline,uint256 maxTotal,bytes signature) sig, (uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
-    "function submitIntentNative((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm) d, (uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) payable returns (uint256)",
-    "function submitIntentAuthorized((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm) d, (uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
-    "function cancelIntent(uint256 id)",
-    "event IntentEscrowed(uint256 indexed id, address indexed payer, address indexed recipient, uint64 publicAssetId, uint64 publicIn, bytes32 cm0, bytes32 cm1, uint256 clueRx0, uint256 clueRy0, uint256 ephPubX0, uint256 ephPubY0, bytes ciphertext0, uint256 clueRx1, uint256 clueRy1, uint256 ephPubX1, uint256 ephPubY1, bytes ciphertext1)",
+    "function escrowed(uint256) view returns (bytes32 digest, address payer, uint32 submittedAt, uint64 publicAssetId)",
+    "function submitIntent((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d, (uint256 nonce,uint256 deadline,uint256 maxTotal,bytes signature) sig, (uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
+    "function submitIntentNative((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d, (uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) payable returns (uint256)",
+    "function submitIntentAuthorized((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d, (uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
+    "function cancelIntent(uint256 id, uint48 publicIn, uint16 feeBpsAtSubmit, bytes32 cm0, bytes32 cm1, uint256[2] cvDep0, uint256[2] cvDep1)",
+    "event IntentEscrowed(uint256 indexed id, address indexed payer, address indexed recipient, uint64 publicAssetId, uint64 publicIn, uint16 feeBpsAtSubmit, bytes32 cm0, bytes32 cm1, uint256 cvDep0X, uint256 cvDep0Y, uint256 cvDep1X, uint256 cvDep1Y, uint256 rcvTotal, uint256 clueRx0, uint256 clueRy0, uint256 ephPubX0, uint256 ephPubY0, bytes ciphertext0, uint256 clueRx1, uint256 clueRy1, uint256 ephPubX1, uint256 ephPubY1, bytes ciphertext1)",
+    "event NotesCreated(bytes32 indexed cm0, bytes32 indexed cm1)",
+    "event NotePayload(bytes32 indexed cm0, bytes32 indexed cm1, uint256 clueRx0, uint256 clueRy0, uint256 ephPubX0, uint256 ephPubY0, bytes ciphertext0, uint256 clueRx1, uint256 clueRy1, uint256 ephPubX1, uint256 ephPubY1, bytes ciphertext1, uint256 cvDep0X, uint256 cvDep0Y, uint256 cvDep1X, uint256 cvDep1Y)",
 ];
 
 const ERC20_ABI = [
@@ -49,17 +50,14 @@ const ERC20_ABI = [
 
 export interface EthersChainAdapterOpts {
     rpcUrl: string;
-    /// 0x-hex private key for the payer. Used to sign Permit2 witnesses.
-    /// Pass an existing `ethers.Signer` via `signer` to keep keys outside
-    /// SDK construction.
+    /// 0x-hex private key for the payer. Mutually exclusive with `signer`.
     signerKey?: string;
-    /// Alternative: caller supplies a pre-built Signer (e.g. wallet UI).
+    /// Pre-built ethers Signer (e.g. wallet UI). Mutually exclusive with `signerKey`.
     signer?: Signer;
-    /// MASP contract address.
     maspAddress: string;
-    /// Optional Permit2 override; defaults to canonical CREATE2 deployment.
+    /// Defaults to canonical CREATE2 deployment.
     permit2Address?: string;
-    /// Optional override; otherwise read via `eth_chainId`.
+    /// Override; otherwise read via `eth_chainId`.
     chainId?: bigint;
 }
 
@@ -73,16 +71,24 @@ export class EthersChainAdapter implements ChainAdapter {
     private cachedChainId?: bigint;
 
     constructor(opts: EthersChainAdapterOpts) {
-        this.provider = new JsonRpcProvider(opts.rpcUrl);
-        // ethers v6 default is 4s — too slow for fast chains. Drop to 1s so
-        // `waitTxReceipt`/`tx.wait()` surface receipts promptly.
-        this.provider.pollingInterval = 1000;
-        if (opts.signer) {
-            this.signer = trySignerConnect(opts.signer, this.provider);
-        } else if (opts.signerKey) {
-            this.signer = new Wallet(opts.signerKey, this.provider);
+        // Reuse caller-supplied provider verbatim: wrappers like
+        // `ethers.NonceManager` track local nonce state that breaks if we
+        // call `.connect(newProvider)`.
+        const existing = (opts.signer as { provider?: unknown } | undefined)?.provider;
+        if (opts.signer && existing instanceof JsonRpcProvider) {
+            this.provider = existing;
+            this.signer = opts.signer;
         } else {
-            throw new Error("EthersChainAdapter: pass `signerKey` or `signer`");
+            this.provider = new JsonRpcProvider(opts.rpcUrl);
+            // ethers v6 default is 4s; drop for prompt receipt surfacing.
+            this.provider.pollingInterval = 1000;
+            if (opts.signer) {
+                this.signer = trySignerConnect(opts.signer, this.provider);
+            } else if (opts.signerKey) {
+                this.signer = new Wallet(opts.signerKey, this.provider);
+            } else {
+                throw new Error("EthersChainAdapter: pass `signerKey` or `signer`");
+            }
         }
         this._maspAddress = opts.maspAddress;
         this._permit2Address = opts.permit2Address ?? PERMIT2_ADDRESS;
@@ -144,6 +150,9 @@ export class EthersChainAdapter implements ChainAdapter {
                 intent.payer,
                 intent.recipient,
                 intent.outCm,
+                intent.cvDep0,
+                intent.cvDep1,
+                intent.rcvTotal,
             ],
             [permit2.nonce, permit2.deadline, permit2.maxTotal, permit2.signature],
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
@@ -168,6 +177,9 @@ export class EthersChainAdapter implements ChainAdapter {
                 intent.payer,
                 intent.recipient,
                 intent.outCm,
+                intent.cvDep0,
+                intent.cvDep1,
+                intent.rcvTotal,
             ],
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
             { value },
@@ -191,6 +203,9 @@ export class EthersChainAdapter implements ChainAdapter {
                 intent.payer,
                 intent.recipient,
                 intent.outCm,
+                intent.cvDep0,
+                intent.cvDep1,
+                intent.rcvTotal,
             ],
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
         );
@@ -255,32 +270,66 @@ export class EthersChainAdapter implements ChainAdapter {
         return { txHash: receipt.hash as string };
     }
 
-    async cancelIntent(id: bigint): Promise<{ txHash: string }> {
+    async cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: string }> {
         const masp = this.maspContract.connect(this.signer) as Contract;
-        const tx = await masp.cancelIntent(id);
+        const tx = await masp.cancelIntent(
+            id,
+            inputs.publicIn,
+            inputs.feeBpsAtSubmit,
+            inputs.cm0,
+            inputs.cm1,
+            [inputs.cvDep0[0], inputs.cvDep0[1]],
+            [inputs.cvDep1[0], inputs.cvDep1[1]],
+        );
         await tx.wait();
         return { txHash: tx.hash as string };
     }
 
     async getEscrowed(id: bigint): Promise<EscrowedIntentView | null> {
         const r = (await this.maspContract.escrowed(id)) as {
-            cm0: string;
-            cm1: string;
+            digest: string;
             payer: string;
             submittedAt: bigint;
-            publicIn: bigint;
-            feeBpsAtSubmit: bigint;
             publicAssetId: bigint;
         };
         if (r.payer === "0x0000000000000000000000000000000000000000") return null;
         return {
-            cm0: r.cm0,
-            cm1: r.cm1,
+            digest: r.digest,
             payer: r.payer,
             submittedAt: Number(r.submittedAt),
-            publicIn: r.publicIn,
-            feeBpsAtSubmit: Number(r.feeBpsAtSubmit),
             publicAssetId: r.publicAssetId,
+        };
+    }
+
+    /// Fetch + decode a single `IntentEscrowed` event by intent id. Null
+    /// if no matching log. Populates `CancelIntentInputs` for `cancelIntent`.
+    async fetchIntentEscrowed(id: bigint): Promise<IntentEscrowedRecord | null> {
+        const iface = this.maspContract.interface;
+        const topic = iface.getEvent("IntentEscrowed")?.topicHash;
+        if (!topic) throw new TxMiningError("fetchIntentEscrowed: ABI missing IntentEscrowed");
+        const idTopic = "0x" + id.toString(16).padStart(64, "0");
+        const logs = await this.provider.getLogs({
+            address: this._maspAddress,
+            topics: [topic, idTopic],
+            fromBlock: 0,
+            toBlock: "latest",
+        });
+        if (logs.length === 0) return null;
+        const parsed = iface.parseLog({ topics: [...logs[0].topics], data: logs[0].data });
+        if (!parsed) return null;
+        const a = parsed.args;
+        return {
+            id: a.id as bigint,
+            payer: a.payer as string,
+            recipient: a.recipient as string,
+            publicAssetId: a.publicAssetId as bigint,
+            publicIn: a.publicIn as bigint,
+            feeBpsAtSubmit: Number(a.feeBpsAtSubmit as bigint),
+            cm0: a.cm0 as string,
+            cm1: a.cm1 as string,
+            cvDep0: [a.cvDep0X as bigint, a.cvDep0Y as bigint],
+            cvDep1: [a.cvDep1X as bigint, a.cvDep1Y as bigint],
+            rcvTotal: a.rcvTotal as bigint,
         };
     }
 
@@ -289,9 +338,9 @@ export class EthersChainAdapter implements ChainAdapter {
         return Number(r);
     }
 
-    /// Permit2 uses an unordered-nonce bitmap. Pick a fresh slot from the
-    /// timestamp-derived word — collision odds are negligible for human-
-    /// rate signing. Wallets that need stronger guarantees can override.
+    /// Permit2 uses an unordered-nonce bitmap. Timestamp-derived word;
+    /// collision odds negligible for human-rate signing. Override for
+    /// stronger guarantees.
     async permit2Nonce(): Promise<bigint> {
         const word = BigInt(Date.now()) << 8n;
         return word | BigInt(Math.floor(Math.random() * 256));
@@ -392,7 +441,7 @@ function extractIntentId(
             const parsed = iface.parseLog({ topics: [...log.topics], data: log.data });
             if (parsed?.name === "IntentEscrowed") return parsed.args[0] as bigint;
         } catch {
-            // log not from MASP; skip
+            // not a MASP log
         }
     }
     throw new TxMiningError("submitIntent: IntentEscrowed log not found");

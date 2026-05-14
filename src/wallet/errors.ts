@@ -1,11 +1,9 @@
-// Typed error classes thrown by the high-level Wallet API.
-// Catch via `instanceof` or switch on `error.code` to react programmatically
-// (e.g. trigger a consolidate-then-retry flow on InsufficientCoverError).
+// Typed errors thrown by the Wallet API. Switch on `error.code` or use
+// `instanceof` to react programmatically.
 
 import type { StoredNote } from "./note-store.js";
 
-/// Discriminator for typed wallet errors. Stable across versions — safe to
-/// switch on. New codes may be added; treat `default:` as "unknown error".
+/// Stable discriminator. New codes may be added; treat `default:` as unknown.
 export type WalletErrorCode =
     | "INSUFFICIENT_COVER"
     | "WALLET_CONFIG"
@@ -21,9 +19,7 @@ export type WalletErrorCode =
     | "SELECTION"
     | "NETWORK_NOT_DEPLOYED";
 
-/// Base class — every typed SDK error inherits from this. Allows
-/// `catch (e) { if (e instanceof WalletError) … }` without listing all
-/// subclasses.
+/// Base class for every typed SDK error.
 export class WalletError extends Error {
     readonly code: WalletErrorCode;
     constructor(code: WalletErrorCode, message: string, options?: { cause?: unknown }) {
@@ -33,11 +29,9 @@ export class WalletError extends Error {
     }
 }
 
-/// Thrown by `Wallet.transfer` / `Wallet.withdraw` when the SFRT selector
-/// cannot find a 1- or 2-note cover for the requested amount, but the total
-/// unspent balance for the asset IS sufficient. Caller should self-spend
-/// `consolidate` first (combine into one note), re-sync, then retry — or
-/// pass `autoConsolidate: true` to have the SDK do that for them.
+/// No 1- or 2-note cover, but total balance is sufficient. Caller should
+/// self-spend `consolidate` first, re-sync, then retry — or pass
+/// `autoConsolidate: true`.
 export class InsufficientCoverError extends WalletError {
     readonly target: bigint;
     readonly asset: bigint;
@@ -63,9 +57,7 @@ export class InsufficientCoverError extends WalletError {
     }
 }
 
-/// Thrown when one or more required `WalletConfig` fields are missing.
-/// `missing` lists every problem at once so callers see the full picture
-/// instead of fixing them one round-trip at a time.
+/// `missing` lists every problem at once.
 export class WalletConfigError extends WalletError {
     readonly missing: string[];
     constructor(missing: string[] | string) {
@@ -81,8 +73,7 @@ export class WalletConfigError extends WalletError {
     }
 }
 
-/// Thrown when an HTTP request to the relayer or fmd-webserver fails after
-/// retries exhaust, or when a deadline passes. `cause` carries the
+/// HTTP failure after retries, or deadline expired. `cause` carries the
 /// underlying network error.
 export class NetworkError extends WalletError {
     readonly url: string;
@@ -100,8 +91,7 @@ export class NetworkError extends WalletError {
     }
 }
 
-/// Thrown when Groth16 proof generation fails (witness mismatch, missing
-/// artifacts, OOM in WASM). `cause` carries the prover's underlying error.
+/// Groth16 proof generation failure. `cause` carries the underlying error.
 export class ProverError extends WalletError {
     constructor(message: string, opts?: { cause?: unknown }) {
         super("PROVER_FAILED", message, opts);
@@ -109,8 +99,7 @@ export class ProverError extends WalletError {
     }
 }
 
-/// Thrown when the user rejects an EIP-2612 permit signature in the wallet,
-/// or when the signature returned is malformed.
+/// User rejected the permit signature, or sig was malformed.
 export class PermitRejectedError extends WalletError {
     constructor(message = "user rejected permit signature", opts?: { cause?: unknown }) {
         super("PERMIT_REJECTED", message, opts);
@@ -118,10 +107,7 @@ export class PermitRejectedError extends WalletError {
     }
 }
 
-/// Thrown by `Wallet.deposit` when the configured `ChainAdapter` /
-/// `Submitter` cannot satisfy the requested deposit strategy (e.g. native
-/// ETH path requested but adapter lacks `submitIntentNative`). `strategy`
-/// names the path the wallet attempted to take.
+/// Adapter/Submitter cannot satisfy the requested deposit path.
 export type DepositStrategy = "native" | "allowance" | "witness";
 
 export class DepositAdapterError extends WalletError {
@@ -138,10 +124,8 @@ export class DepositAdapterError extends WalletError {
     }
 }
 
-/// Thrown by spend coin-selection when no plan can satisfy the request
-/// (zero spendable notes, RNG missing, etc). For "have balance but no
-/// 2-note cover" use `InsufficientCoverError` — that one's recoverable
-/// via consolidate-then-retry; this one isn't.
+/// Unrecoverable selection failure (no spendable notes, RNG missing).
+/// Use `InsufficientCoverError` for the consolidate-then-retry case.
 export class SelectionError extends WalletError {
     readonly asset?: bigint;
     constructor(message: string, opts?: { asset?: bigint }) {
@@ -151,12 +135,9 @@ export class SelectionError extends WalletError {
     }
 }
 
-/// Thrown when no Groth16 prover artifacts are available — caller didn't
-/// pass `proverArtifacts`, the companion `@lelantos-org/circuits` package
-/// isn't installed, and no env-var hint was set. Browser callers also hit
-/// this when neither `proverArtifacts` nor `proverArtifactsCdn` is set,
-/// because the companion is published to GitHub Packages and there is no
-/// public CDN fallback.
+/// No prover artifacts available. Browser callers hit this whenever
+/// neither `proverArtifacts` nor `proverArtifactsCdn` is set, because the
+/// companion package has no public CDN fallback.
 export class ProverArtifactsMissingError extends WalletError {
     readonly tried: string[];
     constructor(tried: string[]) {
@@ -175,11 +156,8 @@ export class ProverArtifactsMissingError extends WalletError {
     }
 }
 
-/// Thrown when a `NetworkPreset` resolves but its `maspAddress` /
-/// `relayerAddress` is `null` — preset is a placeholder pending public
-/// deployment. Surfaces at `Wallet.connect` time so callers don't fail
-/// later with a misleading "invalid address" error from the chain
-/// adapter.
+/// Preset is a placeholder pending public deployment. Surfaces at
+/// `Wallet.connect` time instead of failing later as "invalid address".
 export class NetworkNotDeployedError extends WalletError {
     readonly network: string;
     constructor(network: string) {
@@ -194,7 +172,7 @@ export class NetworkNotDeployedError extends WalletError {
     }
 }
 
-/// Thrown when an EVM transaction fails to mine or returns no receipt.
+/// EVM tx failed to mine or returned no receipt.
 export class TxMiningError extends WalletError {
     readonly txHash?: string;
     constructor(message: string, opts?: { txHash?: string; cause?: unknown }) {

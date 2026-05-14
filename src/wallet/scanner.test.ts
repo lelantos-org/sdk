@@ -1,7 +1,3 @@
-// Parity: LocalScanner output identical to direct `scanNotes`.
-// Worker pool is browser-only — covered by smoke test in CI/browser env,
-// not vitest.
-
 import { beforeAll, describe, expect, it } from "vitest";
 import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../crypto/index.js";
 import { fmdFlag, fmdFlagKeyFromDetection, fmdGenDetectionKey } from "../fmd.js";
@@ -80,9 +76,8 @@ describe("LocalScanner", () => {
         expect(viaScanner.map((h) => h.value)).toEqual([100n, 300n]);
     });
 
-    // In-process fake of `WorkerLike`: runs the scanner-worker logic
-    // synchronously on the same thread. Validates the postMessage protocol
-    // wiring without spinning real Web Workers (which vitest/Node lack).
+    // In-process fake of `WorkerLike` to exercise the postMessage protocol
+    // without spinning real Web Workers (unavailable in vitest/Node).
     function makeFakeWorker(J: Jubjub, P: Poseidon): WorkerLike {
         let onmessage: ((ev: { data: unknown }) => void) | null = null;
         const w: WorkerLike = {

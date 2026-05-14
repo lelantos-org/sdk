@@ -1,14 +1,4 @@
-// WorkerPoolScanner — fans `scanNotes` across N Web Workers.
-//
-// Decoupled from any specific Worker constructor: caller injects a
-// `WorkerFactory`. App glue (Vite/webpack) wires the worker URL:
-//
-//   new WorkerPoolScanner({
-//       factory: () => new Worker(
-//           new URL("@lelantos-org/sdk/scanner-worker", import.meta.url),
-//           { type: "module" },
-//       ),
-//   });
+// WorkerPoolScanner — fans `scanNotes` across N Web Workers via injected factory.
 
 import type { Field } from "../crypto/index.js";
 import type { FmdDetectionKey } from "../fmd.js";
@@ -143,24 +133,14 @@ function defaultPoolSize(): number {
     return Math.max(2, Math.min(8, hw));
 }
 
-// ── browser convenience factory ────────────────────────────────────────
-//
-// Hides the bundler-specific Worker URL plumbing. Browser apps using
-// Vite/webpack/esbuild/Rspack pass a `workerUrl` resolved from the call
-// site's `import.meta.url`. Modern bundlers recognise the
-// `new Worker(new URL(..., import.meta.url), { type: "module" })` pattern
-// and emit a separate worker chunk automatically.
-
 export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "factory"> {
-    /// Worker module URL. Pass it from your ESM call site:
-    ///   `workerUrl: new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`
+    /// `new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`
     workerUrl: string | URL;
 }
 
 export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPoolScanner {
     return new WorkerPoolScanner({
-        // Native Worker is structurally compatible with WorkerLike modulo
-        // MessageEvent typing — cast through unknown.
+        // Native Worker structurally matches WorkerLike modulo MessageEvent typing.
         factory: () => new Worker(opts.workerUrl, { type: "module" }) as unknown as WorkerLike,
         size: opts.size,
         chunkSize: opts.chunkSize,

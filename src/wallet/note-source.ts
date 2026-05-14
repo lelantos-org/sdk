@@ -1,8 +1,4 @@
-// Pluggable encrypted-note feed + merkle-path provider. Default uses the
-// fmd-webserver REST API; apps can plug in indexers, P2P relays, mocks.
-//
-// Returns SDK-canonical shapes (`ScanInput`, `FmdPath`) so the Wallet's
-// scanning + spending paths don't care where the data came from.
+// Pluggable encrypted-note feed + merkle-path provider.
 
 import type { Field } from "../crypto/index.js";
 import type { ScanInput } from "../sync.js";
@@ -12,8 +8,7 @@ export interface MerklePath {
     leafIndex: number;
     pathElements: Field[][];
     pathIndices: number[];
-    /// Recomputed root from the path. Caller MUST verify it's a known root
-    /// on chain before trusting it for spending.
+    /// Recomputed root. Caller MUST verify it's a known on-chain root before spending.
     root: Field;
 }
 
@@ -22,15 +17,11 @@ export interface ListNotesOpts {
     after?: number;
 }
 
-/// Source of encrypted notes + merkle paths. Implementations bridge a
-/// concrete indexing service (fmd-webserver, custom p2p, mock) to the
-/// shapes the Wallet's scan + spend code consumes.
+/// Source of encrypted notes + merkle paths.
 export interface NoteSource {
     listNotes(opts?: ListNotesOpts): Promise<ScanInput[]>;
     fetchPath(cmHex: string): Promise<MerklePath>;
-    /// Batch query the on-chain spent-nullifier set. Returns the subset of
-    /// `nfs` consumed on chain so the Wallet can mark stale local notes
-    /// as spent on sync.
+    /// Returns the subset of `nfs` already consumed on chain.
     spentSet(nfs: bigint[]): Promise<Set<bigint>>;
 }
 
@@ -45,15 +36,14 @@ function hexToBigint(h: string): bigint {
     return BigInt(h.startsWith("0x") ? h : `0x${h}`);
 }
 
-/// Default `NoteSource` against fmd-webserver. Wraps `FmdClient` and
-/// converts the wire shapes to `ScanInput` / `MerklePath`.
+/// Default `NoteSource` against fmd-webserver.
 export class FmdNoteSource implements NoteSource {
     private readonly fmd: FmdClient;
     private readonly J: { packPoint: (p: [bigint, bigint]) => Uint8Array };
 
     constructor(args: {
         fmd: FmdClient;
-        /// Need a Jubjub instance to pack the (x, y) → 32B `epk` form.
+        /// Jubjub instance to pack (x, y) into a 32B `epk`.
         J: { packPoint: (p: [bigint, bigint]) => Uint8Array };
     }) {
         this.fmd = args.fmd;
@@ -82,14 +72,9 @@ export class FmdNoteSource implements NoteSource {
     }
 }
 
-/// `NoteSource` backed by `/v1/matches`. Fetches only the server-side
-/// FMD-filtered subset for a registered subscription. Trades anonymity
-/// (server learns the false-positive set bound by `gamma`) for big
-/// bandwidth + scan-time savings.
-///
-/// Subscription lifecycle is app-level: create one with
-/// `FmdClient.createSubscription({ detectionKeyHex, gamma })`, persist
-/// the returned `id`, and pass it here.
+/// `NoteSource` backed by `/v1/matches`: server-side FMD-filtered subset for
+/// a registered subscription. Trades anonymity (server learns the FP set
+/// bound by `gamma`) for bandwidth + scan-time savings.
 export class FmdMatchesNoteSource implements NoteSource {
     private readonly fmd: FmdClient;
     private readonly J: { packPoint: (p: [bigint, bigint]) => Uint8Array };

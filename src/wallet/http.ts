@@ -1,7 +1,5 @@
-// Shared HTTP helper: timeout via `AbortController`, exponential-backoff
-// retry on 5xx + network errors, typed errors via `NetworkError`. Used by
-// `FmdClient`, `RelayerClient`, `HttpRelayerSubmitter` so timeout/retry
-// behaviour is consistent and configurable from one place.
+// Shared HTTP helper: AbortController timeout, exponential-backoff retry
+// on 5xx + network errors, typed `NetworkError`.
 
 import { NetworkError } from "./errors.js";
 
@@ -9,14 +7,13 @@ type NetworkTimeoutCode = "RELAYER_TIMEOUT" | "FMD_TIMEOUT";
 type NetworkFailureCode = "RELAYER_FAILED" | "FMD_FAILED";
 
 export interface HttpClientOptions {
-    /// Per-request timeout in milliseconds. Default 30 000.
+    /// Default 30 000.
     timeoutMs?: number;
-    /// Retries on 5xx + network errors (excludes 4xx). Default 2.
+    /// 5xx + network errors only (excludes 4xx). Default 2.
     retries?: number;
-    /// Initial backoff delay in milliseconds; doubled on each retry.
-    /// Default 250.
+    /// Doubled on each retry. Default 250.
     backoffMs?: number;
-    /// Override for testing. Defaults to a bound `globalThis.fetch`.
+    /// Defaults to bound `globalThis.fetch`.
     fetchImpl?: typeof fetch;
 }
 
@@ -30,9 +27,7 @@ const DEFAULTS: Required<Omit<HttpClientOptions, "fetchImpl">> = {
     backoffMs: 250,
 };
 
-/// Build an `HttpClient` that wraps `fetch` with timeout + retry. The
-/// caller supplies typed error codes (e.g. "FMD_FAILED") so failures
-/// surface with a `NetworkError` whose `.code` is meaningful to consumers.
+/// Failures surface as `NetworkError` with the caller-supplied code.
 export function createHttpClient(
     timeoutCode: NetworkTimeoutCode,
     failureCode: NetworkFailureCode,

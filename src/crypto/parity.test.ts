@@ -1,5 +1,4 @@
-// Parity tests. Pin SDK primitives byte-for-byte against the values they
-// MUST produce. If circuits change the tag scheme, these tests fail.
+// Parity tests. Pin SDK primitives byte-for-byte against the values they MUST produce.
 
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -87,7 +86,6 @@ describe("crypto parity with circuits/src/lib", () => {
     it("Merkle empty-root and proof verify", () => {
         const t = new MerkleTree(P, 4);
         const empty = t.root();
-        // empty root = z_4
         let z = 0n;
         for (let i = 0; i < 4; i++) z = P.hash([5n, z, z, z, z]);
         expect(empty).toBe(z);
@@ -97,7 +95,6 @@ describe("crypto parity with circuits/src/lib", () => {
         const idx = t.insert(789n);
         const { pathElements, pathIndices } = t.proof(idx);
 
-        // Reconstruct root from proof.
         let cur = 789n;
         for (let level = 0; level < 4; level++) {
             const sibs = pathElements[level];

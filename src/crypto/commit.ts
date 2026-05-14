@@ -9,12 +9,10 @@ export interface NoteCommitInput {
     rcm: Field;
 }
 
-// cm = Poseidon(asset·2^64 + value, pk, rho, rcm). Arity-4, no tag —
-// arity + (asset, value) packing already provide domain separation.
-// Mirrors NoteCommitment in circuits/src/lib/note.circom.
-//
-// Soundness requires asset_id < 2^64 and value < 2^64; the circuit
-// range-checks both. Caller responsibility off-circuit.
+// cm = Poseidon(asset·2^64 + value, pk, rho, rcm). Arity-4, no tag — arity + (asset, value)
+// packing provide domain separation. Mirrors NoteCommitment in circuits/src/lib/note.circom.
+// Soundness requires asset_id < 2^64 and value < 2^64 (circuit range-checks both; caller
+// responsibility off-circuit).
 export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
     if (n.asset >= POW_2_64) throw new Error("asset must fit in 64 bits");
     if (n.value >= POW_2_64) throw new Error("value must fit in 64 bits");

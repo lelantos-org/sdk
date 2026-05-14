@@ -1,5 +1,4 @@
-// Wire-format (de)serializers for the relayer HTTP protocol. Split out of
-// `relayer.ts` so the client surface stays focused on transport.
+// Wire-format (de)serializers for the relayer HTTP protocol.
 
 import type { Field, Point } from "./crypto/index.js";
 import type { AuxOutput } from "./permit2.js";
@@ -59,9 +58,8 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         adapter: s.adapter,
         route: s.route,
         intentD: {
-            // Rust `DepositIntentDto` declares these as `u64`; serde
-            // rejects strings. JS Number is safe for uint64 up to 2^53,
-            // which covers every practical chainId / asset id / publicIn.
+            // Rust DTO declares these as u64 (serde rejects strings); JS
+            // Number is safe up to 2^53.
             chainId: Number(s.intentD.chainId),
             publicAssetId: Number(s.intentD.publicAssetId),
             publicIn: Number(s.intentD.publicIn),
@@ -75,8 +73,7 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         auxD: s.auxD.map(serializeAux),
         tokenIn: s.tokenIn,
         tokenOut: s.tokenOut,
-        // Rust DTO wires `amountIn`/`minOut` as decimal `String` so
-        // U256 values >2^53 round-trip safely.
+        // Decimal strings so U256 values >2^53 round-trip safely.
         amountIn: s.amountIn.toString(),
         minOut: s.minOut.toString(),
     };

@@ -1,28 +1,20 @@
 // Coin selector: SFRT — Smallest-First with Random Tiebreak.
-//
-// Lifted from the CLI; pure logic, browser-safe (uses Web Crypto for the
-// default rng). Exposes `selectNotes` which the Wallet class wraps.
 
 import { SelectionError } from "./errors.js";
 import type { StoredNote } from "./note-store.js";
 
 export interface SelectOpts {
-    /// Fee added to target before selection. Caller supplies; selector treats
-    /// `target + fee` as the cover threshold.
+    /// Cover threshold becomes `target + fee`. Default 0.
     fee?: bigint;
-    /// Notes with value < dustThreshold are excluded from automatic selection.
-    /// Default 0n. Recommended: `2 * marginalFee` (ZIP-317 style).
+    /// Notes with value < dustThreshold are excluded. Recommended: `2 * marginalFee`.
     dustThreshold?: bigint;
-    /// Minimum age (in blocks) before a note becomes spendable. Mitigates
-    /// same-block change-link heuristics. Requires `tipBlock` and per-note
-    /// `firstSeenBlock` to take effect; otherwise no-op.
+    /// Minimum age (blocks) before spendable. Requires `tipBlock` and
+    /// per-note `firstSeenBlock`; otherwise no-op.
     cooldownBlocks?: number;
     tipBlock?: number;
-    /// Width of the value-bucket used for randomized tiebreak. Notes whose
-    /// value is within `(1 ± bucketPct) * pivot` are shuffled before pick.
-    /// Default 0.05 (±5%).
+    /// Tiebreak shuffle width: notes within `(1 ± bucketPct) * pivot`. Default 0.05.
     bucketPct?: number;
-    /// Inject for deterministic tests. Returns float in [0, 1).
+    /// Injectable rng for tests. Returns float in [0, 1).
     rng?: () => number;
 }
 
@@ -34,34 +26,20 @@ export interface DirectSelection {
 
 export interface ConsolidateFirst {
     plan: "consolidate-first";
-    /// Two smallest spendable notes for the asset. Caller should self-spend
-    /// these (combine into a single larger note) and then retry the original
-    /// target after the next sync.
+    /// Two smallest spendable notes — caller self-spends them, retries after sync.
     consolidate: StoredNote[];
-    /// Sum of `consolidate`. Useful for telling the user how much would be
-    /// freed up if they consolidate.
     consolidateSum: bigint;
-    /// Original target the caller asked for (target + fee).
+    /// `target + fee`.
     targetWithFee: bigint;
 }
 
 export type SelectionResult = DirectSelection | ConsolidateFirst;
 
-/// Pick up to 2 unspent notes for `asset` whose values sum to at least
-/// `target + fee`. Strategy: SFRT — Smallest-First with Random Tiebreak.
+/// Pick up to 2 unspent notes for `asset` summing to ≥ `target + fee` via SFRT.
 ///
-/// 1. Single-cover: smallest note ≥ threshold; ties (within ±bucketPct)
-///    shuffled.
-/// 2. Two-cover: ascending sort, two-pointer scan for smallest-pair cover;
-///    ties shuffled.
-/// 3. If no 2-cover but sum-of-all ≥ threshold, return `consolidate-first`
-///    plan naming the two smallest notes.
-/// 4. If even sum-of-all < threshold, throw.
-///
-/// Rationale: largest-first leaves a value-ordering fingerprint across spends
-/// (Tramèr USENIX'24); randomized tiebreak restores indistinguishability
-/// (Chen & Bonneau FC'25); smallest-pair drains dust so wallet note count
-/// shrinks over time (Penumbra planner approach).
+/// Rationale: largest-first leaves a value-ordering fingerprint (Tramèr USENIX'24);
+/// randomized tiebreak restores indistinguishability (Chen & Bonneau FC'25);
+/// smallest-pair drains dust so wallet note count shrinks over time.
 export function selectNotes(
     all: StoredNote[],
     asset: bigint,
@@ -218,16 +196,12 @@ function defaultRng(): number {
     return n / 2 ** 56;
 }
 
-// ---------- pluggable interface ----------
-
-/// Strategy interface for coin selection. Apps can implement custom
-/// strategies (largest-first, Penumbra planner, deterministic test stub)
-/// and pass via `WalletConfig.selector`.
+/// Pluggable selection strategy passed via `WalletConfig.selector`.
 export interface CoinSelector {
     select(all: StoredNote[], asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
 }
 
-/// Default — Smallest-First with Random Tiebreak.
+/// Smallest-First with Random Tiebreak.
 export class SfrtCoinSelector implements CoinSelector {
     select(all: StoredNote[], asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult {
         return selectNotes(all, asset, target, opts);

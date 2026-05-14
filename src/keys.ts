@@ -72,23 +72,17 @@ export function fullViewingKeyFromSpending(sk: SpendingKey): FullViewingKey {
     return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, nk: sk.nk };
 }
 
-/// Single-call address encoder. Saves callers from threading three fields.
 export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): string {
     return encodeAddress(J, sk.pk_d, sk.dk, sk.pk);
 }
 
-/// Bundled `SpendingKey` + `address`. Returned by `deriveKeysFromNsk` so
-/// callers don't have to thread two values through display / debug paths.
 export interface DerivedWalletKeys {
     keys: SpendingKey;
     address: string;
 }
 
-/// One-shot derivation: from the root scalar `nsk` to the full
-/// `SpendingKey` plus bech32m address. Pass already-built `P` / `J` (e.g.
-/// from `preloadWasm`) or omit them to lazily build defaults via the
-/// SDK's WASM Poseidon + Jubjub. Useful for CLIs / debug flows that need
-/// to display key info without spinning up a full `Wallet`.
+/// Derive `SpendingKey` + bech32m address from root scalar `nsk`. Pass
+/// pre-built `P` / `J` (e.g. from `preloadWasm`) or omit to build defaults.
 export async function deriveKeysFromNsk(
     nsk: Field,
     deps?: { P?: Poseidon; J?: Jubjub },
@@ -110,9 +104,8 @@ export interface DeriveFromMnemonicOpts {
     J?: Jubjub;
 }
 
-/// One-shot mnemonic → `{ keys, address, nsk }`. Top-level convenience for
-/// SDK consumers that just want an account's keys without juggling
-/// `mnemonicToAccountKey` + `deriveKeysFromNsk` themselves.
+/// Mnemonic → `{ keys, address, nsk }`. Wraps `mnemonicToAccountKey` +
+/// `deriveKeysFromNsk`.
 export async function deriveKeysFromMnemonic(
     opts: DeriveFromMnemonicOpts,
 ): Promise<DerivedWalletKeys & { nsk: Field }> {

@@ -1,7 +1,4 @@
-// Pluggable transact-bundle submitter. Default: HTTP POST to a relayer
-// service (`HttpRelayerSubmitter`). Apps can swap in a multi-relayer
-// submitter (race / fallback), a mock for tests, or a direct on-chain
-// submitter for self-relaying flows.
+// Pluggable transact-bundle submitter.
 
 import {
     RelayerClient,
@@ -13,13 +10,11 @@ import {
 } from "../relayer.js";
 
 export interface Submitter {
-    /// Spend op (transfer / withdraw / withdrawNative). Relayer attaches
-    /// the matching tree_update_batch SNARK + tpi from its own state.
+    /// Spend op. Relayer attaches the matching tree_update_batch SNARK + tpi.
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse>;
-    /// Deposit escrow. Optional — when absent, wallet falls back to
-    /// `chain.submitIntent` for direct-to-chain broadcast.
+    /// Deposit escrow. Falls back to `chain.submitIntent` when absent.
     submitIntent?(payload: SubmitIntentPayload): Promise<RelayerIntentResponse>;
-    /// Atomic shielded swap. Optional — `Wallet.swap` requires this.
+    /// Atomic shielded swap. Required for `Wallet.swap`.
     submitSwap?(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse>;
 }
 

@@ -1,5 +1,4 @@
-// Build the 1- or 2-slot `InputSlots` array consumed by transact bundle
-// builders. Pads to 2 slots with `null` for single-input spends.
+// Build 1- or 2-slot `InputSlots`; pads with `null` for single-input spends.
 
 import type { InputSlot, InputSlots } from "../bundle.js";
 import type { Field } from "../crypto/index.js";

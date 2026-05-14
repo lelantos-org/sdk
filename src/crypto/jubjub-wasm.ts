@@ -1,13 +1,8 @@
-// WASM-backed Baby-Jubjub. Same shape as the circomlibjs `Jubjub` class so it
-// drops into `Wallet`, `LocalScanner`, `WorkerPoolScanner`, etc. with no
-// caller changes.
-//
-// `hashToAssetGen` is delegated to circomlibjs (lazy-loaded) because it depends
-// on a specific Pedersen-264 bit-stream that the circuit locks to circomlibjs
-// byte-for-byte. Lazy load lets browser bundles that don't touch asset_gen
-// omit the Node-flavored circomlibjs dep entirely.
-//
-// Wire conventions are described in `sdk/wasm/jubjub/src/lib.rs`.
+// WASM-backed Baby-Jubjub. Structurally compatible with circomlibjs `Jubjub`.
+// `hashToAssetGen` is delegated to circomlibjs (lazy-loaded) because it depends on a specific
+// Pedersen-264 bit-stream the circuit locks to circomlibjs byte-for-byte. Lazy load keeps the
+// Node-flavored circomlibjs dep out of browser bundles that don't touch asset_gen.
+// Wire conventions: see `sdk/wasm/jubjub/src/lib.rs`.
 
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
@@ -15,19 +10,11 @@ import type { Jubjub as CircomlibJubjub } from "./jubjub.js";
 import { H_BASE, type Jubjub, type Point } from "./jubjub.js";
 import type { Field, Poseidon } from "./poseidon.js";
 
-// Resolve the wasm-pack `pkg/` JS module + binary URL via Node's package
-// `imports` map (`#wasm/jubjub` → `./wasm/jubjub/pkg/jubjub_wasm.js`).
-// Bundlers honour the same map, so this works everywhere without further
-// configuration.
-
 // Domain-separation tag for FMD bit derivation. Mirrors `TAG_FMD_BIT` in
 // `sdk/src/fmd.ts` and `circuits/src/lib/tags.circom`.
 const TAG_FMD_BIT: bigint = 8n;
 
-// Local type for the wasm-pack output. The real `.d.ts` ships at
-// `wasm/jubjub/pkg/jubjub_wasm.d.ts` after `just build`, but is gitignored,
-// so we describe the consumed surface inline to keep `tsc --noEmit` green
-// in CI without a wasm build step.
+// Inline surface for the wasm-pack output (real `.d.ts` is gitignored).
 interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
     base8(): Uint8Array;
@@ -45,18 +32,16 @@ interface JubWasmMod extends WasmModuleBase {
 
 const POINT_BYTES = 64;
 
-/// Browser apps that bundle the SDK can't rely on the relative-path fallback
-/// (`../../wasm/jubjub/pkg/jubjub_wasm.js`) — the bundler rewrites the path
-/// to a location that doesn't exist at runtime. Inject a loader that resolves
-/// the wasm-pack module + binary using the bundler's own asset-URL pipeline
-/// (e.g. Vite's `?url` imports) before calling `WasmJubjub.build()`.
+/// Inject a loader that resolves the wasm-pack module + binary via the bundler's asset-URL
+/// pipeline (e.g. Vite's `?url` imports) before calling `WasmJubjub.build()`. Required for
+/// browser bundlers that rewrite the relative-path fallback to a runtime-invalid location.
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
 const PKG_JS_URL = new URL("../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url);
 const PKG_WASM_URL = new URL("../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url);
 
-// `node:*` specifiers held in variables so Vite stops trying to resolve
-// them statically in browser builds. Reached only on Node.
+// `node:*` specifier held in a variable to prevent Vite from statically resolving it in
+// browser builds. Reached only on Node.
 const NODE_URL = "node:url";
 
 const loader = createWasmLoader<JubWasmMod>({
@@ -69,8 +54,7 @@ const loader = createWasmLoader<JubWasmMod>({
     },
 });
 
-/// Override the default loader. Call once at app boot, before
-/// `WasmJubjub.build()` / `Wallet.create()`.
+/// Override the default loader. Call once at app boot, before `WasmJubjub.build()`.
 export function configureJubjubWasm(override: JubjubWasmLoader): void {
     loader.configure(override);
 }
@@ -109,7 +93,10 @@ export class WasmJubjub {
         await ensureInit();
         const base8 = bytesToPoint(w().base8());
         const order = fromLeBytes(w().sub_order_le());
-        return new WasmJubjub(base8, order);
+        const inst = new WasmJubjub(base8, order);
+        // Eagerly load circomlibjs fallback used by the sync `hashToAssetGen` hot path.
+        await inst.getFallback();
+        return inst;
     }
 
     private async getFallback(): Promise<CircomlibJubjub> {
@@ -179,10 +166,8 @@ export class WasmJubjub {
         );
     }
 
-    // FMD2 (Niwl) v2 detection. Bit derivation is Poseidon over field
-    // elements — mirrors `fmdTest` in `sdk/src/fmd.ts` and the in-circuit
-    // `ClueCheck`. Point ops use the WASM crate; the hash stays in JS so
-    // the wasm artifact does not need a Poseidon dependency.
+    // FMD2 (Niwl) v2 detection. Mirrors `fmdTest` in `sdk/src/fmd.ts` and in-circuit `ClueCheck`.
+    // Hash stays in JS so the wasm artifact does not need a Poseidon dependency.
     fmdTest(
         P: Poseidon,
         dk: Field[],
@@ -215,11 +200,8 @@ export class WasmJubjub {
     }
 }
 
-/// Build the WASM-backed jubjub typed as the nominal `Jubjub` class so it
-/// drops into APIs declared as `Jubjub` without a cast. Centralises the
-/// `as unknown as Jubjub` hack: parity is locked by `jubjub-wasm.test.ts`,
-/// so the structural compatibility is safe — TS just can't see it across
-/// nominal class types.
+/// Build the WASM-backed jubjub typed as the nominal `Jubjub` class. Parity is locked by
+/// `jubjub-wasm.test.ts`; TS can't see structural compatibility across nominal class types.
 export async function buildJubjub(): Promise<Jubjub> {
     return (await WasmJubjub.build()) as unknown as Jubjub;
 }

@@ -6,7 +6,7 @@ Client SDK for the Lelantos MASP. Three layers:
 - **Pluggable interfaces** — `ChainAdapter`, `NoteSource`, `Submitter`, `Prover`, `CoinSelector`, `NoteStore`. Swap any one for tests or alt transports.
 - **Low-level primitives** — keys, FMD, note encryption, witness builders, prover wrapper. Use for tests, custom flows, advanced integrations.
 
-Browser-safe: SDK uses Web Crypto + `fetch`; no `node:*` imports. Works in Node 19+, modern browsers, Deno.
+Browser-safe: SDK uses Web Crypto + `fetch`; no `node:*` imports. Works in Node 24+, modern browsers, Deno.
 
 > **Usage guide:** see [SDK.md](./SDK.md) for the full walkthrough — wallet creation, deposit/transfer/withdraw, sync + balance, custom storage, pluggables, browser, low-level primitives, and errors.
 
@@ -62,57 +62,13 @@ Published privately on **GitHub Packages**. Consumers need a token with `read:pa
 
 ---
 
-## Layout
-
-```
-src/
-  crypto/                  poseidon, jubjub, tags, derive, commit, nullifier, merkle, bytes
-  witness/
-    tree-update.ts         tree_update circuit witness
-  witness.ts               transact_2x2 circuit witness
-  snark-compression.ts     flatten + (z, y) compression for both circuits
-  keys.ts                  key hierarchy + addressFromSpendingKey
-  metamask.ts              EIP-712 → nsk
-  address.ts               bech32m (HRP "lelantos2", payload = pk_d || dk || pk)
-  fmd.ts                   Niwl
-  note-encrypt.ts          ECDH + ChaCha20-Poly1305
-  note-codec.ts            80-byte plaintext layout
-  notes.ts                 Note + EncryptedNote types
-  cache.ts                 In-memory note cache (legacy)
-  bundle.ts                buildDeposit / buildTransfer / buildWithdraw
-  aux.ts                   per-output FMD + ECDH bundle
-  prover.ts                snarkjs wrapper
-  relayer.ts               wallet → relayer HTTP client (typed payload, includes permit)
-  operator.ts              relayer-internal: canonical tree + tree_update prover
-  sync.ts                  trial-decrypt loop (scanNotes) + path verification
-  permit.ts                EIP-2612 typed-data signer
-  wallet/                  HIGH-LEVEL — Wallet class lives here
-    index.ts               WalletApi interface + Wallet class
-    config.ts              WalletConfig (all pluggables optional)
-    key-source.ts          KeySource discriminated union + resolveNsk
-    note-store.ts          NoteStore interface + InMemoryNoteStore
-    selection.ts           CoinSelector interface + SfrtCoinSelector
-    submitter.ts           Submitter interface + HttpRelayerSubmitter
-    note-source.ts         NoteSource interface + FmdNoteSource
-    prover.ts              Prover interface + SnarkjsProver
-    randomness.ts          Web-Crypto Fr + jubjub-scalar samplers
-    fmd-client.ts          Typed fmd-webserver HTTP client
-    chain-adapter.ts       ChainAdapter interface
-    sync.ts                syncWallet helper
-    adapters/
-      ethers-chain.ts      EthersChainAdapter (ethers v6)
-  index.ts                 barrel — re-exports everything
-```
-
----
-
 ## Address format
 
 - **HRP**: `lelantos2`
 - **Payload (96 B)**: `pk_d (32, packed Baby-Jubjub) || dk (32, LE Field) || pk (32, LE Field)`
 - **Encoding**: bech32m
 
-`pk` is published so any sender can construct a valid note commitment for the recipient. Spend authority remains gated by `nsk` (private). See [contracts/src/MASP.sol](../contracts/src/MASP.sol) and the audit notes in repo CLAUDE history.
+`pk` is published so any sender can construct a valid note commitment for the recipient. Spend authority remains gated by `nsk` (private). See [contracts/src/MASP.sol](../contracts/src/MASP.sol).
 
 Old `lelantos1...` addresses (pk-less) are rejected on decode (`bad HRP`).
 
@@ -127,7 +83,7 @@ Old `lelantos1...` addresses (pk-less) are rejected on decode (`bad HRP`).
 ## Testing
 
 ```bash
-npm test              # 37 tests across crypto, address, keys, fmd, permit, selection
+npm test              # vitest suite across crypto, address, keys, fmd, permit2, selection, scanner
 npm run build         # tsc → dist/
 ```
 

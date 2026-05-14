@@ -1,8 +1,4 @@
-// Public Wallet API surface — types only.
-//
-// `WalletApi` is the seam apps mock in tests; `Wallet` (in `./index.ts`)
-// is the default implementation. Splitting types out of the impl keeps
-// the import graph shallow for consumers that need only the shape.
+// Public Wallet API types. `Wallet` in `./index.ts` is the default impl.
 
 import type { SpendingKey } from "../keys.js";
 import type { SwapQuote } from "../swap.js";
@@ -15,161 +11,107 @@ import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import type { SyncProgress, SyncResult } from "./sync.js";
 
-/// Per-op progress phases. Mirrors `SyncProgress.phase`. Surfaced via
-/// `onPhase` callbacks on each op's options so UIs can render a stepper.
 export type DepositPhase = "signing" | "submitting";
 export type SpendPhase = "preparing" | "proving" | "submitting";
 
-/// Args for `Wallet.deposit`. Shields an ERC-20 from caller's eth account
-/// into the MASP. Caller must hold an EIP-2612-permit-capable ERC-20
-/// balance ≥ `amount * scale + fee`. For native ETH, use `depositEth`.
+/// Shield ERC-20 into the MASP. For native ETH, set `asEth: true`.
 export interface DepositOptions {
-    /// Amount in *circuit units* (post-scale-down). Multiplied by the
-    /// asset's `scale` to get the ERC-20 base-unit deposit.
+    /// Amount in circuit units (post-scale-down).
     amount: bigint;
-    /// Asset id (default 1n).
+    /// Default 1n.
     asset?: bigint;
-    /// Shielded recipient (bech32m). Defaults to own address (deposit to self).
+    /// Shielded recipient (bech32m). Defaults to own address.
     to?: string;
-    /// EIP-2612 permit deadline (unix-seconds). Default: `now + 3600`.
+    /// Unix-seconds. Default `now + 3600`.
     deadline?: bigint;
-    /// Native-ETH deposit. When true, the asset must be the registered WETH
-    /// id; SDK calls `chain.submitIntentNative` with `msg.value = total` and
-    /// skips Permit2 entirely. Caller must have native ETH balance ≥ total.
+    /// Native-ETH deposit. Requires the registered WETH asset id; SDK
+    /// calls `submitIntentNative` with `msg.value = total`.
     asEth?: boolean;
-    /// Progress callback fired before each major step. Useful for UIs that
-    /// want to render a stepper. Errors thrown from this callback are
-    /// swallowed so they don't break the op.
+    /// Errors from callback are swallowed.
     onPhase?: (phase: DepositPhase) => void;
 }
 
-/// Args for `Wallet.withdrawEth`. Unshields a WETH-asset note and forwards
-/// raw ETH to `to` via `MASP.withdrawEth` (unwraps inside the contract).
-/// The selected asset id MUST be registered against the chain's WETH.
+/// Unshield WETH note to raw ETH via `MASP.withdrawEth`. Asset id MUST
+/// be registered against the chain's WETH.
 export interface WithdrawEthOptions {
-    /// On-chain ETH recipient (0x address). Must be EOA or payable contract.
     to: string;
-    /// Amount in circuit units.
     amount: bigint;
     /// Asset id of WETH in the MASP registry.
     asset: bigint;
-    /// Optional selection tuning.
     selectOpts?: SelectOpts;
-    /// On `InsufficientCoverError`, transparently self-spend then retry.
+    /// Self-spend then retry on `InsufficientCoverError`.
     autoConsolidate?: boolean;
-    /// Progress callback for stepper UIs. See `DepositOptions.onPhase`.
     onPhase?: (phase: SpendPhase) => void;
 }
 
-/// Args for `Wallet.transfer`. Spends 1-2 unspent notes covering `amount`
-/// and creates a send-note for `to` plus a change-note back to self.
-/// Throws `InsufficientCoverError` if no 1- or 2-note cover exists, unless
-/// `autoConsolidate: true` is set.
+/// Shielded transfer. Throws `InsufficientCoverError` if no 1- or 2-note
+/// cover exists, unless `autoConsolidate: true`.
 export interface TransferOptions {
-    /// Recipient bech32m shielded address (any wallet, including own).
+    /// Recipient bech32m shielded address.
     to: string;
-    /// Amount in circuit units.
     amount: bigint;
-    /// Asset id (default 1n).
+    /// Default 1n.
     asset?: bigint;
-    /// Optional selection tuning (fee, dust threshold, RNG, etc.).
     selectOpts?: SelectOpts;
-    /// On `InsufficientCoverError`, transparently self-spend the two
-    /// smallest notes, re-sync, and retry the transfer once. Default false.
     autoConsolidate?: boolean;
-    /// Progress callback for stepper UIs. See `DepositOptions.onPhase`.
     onPhase?: (phase: SpendPhase) => void;
 }
 
-/// Args for `Wallet.withdraw`. Spends 1-2 notes; releases `amount` ERC20
-/// to `to` on-chain; remainder split into two change-notes back to self.
-/// For native ETH unshield, use `withdrawEth`. Throws
-/// `InsufficientCoverError` on no cover, unless `autoConsolidate: true` is
-/// set.
+/// Unshield to ERC20. For native ETH use `withdrawEth`. Throws
+/// `InsufficientCoverError` on no cover, unless `autoConsolidate: true`.
 export interface WithdrawOptions {
-    /// On-chain ERC-20 recipient (0x address).
     to: string;
-    /// Amount in circuit units.
     amount: bigint;
-    /// Asset id (default 1n).
+    /// Default 1n.
     asset?: bigint;
-    /// Optional selection tuning.
     selectOpts?: SelectOpts;
-    /// On `InsufficientCoverError`, transparently self-spend the two
-    /// smallest notes, re-sync, and retry the withdraw once. Default false.
     autoConsolidate?: boolean;
-    /// Progress callback for stepper UIs. See `DepositOptions.onPhase`.
     onPhase?: (phase: SpendPhase) => void;
 }
 
-/// Args for `Wallet.swap`. Atomic shielded swap: spends 1-2 notes of
-/// `assetIn`, releases `amount` (gross publicOut, MASP fee deducted) to
-/// the SwapWrapper, which adapter-swaps to `assetOut` and re-shields the
-/// result as a fresh B note for `bRecipient` (default own).
+/// Atomic shielded swap via SwapWrapper.
 export interface SwapOptions {
-    /// Asset id of the input notes to spend.
     assetIn: bigint;
-    /// Asset id of the output (B) note.
     assetOut: bigint;
-    /// Amount in circuit units of `assetIn`. Encoded as `pi.publicOut` on
-    /// the leg-1 withdraw — MASP transfers `amount * scaleIn` minus its
-    /// protocol fee to the wrapper.
+    /// Gross publicOut in circuit units of `assetIn`. MASP transfers
+    /// `amount * scaleIn` minus protocol fee to the wrapper.
     amount: bigint;
-    /// Pre-fetched MetaQuoter quote pinning the route + minOut floor.
-    /// Caller fetches via `fetchSwapQuote`; refetch if `quoteAgeSecs > N`.
+    /// Pre-fetched MetaQuoter quote pinning route + minOut.
     quote: SwapQuote;
-    /// SwapWrapper contract address. Bound into the leg-1 PI as
-    /// `recipient = relayer = wrapperAddress`, and as `payer` on leg-2.
+    /// SwapWrapper address; bound as leg-1 recipient+relayer and leg-2 payer.
     wrapperAddress: string;
-    /// Shielded recipient (bech32m) for the B note. Defaults to own.
+    /// Shielded recipient for B note. Defaults to own.
     bRecipient?: string;
-    /// Optional selection tuning.
     selectOpts?: SelectOpts;
-    /// Auto-consolidate on `InsufficientCoverError`. See `WithdrawOptions`.
     autoConsolidate?: boolean;
-    /// Progress callback for stepper UIs.
     onPhase?: (phase: SpendPhase) => void;
 }
 
-/// Normalised receipt returned by `deposit` / `transfer` / `withdraw`. All
-/// fields are always populated (empty arrays / `0n` instead of
-/// `undefined`) so consumers can drop the optional-chaining boilerplate.
+/// Normalised receipt. Empty arrays / `0n` over `undefined`.
 export interface TransactionResult {
-    /// On-chain transaction hash.
     txHash: string;
-    /// Commitments created by the transaction (0x-hex). Always length 2.
+    /// 0x-hex commitments created by the tx. Always length 2.
     commitments: [string, string];
-    /// Note IDs spent by this transaction. Empty for `deposit`.
+    /// Note IDs spent. Empty for `deposit`.
     spent: string[];
-    /// Total input value (`0n` on deposit).
+    /// `0n` on deposit.
     inputSum: bigint;
-    /// Value sent to the recipient (deposit/transfer/withdraw amount).
     sent: bigint;
-    /// Value returned to the wallet as change.
     change: bigint;
-    /// @deprecated Use `commitments`. Tuple alias kept for back-compat.
+    /// @deprecated Use `commitments`.
     cm: [string, string];
-    /// @deprecated Use `spent`. Old optional alias kept for back-compat.
+    /// @deprecated Use `spent`.
     spentNoteIds?: string[];
-    /// Deposit-only: the on-chain intent id allocated by `MASP.submitIntent`.
-    /// Webapp consumers track flush status by this id over the relayer SSE
-    /// stream. Undefined for spend ops.
+    /// Deposit-only: on-chain intent id from `MASP.submitIntent`.
     intentId?: bigint;
-    /// Subset of `commitments` that this wallet expects to recover via FMD
-    /// scan (own change / self-deposit notes). Empty for transfers where
-    /// neither output goes to self. Use with `wallet.awaitCommitments`.
+    /// Subset of `commitments` recoverable via this wallet's FMD scan.
     ownCommitments: string[];
-    /// Total value (in circuit units) of the produced outputs flagged as
-    /// own. Equals the amount that will land back in the local wallet
-    /// once the FMD scanner indexes them. UIs use this to render an
-    /// "incoming" pending balance until those notes are observed.
+    /// Total value of own outputs; pending balance once FMD indexes them.
     ownInflow: bigint;
 }
 
-/// Plaintext payload of a recovered note. Returned by
-/// `WalletNote.notePayload()` for callers that need the cryptographic
-/// fields (rho/rcm/rcvDep) — e.g. building custom proofs against the
-/// SDK's low-level builders.
+/// Plaintext payload of a recovered note. Cryptographic fields for
+/// custom proofs against the low-level builders.
 export interface WalletNotePayload {
     asset: bigint;
     value: bigint;
@@ -178,48 +120,33 @@ export interface WalletNotePayload {
     rcvDep: bigint;
 }
 
-/// Friendly note view returned by `wallet.notes()`. The only note type
-/// integrators need to touch — storage encoding is internal.
+/// Friendly note view returned by `wallet.notes()`.
 export interface WalletNote {
-    /// Stable short id assigned by the SDK on discovery.
     id: string;
-    /// Native bigint asset id.
     asset: bigint;
-    /// Native bigint value (in circuit units).
     value: bigint;
-    /// Whether the note has been spent on chain.
     spent: boolean;
-    /// First chain block at which the note was observed (when known).
     firstSeenBlock?: number;
-    /// Wall-clock discovery time (ISO-8601).
+    /// ISO-8601.
     discoveredAt: string;
-    /// 0x-hex commitment (32 bytes).
+    /// 0x-hex (32 bytes).
     cm: string;
-    /// Decoded payload (rho/rcm/rcvDep) — needed when assembling custom
-    /// bundles via the low-level `buildTransfer` / `buildWithdraw` paths.
-    /// Cheap accessor; recomputes on each call. Most apps never need this.
+    /// Decoded payload. Recomputes on each call.
     notePayload(): WalletNotePayload;
 }
 
-/// Filter for `wallet.notes()`. `asset` is required so callers in
-/// multi-asset deployments can't accidentally read across assets.
+/// `asset` is required so multi-asset callers can't read across assets.
 export interface NotesFilter {
     asset: bigint;
     spent?: boolean;
 }
 
-/// Public interface — apps can mock this in tests, or build alternative
-/// implementations (HSM-backed wallet, multi-sig, MPC) without subclassing.
 export interface WalletApi {
     readonly address: string;
     readonly keys: SpendingKey;
     readonly noteStore: NoteStore;
-    /// Active chain adapter — exposed for token lookups, balance reads,
-    /// and any direct RPC needs. Cast to your adapter's concrete type
-    /// (e.g. `EthersChainAdapter`) for adapter-specific accessors.
+    /// Cast to a concrete adapter type for adapter-specific accessors.
     readonly chain: ChainAdapter;
-    /// Active pluggables. Useful for tooling that wants to wrap them with
-    /// timing / retry / observability (see CLI's `instrumentWallet`).
     readonly noteSource: NoteSource;
     readonly submitter: Submitter;
     readonly prover: Prover;
@@ -228,21 +155,16 @@ export interface WalletApi {
 
     sync(opts?: { limit?: number; onProgress?: (p: SyncProgress) => void }): Promise<SyncResult>;
     refresh(): Promise<void>;
-    /// Block until every commitment in `cms` is present in the local note
-    /// store, polling `sync()` between attempts. Resolves immediately if
-    /// they're already there. Use `signal` to cancel; `pollMs` controls
-    /// backoff between sync calls.
+    /// Block until every commitment in `cms` is in the local store,
+    /// polling `sync()` between attempts.
     awaitCommitments(
         cms: string[],
         opts?: { signal?: AbortSignal; pollMs?: number; maxAttempts?: number },
     ): Promise<void>;
-    /// Friendly note view filtered by asset. `spent` is optional; omit to
-    /// include both spent + unspent.
+    /// Omit `spent` to include both.
     notes(filter: NotesFilter): WalletNote[];
-    /// Same view, but across all assets — for dashboards / multi-asset
-    /// summaries. `spent` filters spent / unspent (omit for both).
+    /// Cross-asset view for dashboards.
     allNotes(filter?: { spent?: boolean }): WalletNote[];
-    /// Unspent balance for `asset`.
     balance(asset: bigint): bigint;
     selectNotes(asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
 
@@ -251,9 +173,7 @@ export interface WalletApi {
     withdraw(args: WithdrawOptions): Promise<TransactionResult>;
     /// Unshield to raw ETH via the WETH bridge.
     withdrawEth(args: WithdrawEthOptions): Promise<TransactionResult>;
-    /// Atomic shielded swap (note `assetIn` → SwapWrapper → note `assetOut`).
-    /// Leg-1 unshield to wrapper + leg-2 escrow intent are bundled into
-    /// one tx via `submitter.submitSwap`.
+    /// Atomic shielded swap; legs bundled via `submitter.submitSwap`.
     swap(args: SwapOptions): Promise<TransactionResult>;
     markSpent(noteIds: string[]): Promise<void>;
 }

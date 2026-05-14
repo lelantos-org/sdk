@@ -27,11 +27,10 @@ export const POW_2_64 = 1n << 64n;
 export const BN254_FR =
     21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
-// Baby-Jubjub subgroup order (used to reduce derived scalars).
+// Baby-Jubjub subgroup order.
 export const BABYJUB_SUBGROUP_ORDER =
     2736030358979909402780800718157159386076813972158567259200215660948447373041n;
 
-// Public quadratic non-residue in BN254 scalar field, used by FMD
-// Legendre-symbol bit-extraction gadget. Verified: 5^((r-1)/2) ≡ -1 (mod r).
-// Mirrors `FMD_LEGENDRE_QNR` in circuits/src/lib/hash_to_bit.circom.
+// Public QNR in BN254 scalar field for FMD Legendre-symbol bit-extraction gadget.
+// 5^((r-1)/2) ≡ -1 (mod r). Mirrors `FMD_LEGENDRE_QNR` in circuits/src/lib/hash_to_bit.circom.
 export const FMD_LEGENDRE_QNR = 5n;

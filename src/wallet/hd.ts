@@ -1,19 +1,9 @@
 // ZIP-32-lite hierarchical key derivation for Baby-Jubjub.
 //
-// One BIP39 seed → many independent `nsk` roots (accounts). Each account's
-// nsk feeds the existing `buildSpendingKey` pipeline (sdk/src/keys.ts) to
-// produce its own ivk/nk/pk_d/dk/pk subtree.
-//
-// Path: m / 32' / LELANTOS_COIN_TYPE' / account'  — hardened-only.
-//
-// Quick start:
-//   const esk = mnemonicToAccountKey(mnemonic, 0);
-//   const nsk = esk.nsk;                          // pass to buildSpendingKey
-//   accountPath(0) === "m/32'/1819239265'/0'";    // for logging/display
-//
-// PRF: blake2b in keyed mode with the parent chain code as the key. Domain
-// byte 0x11 is reserved for hardened sk-derivation; 0x12 is left free for
-// future non-hardened ivk-derivation if/when ZIP-32 full mode is added.
+// Path: m / 32' / LELANTOS_COIN_TYPE' / account' (hardened-only).
+// PRF: blake2b keyed with parent chain code. Domain byte 0x11 is reserved
+// for hardened sk-derivation; 0x12 is reserved for future non-hardened
+// ivk-derivation.
 
 import { blake2b } from "@noble/hashes/blake2";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -21,22 +11,22 @@ import { wordlist } from "@scure/bip39/wordlists/english";
 import { BN254_FR, type Field, fromLeBytes, toLeBytes } from "../crypto/index.js";
 
 const HARDENED_BIT = 0x80000000;
-const MAX_INDEX = HARDENED_BIT; // exclusive upper bound for user-facing index
+/// Exclusive upper bound for user-facing index.
+const MAX_INDEX = HARDENED_BIT;
 
 const MASTER_PERSONAL = new TextEncoder().encode("Lelantos_ZIP32_v1_Master");
 
-/// ZIP-32 purpose; matches Sapling/Orchard convention.
+/// Matches Sapling/Orchard convention.
 export const ZIP32_PURPOSE = 32;
 
-/// Unregistered Lelantos coin type — placeholder ASCII "lela" big-endian.
+/// Unregistered placeholder; ASCII "lela" big-endian.
 export const LELANTOS_COIN_TYPE = 0x6c656c61;
 
 export interface ExtendedSpendingKey {
     nsk: Field;
     chainCode: Uint8Array;
     depth: number;
-    /// Raw on-the-wire child index (hardened bit included for hardened
-    /// children). User-facing account number is `childIndex & 0x7fffffff`.
+    /// Wire index with hardened bit. User-facing account = `childIndex & 0x7fffffff`.
     childIndex: number;
 }
 
@@ -60,7 +50,7 @@ function checkIndex(i: number, label: string): void {
     }
 }
 
-/// Master ESK from a 64-byte BIP39 seed.
+/// From a 64-byte BIP39 seed.
 export function masterFromSeed(seed: Uint8Array): ExtendedSpendingKey {
     const I = blake2b(seed, { dkLen: 64, key: MASTER_PERSONAL });
     return {
@@ -71,8 +61,7 @@ export function masterFromSeed(seed: Uint8Array): ExtendedSpendingKey {
     };
 }
 
-/// Hardened child derivation. Pass the user-facing index (e.g. `32` for
-/// purpose, `0` for first account); the hardened bit is applied internally.
+/// Pass user-facing index; hardened bit is applied internally.
 export function deriveChildHardened(
     parent: ExtendedSpendingKey,
     index: number,
@@ -93,7 +82,6 @@ export function deriveChildHardened(
     };
 }
 
-/// Walk the canonical Lelantos path from a BIP39 seed:
 /// `m / 32' / LELANTOS_COIN_TYPE' / account'`.
 export function deriveAccount(seed: Uint8Array, account: number): ExtendedSpendingKey {
     checkIndex(account, "account");
@@ -103,9 +91,7 @@ export function deriveAccount(seed: Uint8Array, account: number): ExtendedSpendi
     return deriveChildHardened(coin, account);
 }
 
-/// One-shot mnemonic → account ESK. Validates BIP39, derives the canonical
-/// path. Use `.nsk` from the result with `buildSpendingKey` (or call the
-/// higher-level `deriveKeysFromMnemonic`).
+/// Validates BIP39, derives the canonical path.
 export function mnemonicToAccountKey(
     mnemonic: string,
     account = 0,
@@ -117,8 +103,7 @@ export function mnemonicToAccountKey(
     return deriveAccount(mnemonicToSeedSync(mnemonic, passphrase), account);
 }
 
-/// Render the canonical derivation path for an account as a string. Useful
-/// for logs, debug output, and HW-wallet integrations.
+/// Render the canonical derivation path string.
 export function accountPath(account: number): string {
     checkIndex(account, "account");
     return `m/${ZIP32_PURPOSE}'/${LELANTOS_COIN_TYPE}'/${account}'`;

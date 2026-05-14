@@ -1,11 +1,8 @@
 // Quote-fetch helper for the MetaQuoter backend.
 //
-// Phase-1 surface is intentionally tiny: this module fetches the best
-// route for a `(tokenIn, tokenOut, amountIn)` triple and returns it to
-// the caller. Proof bundling for the wrapper's two legs reuses the
-// existing `buildWithdraw` + `buildDeposit` builders in `bundle.ts`;
-// caller assembles the on-chain `SwapWrapper.swap(SwapArgs)` calldata
-// against their own signer/relayer integration.
+// Fetches the best route for `(tokenIn, tokenOut, amountIn)`. Proof bundling
+// reuses `buildWithdraw` + `buildDeposit` from `bundle.ts`; caller assembles
+// `SwapWrapper.swap(SwapArgs)` calldata against their own signer/relayer.
 
 /// Venue tag returned by MetaQuoter. Extend as additional adapters land.
 export type SwapVenue = "univ3";

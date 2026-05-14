@@ -1,6 +1,5 @@
-// Parity: WasmJubjub must match circomlibjs Jubjub byte-for-byte on every
-// op that touches wire bytes. Auto-skips when the WASM artifact has not
-// been built (CI runs `just build` in `wasm/` before tests).
+// WasmJubjub must match circomlibjs Jubjub byte-for-byte on every op that touches wire bytes.
+// Auto-skips when the WASM artifact has not been built.
 
 import { beforeAll, expect, it } from "vitest";
 import { BABYJUB_SUBGROUP_ORDER, Jubjub, type Point } from "./index.js";

@@ -1,16 +1,10 @@
-// High-level transact bundle builders. Promotes the logic that previously
-// lived in `e2e/runner/src/bundles.ts` into the SDK so every consumer (the
-// runner, the CLI, future wallet UIs) shares one witness/prove/encrypt
-// pipeline.
+// High-level transact bundle builders.
 //
-// Two flavors:
-//   - Spend builders (`buildTransfer`, `buildWithdraw`, `buildWithdrawNative`)
-//     prove the transact_2x2 SNARK and return a `SubmitTransactPayload` ready
-//     to POST to the relayer's `/v1/transact`.
-//   - `buildDeposit` does NOT prove — under the new escrow flow, deposits go
-//     through `MASP.submitIntent` (Permit2 witness, no SNARK at submit). It
-//     returns a `BuiltIntent` ready for the wallet to sign + POST to
-//     `/v1/intent`.
+// Spend builders (`buildTransfer`, `buildWithdraw`, `buildWithdrawNative`)
+// prove the transact_2x2 SNARK and return a `SubmitTransactPayload` for
+// `/v1/transact`. `buildDeposit` does NOT prove — deposits go through
+// `MASP.submitIntent` (Permit2 witness); returns a `BuiltIntent` for the
+// wallet to sign + POST to `/v1/intent`.
 
 import {
     buildOutputAux,
@@ -43,7 +37,7 @@ export interface OutputRecipient {
     pk_d: Point;
     dk: Field;
     /// Note-commitment binding scalar; same value the receiver derives via
-    /// `derivePkFromIvk`. Now part of the bech32m address.
+    /// `derivePkFromIvk`. Part of the bech32m address.
     pk: Field;
 }
 
@@ -76,8 +70,6 @@ export interface BuiltBundle {
     producedNotes: [Note, Note];
 }
 
-// ---------- DEPOSIT (escrow intent — no SNARK) ----------
-
 export interface DepositArgs {
     P: Poseidon;
     J: Jubjub;
@@ -88,9 +80,8 @@ export interface DepositArgs {
     /// 0x ETH; on-chain recipient (binds DepositIntent.recipient).
     recipientAddress: string;
     publicIn: bigint;
-    /// Bech32m-decoded shielded address of the receiving wallet. The
-    /// recipient's note-binding `pk` comes from this struct now that it is
-    /// in the address payload.
+    /// Bech32m-decoded shielded address of the receiving wallet. Provides
+    /// the note-binding `pk` via the address payload.
     recipient: OutputRecipient;
     /// Per-output randomness for the real output (slot 0).
     output0: { rho: Field; rcm: Field; rcv: Field; rcvDep: Field; aux: OutputRandomness };
@@ -143,7 +134,7 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
     // Deposit-anchor Pedersen value commitments. cv_dep_j = value_j · V^asset
     // + rcv_dep_j · H. Baked into the leaf via Poseidon(TAG_LEAF, cm, cv_dep)
     // so the spender cannot open the cm under a different (asset, value) at
-    // spend time. Closes C-1 (cm-preimage substitution on deposit path).
+    // spend time.
     const assetGen = J.hashToAssetGen(a.asset);
     const cvDep0 = J.valueCommit(realOut.value, assetGen, realOut.rcvDep);
     const cvDep1 = J.valueCommit(padOut.value, assetGen, padOut.rcvDep);
@@ -169,8 +160,6 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
     };
 }
 
-// ---------- INPUT SLOT ----------
-
 /// One real input slot for transfer/withdraw. Pass `null` in the
 /// per-slot tuple to fill that slot with a dummy.
 export interface InputSlot {
@@ -183,8 +172,6 @@ export interface InputSlot {
 /// an `InputSlot` (real spend) or `null` (dummy). At least one must be
 /// non-null; balance equation enforced inside the builder.
 export type InputSlots = [InputSlot | null, InputSlot | null];
-
-// ---------- TRANSFER ----------
 
 export interface TransferArgs extends BundleCommon {
     inputs: InputSlots;
@@ -215,8 +202,6 @@ export async function buildTransfer(a: TransferArgs): Promise<BuiltBundle> {
     return finalize(a, "transfer", realIns, a.outputs, a.merkleRoot, 0n, 0n, [aux0, aux1]);
 }
 
-// ---------- WITHDRAW ----------
-
 export interface WithdrawArgs extends BundleCommon {
     inputs: InputSlots;
     merkleRoot: Field;
@@ -246,8 +231,6 @@ export async function buildWithdraw(a: WithdrawArgs): Promise<BuiltBundle> {
 
     return finalize(a, "withdraw", realIns, a.change, a.merkleRoot, 0n, a.publicOut, [aux0, aux1]);
 }
-
-// ---------- WITHDRAW NATIVE (WETH → ETH) ----------
 
 export interface WithdrawNativeArgs extends WithdrawArgs {}
 
@@ -290,8 +273,6 @@ function buildInputs(
     );
 }
 
-// ---------- internals ----------
-
 function buildAuxForReal(
     J: Jubjub,
     P: Poseidon,
@@ -317,10 +298,8 @@ function buildAuxForReal(
     });
 }
 
-// ── finalize: pure pipeline (witness → flatten → prove → wire payload) ──
-
-/// Shape produced by `toCircomInput`. Decimal strings — fed to the prover
-/// verbatim; we only re-parse the public-input subset for the wire format.
+/// Shape produced by `toCircomInput`. Decimal strings fed to the prover
+/// verbatim; only the public-input subset is re-parsed for the wire format.
 type CircomInput = ReturnType<typeof toCircomInput>;
 
 async function finalize(
@@ -340,8 +319,7 @@ async function finalize(
     const outputClues = auxAndWitness.map((a) => a.witness);
 
     const { J, asset } = common;
-    // Warm WasmJubjub's circomlibjs fallback once; per-note hashToAssetGen
-    // calls inside toCircomInput depend on it.
+    // Warm WasmJubjub's circomlibjs fallback; hashToAssetGen depends on it.
     const maybeAsync = (J as { hashToAssetGenAsync?: (a: bigint) => Promise<unknown> })
         .hashToAssetGenAsync;
     if (typeof maybeAsync === "function") await maybeAsync.call(J, asset);
@@ -377,10 +355,8 @@ async function finalize(
     };
 }
 
-/// Convert an internal `OutputAux` (pair of points + bytes) to the wire
-/// `AuxOutput` shape consumed by Permit2 piHash + relayer wire. Splits the
-/// Baby-Jubjub points into separate x/y coordinates to mirror the on-chain
-/// `AuxValidation.Output` struct.
+/// Convert internal `OutputAux` to the wire `AuxOutput`, splitting Baby-Jubjub
+/// points into x/y to mirror the on-chain `AuxValidation.Output` struct.
 function auxOutputToWire(a: OutputAux): AuxOutput {
     return {
         clueRx: a.clueR[0],
@@ -401,9 +377,7 @@ function computeFiatShamirZ(
     aux: [OutputAux, OutputAux],
     outputClues: OutputAuxWithWitness["witness"][],
 ): bigint {
-    // `baseInput` is the generic Record returned by `toCircomInput`; structurally
-    // matches FlattenInput's required slots but TS can't prove it without the
-    // unknown bridge.
+    // Structural cast: baseInput satisfies FlattenInput but TS can't prove it.
     const flattenInput: FlattenInput = {
         ...(baseInput as unknown as FlattenInput),
         out_clue_Rx: aux.map((a) => a.clueR[0]),

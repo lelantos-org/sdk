@@ -1,10 +1,8 @@
 // Wallet-side tree sync helpers.
 //
-// In the lazy-root model the chain holds only `roots[ring]` + `isKnownRoot`
-// + `committedCount`. The actual leaves and merkle paths live with the
-// relayer. Wallets verify any path the relayer hands them by recomputing
-// the root from `(leaf, pathElements, pathIndices)` and asserting the
-// result is on-chain `isKnownRoot`. Soundness gives no path-forgery vector.
+// Lazy-root model: chain holds only `roots[ring]` + `isKnownRoot` +
+// `committedCount`. Leaves and merkle paths live with the relayer. Wallets
+// verify by recomputing the root and asserting `isKnownRoot`.
 
 import { type Field, type Jubjub, type Poseidon, TAG_MERKLE } from "./crypto/index.js";
 import { type FmdClue, type FmdDetectionKey, fmdTest } from "./fmd.js";
@@ -31,11 +29,9 @@ export interface ScanHit extends NotePayload {
     leafIndex: number;
 }
 
-/// Trial-decrypt every note with the given ivk; return the ones whose
-/// ChaCha tag verifies and whose plaintext decodes cleanly.
-///
-/// `detectionKey` is optional: when supplied, FMD is used as a pre-filter
-/// to skip clearly-not-mine notes without paying the ECDH+ChaCha cost.
+/// Trial-decrypt notes with `ivk`; return those whose ChaCha tag verifies
+/// and plaintext decodes. `detectionKey` optional FMD pre-filter to skip
+/// clearly-not-mine notes without paying ECDH+ChaCha cost.
 export function scanNotes(
     J: Jubjub,
     P: Poseidon,
@@ -53,9 +49,8 @@ export function scanNotes(
         if (!plain) continue;
         try {
             const payload = decodeNotePayload(plain);
-            // Drop self-pad outputs (value=0n) emitted by deposits for FMD
-            // privacy. They decrypt cleanly but are not spendable and would
-            // otherwise pile up as phantom unspent notes.
+            // Drop self-pad outputs (value=0n): decrypt cleanly but not
+            // spendable; would otherwise pile up as phantom unspent notes.
             if (payload.value === 0n) continue;
             hits.push({ ...payload, cm: inp.cm, leafIndex: inp.leafIndex });
         } catch {
@@ -88,8 +83,7 @@ export function rootFromPath(
 }
 
 /// Verify a relayer-supplied merkle path against an on-chain root oracle.
-/// Caller passes a `isKnownRootOnChain(root)` predicate (e.g. an
-/// ethers-contract `isKnownRoot(bytes32)` view call).
+/// Caller passes `isKnownRootOnChain(root)` predicate.
 export async function verifyPath(
     P: Poseidon,
     leaf: Field,

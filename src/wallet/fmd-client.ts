@@ -1,9 +1,7 @@
 // Typed fmd-webserver HTTP client.
 //
-// Backend hex format inconsistency note:
-//   /v1/path     and /v1/tree-state return 0x-prefixed hex
-//   /v1/notes    returns BARE hex (no 0x) for cm + ciphertext
-// `hexToBigint` here normalizes both forms.
+// Backend hex inconsistency: /v1/path + /v1/tree-state return 0x-hex;
+// /v1/notes returns BARE hex (no 0x) for cm + ciphertext.
 
 import type { Field } from "../crypto/index.js";
 import { createHttpClient, type HttpClient, type HttpClientOptions } from "./http.js";
@@ -32,8 +30,7 @@ export interface FmdNoteOut {
     chainId?: number;
 }
 
-/// Server-side FMD-filtered note. Uses `note_id` on the wire; normalized
-/// into the same `id` field as `FmdNoteOut` so callers can share mappers.
+/// Server-side FMD-filtered note. Wire field `note_id` normalised to `id`.
 export interface FmdMatchOut extends FmdNoteOut {}
 
 export interface SubscriptionOut {
@@ -48,8 +45,7 @@ export interface CreateSubscriptionInput {
     gamma: number;
 }
 
-/// Optional query params accepted by most endpoints. `chainId` is added
-/// automatically on every URL — callers don't pass it.
+/// `chainId` is added automatically — callers don't pass it.
 type QueryParams = Record<string, string | number | bigint | undefined>;
 
 export class FmdClient {
@@ -60,8 +56,7 @@ export class FmdClient {
         private readonly chainId: bigint,
         opts?: HttpClientOptions | typeof fetch,
     ) {
-        // Back-compat: third arg used to be a raw `fetch` impl. Detect and
-        // forward into the shared HTTP client, which adds timeout + retry.
+        // Back-compat: third arg used to be a raw `fetch` impl.
         const httpOpts: HttpClientOptions =
             typeof opts === "function" ? { fetchImpl: opts } : (opts ?? {});
         this.http = createHttpClient("FMD_TIMEOUT", "FMD_FAILED", httpOpts);
@@ -108,8 +103,6 @@ export class FmdClient {
     }
 
     /// Server-side FMD-filtered notes for a registered subscription.
-    /// Returned rows use `note_id` on the wire; normalised to `id` so the
-    /// shape matches `FmdNoteOut`.
     async listMatches(opts: {
         subscription: number;
         limit?: number;
@@ -126,9 +119,7 @@ export class FmdClient {
         return rows.map(({ noteId, ...rest }) => ({ id: noteId, ...rest }));
     }
 
-    /// Batch query the on-chain spent-nullifier set. Returns the subset of
-    /// `nfs` that has been consumed on chain. Server enforces a 1024-entry
-    /// cap per request.
+    /// Batch query on-chain spent-nullifier set. Server caps at 1024 per request.
     async spentSet(nfs: bigint[]): Promise<Set<bigint>> {
         if (nfs.length === 0) return new Set();
         const nullifiers = nfs.map((n) => `0x${n.toString(16).padStart(64, "0")}`);
@@ -151,9 +142,7 @@ export class FmdClient {
         await this.http.fetch(this.url(`/v1/subscriptions/${id}`), { method: "DELETE" });
     }
 
-    /// Build a fully-qualified URL with optional query params. Skips
-    /// `undefined` entries so callers can pass conditional pagination
-    /// fields without `if`-walls.
+    /// Skips `undefined` entries.
     private url(path: string, params?: QueryParams): string {
         if (!params) return this.baseUrl + path;
         const q = new URLSearchParams();

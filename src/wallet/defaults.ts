@@ -1,5 +1,4 @@
-// Default pluggable factories + up-front config validation. Keeps the
-// `Wallet` class focused on flow, not on stitching defaults.
+// Default pluggable factories + up-front config validation.
 
 import type { Jubjub } from "../crypto/index.js";
 import { bundledProverArtifacts, type ProverPaths, resolveArtifacts } from "../prover.js";
@@ -10,12 +9,8 @@ import { FmdMatchesNoteSource, FmdNoteSource, type NoteSource } from "./note-sou
 import { type Prover, SnarkjsProver } from "./prover.js";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 
-/// Aggregate up-front config validation. Thrown error lists every problem
-/// at once so callers don't have to round-trip per missing field.
-///
-/// `prover`/`proverPaths` are NOT required: when omitted, `defaultProver`
-/// resolves bundled artifacts via `bundledProverArtifacts()`. Validation
-/// here only catches transport-layer omissions.
+/// Aggregate validation; collects every problem before throwing. Skips
+/// prover validation — `defaultProver` resolves bundled artifacts.
 export function validateConfig(cfg: WalletConfig): void {
     const missing: string[] = [];
     if (cfg.chainId === undefined || cfg.chainId === null) missing.push("`chainId`");
@@ -43,11 +38,9 @@ export function defaultSubmitter(cfg: WalletConfig): Submitter {
     return new HttpRelayerSubmitter(cfg.relayerUrl as string);
 }
 
-/// Builds the default snarkjs prover. When `cfg.proverPaths` is set,
-/// uses it verbatim. When unset, resolves bundled artifacts via
-/// `bundledProverArtifacts()` — companion package on Node, jsDelivr
-/// CDN URLs in browser. Throws `ProverArtifactsMissingError` with
-/// actionable guidance when nothing resolves.
+/// Default snarkjs prover. Uses `cfg.proverPaths` if set, else resolves
+/// via `bundledProverArtifacts()`. Throws `ProverArtifactsMissingError`
+/// when nothing resolves.
 export async function defaultProver(cfg: WalletConfig): Promise<Prover> {
     if (cfg.proverPaths) return new SnarkjsProver(cfg.proverPaths);
     const artifacts = await bundledProverArtifacts();

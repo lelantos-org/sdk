@@ -1,5 +1,4 @@
-// Little-endian byte conversions for field elements.
-// All on-chain serialisation uses 32-byte LE; centralise it here.
+// Little-endian byte conversions for field elements. On-chain serialisation uses 32-byte LE.
 
 import type { Field } from "./poseidon.js";
 

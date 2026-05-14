@@ -1,9 +1,6 @@
-// Documented type aliases used throughout the SDK's public surface.
-//
-// These are *aliases*, not nominal brands — assignment from `string` still
-// works so back-compat is preserved. The aliases give IDE hints + a single
-// place to attach validators (`parseHex`, `parseAddress`, `parseUrl`) when
-// callers want runtime-checked input at trust boundaries.
+// Public type aliases. Not nominal brands — assignment from `string` works.
+// Validators (`parseHex`, `parseEthAddress`, `parseUrl`) provide runtime
+// checks at trust boundaries.
 
 /// 0x-prefixed lower-hex string. SDK uses these for note commitments,
 /// nullifiers, and transaction hashes (32 bytes → 66 chars total).

@@ -1,14 +1,12 @@
-// Note-payload codec — the plaintext that travels inside an EncryptedNote.
+// Note-payload codec — plaintext inside an EncryptedNote.
 //
 // Wire format (112 B, little-endian):
 //   asset (8) || value (8) || rho (32) || rcm (32) || rcv_dep (32)
 //
 // `pk` is reconstructed by the receiver from their own ivk; `rcv` is
-// per-spend (a fresh value commitment randomness) and is not transmitted.
-// `rcv_dep` is the deposit-anchor Pedersen blinder bound into the Merkle
-// leaf at note creation; the spender needs it to recompute the leaf hash
-// at spend time. This format is what the rust indexer + e2e runner already
-// speak; do not change without bumping the encryption KDF domain.
+// per-spend and is not transmitted. `rcv_dep` is the deposit-anchor Pedersen
+// blinder bound into the Merkle leaf; the spender needs it to recompute the
+// leaf hash. Do not change without bumping the encryption KDF domain.
 
 import { FIELD_BYTES, type Field, fromLeBytes, toLeBytes } from "./crypto/index.js";
 

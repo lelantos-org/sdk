@@ -21,7 +21,7 @@ function note(
     };
 }
 
-/// Mulberry32 PRNG — deterministic for reproducible tests.
+/// Mulberry32 PRNG.
 function seededRng(seed: number): () => number {
     let s = seed >>> 0;
     return () => {
@@ -35,7 +35,7 @@ function seededRng(seed: number): () => number {
 
 const baseOpts = (extra: SelectOpts = {}): SelectOpts => ({
     rng: seededRng(1),
-    bucketPct: 0, // disable shuffle in default cases for deterministic asserts
+    bucketPct: 0, // deterministic: disable shuffle
     ...extra,
 });
 
@@ -76,8 +76,7 @@ describe("selectNotes", () => {
 
     it("two-cover picks smallest pair, not largest+gap", () => {
         const notes = [note("a", 30n), note("b", 40n), note("c", 60n), note("d", 1000n)];
-        // target 80 → smallest pair sum is (a=30, c=60)=90; NOT (d=1000, *).
-        // The big note `d` is left for future spends — drains dust first.
+        // target 80 → smallest pair (a=30, c=60)=90; large `d` kept for later.
         const r = selectNotes(notes, 1n, 80n, baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
         const ids = r.notes.map((n) => n.id).sort();
@@ -133,7 +132,7 @@ describe("selectNotes", () => {
     });
 
     it("returns consolidate-first when sum sufficient but no 2-cover", () => {
-        // Max pair = 40 + 50 = 90; total = 120; target = 100 → consolidate.
+        // max pair=90, total=120, target=100 → consolidate.
         const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
         const r = selectNotes(notes, 1n, 100n, baseOpts());
         expect(r.plan).toBe("consolidate-first");
@@ -150,7 +149,6 @@ describe("selectNotes", () => {
     });
 
     it("bucket shuffle: ±5% bucket randomizes among near-equal notes", () => {
-        // 3 notes within ±5% of each other; over many seeds we should see >1 distinct pick.
         const notes = [note("a", 100n), note("b", 102n), note("c", 98n)];
         const picks = new Set<string>();
         for (let s = 1; s < 200; s++) {
@@ -161,9 +159,7 @@ describe("selectNotes", () => {
     });
 
     it("privacy regression: no monotone preference for largest-rank notes", () => {
-        // Build many random wallet states; assert the rank of the chosen note
-        // (within ascending-sorted candidates) does NOT correlate with wallet
-        // size. Largest-first would yield consistently high ranks.
+        // Random wallets: picked-note rank should not correlate with wallet size.
         const samples: number[] = [];
         const rng = seededRng(42);
         for (let trial = 0; trial < 100; trial++) {
@@ -180,7 +176,7 @@ describe("selectNotes", () => {
             samples.push(rank);
         }
         const mean = samples.reduce((s, x) => s + x, 0) / samples.length;
-        // largest-first would mean rank ≈ 1; SFRT should be in the lower half.
+        // largest-first ⇒ rank≈1; SFRT should land in lower half.
         expect(mean).toBeLessThan(0.5);
     });
 });

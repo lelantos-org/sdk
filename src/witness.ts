@@ -1,7 +1,5 @@
-// Witness builders for the 2x2 MASP circuit. Same source consumed by
-// circuit tests (circuits/) and Foundry fixture generators (contracts/),
-// so the on-chain view, the prover view, and the in-circuit view stay
-// byte-identical.
+// Witness builders for the 2x2 MASP circuit. Shared between circuit tests
+// and Foundry fixture generators so all three views stay byte-identical.
 
 import {
     buildNoteCommitment,
@@ -103,10 +101,9 @@ export function toCircomInput(
         J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv),
     );
 
-    // Deposit-anchor cv_dep per output (and per input for spent.circom). Same
-    // Pedersen shape as cv but with the rcv_dep blinder so the leaf hash
-    // Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) re-derives consistently from
-    // the spender's side.
+    // Deposit-anchor cv_dep: same Pedersen shape as cv but with the rcv_dep
+    // blinder so leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) re-derives
+    // consistently from the spender's side.
     const out_cv_dep: Point[] = outputs.map((o) =>
         J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep),
     );
@@ -158,10 +155,8 @@ export function toCircomInput(
     };
 }
 
-// Compute the (bit, y) Legendre witness pair per (output, γ-slot) so the
-// in-circuit `HashToBit` gadget has the prover-side data it needs. Mirrors
-// the hash layout of `ClueCheck` exactly: Poseidon(TAG_FMD_BIT, R.x, R.y,
-// i, S.x, S.y).
+// Legendre (bit, y) witness pair per (output, γ-slot) for the in-circuit
+// `HashToBit` gadget. Hash layout: Poseidon(TAG_FMD_BIT, R.x, R.y, i, S.x, S.y).
 function fmdLegendreInputs(
     P: Poseidon,
     J: Jubjub,
@@ -190,10 +185,9 @@ export function dummyOutput(asset: Field = 1n): Note {
     return { asset, value: 0n, pk: 0n, rho: 0n, rcm: 0n, rcv: 0n, rcvDep: 0n };
 }
 
-// Dummy spent slot. is_dummy=1 bypasses Merkle membership and pk check inside
-// the circuit. nf is computed normally as Poseidon(TAG_NF, nk, rho) where
-// nk = Poseidon(TAG_NK, 0); pick a fresh `rho` to keep nf distinct from
-// prior dummies and any real spend.
+// Dummy spent slot. is_dummy=1 bypasses Merkle membership + pk check.
+// nf = Poseidon(TAG_NF, nk, rho) with nk = Poseidon(TAG_NK, 0); fresh `rho`
+// keeps nf distinct from prior dummies and any real spend.
 export function dummyInputAt(P: Poseidon, depth: number, rho: Field = 0n): SpentNote {
     const nsk = 0n;
     const nf = buildNullifierFromNsk(P, nsk, rho);

@@ -1,6 +1,5 @@
-// Coin-cover helper: encapsulates the "select notes; on insufficient cover
-// either consolidate-and-retry or throw" pattern shared by `transfer` and
-// `withdraw`.
+// Coin-cover helper shared by `transfer` and `withdraw`: select notes,
+// consolidate-and-retry or throw on insufficient cover.
 
 import { InsufficientCoverError } from "./errors.js";
 import type { StoredNote } from "./note-store.js";

@@ -1,14 +1,3 @@
-// ZIP-32-lite derivation tests.
-//
-// Coverage:
-//   - master ESK deterministic from seed
-//   - distinct accounts → distinct nsk
-//   - same account → identical nsk across calls
-//   - account index validation
-//   - hardened bit enforcement on deriveChildHardened
-//   - nsk always in [1, BN254_FR)
-//   - end-to-end: mnemonicToNsk → buildSpendingKey → distinct addresses
-
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { describe, expect, it } from "vitest";
 import { BN254_FR } from "../crypto/index.js";

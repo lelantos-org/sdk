@@ -1,19 +1,14 @@
 // Wallet-side HTTP client for the off-chain MASP relayer service.
 //
-// New-flow split:
-//   - Deposits: wallet escrows funds via `MASP.submitIntent` (Permit2 witness
-//     bound to DepositIntent + aux). Wallet POSTs `SubmitIntentPayload` to
-//     `/v1/intent`; relayer broadcasts the on-chain submitIntent and later
-//     batches up to MAX_N=8 escrowed intents under one `flushBatch` SNARK.
-//   - Spends (transfer / withdraw / withdrawNative): wallet builds the
-//     transact_2x2 SNARK + transact pubInputs + per-output AuxValidation
-//     payload. Wallet POSTs `SubmitTransactPayload` to `/v1/transact`;
-//     relayer assembles the matching tree_update_batch SNARK (it owns the
-//     249 MB zkey and the tree state) and submits the on-chain spend.
+// Deposits: wallet POSTs `SubmitIntentPayload` to `/v1/intent`; relayer
+// broadcasts `MASP.submitIntent` and later batches up to MAX_N=8 escrowed
+// intents under one `flushBatch` SNARK.
+// Spends (transfer/withdraw/withdrawNative): wallet builds the transact_2x2
+// SNARK + pubInputs + per-output aux. Relayer assembles the matching
+// tree_update_batch SNARK (owns the 249 MB zkey + tree state).
 //
-// The relayer can censor (refuse to submit, withhold ciphertext) but cannot
-// forge: every merkle path it serves must verify against an on-chain
-// `isKnownRoot` before the wallet trusts it for spending.
+// Relayer can censor but not forge: every merkle path must verify against
+// on-chain `isKnownRoot` before the wallet trusts it.
 
 import type { Field, Point } from "./crypto/index.js";
 import type { AuxOutput, DepositIntent, Permit2Sig } from "./permit2.js";
@@ -30,10 +25,8 @@ import {
 } from "./relayer-codec.js";
 import { createHttpClient, type HttpClient, type HttpClientOptions } from "./wallet/http.js";
 
-/// Spend op the relayer should route to on-chain. Maps 1:1 to the MASP
-/// entry point: `transfer` / `withdraw` / `withdrawNative`. The relayer
-/// attaches the matching `tree_update_batch` proof + tpi from its own
-/// state; wallet never proves that circuit.
+/// Spend op the relayer routes to on-chain. Maps 1:1 to the MASP entry
+/// point. Relayer attaches the `tree_update_batch` proof from its own state.
 export type SpendKind = "transfer" | "withdraw" | "withdrawNative";
 
 export interface SubmitTransactPayload {
@@ -177,7 +170,7 @@ export class RelayerClient {
         private readonly baseUrl: string,
         opts?: HttpClientOptions | typeof fetch,
     ) {
-        // Back-compat: second arg used to be a raw `fetch` impl.
+        // Back-compat: opts may be a raw `fetch` impl.
         const httpOpts: HttpClientOptions =
             typeof opts === "function" ? { fetchImpl: opts } : (opts ?? {});
         this.http = createHttpClient("RELAYER_TIMEOUT", "RELAYER_FAILED", httpOpts);

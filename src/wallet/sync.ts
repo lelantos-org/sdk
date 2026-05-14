@@ -1,5 +1,4 @@
-// Wallet sync — fetch encrypted notes from a `NoteSource`, trial-decrypt
-// with this wallet's ivk, persist hits to the `NoteStore`.
+// Wallet sync: fetch from `NoteSource`, trial-decrypt with ivk, persist to `NoteStore`.
 
 import { flagKeyFromAddressDk } from "../aux.js";
 import type { Field, Jubjub } from "../crypto/index.js";
@@ -25,11 +24,8 @@ export interface SyncDeps {
 }
 
 export interface SyncProgress {
-    /// Phase: where we are in the sync pipeline.
     phase: "fetching" | "scanning" | "persisting" | "done";
-    /// Notes pulled from the `NoteSource` so far.
     fetched: number;
-    /// Trial-decryption hits found so far.
     hits: number;
 }
 

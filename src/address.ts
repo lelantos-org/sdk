@@ -8,11 +8,10 @@
 // HRP carries the format version: bumping it (`lelantos` → `lelantos2`)
 // invalidates old strings and lets future format changes fail-fast.
 //
-// `pk = Poseidon(TAG_PK, ivk)` is exposed so that any sender can construct
-// a valid note commitment for the recipient. Spend authority remains gated
-// solely by `nsk` (the nullifier check uses `nsk`, not `pk`); publishing
-// `pk` does not enable forgery and does not worsen linkability beyond what
-// `pk_d` already exposes — see the audit in PR description.
+// `pk = Poseidon(TAG_PK, ivk)` is exposed so any sender can construct a
+// valid note commitment for the recipient. Spend authority remains gated
+// solely by `nsk` (nullifier check uses `nsk`, not `pk`); publishing `pk`
+// does not enable forgery and does not worsen linkability beyond `pk_d`.
 
 import { bech32m } from "bech32";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./crypto/bytes.js";

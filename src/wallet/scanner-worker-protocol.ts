@@ -1,5 +1,4 @@
 // Wire format between WorkerPoolScanner and the scanner-worker entry.
-// Kept in its own module so both sides import from the same source.
 
 import type { FmdDetectionKey } from "../fmd.js";
 import type { ScanHit, ScanInput } from "../sync.js";

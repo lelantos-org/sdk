@@ -1,9 +1,8 @@
-// SnarkCompression: collapse N logical Groth16 public inputs into the 2
-// signals (z, y) the verifier actually sees. Off-chain reference for
-// contracts/src/lib/PubInputs.sol :: compress(Transact).
+// SnarkCompression: collapse N logical Groth16 PIs into the 2 signals (z, y)
+// the verifier sees. Off-chain reference for PubInputs.sol :: compress(Transact).
 //
-// Slot order MUST match the on-chain compress() byte-for-byte AND the
-// snarkjs publicSignals order written by fixture generators.
+// Slot order MUST match on-chain compress() byte-for-byte AND snarkjs
+// publicSignals order from fixture generators.
 
 import { AbiCoder, keccak256 } from "ethers";
 import type { Field } from "./crypto/index.js";
@@ -78,13 +77,8 @@ export function flatten(input: FlattenInput): Field[] {
     return base;
 }
 
-// Solidity equivalent (PubInputs._finalize):
-//   uint256[] memory s = new uint256[](N); ...
-//   uint256 z = uint256(keccak256(abi.encode(s))) % R;
-// Dynamic uint256[] → length prefix + words. Match exactly.
 /// Horner-form polynomial evaluation in BN254 Fr. Mirrors the in-circuit
-/// `PolyEval` gadget and the on-chain `PubInputs._evalY` so off-chain code,
-/// tests, and the circuit compute identical `y`.
+/// `PolyEval` and on-chain `PubInputs._evalY`.
 export function hornerEval(coeffs: Field[], z: Field): Field {
     let acc = 0n;
     for (let i = coeffs.length - 1; i >= 0; i--) {

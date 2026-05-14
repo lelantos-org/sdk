@@ -1,11 +1,8 @@
-// MetaMask → nsk derivation. EIP-712 typed-data sign over a fixed,
-// version-stamped domain → keccak256 → reduce mod Baby-Jubjub subgroup
-// order. Pattern is the same one Aztec / Railgun / Penumbra wallet
-// adapters use; do not roll your own.
+// MetaMask → nsk derivation: EIP-712 typed-data sign over a fixed,
+// version-stamped domain → keccak256 → reduce mod Baby-Jubjub subgroup order.
 //
-// IMPORTANT: domain must NEVER be reused across versions. Bumping
-// `LELANTOS_NSK_DOMAIN.version` invalidates all derived keys, which is
-// exactly what you want if the derivation pipeline changes.
+// IMPORTANT: domain MUST NEVER be reused across versions. Bumping
+// `LELANTOS_NSK_DOMAIN.version` invalidates all derived keys.
 
 import { keccak256, type Signer, TypedDataEncoder, type TypedDataField } from "ethers";
 import { BABYJUB_SUBGROUP_ORDER, type Field } from "./crypto/index.js";
@@ -42,14 +39,12 @@ export function reduceSignatureToScalar(sigHex: string): Field {
     return r === 0n ? 1n : r;
 }
 
-// Off-line variant: hash a precomputed signature (e.g. from a hardware
-// wallet flow that already returned the bytes).
+/// Offline variant: reduce a precomputed signature/digest.
 export function nskFromTypedDataDigest(typedDataDigest: string): Field {
     return reduceSignatureToScalar(typedDataDigest);
 }
 
-// Helper for tests / unit verification — recompute the typed-data hash
-// without going through a signer.
+/// Recompute the typed-data hash without a signer (tests / verification).
 export function lelantosTypedDataHash(): string {
     return TypedDataEncoder.hash(LELANTOS_NSK_DOMAIN, TYPES, MESSAGE);
 }

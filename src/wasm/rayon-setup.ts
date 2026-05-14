@@ -1,7 +1,6 @@
-// Rayon thread-pool bring-up for `wasm-bindgen-rayon`-built modules
-// (currently `WasmProver`). Splits browser vs Node paths, polyfills the
-// Worker shape Node needs, and gracefully degrades to single-threaded on
-// missing prereqs (no SharedArrayBuffer, no COI, etc).
+// Rayon thread-pool bring-up for `wasm-bindgen-rayon` modules. Splits browser vs Node paths,
+// polyfills the Worker shape Node needs, and degrades to single-threaded on missing prereqs
+// (no SharedArrayBuffer, no COI, etc).
 
 const NODE_URL = "node:url";
 const NODE_OS = "node:os";
@@ -20,9 +19,8 @@ export interface RayonInitOpts {
     label: string;
 }
 
-/// `wasm-pack --target web` pulls in `wasm-bindgen-rayon`'s workerHelpers.js,
-/// which references `self.addEventListener` at module top level. Stub the
-/// Worker-shaped globals so module load succeeds in Node.
+/// `wasm-bindgen-rayon`'s workerHelpers.js references `self.addEventListener` at module top
+/// level. Stub the Worker-shaped globals so module load succeeds in Node.
 export function polyfillSelfForNode(): void {
     const g = globalThis as Record<string, unknown>;
     if (g.self === undefined) g.self = globalThis;
@@ -37,9 +35,8 @@ export async function initBrowserThreadPool(mod: RayonModule, opts: RayonInitOpt
         console.warn(`[${opts.label}] mod.initThreadPool missing — running single-threaded`);
         return;
     }
-    // Requires `crossOriginIsolated` (COOP+COEP headers). Without it
-    // `SharedArrayBuffer` is unavailable and rayon falls back to the
-    // current thread — slow but correct, so we just warn.
+    // Requires `crossOriginIsolated` (COOP+COEP headers). Without it `SharedArrayBuffer` is
+    // unavailable and rayon falls back to the current thread — slow but correct.
     const coi = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated;
     if (!coi) {
         // eslint-disable-next-line no-console
@@ -113,10 +110,9 @@ function raceWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 let nodeRayonInstalled = false;
 
-/// Adapt browser-Worker API to `node:worker_threads` so wasm-bindgen-rayon's
-/// `startWorkers` (which does `new Worker(url, {type:"module"})`) functions in
-/// Node. Each spawned Node worker first runs a static ESM bootstrap shipped
-/// alongside the SDK, then dynamic-imports the real workerHelpers.js URL.
+/// Adapt browser-Worker API to `node:worker_threads` so wasm-bindgen-rayon's `startWorkers`
+/// (which does `new Worker(url, {type:"module"})`) functions in Node. Each Node worker first
+/// runs a static ESM bootstrap, then dynamic-imports the real workerHelpers.js URL.
 async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> {
     if (nodeRayonInstalled) return;
     const { Worker: NodeWorker } = await import(/* @vite-ignore */ NODE_WORKER_THREADS);

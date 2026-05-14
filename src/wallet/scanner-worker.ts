@@ -1,9 +1,4 @@
-// Web Worker entry. Boots a `WasmJubjub` (cached) and runs `scanNotes` for
-// each scan request via the fused decrypt + FMD WASM paths.
-//
-// Bundle this as a separate worker chunk in your app build:
-//   new Worker(new URL("@lelantos-org/sdk/scanner-worker", import.meta.url),
-//              { type: "module" })
+// Web Worker entry. Boots `WasmJubjub` (cached) and runs `scanNotes` per request.
 
 import { WasmJubjub } from "../crypto/jubjub-wasm.js";
 import { Poseidon } from "../crypto/poseidon.js";

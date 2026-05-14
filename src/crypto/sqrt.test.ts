@@ -58,7 +58,7 @@ describe("modular sqrt + Legendre", () => {
             if (s === 0n) continue;
             qrCount += fmdLegendreWitness(s).bit;
         }
-        // 200 fair coins: P[<70 or >130] ≈ 4·10^-9. Loose bound.
+        // 200 fair coins: P[<70 or >130] ≈ 4·10^-9.
         expect(qrCount).toBeGreaterThan(70);
         expect(qrCount).toBeLessThan(130);
     });
