@@ -1,6 +1,6 @@
 {
   "name": "@lelantos-org/sdk",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
@@ -64,6 +64,10 @@
     "./chain": {
       "types": "./dist/chain/index.d.ts",
       "default": "./dist/chain/index.js"
+    },
+    "./wallet": {
+      "types": "./dist/wallet/index.d.ts",
+      "default": "./dist/wallet/index.js"
     },
     "./witness": {
       "types": "./dist/bundle/witness.d.ts",

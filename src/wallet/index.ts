@@ -3,8 +3,11 @@
 
 export type {
     DepositOptions,
+    DepositPhase,
     DepositResult,
     NotesFilter,
+    OnPhase,
+    SpendPhase,
     SwapOptions,
     SwapResult,
     TransactionResult,
