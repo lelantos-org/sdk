@@ -1,6 +1,6 @@
 // Coin selector: SFRT — Smallest-First with Random Tiebreak.
 
-import { SelectionError } from "./errors.js";
+import { SelectionError } from "./errors/index.js";
 import type { StoredNote } from "./note-store.js";
 
 export interface SelectOpts {
@@ -35,6 +35,7 @@ export interface ConsolidateFirst {
 
 export type SelectionResult = DirectSelection | ConsolidateFirst;
 
+/** @internal */
 /// Pick up to 2 unspent notes for `asset` summing to ≥ `target + fee` via SFRT.
 ///
 /// Rationale: largest-first leaves a value-ordering fingerprint (Tramèr USENIX'24);

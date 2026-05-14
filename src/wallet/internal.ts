@@ -1,40 +1,15 @@
 // Private helpers used by `Wallet`.
+//
+// Per-output randomness factories now live in `notes/randomness.ts`.
+// CSPRNG primitives (`randomFr`, `randomJubjubScalar`) still live in
+// `./randomness.ts`.
 
+import type { AuxOutput } from "../bundle/permit2.js";
 import type { Field } from "../crypto/index.js";
-import type { Note } from "../notes.js";
-import type { AuxOutput } from "../permit2.js";
-import type { TransactAux } from "../relayer.js";
-import type { TransactionResult, WalletNote } from "./api.js";
+import type { Note } from "../notes/note.js";
+import type { TransactAux } from "../relayer/client.js";
+import type { TransactionResult, TransferResult, WalletNote } from "./api.js";
 import type { StoredNote } from "./note-store.js";
-import { randomFr, randomJubjubScalar } from "./randomness.js";
-
-/// Slot-0 deposit randomness: rho/rcm/rcv/rcvDep + FMD aux.
-export interface OutputRandomness {
-    rho: Field;
-    rcm: Field;
-    rcv: Field;
-    rcvDep: Field;
-    aux: { esk: Field; fmdR: Field };
-}
-
-export function freshOutput(): OutputRandomness {
-    return {
-        rho: randomFr(),
-        rcm: randomFr(),
-        rcv: randomJubjubScalar(),
-        rcvDep: randomJubjubScalar(),
-        aux: { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() },
-    };
-}
-
-export function freshNoteRandomness(): { rho: Field; rcm: Field; rcv: Field; rcvDep: Field } {
-    return {
-        rho: randomFr(),
-        rcm: randomFr(),
-        rcv: randomJubjubScalar(),
-        rcvDep: randomJubjubScalar(),
-    };
-}
 
 /// Bridge flat-scalar `AuxOutput` (piHash shape) → point-as-tuple
 /// `TransactAux` (relayer wire shape) for swap.
@@ -72,13 +47,20 @@ export interface BuiltLike {
     producedNotes: [Note, Note];
 }
 
+/// Per-tx file passes its kind discriminator; `makeTransactionResult`
+/// builds the union variant matching that kind. See `api.ts` for the
+/// branch shapes.
+export type TransactionKind = TransactionResult["kind"];
+
 export interface MakeTransactionResultArgs {
+    kind: TransactionKind;
     txHash: string;
     built: BuiltLike;
     spent?: string[];
     inputSum?: bigint;
     sent?: bigint;
     change?: bigint;
+    intentId?: bigint;
     /// Indices into `built.cm` for own commitments. Deposit/withdraw: `[0,1]`;
     /// transfer: `[1]`; self-transfer: `[0,1]`.
     ownIndices?: number[];
@@ -101,17 +83,56 @@ export function makeTransactionResult(args: MakeTransactionResultArgs): Transact
         (acc, i) => acc + BigInt(args.built.producedNotes[i].value),
         0n,
     );
-    return {
-        txHash: args.txHash,
-        commitments,
-        spent,
-        inputSum: args.inputSum ?? 0n,
-        sent: args.sent ?? 0n,
-        change: args.change ?? 0n,
-        ownCommitments,
-        ownInflow,
-        // Back-compat aliases.
-        cm: commitments,
-        spentNoteIds: spent,
-    };
+
+    switch (args.kind) {
+        case "deposit":
+            return {
+                kind: "deposit",
+                txHash: args.txHash,
+                commitments,
+                ownCommitments,
+                ownInflow,
+                sent: args.sent ?? 0n,
+                ...(args.intentId !== undefined ? { intentId: args.intentId } : {}),
+            };
+        case "transfer": {
+            const r: TransferResult = {
+                kind: "transfer",
+                txHash: args.txHash,
+                commitments,
+                spent,
+                inputSum: args.inputSum ?? 0n,
+                sent: args.sent ?? 0n,
+                change: args.change ?? 0n,
+                ownCommitments,
+                ownInflow,
+            };
+            return r;
+        }
+        case "withdraw":
+            return {
+                kind: "withdraw",
+                txHash: args.txHash,
+                commitments,
+                spent,
+                inputSum: args.inputSum ?? 0n,
+                sent: args.sent ?? 0n,
+                change: args.change ?? 0n,
+                ownCommitments,
+                ownInflow,
+            };
+        case "swap":
+            return {
+                kind: "swap",
+                txHash: args.txHash,
+                commitments,
+                spent,
+                inputSum: args.inputSum ?? 0n,
+                sent: args.sent ?? 0n,
+                change: args.change ?? 0n,
+                ownCommitments,
+                ownInflow,
+                ...(args.intentId !== undefined ? { intentId: args.intentId } : {}),
+            };
+    }
 }

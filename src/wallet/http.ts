@@ -1,7 +1,11 @@
 // Shared HTTP helper: AbortController timeout, exponential-backoff retry
 // on 5xx + network errors, typed `NetworkError`.
+//
+// Canonical home for `HttpClientOptions` and `createHttpClient`. Every
+// SDK HTTP-speaking client (`wallet/fmd-client.ts`, `relayer/client.ts`)
+// MUST consume these — do not reimplement timeout/retry/backoff locally.
 
-import { NetworkError } from "./errors.js";
+import { NetworkError } from "./errors/index.js";
 
 type NetworkTimeoutCode = "RELAYER_TIMEOUT" | "FMD_TIMEOUT";
 type NetworkFailureCode = "RELAYER_FAILED" | "FMD_FAILED";

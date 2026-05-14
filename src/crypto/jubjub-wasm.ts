@@ -37,6 +37,7 @@ interface JubWasmMod extends WasmModuleBase {
 
 const POINT_BYTES = 64;
 
+/** @internal */
 /// Override for bundlers that rewrite `new URL(..., import.meta.url)` to a
 /// runtime-invalid location. Call before `WasmJubjub.build()`.
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
@@ -87,6 +88,7 @@ function bytesToPoint(b: Uint8Array): Point {
     return [fromLeBytes(b.slice(0, FIELD_BYTES)), fromLeBytes(b.slice(FIELD_BYTES, POINT_BYTES))];
 }
 
+/** @internal */
 export class WasmJubjub {
     private fallback: CircomlibJubjub | null = null;
 

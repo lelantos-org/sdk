@@ -1,10 +1,11 @@
 {
   "name": "@lelantos-org/sdk",
-  "version": "0.3.13",
+  "version": "0.4.0",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
   "type": "module",
+  "sideEffects": false,
   "packageManager": "npm@10.9.2",
   "engines": {
     "node": ">=24.0.0"
@@ -32,29 +33,61 @@
       "types": "./dist/crypto/index.d.ts",
       "default": "./dist/crypto/index.js"
     },
+    "./keys": {
+      "types": "./dist/keys/index.d.ts",
+      "default": "./dist/keys/index.js"
+    },
+    "./notes": {
+      "types": "./dist/notes/index.d.ts",
+      "default": "./dist/notes/index.js"
+    },
+    "./fmd": {
+      "types": "./dist/fmd/index.d.ts",
+      "default": "./dist/fmd/index.js"
+    },
+    "./bundle": {
+      "types": "./dist/bundle/index.d.ts",
+      "default": "./dist/bundle/index.js"
+    },
+    "./prover": {
+      "types": "./dist/prover/index.d.ts",
+      "default": "./dist/prover/index.js"
+    },
+    "./relayer": {
+      "types": "./dist/relayer/index.d.ts",
+      "default": "./dist/relayer/index.js"
+    },
+    "./sync": {
+      "types": "./dist/sync/index.d.ts",
+      "default": "./dist/sync/index.js"
+    },
+    "./chain": {
+      "types": "./dist/chain/index.d.ts",
+      "default": "./dist/chain/index.js"
+    },
     "./witness": {
-      "types": "./dist/witness.d.ts",
-      "default": "./dist/witness.js"
+      "types": "./dist/bundle/witness.d.ts",
+      "default": "./dist/bundle/witness.js"
     },
     "./networks": {
-      "types": "./dist/wallet/networks.d.ts",
-      "default": "./dist/wallet/networks.js"
+      "types": "./dist/chain/networks.d.ts",
+      "default": "./dist/chain/networks.js"
     },
     "./errors": {
-      "types": "./dist/wallet/errors.d.ts",
-      "default": "./dist/wallet/errors.js"
+      "types": "./dist/wallet/errors/index.d.ts",
+      "default": "./dist/wallet/errors/index.js"
     },
     "./wasm-prover": {
-      "types": "./dist/wallet/wasm-prover.d.ts",
-      "default": "./dist/wallet/wasm-prover.js"
+      "types": "./dist/prover/wasm-prover.d.ts",
+      "default": "./dist/prover/wasm-prover.js"
     },
     "./prover-worker": {
-      "types": "./dist/wallet/prover-worker.d.ts",
-      "default": "./dist/wallet/prover-worker.js"
+      "types": "./dist/prover/worker.d.ts",
+      "default": "./dist/prover/worker.js"
     },
     "./scanner-worker": {
-      "types": "./dist/wallet/scanner-worker.d.ts",
-      "default": "./dist/wallet/scanner-worker.js"
+      "types": "./dist/sync/scanner-worker.d.ts",
+      "default": "./dist/sync/scanner-worker.js"
     },
     "./wasm/prover": {
       "types": "./wasm/prover/pkg/prover.d.ts",
@@ -73,19 +106,29 @@
     "wasm/jubjub/pkg"
   ],
   "scripts": {
+    "prebuild": "node scripts/sync-version.mjs",
     "build": "tsc -p tsconfig.json && mkdir -p dist/wasm && cp src/wasm/rayon-worker-bootstrap.mjs dist/wasm/rayon-worker-bootstrap.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:bench": "vitest run --config vitest.bench.config.ts",
     "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
     "bench:scan": "tsx scripts/bench-scan.ts",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
     "check": "biome check .",
+    "check:browser-safe": "node scripts/check-browser-safe.mjs",
+    "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm",
     "prepare": "lefthook install >/dev/null 2>&1 || true",
-    "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-wasm-size.mjs"
+    "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
+  },
+  "peerDependencies": {
+    "@lelantos-org/circuits": "*"
+  },
+  "peerDependenciesMeta": {
+    "@lelantos-org/circuits": { "optional": true }
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",

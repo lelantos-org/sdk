@@ -1,29 +1,32 @@
 // `Wallet.connect()` — high-level entrypoint. Apps needing full control
 // use `Wallet.create(source, cfg)` directly.
+//
+// This module is deliberately thin: it parses `ConnectOptions`, hands
+// off default-resolution to `./defaults.ts`, and calls `Wallet.create`.
+// Everything chain-/prover-/note-source-default-shaped lives in
+// `./defaults.ts`.
 
 import type { Signer } from "ethers";
-import type { ProverPaths } from "../prover.js";
-import { bundledProverArtifacts, resolveArtifacts } from "../prover.js";
-import type { ProverArtifacts } from "../types.js";
-import { configureWasm, type WasmConfig } from "../wasm/config.js";
-import { EthersChainAdapter } from "./adapters/ethers-chain.js";
-import type { ChainAdapter } from "./chain-adapter.js";
-import type { SyncStrategy, WalletConfig } from "./config.js";
-import { NetworkNotDeployedError, WalletConfigError } from "./errors.js";
-import { Wallet, type WalletApi } from "./index.js";
-import type { KeySource } from "./key-source.js";
+import type { ChainAdapter } from "../chain/adapter.js";
 import {
-    type DeployedNetworkPreset,
     isNetworkDeployed,
     type NetworkName,
     type NetworkPreset,
     resolveNetwork,
-} from "./networks.js";
+} from "../chain/networks.js";
+import type { KeySource } from "../keys/key-source.js";
+import type { ProverArtifacts } from "../prover/artifacts.js";
+import type { Prover } from "../prover/interface.js";
+import type { ProverPaths } from "../prover/snarkjs.js";
+import { resolveArtifacts } from "../prover/snarkjs.js";
+import type { Scanner } from "../sync/scanner.js";
+import { configureWasm, type WasmConfig } from "../wasm/config.js";
+import type { SyncStrategy, WalletConfig } from "./config.js";
+import { buildConnectProver, defaultChainAdapter } from "./defaults.js";
+import { NetworkNotDeployedError, WalletConfigError } from "./errors/index.js";
+import { Wallet, type WalletApi } from "./index.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
-import type { Prover } from "./prover.js";
-import { SnarkjsProver } from "./prover.js";
-import type { Scanner } from "./scanner.js";
 import type { CoinSelector } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 
@@ -118,52 +121,6 @@ function buildKeySource(opts: ConnectOptions): KeySource {
     return { type: "nsk", nsk: opts.nsk! };
 }
 
-function buildChainAdapter(opts: ConnectOptions, preset: DeployedNetworkPreset): ChainAdapter {
-    if (opts.chain) return opts.chain;
-
-    const errs: string[] = [];
-    if (!opts.signer && !opts.privateKey) {
-        errs.push("pass `chain`, `signer`, or `privateKey`");
-    }
-    // EthersChainAdapter always constructs a JsonRpcProvider for read-only
-    // calls; empty rpcUrl trips `UNSUPPORTED_OPERATION (protocol="")`.
-    if (!opts.rpcUrl) {
-        errs.push("`rpcUrl` required when building chain adapter (or pass a pre-built `chain`)");
-    }
-    if (errs.length) throw new WalletConfigError(errs);
-
-    return new EthersChainAdapter({
-        rpcUrl: opts.rpcUrl as string,
-        signer: opts.signer,
-        signerKey: opts.privateKey,
-        maspAddress: preset.maspAddress,
-        chainId: preset.chainId,
-        permit2Address: preset.permit2Address,
-    });
-}
-
-async function buildProver(
-    opts: ConnectOptions,
-    runtime: "node" | "browser",
-): Promise<Prover | undefined> {
-    if (opts.prover) return opts.prover;
-
-    // Defer to `Wallet.create` → `defaultProver` when on the snarkjs path
-    // without artifacts; keeps fallback resolution in one place.
-    const useWasm = opts.useWasmProver ?? runtime === "node";
-    if (!useWasm && !opts.proverArtifacts) return undefined;
-
-    const artifacts = opts.proverArtifacts
-        ? opts.proverArtifacts
-        : await bundledProverArtifacts({ runtime, cdn: opts.proverArtifactsCdn });
-    const paths = resolveArtifacts(artifacts);
-    if (!useWasm) return new SnarkjsProver(paths);
-    // Dynamic import keeps wasm-bindgen-rayon worker glue out of bundles
-    // that opt out via `useWasmProver: false`.
-    const { WasmProver } = await import("./wasm-prover.js");
-    return WasmProver.build(paths);
-}
-
 /// Single-call wallet construction.
 ///
 /// ```ts
@@ -186,8 +143,24 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
         throw new NetworkNotDeployedError(name);
     }
     const keySource = buildKeySource(opts);
-    const chain = buildChainAdapter(opts, preset);
-    const prover = await buildProver(opts, runtime);
+    const chain = defaultChainAdapter(
+        {
+            chain: opts.chain,
+            signer: opts.signer,
+            privateKey: opts.privateKey,
+            rpcUrl: opts.rpcUrl,
+        },
+        preset,
+    );
+    const prover = await buildConnectProver(
+        {
+            prover: opts.prover,
+            proverArtifacts: opts.proverArtifacts,
+            proverArtifactsCdn: opts.proverArtifactsCdn,
+            useWasmProver: opts.useWasmProver,
+        },
+        runtime,
+    );
 
     const cfg: WalletConfig = {
         chainId: preset.chainId,

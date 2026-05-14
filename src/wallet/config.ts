@@ -1,7 +1,7 @@
 // Wallet runtime configuration. Every external dependency is pluggable.
 
-import type { ProverPaths } from "../prover.js";
-import type { ChainAdapter } from "./chain-adapter.js";
+import type { ChainAdapter } from "../chain/adapter.js";
+import type { ProverPaths } from "../prover/snarkjs.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
 
@@ -10,8 +10,8 @@ import type { NoteStore } from "./note-store.js";
 /// `noteSource` is set.
 export type SyncStrategy = { kind: "full" } | { kind: "matches"; subscriptionId: number };
 
-import type { Prover } from "./prover.js";
-import type { Scanner } from "./scanner.js";
+import type { Prover } from "../prover/interface.js";
+import type { Scanner } from "../sync/scanner.js";
 import type { CoinSelector } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 

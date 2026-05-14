@@ -51,11 +51,17 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Browser-safety lint (no node: imports under src/)
+        run: npm run check:browser-safe
+
       - name: Type check
         run: npx tsc -p tsconfig.json --noEmit
 
       - name: Build
         run: npm run build
+
+      - name: Bundle size budget
+        run: npm run check:bundle-size
 
       - name: Test (with coverage)
         run: npm run test:coverage

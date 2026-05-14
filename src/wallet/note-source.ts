@@ -1,7 +1,7 @@
 // Pluggable encrypted-note feed + merkle-path provider.
 
 import type { Field } from "../crypto/index.js";
-import type { ScanInput } from "../sync.js";
+import type { ScanInput } from "../sync/sync.js";
 import type { FmdClient } from "./fmd-client.js";
 
 export interface MerklePath {

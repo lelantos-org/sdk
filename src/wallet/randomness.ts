@@ -22,6 +22,7 @@ export function randomFr(): Field {
     }
 }
 
+/** @internal */
 /// Uniform non-zero scalar mod Baby-Jubjub subgroup order.
 export function randomJubjubScalar(): Field {
     for (;;) {

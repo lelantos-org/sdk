@@ -1,8 +1,8 @@
 // Build 1- or 2-slot `InputSlots`; pads with `null` for single-input spends.
 
-import type { InputSlot, InputSlots } from "../bundle.js";
+import type { InputSlot, InputSlots } from "../bundle/common.js";
+import type { SpendableCachedNote } from "../bundle/witness.js";
 import type { Field } from "../crypto/index.js";
-import type { SpendableCachedNote } from "../witness.js";
 import type { NoteSource } from "./note-source.js";
 import { decodeStoredNote, type StoredNote } from "./note-store.js";
 

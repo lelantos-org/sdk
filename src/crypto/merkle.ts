@@ -7,11 +7,13 @@ import { TAG_MERKLE } from "./tags.js";
 
 const ARITY = 4;
 
+/** @internal */
 export interface MerkleProof {
     pathElements: Field[][];
     pathIndices: number[];
 }
 
+/** @internal */
 export class MerkleTree {
     leaves: Field[] = [];
     private readonly zeros: Field[] = [];

@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../src/crypto/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
 import {
     encodeClue,
     type FmdDetectionKey,

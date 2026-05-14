@@ -2,6 +2,7 @@
 
 import type { Field } from "./poseidon.js";
 
+/** @internal */
 export const FIELD_BYTES = 32;
 
 export function toLeBytes(x: Field, len = FIELD_BYTES): Uint8Array {

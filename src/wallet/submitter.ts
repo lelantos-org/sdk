@@ -7,7 +7,7 @@ import {
     type SubmitIntentPayload,
     type SubmitSwapPayload,
     type SubmitTransactPayload,
-} from "../relayer.js";
+} from "../relayer/client.js";
 
 export interface Submitter {
     /// Spend op. Relayer attaches the matching tree_update_batch SNARK + tpi.

@@ -7,13 +7,15 @@
 // Per-crate `configureJubjubWasm` / `configureProverWasm` remain exported.
 
 import { configureJubjubWasm, type JubjubWasmLoader } from "../crypto/jubjub-wasm.js";
-import { configureProverWasm, type ProverWasmLoader } from "../wallet/wasm-prover.js";
+import { configureProverWasm, type ProverWasmLoader } from "../prover/wasm-prover.js";
 
+/** @internal */
 export interface WasmConfig {
     jubjub?: JubjubWasmLoader;
     prover?: ProverWasmLoader;
 }
 
+/** @internal */
 export function configureWasm(cfg: WasmConfig): void {
     if (cfg.jubjub) configureJubjubWasm(cfg.jubjub);
     if (cfg.prover) configureProverWasm(cfg.prover);

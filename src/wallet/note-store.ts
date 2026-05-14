@@ -1,6 +1,6 @@
 // Persistent-note schema + storage abstraction.
 
-import type { ScanHit } from "../sync.js";
+import type { ScanHit } from "../sync/sync.js";
 
 /// JSON-safe wire/storage shape. BigInts as decimal strings, `cm` as 0x-hex (32 B).
 export interface StoredNote {

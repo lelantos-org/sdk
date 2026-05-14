@@ -1,11 +1,11 @@
 // Wallet sync: fetch from `NoteSource`, trial-decrypt with ivk, persist to `NoteStore`.
 
-import { flagKeyFromAddressDk } from "../aux.js";
 import type { Field, Jubjub } from "../crypto/index.js";
+import { flagKeyFromAddressDk } from "../notes/aux.js";
+import type { Scanner } from "../sync/scanner.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
 import { addHits } from "./note-store.js";
-import type { Scanner } from "./scanner.js";
 
 export interface SyncResult {
     fetched: number;
