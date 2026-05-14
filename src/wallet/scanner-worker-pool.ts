@@ -16,11 +16,16 @@ import {
     transferablesOf,
 } from "./scanner-worker-protocol.js";
 
+/// Minimal Worker shape used by `WorkerPoolScanner`. Typed permissively so
+/// DOM `Worker` and Node `worker_threads` shims structurally match without a
+/// cast at the call site. Internal code still narrows via the wire-protocol
+/// codec.
+// biome-ignore-all lint/suspicious/noExplicitAny: variance-permissive Worker shape
 export interface WorkerLike {
-    postMessage(msg: unknown, transfer?: Transferable[]): void;
+    postMessage(msg: unknown, transfer?: any[]): void;
     terminate(): void;
-    onmessage: ((ev: { data: unknown }) => void) | null;
-    onerror?: ((ev: unknown) => void) | null;
+    onmessage: ((ev: any) => void) | null;
+    onerror?: ((ev: any) => void) | null;
 }
 
 export type WorkerFactory = () => WorkerLike;
@@ -140,8 +145,7 @@ export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "f
 
 export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPoolScanner {
     return new WorkerPoolScanner({
-        // Native Worker structurally matches WorkerLike modulo MessageEvent typing.
-        factory: () => new Worker(opts.workerUrl, { type: "module" }) as unknown as WorkerLike,
+        factory: () => new Worker(opts.workerUrl, { type: "module" }),
         size: opts.size,
         chunkSize: opts.chunkSize,
     });
