@@ -1,6 +1,6 @@
 {
   "name": "@lelantos-org/sdk",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
@@ -51,6 +51,10 @@
     "./prover-worker": {
       "types": "./dist/wallet/prover-worker.d.ts",
       "default": "./dist/wallet/prover-worker.js"
+    },
+    "./scanner-worker": {
+      "types": "./dist/wallet/scanner-worker.d.ts",
+      "default": "./dist/wallet/scanner-worker.js"
     },
     "./wasm/prover": {
       "types": "./wasm/prover/pkg/prover.d.ts",

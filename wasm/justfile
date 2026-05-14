@@ -54,3 +54,10 @@ clean:
 
 size: build
     @ls -lh {{PROVER}}/pkg/*_bg.wasm {{JUBJUB}}/pkg/*_bg.wasm | awk '{print $5, $9}'
+
+# Run wasm benchmarks via Node. Builds first if pkg/ stale.
+# Set PROVER_DIR=/path/to/2x2 to also bench prover (zkey + wtns).
+bench:
+    @[ -f {{JUBJUB}}/pkg/jubjub_wasm.js ] || just jubjub-build
+    @[ -f {{PROVER}}/pkg/prover.js ] || just prover-build
+    cd .. && node scripts/bench-wasm.mjs
