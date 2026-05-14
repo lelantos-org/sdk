@@ -20,11 +20,13 @@ import {
 /// DOM `Worker` and Node `worker_threads` shims structurally match without a
 /// cast at the call site. Internal code still narrows via the wire-protocol
 /// codec.
-// biome-ignore-all lint/suspicious/noExplicitAny: variance-permissive Worker shape
 export interface WorkerLike {
+    // biome-ignore lint/suspicious/noExplicitAny: variance-permissive transfer list
     postMessage(msg: unknown, transfer?: any[]): void;
     terminate(): void;
+    // biome-ignore lint/suspicious/noExplicitAny: variance-permissive event shape
     onmessage: ((ev: any) => void) | null;
+    // biome-ignore lint/suspicious/noExplicitAny: variance-permissive event shape
     onerror?: ((ev: any) => void) | null;
 }
 
