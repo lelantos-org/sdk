@@ -51,7 +51,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Browser-safety lint (no node: imports under src/)
+      - name: "Browser-safety lint (no node: imports under src/)"
         run: npm run check:browser-safe
 
       - name: Type check
