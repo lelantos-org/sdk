@@ -139,6 +139,7 @@ export class EthersChainAdapter implements ChainAdapter {
         intent: DepositIntent;
         permit2: Permit2Sig;
         aux: [AuxOutput, AuxOutput];
+        onSent?: (txHash: string) => void;
     }): Promise<{ txHash: string; intentId: bigint }> {
         const masp = this.maspContract.connect(this.signer) as Contract;
         const { intent, permit2, aux } = args;
@@ -157,6 +158,11 @@ export class EthersChainAdapter implements ChainAdapter {
             [permit2.nonce, permit2.deadline, permit2.maxTotal, permit2.signature],
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
         );
+        try {
+            args.onSent?.(tx.hash as string);
+        } catch {
+            // ignore
+        }
         const receipt = await tx.wait();
         const intentId = extractIntentId(receipt, this.maspContract);
         return { txHash: tx.hash as string, intentId };
@@ -166,6 +172,7 @@ export class EthersChainAdapter implements ChainAdapter {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
         value: bigint;
+        onSent?: (txHash: string) => void;
     }): Promise<{ txHash: string; intentId: bigint }> {
         const masp = this.maspContract.connect(this.signer) as Contract;
         const { intent, aux, value } = args;
@@ -184,6 +191,11 @@ export class EthersChainAdapter implements ChainAdapter {
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
             { value },
         );
+        try {
+            args.onSent?.(tx.hash as string);
+        } catch {
+            // ignore
+        }
         const receipt = await tx.wait();
         const intentId = extractIntentId(receipt, this.maspContract);
         return { txHash: tx.hash as string, intentId };
@@ -192,6 +204,7 @@ export class EthersChainAdapter implements ChainAdapter {
     async submitIntentAuthorized(args: {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
+        onSent?: (txHash: string) => void;
     }): Promise<{ txHash: string; intentId: bigint }> {
         const masp = this.maspContract.connect(this.signer) as Contract;
         const { intent, aux } = args;
@@ -209,6 +222,11 @@ export class EthersChainAdapter implements ChainAdapter {
             ],
             aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
         );
+        try {
+            args.onSent?.(tx.hash as string);
+        } catch {
+            // ignore
+        }
         const receipt = await tx.wait();
         const intentId = extractIntentId(receipt, this.maspContract);
         return { txHash: tx.hash as string, intentId };

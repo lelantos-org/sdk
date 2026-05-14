@@ -88,6 +88,10 @@ export interface ChainAdapter {
         intent: DepositIntent;
         permit2: Permit2Sig;
         aux: [AuxOutput, AuxOutput];
+        /// Fired after the wallet signs and the tx hash is known, before
+        /// receipt-wait. Used by callers to separate "sign" from "mined"
+        /// in user-facing progress UI.
+        onSent?: (txHash: string) => void;
     }): Promise<{ txHash: string; intentId: bigint }>;
     /// `MASP.submitIntentNative` with `msg.value = value`. Pool wraps
     /// internally; no Permit2. Asset id must be WETH-registered. Optional.
@@ -95,12 +99,14 @@ export interface ChainAdapter {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
         value: bigint;
+        onSent?: (txHash: string) => void;
     }): Promise<{ txHash: string; intentId: bigint }>;
     /// `MASP.submitIntentAuthorized`. Pulls via Permit2 AllowanceTransfer
     /// against a previously-signed window; no per-deposit sig. Optional.
     submitIntentAuthorized?(args: {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
+        onSent?: (txHash: string) => void;
     }): Promise<{ txHash: string; intentId: bigint }>;
     /// `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional.
     permit2Allowance?(

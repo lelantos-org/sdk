@@ -430,17 +430,32 @@ export class Wallet implements WalletApi {
         const { built, args, assetEntry, total } = ctx;
         const chain = this.cfg.chain;
 
+        // `broadcast` fires once the wallet returns a tx hash (user signed,
+        // tx in mempool); the awaited `tx.wait()` then resolves and we emit
+        // `mined`. Splits the otherwise-opaque submit gap into three steps
+        // for the form's progress UI.
+        const onSent = () => safePhase(args.onPhase, "broadcast");
+        const emitMined = (r: { txHash: string; intentId: bigint }) => {
+            safePhase(args.onPhase, "mined");
+            return r;
+        };
+
         if (strategy === "native") {
             safePhase(args.onPhase, "submitting");
             return chain.submitIntentNative!({
                 intent: built.intent,
                 aux: built.aux,
                 value: total,
-            });
+                onSent,
+            }).then(emitMined);
         }
         if (strategy === "allowance") {
             safePhase(args.onPhase, "submitting");
-            return chain.submitIntentAuthorized!({ intent: built.intent, aux: built.aux });
+            return chain.submitIntentAuthorized!({
+                intent: built.intent,
+                aux: built.aux,
+                onSent,
+            }).then(emitMined);
         }
         // witness path
         const deadline =
@@ -457,14 +472,24 @@ export class Wallet implements WalletApi {
         });
         safePhase(args.onPhase, "submitting");
         if (this.submitter.submitIntent) {
-            return this.submitter.submitIntent({
+            // Relayer-broadcast path: the submitter posts to the relayer and
+            // receives the hash back. Emit `broadcast` once the request
+            // resolves with a hash, then `mined` after the on-chain receipt
+            // surfaces upstream. For now we treat the submitter return as
+            // the broadcast point.
+            const r = await this.submitter.submitIntent({
                 chainId: this.cfg.chainId,
                 intent: built.intent,
                 permit2,
                 aux: built.aux,
             });
+            safePhase(args.onPhase, "broadcast");
+            safePhase(args.onPhase, "mined");
+            return r;
         }
-        return chain.submitIntent!({ intent: built.intent, permit2, aux: built.aux });
+        return chain.submitIntent!({ intent: built.intent, permit2, aux: built.aux, onSent }).then(
+            emitMined,
+        );
     }
 
     /// Recompute the total the strategy picker compares to the allowance

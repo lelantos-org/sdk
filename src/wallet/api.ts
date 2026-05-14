@@ -11,7 +11,7 @@ import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import type { SyncProgress, SyncResult } from "./sync.js";
 
-export type DepositPhase = "signing" | "submitting";
+export type DepositPhase = "signing" | "submitting" | "broadcast" | "mined";
 export type SpendPhase = "preparing" | "proving" | "submitting";
 
 /// Shield ERC-20 into the MASP. For native ETH, set `asEth: true`.
