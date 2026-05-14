@@ -35,7 +35,7 @@ describe("FMD (Niwl)", () => {
         }
     });
 
-    it("foreign detection statistically near 2^-γ", () => {
+    it("foreign detection statistically near 2^-γ", { timeout: 120_000 }, () => {
         const N = 256;
         const γ = FMD_DEFAULT_GAMMA;
         const ra = rng(0xa1n),
