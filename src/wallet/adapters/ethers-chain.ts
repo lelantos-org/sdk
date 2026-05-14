@@ -307,7 +307,7 @@ export class EthersChainAdapter implements ChainAdapter {
         const iface = this.maspContract.interface;
         const topic = iface.getEvent("IntentEscrowed")?.topicHash;
         if (!topic) throw new TxMiningError("fetchIntentEscrowed: ABI missing IntentEscrowed");
-        const idTopic = "0x" + id.toString(16).padStart(64, "0");
+        const idTopic = `0x${id.toString(16).padStart(64, "0")}`;
         const logs = await this.provider.getLogs({
             address: this._maspAddress,
             topics: [topic, idTopic],
