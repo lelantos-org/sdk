@@ -1,20 +1,25 @@
 // WASM-backed Baby-Jubjub. Structurally compatible with circomlibjs `Jubjub`.
-// `hashToAssetGen` is delegated to circomlibjs (lazy-loaded) because it depends on a specific
-// Pedersen-264 bit-stream the circuit locks to circomlibjs byte-for-byte. Lazy load keeps the
-// Node-flavored circomlibjs dep out of browser bundles that don't touch asset_gen.
-// Wire conventions: see `sdk/wasm/jubjub/src/lib.rs`.
+// `hashToAssetGen` delegates to circomlibjs (lazy-loaded) — circuits lock the
+// Pedersen-264 bit-stream byte-for-byte to that impl.
+// Wire conventions: `sdk/wasm/jubjub/src/lib.rs`.
 
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
-import type { Jubjub as CircomlibJubjub } from "./jubjub.js";
-import { H_BASE, type Jubjub, type Point } from "./jubjub.js";
+// Type-only — runtime load of `jubjub.js` (and its `circomlibjs` dep) is
+// deferred to `getFallback()` so this module stays worker-importable.
+import type { Jubjub as CircomlibJubjub, Jubjub, Point } from "./jubjub.js";
 import type { Field, Poseidon } from "./poseidon.js";
 
-// Domain-separation tag for FMD bit derivation. Mirrors `TAG_FMD_BIT` in
-// `sdk/src/fmd.ts` and `circuits/src/lib/tags.circom`.
+// Inlined to keep this module's runtime imports `circomlibjs`-free.
+// Mirrors `H_BASE` in `./jubjub.ts`.
+const H_BASE: Point = [
+    5802099305472655231388284418920769829666717045250560929368476121199858275951n,
+    5980429700218124965372158798884772646841287887664001482443826541541529227896n,
+];
+
+/// Mirrors `TAG_FMD_BIT` in `sdk/src/fmd.ts` + `circuits/src/lib/tags.circom`.
 const TAG_FMD_BIT: bigint = 8n;
 
-// Inline surface for the wasm-pack output (real `.d.ts` is gitignored).
 interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
     base8(): Uint8Array;
@@ -32,21 +37,22 @@ interface JubWasmMod extends WasmModuleBase {
 
 const POINT_BYTES = 64;
 
-/// Inject a loader that resolves the wasm-pack module + binary via the bundler's asset-URL
-/// pipeline (e.g. Vite's `?url` imports) before calling `WasmJubjub.build()`. Required for
-/// browser bundlers that rewrite the relative-path fallback to a runtime-invalid location.
+/// Override for bundlers that rewrite `new URL(..., import.meta.url)` to a
+/// runtime-invalid location. Call before `WasmJubjub.build()`.
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
 const PKG_JS_URL = new URL("../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url);
 const PKG_WASM_URL = new URL("../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url);
 
-// `node:*` specifier held in a variable to prevent Vite from statically resolving it in
-// browser builds. Reached only on Node.
+// Specifiers held in variables (+ `@vite-ignore` below) so Vite skips static
+// resolution. `node:url` is Node-only; `#wasm/jubjub` requires either a Node
+// runtime or an injected loader.
 const NODE_URL = "node:url";
+const WASM_JUBJUB_SUBPATH = "#wasm/jubjub";
 
 const loader = createWasmLoader<JubWasmMod>({
     name: "jubjub",
-    defaultImport: () => import("#wasm/jubjub") as Promise<JubWasmMod>,
+    defaultImport: () => import(/* @vite-ignore */ WASM_JUBJUB_SUBPATH) as Promise<JubWasmMod>,
     nodeJsUrl: async () => PKG_JS_URL.href,
     nodeWasmPath: async () => {
         const { fileURLToPath } = await import(/* @vite-ignore */ NODE_URL);
@@ -54,7 +60,7 @@ const loader = createWasmLoader<JubWasmMod>({
     },
 });
 
-/// Override the default loader. Call once at app boot, before `WasmJubjub.build()`.
+/// Call once at app boot, before `WasmJubjub.build()`.
 export function configureJubjubWasm(override: JubjubWasmLoader): void {
     loader.configure(override);
 }
@@ -93,10 +99,10 @@ export class WasmJubjub {
         await ensureInit();
         const base8 = bytesToPoint(w().base8());
         const order = fromLeBytes(w().sub_order_le());
-        const inst = new WasmJubjub(base8, order);
-        // Eagerly load circomlibjs fallback used by the sync `hashToAssetGen` hot path.
-        await inst.getFallback();
-        return inst;
+        // Fallback (`circomlibjs.Jubjub`) is loaded lazily on first
+        // `hashToAssetGen` call — eager load would drag `circomlibjs` /
+        // CJS `blake2b` into every importer, breaking Vite workers.
+        return new WasmJubjub(base8, order);
     }
 
     private async getFallback(): Promise<CircomlibJubjub> {

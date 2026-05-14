@@ -1,11 +1,15 @@
-// Wire format between WorkerPoolScanner and the scanner-worker entry.
-
 import type { FmdDetectionKey } from "../fmd.js";
 import type { ScanHit, ScanInput } from "../sync.js";
 
 export interface InitReq {
     type: "init";
     id: number;
+    wasm?: WireWasmConfig;
+}
+
+export interface WireWasmConfig {
+    jubjubModuleUrl: string;
+    jubjubWasmUrl: string;
 }
 
 export interface InitRes {
@@ -13,10 +17,16 @@ export interface InitRes {
     id: number;
 }
 
+export interface InitErr {
+    type: "init-err";
+    id: number;
+    message: string;
+}
+
 export interface ScanReq {
     type: "scan";
     id: number;
-    ivk: string; // bigint as decimal string (postMessage-safe)
+    ivk: string;
     inputs: WireScanInput[];
     detectionKey?: WireDetectionKey;
 }
@@ -36,7 +46,7 @@ export interface ScanErr {
 export interface WireScanInput {
     ciphertext: Uint8Array;
     epk: Uint8Array;
-    cm: string; // bigint decimal
+    cm: string;
     leafIndex: number;
     clue?: { R: Uint8Array; bits: Uint8Array; gamma: number };
 }

@@ -17,8 +17,10 @@
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
 import { blake2b } from "@noble/hashes/blake2";
-import { BABYJUB_SUBGROUP_ORDER, type Field, type Jubjub, type Point } from "./crypto/index.js";
+// Leaf import keeps this module worker-safe (barrel pulls circomlibjs/blake2b).
+import type { Field, Jubjub, Point } from "./crypto/index.js";
 import { WasmJubjub } from "./crypto/jubjub-wasm.js";
+import { BABYJUB_SUBGROUP_ORDER } from "./crypto/tags.js";
 import type { EncryptedNote } from "./notes.js";
 
 const KDF_DOMAIN = new TextEncoder().encode("lelantos.note.kdf.v1");

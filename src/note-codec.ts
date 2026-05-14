@@ -8,7 +8,9 @@
 // blinder bound into the Merkle leaf; the spender needs it to recompute the
 // leaf hash. Do not change without bumping the encryption KDF domain.
 
-import { FIELD_BYTES, type Field, fromLeBytes, toLeBytes } from "./crypto/index.js";
+// Leaf imports keep this module worker-safe (barrel pulls circomlibjs/blake2b).
+import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./crypto/bytes.js";
+import type { Field } from "./crypto/poseidon.js";
 
 export const NOTE_ASSET_BYTES = 8;
 export const NOTE_VALUE_BYTES = 8;

@@ -1,10 +1,12 @@
-// Wallet-side tree sync helpers.
-//
 // Lazy-root model: chain holds only `roots[ring]` + `isKnownRoot` +
-// `committedCount`. Leaves and merkle paths live with the relayer. Wallets
+// `committedCount`. Leaves and merkle paths live with the relayer; wallets
 // verify by recomputing the root and asserting `isKnownRoot`.
 
-import { type Field, type Jubjub, type Poseidon, TAG_MERKLE } from "./crypto/index.js";
+// `TAG_MERKLE` imported from the leaf module — the barrel `./crypto/index.js`
+// pulls `circomlibjs` (CJS `blake2b`) which Vite's worker pre-bundle can't
+// shim, so any worker importing this file would crash on module load.
+import type { Field, Jubjub, Poseidon } from "./crypto/index.js";
+import { TAG_MERKLE } from "./crypto/tags.js";
 import { type FmdClue, type FmdDetectionKey, fmdTest } from "./fmd.js";
 import { decodeNotePayload, type NotePayload, stripClueBitsPrefix } from "./note-codec.js";
 import { decryptNote } from "./note-encrypt.js";
@@ -12,15 +14,13 @@ import { decryptNote } from "./note-encrypt.js";
 const ARITY = 4;
 
 export interface ScanInput {
-    /// Wire ciphertext (2B clueBits prefix + ChaCha body), unstripped.
+    /// Wire ciphertext: 2B clueBits prefix + ChaCha body, unstripped.
     ciphertext: Uint8Array;
-    /// Recipient ECDH ephemeral pub (packed Baby-Jubjub).
+    /// Packed Baby-Jubjub recipient ECDH ephemeral pubkey.
     epk: Uint8Array;
-    /// On-chain commitment for this note (used by callers to look up paths).
     cm: Field;
     leafIndex: number;
-    /// Optional FMD clue. If provided AND a detection key is supplied to
-    /// `scanNotes`, the clue is tested first as a cheap reject.
+    /// Cheap FMD pre-reject. Only consulted when `scanNotes` gets a detection key.
     clue?: FmdClue;
 }
 
@@ -29,9 +29,8 @@ export interface ScanHit extends NotePayload {
     leafIndex: number;
 }
 
-/// Trial-decrypt notes with `ivk`; return those whose ChaCha tag verifies
-/// and plaintext decodes. `detectionKey` optional FMD pre-filter to skip
-/// clearly-not-mine notes without paying ECDH+ChaCha cost.
+/// Trial-decrypt with `ivk`; return notes whose ChaCha tag verifies and
+/// plaintext decodes. `detectionKey` is an optional FMD pre-filter.
 export function scanNotes(
     J: Jubjub,
     P: Poseidon,
@@ -49,18 +48,17 @@ export function scanNotes(
         if (!plain) continue;
         try {
             const payload = decodeNotePayload(plain);
-            // Drop self-pad outputs (value=0n): decrypt cleanly but not
-            // spendable; would otherwise pile up as phantom unspent notes.
+            // Self-pad outputs decrypt cleanly but are unspendable; would
+            // otherwise pile up as phantom unspent notes.
             if (payload.value === 0n) continue;
             hits.push({ ...payload, cm: inp.cm, leafIndex: inp.leafIndex });
         } catch {
-            /* tag passed but body did not decode as a NotePayload — skip. */
+            /* body decoded as something other than NotePayload — skip. */
         }
     }
     return hits;
 }
 
-/// Recompute the merkle root from a path supplied by the relayer.
 export function rootFromPath(
     P: Poseidon,
     leaf: Field,
@@ -82,8 +80,6 @@ export function rootFromPath(
     return cur;
 }
 
-/// Verify a relayer-supplied merkle path against an on-chain root oracle.
-/// Caller passes `isKnownRootOnChain(root)` predicate.
 export async function verifyPath(
     P: Poseidon,
     leaf: Field,

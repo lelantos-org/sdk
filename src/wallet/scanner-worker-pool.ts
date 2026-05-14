@@ -1,5 +1,3 @@
-// WorkerPoolScanner — fans `scanNotes` across N Web Workers via injected factory.
-
 import type { Field } from "../crypto/index.js";
 import type { FmdDetectionKey } from "../fmd.js";
 import type { ScanHit, ScanInput } from "../sync.js";
@@ -8,18 +6,18 @@ import {
     decodeHit,
     encodeDetection,
     encodeInput,
+    type InitErr,
     type InitReq,
     type InitRes,
     type ScanErr,
     type ScanReq,
     type ScanRes,
     transferablesOf,
+    type WireWasmConfig,
 } from "./scanner-worker-protocol.js";
 
-/// Minimal Worker shape used by `WorkerPoolScanner`. Typed permissively so
-/// DOM `Worker` and Node `worker_threads` shims structurally match without a
-/// cast at the call site. Internal code still narrows via the wire-protocol
-/// codec.
+/// Structural superset of DOM `Worker` and `node:worker_threads`, so either
+/// can be passed by `factory()` without casts.
 export interface WorkerLike {
     postMessage(msg: unknown, transfer?: any[]): void;
     terminate(): void;
@@ -31,15 +29,18 @@ export type WorkerFactory = () => WorkerLike;
 
 export interface WorkerPoolScannerOpts {
     factory: WorkerFactory;
-    /// Pool size. Defaults to clamp(navigator.hardwareConcurrency, 2, 8).
     size?: number;
-    /// Notes per chunk. Defaults to ceil(inputs.length / size).
     chunkSize?: number;
+    /// Forwarded to each worker on `init`. Required for bundlers that rewrite
+    /// `new URL(..., import.meta.url)` in worker chunks — without it wasm load
+    /// in the worker hangs silently.
+    wasm?: WireWasmConfig;
 }
 
 export class WorkerPoolScanner implements Scanner {
     private readonly workers: WorkerLike[];
     private readonly chunkSize?: number;
+    private readonly wasm?: WireWasmConfig;
     private readonly initPromise: Promise<void>;
     private nextReqId = 1;
 
@@ -48,6 +49,7 @@ export class WorkerPoolScanner implements Scanner {
         if (size < 1) throw new Error("WorkerPoolScanner: size must be >= 1");
         this.workers = Array.from({ length: size }, () => opts.factory());
         this.chunkSize = opts.chunkSize;
+        this.wasm = opts.wasm;
         this.initPromise = Promise.all(this.workers.map((w) => this.initOne(w))).then(
             () => undefined,
         );
@@ -55,15 +57,15 @@ export class WorkerPoolScanner implements Scanner {
 
     private initOne(worker: WorkerLike): Promise<void> {
         const id = this.nextReqId++;
-        const req: InitReq = { type: "init", id };
+        const req: InitReq = { type: "init", id, wasm: this.wasm };
         return new Promise<void>((resolve, reject) => {
             const prev = worker.onmessage;
             worker.onmessage = (ev: { data: unknown }): void => {
-                const msg = ev.data as InitRes | ScanErr;
+                const msg = ev.data as InitRes | InitErr;
                 if (!msg || (msg as { id?: number }).id !== id) return;
                 worker.onmessage = prev;
                 if (msg.type === "init-res") resolve();
-                else reject(new Error((msg as ScanErr).message ?? "worker init failed"));
+                else reject(new Error((msg as InitErr).message ?? "worker init failed"));
             };
             worker.postMessage(req);
         });
@@ -147,5 +149,6 @@ export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPool
         factory: () => new Worker(opts.workerUrl, { type: "module" }),
         size: opts.size,
         chunkSize: opts.chunkSize,
+        wasm: opts.wasm,
     });
 }

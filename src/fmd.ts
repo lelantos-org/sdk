@@ -37,17 +37,12 @@
 // Byte order locked against the Rust indexer impl via deterministic vectors.
 // Bumping FMD_DOMAIN signals scheme change.
 
-import {
-    BABYJUB_SUBGROUP_ORDER,
-    BN254_FR,
-    FIELD_BYTES,
-    type Field,
-    type Jubjub,
-    legendreSymbol,
-    type Point,
-    toLeBytes,
-} from "./crypto/index.js";
-import type { Poseidon } from "./crypto/poseidon.js";
+// Leaf imports keep this module worker-safe (barrel pulls circomlibjs/blake2b).
+import { FIELD_BYTES, toLeBytes } from "./crypto/bytes.js";
+import type { Jubjub, Point } from "./crypto/jubjub.js";
+import type { Field, Poseidon } from "./crypto/poseidon.js";
+import { legendreSymbol } from "./crypto/sqrt.js";
+import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "./crypto/tags.js";
 
 export const FMD_DEFAULT_GAMMA = 5;
 export const FMD_DOMAIN = "lelantos.fmd.v3";
