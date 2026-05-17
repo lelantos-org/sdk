@@ -54,6 +54,9 @@ jobs:
       - name: "Browser-safety lint (no node: imports under src/)"
         run: npm run check:browser-safe
 
+      - name: Sync version
+        run: node scripts/sync-version.mjs
+
       - name: Type check
         run: npx tsc -p tsconfig.json --noEmit
 
