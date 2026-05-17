@@ -1,5 +1,5 @@
 // Wire-format helpers shared across the relayer codec, permit2 signer,
-// and the ethers chain adapter. All three previously inlined identical
+// and the chain adapter. All three previously inlined identical
 // `bytesToHex` / `hexToBytes` pairs.
 
 /// `0x`-prefixed lowercase hex of a byte array.

@@ -82,6 +82,7 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         // Decimal strings so U256 values >2^53 round-trip safely.
         amountIn: s.amountIn.toString(),
         minOut: s.minOut.toString(),
+        deadline: s.deadline?.toString() ?? null,
     };
 }
 

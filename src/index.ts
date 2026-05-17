@@ -44,15 +44,21 @@ export {
     supportsAllowanceTransfer,
 } from "./chain/adapter.js";
 export {
-    EthersChainAdapter,
-    type EthersChainAdapterOpts,
-} from "./chain/ethers-adapter.js";
+    type Eip1193ProviderLike,
+    Eip1193Signer,
+    type EthSigner,
+    PrivateKeySigner,
+} from "./chain/eth-signer.js";
 export {
     NETWORKS,
     type NetworkName,
     type NetworkPreset,
     resolveNetwork,
 } from "./chain/networks.js";
+export {
+    ViemChainAdapter,
+    type ViemChainAdapterOpts,
+} from "./chain/viem-adapter.js";
 // ── crypto primitives ────────────────────────────────────────────────────
 export {
     BABYJUB_SUBGROUP_ORDER,
@@ -180,7 +186,6 @@ export {
     type WithdrawEthOptions,
     type WithdrawOptions,
     type WithdrawResult,
-    warmAssetGen,
 } from "./wallet/index.js";
 export {
     FmdMatchesNoteSource,

@@ -10,11 +10,12 @@ import {
     ALLOWANCE_BUFFER_SECS,
     BPS_DENOMINATOR,
     PERMIT2_DEFAULT_DEADLINE_SECS,
+    PUBLIC_IN_MAX,
 } from "./constants.js";
 import { DepositAdapterError, type DepositStrategy } from "./errors/index.js";
 import { makeTransactionResult } from "./internal.js";
 import type { Wallet } from "./wallet.js";
-import { safePhase, warmAssetGen } from "./wallet.js";
+import { safePhase } from "./wallet.js";
 
 export async function executeDeposit(
     wallet: Wallet,
@@ -25,14 +26,17 @@ export async function executeDeposit(
     const payer = await wallet.cfg.chain.payerAddress();
     const assetEntry = await wallet.cfg.chain.fetchAsset(asset);
     const feeBps = await wallet.resolveFeeBps();
+    if (args.amount > PUBLIC_IN_MAX) {
+        throw new Error(
+            `deposit: amount ${args.amount} exceeds uint48 publicIn cap; asset ${asset} scale ${assetEntry.scale} too small`,
+        );
+    }
     const inAmt = args.amount * assetEntry.scale;
     const fee = (inAmt * feeBps) / BPS_DENOMINATOR;
     const total = inAmt + fee;
 
     const o0 = freshOutput();
     const o1 = freshNoteRandomness();
-    // Warm WasmJubjub's circomlibjs fallback; sync hashToAssetGen depends on it.
-    await warmAssetGen(wallet.J, asset);
     const built = buildDeposit({
         P: wallet.P,
         J: wallet.J,

@@ -30,3 +30,8 @@ export const AWAIT_COMMITMENTS_SYNC_LIMIT = 200;
 /// on-chain. Same constant used across deposit/withdraw/swap so a future
 /// switch to ppm only changes one place.
 export const BPS_DENOMINATOR = 10_000n;
+
+/// Mirrors `MASP.PublicInTooLarge` bound at `MASP.sol:413`:
+/// `d.publicIn > type(uint48).max` reverts on-chain. The SDK pre-checks
+/// against this to surface an actionable error instead of a relayer 500.
+export const PUBLIC_IN_MAX = (1n << 48n) - 1n;

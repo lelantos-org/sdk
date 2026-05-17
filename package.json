@@ -29,6 +29,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./package.json": "./package.json",
     "./crypto": {
       "types": "./dist/crypto/index.d.ts",
       "default": "./dist/crypto/index.js"
@@ -129,19 +130,24 @@
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
   },
   "peerDependencies": {
-    "@lelantos-org/circuits": "*"
+    "@lelantos-org/circuits": "*",
+    "snarkjs": "^0.7.4",
+    "viem": "^2.49.3"
   },
   "peerDependenciesMeta": {
-    "@lelantos-org/circuits": { "optional": true }
+    "@lelantos-org/circuits": {
+      "optional": true
+    },
+    "snarkjs": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",
     "@noble/hashes": "^1.5.0",
     "@scure/bip39": "^1.3.0",
     "bech32": "^2.0.0",
-    "circomlibjs": "^0.1.7",
-    "ethers": "^6.13.0",
-    "snarkjs": "^0.7.4"
+    "poseidon-lite": "^0.3.0"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.17.0",
@@ -150,8 +156,10 @@
     "@vitest/coverage-v8": "^4.1.5",
     "lefthook": "^1.8.0",
     "publint": "^0.3.0",
+    "snarkjs": "^0.7.4",
     "tsx": "^4.19.0",
     "typescript": "^5.7.2",
+    "viem": "^2.49.3",
     "vitest": "^4.1.5"
   },
   "overrides": {

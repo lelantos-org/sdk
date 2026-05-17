@@ -1,8 +1,25 @@
 // snarkjs Groth16 wrapper. Configure via `configureProver({ wasmPath, zkeyPath })`
 // at app boot or pass per-call. Artifacts live under `circuits/build/`.
 
-import * as snarkjs from "snarkjs";
+import type * as SnarkjsT from "snarkjs";
 import { urlToString } from "../utils/types.js";
+
+let snarkjsMod: typeof SnarkjsT | null = null;
+async function loadSnarkjs(): Promise<typeof SnarkjsT> {
+    if (snarkjsMod) return snarkjsMod;
+    try {
+        snarkjsMod = (await import("snarkjs")) as typeof SnarkjsT;
+        return snarkjsMod;
+    } catch (e) {
+        throw new Error(
+            "snarkjs prover requested but `snarkjs` is not installed. " +
+                "Add it to your app dependencies (`npm i snarkjs`), or use the WASM prover " +
+                "(`@lelantos-org/sdk/wasm-prover`).",
+            { cause: e as Error },
+        );
+    }
+}
+
 import { ProverArtifactsMissingError } from "../wallet/errors/index.js";
 import type { ProverArtifacts } from "./artifacts.js";
 
@@ -55,6 +72,7 @@ export async function prove(
     paths: ProverPaths | null = DEFAULT_PATHS,
 ): Promise<ProveResult> {
     if (!paths) throw new Error("prover paths not configured (call configureProver)");
+    const snarkjs = await loadSnarkjs();
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(
         input,
         paths.wasmPath,
@@ -69,6 +87,7 @@ export async function verify(
     publicSignals: string[],
     proof: Groth16Proof,
 ): Promise<boolean> {
+    const snarkjs = await loadSnarkjs();
     return snarkjs.groth16.verify(vkey, publicSignals, proof);
 }
 
@@ -140,5 +159,6 @@ export async function exportSolidityCallData(
     proof: Groth16Proof,
     publicSignals: string[],
 ): Promise<string> {
+    const snarkjs = await loadSnarkjs();
     return snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
 }

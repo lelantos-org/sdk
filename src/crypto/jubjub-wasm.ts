@@ -1,21 +1,10 @@
-// WASM-backed Baby-Jubjub. Structurally compatible with circomlibjs `Jubjub`.
-// `hashToAssetGen` delegates to circomlibjs (lazy-loaded) — circuits lock the
-// Pedersen-264 bit-stream byte-for-byte to that impl.
+// WASM-backed Baby-Jubjub. Sole runtime impl (no circomlibjs).
 // Wire conventions: `sdk/wasm/jubjub/src/lib.rs`.
 
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
-// Type-only — runtime load of `jubjub.js` (and its `circomlibjs` dep) is
-// deferred to `getFallback()` so this module stays worker-importable.
-import type { Jubjub as CircomlibJubjub, Jubjub, Point } from "./jubjub.js";
+import { H_BASE, type Point } from "./jubjub.js";
 import type { Field, Poseidon } from "./poseidon.js";
-
-// Inlined to keep this module's runtime imports `circomlibjs`-free.
-// Mirrors `H_BASE` in `./jubjub.ts`.
-const H_BASE: Point = [
-    5802099305472655231388284418920769829666717045250560929368476121199858275951n,
-    5980429700218124965372158798884772646841287887664001482443826541541529227896n,
-];
 
 /// Mirrors `TAG_FMD_BIT` in `sdk/src/fmd.ts` + `circuits/src/lib/tags.circom`.
 const TAG_FMD_BIT: bigint = 8n;
@@ -23,6 +12,7 @@ const TAG_FMD_BIT: bigint = 8n;
 interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
     base8(): Uint8Array;
+    hash_to_asset_gen(asset_id_le: Uint8Array): Uint8Array;
     in_subgroup(p: Uint8Array): boolean;
     mul_point_escalar(p: Uint8Array, scalar_le: Uint8Array): Uint8Array;
     pack_point(p: Uint8Array): Uint8Array;
@@ -90,8 +80,6 @@ function bytesToPoint(b: Uint8Array): Point {
 
 /** @internal */
 export class WasmJubjub {
-    private fallback: CircomlibJubjub | null = null;
-
     private constructor(
         private readonly _base8: Point,
         private readonly _order: bigint,
@@ -101,17 +89,7 @@ export class WasmJubjub {
         await ensureInit();
         const base8 = bytesToPoint(w().base8());
         const order = fromLeBytes(w().sub_order_le());
-        // Fallback (`circomlibjs.Jubjub`) is loaded lazily on first
-        // `hashToAssetGen` call — eager load would drag `circomlibjs` /
-        // CJS `blake2b` into every importer, breaking Vite workers.
         return new WasmJubjub(base8, order);
-    }
-
-    private async getFallback(): Promise<CircomlibJubjub> {
-        if (this.fallback) return this.fallback;
-        const { Jubjub } = await import("./jubjub.js");
-        this.fallback = await Jubjub.build();
-        return this.fallback;
     }
 
     get base8(): Point {
@@ -151,20 +129,8 @@ export class WasmJubjub {
         if (assetId >= 1n << 64n) {
             throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
         }
-        if (!this.fallback) {
-            throw new Error(
-                "hashToAssetGen: circomlibjs fallback not initialized; call hashToAssetGenAsync first",
-            );
-        }
-        return this.fallback.hashToAssetGen(assetId);
-    }
-
-    async hashToAssetGenAsync(assetId: Field): Promise<Point> {
-        if (assetId >= 1n << 64n) {
-            throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
-        }
-        const fb = await this.getFallback();
-        return fb.hashToAssetGen(assetId);
+        const out = w().hash_to_asset_gen(toLeBytes(assetId, 8));
+        return bytesToPoint(out);
     }
 
     valueCommit(value: Field, assetGen: Point, rcv: Field): Point {
@@ -208,8 +174,8 @@ export class WasmJubjub {
     }
 }
 
-/// Build the WASM-backed jubjub typed as the nominal `Jubjub` class. Parity is locked by
-/// `jubjub-wasm.test.ts`; TS can't see structural compatibility across nominal class types.
-export async function buildJubjub(): Promise<Jubjub> {
-    return (await WasmJubjub.build()) as unknown as Jubjub;
+/// Convenience builder kept for callers that previously used the
+/// `circomlibjs`-fallback shape.
+export async function buildJubjub(): Promise<WasmJubjub> {
+    return WasmJubjub.build();
 }

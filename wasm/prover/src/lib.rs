@@ -19,6 +19,8 @@ use std::io::Cursor;
 use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Groth16, ProvingKey};
 use ark_relations::r1cs::ConstraintMatrices;
+use ark_std::UniformRand;
+use rand_core::OsRng;
 use wasm_bindgen::prelude::*;
 
 use crate::encode::{public_signals, ProveOutput};
@@ -67,11 +69,12 @@ impl ProverSession {
             return Err(JsValue::from_str("witness shorter than nPublic+1"));
         }
 
-        let zero = Fr::from(0u64);
+        let r = Fr::rand(&mut OsRng);
+        let s = Fr::rand(&mut OsRng);
         let proof = Groth16::<Bn254, CircomReduction>::create_proof_with_reduction_and_matrices(
             &self.pk,
-            zero,
-            zero,
+            r,
+            s,
             &self.matrices,
             self.matrices.num_instance_variables,
             self.matrices.num_constraints,

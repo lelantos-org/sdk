@@ -588,6 +588,7 @@ dependencies = [
  "num-traits",
  "rand 0.4.6",
  "wasm-bindgen",
+ "zeroize",
 ]
 
 [[package]]
@@ -736,6 +737,7 @@ dependencies = [
  "js-sys",
  "num-bigint 0.4.6",
  "num-traits",
+ "rand_core 0.6.4",
  "rayon",
  "serde",
  "serde-wasm-bindgen",
@@ -808,6 +810,9 @@ name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "rayon"

@@ -1,5 +1,7 @@
-import { keccak256, verifyTypedData, Wallet } from "ethers";
+import { keccak256, recoverTypedDataAddress } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
+import { PrivateKeySigner } from "../chain/eth-signer.js";
 import {
     type AuxOutput,
     computePiHash,
@@ -21,14 +23,15 @@ const PERMIT2_TYPES = {
         { name: "amount", type: "uint256" },
     ],
     MASPDeposit: [{ name: "piHash", type: "bytes32" }],
-};
+} as const;
+
+const ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const;
 
 describe("permit2", () => {
     it("signPermit2Witness round-trips: signature recovers the payer", async () => {
-        const signer = new Wallet(
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        );
+        const account = privateKeyToAccount(ANVIL_KEY);
         const chainId = 31337n;
+        const signer = new PrivateKeySigner(ANVIL_KEY, "http://localhost:0", chainId);
         const spender = "0x0000000000000000000000000000000000005678";
         const token = "0x0000000000000000000000000000000000001234";
         const piHash = keccak256("0xdeadbeef");
@@ -47,19 +50,20 @@ describe("permit2", () => {
             piHash,
         });
 
-        const recovered = verifyTypedData(
-            { name: "Permit2", chainId, verifyingContract: PERMIT2_ADDRESS },
-            PERMIT2_TYPES,
-            {
+        const recovered = await recoverTypedDataAddress({
+            domain: { name: "Permit2", chainId, verifyingContract: PERMIT2_ADDRESS },
+            types: PERMIT2_TYPES as any,
+            primaryType: "PermitWitnessTransferFrom",
+            message: {
                 permitted: { token, amount: maxTotal },
                 spender,
                 nonce,
                 deadline,
                 witness: { piHash },
             },
-            out.signature,
-        );
-        expect(recovered.toLowerCase()).toBe(signer.address.toLowerCase());
+            signature: out.signature as `0x${string}`,
+        });
+        expect(recovered.toLowerCase()).toBe(account.address.toLowerCase());
         expect(out.maxTotal).toBe(maxTotal);
         expect(out.nonce).toBe(nonce);
         expect(out.deadline).toBe(deadline);

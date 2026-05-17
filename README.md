@@ -64,13 +64,13 @@ Published privately on **GitHub Packages**. Consumers need a token with `read:pa
 
 ## Address format
 
-- **HRP**: `lelantos2`
+- **HRP**: `sswap`
 - **Payload (96 B)**: `pk_d (32, packed Baby-Jubjub) || dk (32, LE Field) || pk (32, LE Field)`
 - **Encoding**: bech32m
 
 `pk` is published so any sender can construct a valid note commitment for the recipient. Spend authority remains gated by `nsk` (private). See [contracts/src/MASP.sol](../contracts/src/MASP.sol).
 
-Old `lelantos1...` addresses (pk-less) are rejected on decode (`bad HRP`).
+Old `lelantos1...` / `lelantos2...` addresses are rejected on decode (`bad HRP`).
 
 ---
 

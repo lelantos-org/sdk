@@ -40,14 +40,19 @@ impl R1CSToQAP for CircomReduction {
 
         let mut a = vec![zero; domain_size];
         let mut b = vec![zero; domain_size];
+        let mut c = vec![zero; domain_size];
 
         cfg_iter_mut!(a[..num_constraints])
             .zip(cfg_iter_mut!(b[..num_constraints]))
+            .zip(cfg_iter_mut!(c[..num_constraints]))
             .zip(cfg_iter!(&matrices.a))
             .zip(cfg_iter!(&matrices.b))
-            .for_each(|(((a, b), at_i), bt_i)| {
-                *a = evaluate_constraint(at_i, full_assignment);
-                *b = evaluate_constraint(bt_i, full_assignment);
+            .for_each(|((((a, b), c), at_i), bt_i)| {
+                let a_val = evaluate_constraint(at_i, full_assignment);
+                let b_val = evaluate_constraint(bt_i, full_assignment);
+                *a = a_val;
+                *b = b_val;
+                *c = a_val * b_val;
             });
 
         {
@@ -55,14 +60,6 @@ impl R1CSToQAP for CircomReduction {
             let end = start + num_inputs;
             a[start..end].clone_from_slice(&full_assignment[..num_inputs]);
         }
-
-        let mut c = vec![zero; domain_size];
-        cfg_iter_mut!(c[..num_constraints])
-            .zip(&a)
-            .zip(&b)
-            .for_each(|((c_i, &a), &b)| {
-                *c_i = a * b;
-            });
 
         domain.ifft_in_place(&mut a);
         domain.ifft_in_place(&mut b);

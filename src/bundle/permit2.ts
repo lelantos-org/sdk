@@ -6,7 +6,13 @@
 //
 // Witness type-string MUST match MASP._DEPOSIT_WITNESS_TYPE_STRING.
 
-import { AbiCoder, keccak256, type Signer, type TypedDataDomain } from "ethers";
+import {
+    encodeAbiParameters,
+    keccak256,
+    type TypedDataDomain,
+    type TypedDataParameter,
+} from "viem";
+import type { EthSigner } from "../chain/eth-signer.js";
 import { bytesToHex } from "../utils/wire.js";
 
 /** @internal */
@@ -20,7 +26,7 @@ export const MASP_DEPOSIT_WITNESS_TYPE_STRING =
     "MASPDeposit witness)MASPDeposit(bytes32 piHash)TokenPermissions(address token,uint256 amount)";
 
 /// EIP-712 type definitions matching Permit2 + MASPDeposit witness.
-const PERMIT2_TYPES: Record<string, { name: string; type: string }[]> = {
+const PERMIT2_TYPES: Record<string, TypedDataParameter[]> = {
     PermitWitnessTransferFrom: [
         { name: "permitted", type: "TokenPermissions" },
         { name: "spender", type: "address" },
@@ -79,7 +85,7 @@ export interface Permit2Sig {
 
 /** @internal */
 export interface SignPermit2Args {
-    signer: Signer;
+    signer: EthSigner;
     chainId: bigint;
     /// MASP contract address (the Permit2 spender).
     spender: string;
@@ -98,7 +104,7 @@ export interface SignPermit2Args {
 }
 
 export async function signPermit2Witness(args: SignPermit2Args): Promise<Permit2Sig> {
-    const verifyingContract = args.permit2Address ?? PERMIT2_ADDRESS;
+    const verifyingContract = (args.permit2Address ?? PERMIT2_ADDRESS) as `0x${string}`;
     const domain: TypedDataDomain = {
         name: "Permit2",
         chainId: args.chainId,
@@ -111,32 +117,64 @@ export async function signPermit2Witness(args: SignPermit2Args): Promise<Permit2
         deadline: args.deadline,
         witness: { piHash: args.piHash },
     };
-    const signature = await args.signer.signTypedData(domain, PERMIT2_TYPES, message);
+    const signature = await args.signer.signTypedData(
+        domain,
+        PERMIT2_TYPES,
+        "PermitWitnessTransferFrom",
+        message,
+    );
     return { nonce: args.nonce, deadline: args.deadline, maxTotal: args.maxTotal, signature };
 }
 
 /// Compute `piHash = keccak256(abi.encode(DepositIntent, AuxValidation.Output[2]))`.
 /// Mirrors MASP.submitIntent line `keccak256(abi.encode(d, aux))`.
 export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]): string {
-    const intentTuple =
-        "tuple(uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal)";
-    const auxTuple =
-        "tuple(uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2]";
-    const encoded = AbiCoder.defaultAbiCoder().encode(
-        [intentTuple, auxTuple],
+    const encoded = encodeAbiParameters(
         [
-            [
-                intent.chainId,
-                intent.publicAssetId,
-                intent.publicIn,
-                intent.payer,
-                intent.recipient,
-                intent.outCm,
-                intent.cvDep0,
-                intent.cvDep1,
-                intent.rcvTotal,
-            ],
-            aux.map((a) => [a.clueRx, a.clueRy, a.ephPubX, a.ephPubY, bytesToHex(a.ciphertext)]),
+            {
+                type: "tuple",
+                components: [
+                    { name: "chainId", type: "uint64" },
+                    { name: "publicAssetId", type: "uint64" },
+                    { name: "publicIn", type: "uint64" },
+                    { name: "payer", type: "address" },
+                    { name: "recipient", type: "address" },
+                    { name: "outCm", type: "bytes32[2]" },
+                    { name: "cvDep0", type: "uint256[2]" },
+                    { name: "cvDep1", type: "uint256[2]" },
+                    { name: "rcvTotal", type: "uint256" },
+                ],
+            },
+            {
+                type: "tuple[2]",
+                components: [
+                    { name: "clueRx", type: "uint256" },
+                    { name: "clueRy", type: "uint256" },
+                    { name: "ephPubX", type: "uint256" },
+                    { name: "ephPubY", type: "uint256" },
+                    { name: "ciphertext", type: "bytes" },
+                ],
+            },
+        ],
+        [
+            {
+                chainId: intent.chainId,
+                publicAssetId: intent.publicAssetId,
+                publicIn: intent.publicIn,
+                payer: intent.payer as `0x${string}`,
+                recipient: intent.recipient as `0x${string}`,
+                outCm: intent.outCm as [`0x${string}`, `0x${string}`],
+                cvDep0: intent.cvDep0,
+                cvDep1: intent.cvDep1,
+                rcvTotal: intent.rcvTotal,
+            },
+            aux.map((a) => ({
+                clueRx: a.clueRx,
+                clueRy: a.clueRy,
+                ephPubX: a.ephPubX,
+                ephPubY: a.ephPubY,
+                ciphertext: bytesToHex(a.ciphertext) as `0x${string}`,
+            })) as never,
         ],
     );
     return keccak256(encoded);
@@ -168,7 +206,7 @@ export interface PermitSingle {
     sigDeadline: bigint;
 }
 
-const PERMIT2_ALLOWANCE_TYPES: Record<string, { name: string; type: string }[]> = {
+const PERMIT2_ALLOWANCE_TYPES: Record<string, TypedDataParameter[]> = {
     PermitSingle: [
         { name: "details", type: "PermitDetails" },
         { name: "spender", type: "address" },
@@ -184,7 +222,7 @@ const PERMIT2_ALLOWANCE_TYPES: Record<string, { name: string; type: string }[]> 
 
 /** @internal */
 export interface SignPermit2AllowanceArgs {
-    signer: Signer;
+    signer: EthSigner;
     chainId: bigint;
     permit: PermitSingle;
     /// Optional Permit2 contract override; defaults to canonical CREATE2.
@@ -199,7 +237,7 @@ export interface SignPermit2AllowanceArgs {
 export async function signPermit2Allowance(
     args: SignPermit2AllowanceArgs,
 ): Promise<{ permit: PermitSingle; signature: string }> {
-    const verifyingContract = args.permit2Address ?? PERMIT2_ADDRESS;
+    const verifyingContract = (args.permit2Address ?? PERMIT2_ADDRESS) as `0x${string}`;
     const domain: TypedDataDomain = {
         name: "Permit2",
         chainId: args.chainId,
@@ -208,6 +246,7 @@ export async function signPermit2Allowance(
     const signature = await args.signer.signTypedData(
         domain,
         PERMIT2_ALLOWANCE_TYPES,
+        "PermitSingle",
         args.permit as unknown as Record<string, unknown>,
     );
     return { permit: args.permit, signature };

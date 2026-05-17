@@ -43,18 +43,6 @@ import { executeTransfer } from "./transfer.js";
 import { executeWithdraw, type WithdrawKind } from "./withdraw.js";
 
 /**
- * Warm WasmJubjub's circomlibjs fallback so subsequent sync `hashToAssetGen`
- * calls in `buildDeposit` don't throw. No-op on Jubjub impls without async
- * variant (already-warmed circomlibjs path).
- * @internal
- */
-export async function warmAssetGen(J: Jubjub, asset: bigint): Promise<void> {
-    const maybeAsync = (J as { hashToAssetGenAsync?: (a: bigint) => Promise<unknown> })
-        .hashToAssetGenAsync;
-    if (typeof maybeAsync === "function") await maybeAsync.call(J, asset);
-}
-
-/**
  * Swallow callback errors so a misbehaving listener can't break a tx.
  * @internal
  */
@@ -144,7 +132,7 @@ export class Wallet implements WalletApi {
 
     /// 0x-hex EVM key both signs txs and derives nsk via `hexPrivateKeyToNsk`.
     static async fromPrivateKey(
-        privateKey: string,
+        privateKey: `0x${string}`,
         opts: Omit<
             import("./connect.js").ConnectOptions,
             "mnemonic" | "signature" | "nsk" | "privateKey"
@@ -160,7 +148,7 @@ export class Wallet implements WalletApi {
     /// Derive nsk by asking the signer to sign the canonical EIP-712
     /// message. One signature prompt at boot; same signer reused for txs.
     static async fromSigner(
-        signer: import("ethers").Signer,
+        signer: import("../chain/eth-signer.js").EthSigner,
         opts: Omit<
             import("./connect.js").ConnectOptions,
             "mnemonic" | "signature" | "nsk" | "signer"
@@ -258,6 +246,18 @@ export class Wallet implements WalletApi {
     /// Reload in-memory cache from `NoteStore` after external mutation.
     async refresh(): Promise<void> {
         this.file = await this.noteStore.load();
+    }
+
+    async compact(): Promise<{ removed: number }> {
+        const file = await this.noteStore.load();
+        const before = file.notes.length;
+        const live = file.notes.filter((n) => !n.spent);
+        const removed = before - live.length;
+        if (removed === 0) return { removed: 0 };
+        file.notes = live;
+        await this.noteStore.save(file);
+        this.file = file;
+        return { removed };
     }
 
     /// Resolve once every `cms` entry is persisted locally. Polls `sync()`

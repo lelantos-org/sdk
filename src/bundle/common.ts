@@ -148,10 +148,6 @@ export async function finalize(
     const outputClues = auxAndWitness.map((a) => a.witness);
 
     const { J, asset } = common;
-    // Warm WasmJubjub's circomlibjs fallback; hashToAssetGen depends on it.
-    const maybeAsync = (J as { hashToAssetGenAsync?: (a: bigint) => Promise<unknown> })
-        .hashToAssetGenAsync;
-    if (typeof maybeAsync === "function") await maybeAsync.call(J, asset);
 
     const baseInput = toCircomInput(common.P, J, {
         publicAssetId: asset,

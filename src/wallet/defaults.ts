@@ -2,10 +2,15 @@
 // default-resolution lives here so `connect.ts` can stay a thin
 // parse → `WalletConfig` → `Wallet.create` pipeline.
 
-import type { Signer } from "ethers";
 import type { ChainAdapter } from "../chain/adapter.js";
-import { EthersChainAdapter } from "../chain/ethers-adapter.js";
+import {
+    type Eip1193ProviderLike,
+    Eip1193Signer,
+    type EthSigner,
+    PrivateKeySigner,
+} from "../chain/eth-signer.js";
 import type { DeployedNetworkPreset } from "../chain/networks.js";
+import { ViemChainAdapter } from "../chain/viem-adapter.js";
 import type { Jubjub } from "../crypto/index.js";
 import type { ProverArtifacts } from "../prover/artifacts.js";
 import type { Prover } from "../prover/interface.js";
@@ -56,16 +61,23 @@ export async function defaultProver(cfg: WalletConfig): Promise<Prover> {
     return new SnarkjsProver(resolveArtifacts(artifacts) as ProverPaths);
 }
 
-/// Inputs `connect()` collects to wire the default `EthersChainAdapter`.
+/// Inputs `connect()` collects to wire the default `ViemChainAdapter`.
 export interface ChainAdapterInputs {
     chain?: ChainAdapter;
-    signer?: Signer;
-    privateKey?: string;
+    /// Pre-built signer (EIP-1193 wrapper, private key signer, etc.).
+    signer?: EthSigner;
+    /// Browser-style entry: raw EIP-1193 provider + the signing account +
+    /// chainId. SDK builds an `Eip1193Signer` internally.
+    provider?: Eip1193ProviderLike;
+    address?: `0x${string}`;
+    /// 0x-hex private key for Node tests / CLI builds.
+    privateKey?: `0x${string}`;
     rpcUrl?: string;
 }
 
-/// Build the default `EthersChainAdapter`. Used by `connect()` when the
-/// caller passes `signer` / `privateKey` rather than a pre-built adapter.
+/// Build the default `ViemChainAdapter`. Used by `connect()` when the
+/// caller passes `signer` / `provider` / `privateKey` rather than a
+/// pre-built adapter.
 export function defaultChainAdapter(
     inputs: ChainAdapterInputs,
     preset: DeployedNetworkPreset,
@@ -73,20 +85,27 @@ export function defaultChainAdapter(
     if (inputs.chain) return inputs.chain;
 
     const errs: string[] = [];
-    if (!inputs.signer && !inputs.privateKey) {
-        errs.push("pass `chain`, `signer`, or `privateKey`");
-    }
-    // EthersChainAdapter always constructs a JsonRpcProvider for read-only
-    // calls; empty rpcUrl trips `UNSUPPORTED_OPERATION (protocol="")`.
     if (!inputs.rpcUrl) {
         errs.push("`rpcUrl` required when building chain adapter (or pass a pre-built `chain`)");
     }
+    if (!inputs.signer && !(inputs.provider && inputs.address) && !inputs.privateKey) {
+        errs.push("pass one of `chain`, `signer`, `{provider,address}`, or `privateKey`");
+    }
     if (errs.length) throw new WalletConfigError(errs);
 
-    return new EthersChainAdapter({
+    const signer: EthSigner =
+        inputs.signer ??
+        (inputs.provider && inputs.address
+            ? new Eip1193Signer(inputs.provider, inputs.address, preset.chainId)
+            : new PrivateKeySigner(
+                  inputs.privateKey as `0x${string}`,
+                  inputs.rpcUrl as string,
+                  preset.chainId,
+              ));
+
+    return new ViemChainAdapter({
         rpcUrl: inputs.rpcUrl as string,
-        signer: inputs.signer,
-        signerKey: inputs.privateKey,
+        signer,
         maspAddress: preset.maspAddress,
         chainId: preset.chainId,
         permit2Address: preset.permit2Address,

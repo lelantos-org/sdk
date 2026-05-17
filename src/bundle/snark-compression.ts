@@ -4,7 +4,7 @@
 // Slot order MUST match on-chain compress() byte-for-byte AND snarkjs
 // publicSignals order from fixture generators.
 
-import { AbiCoder, keccak256 } from "ethers";
+import { encodeAbiParameters, keccak256 } from "viem";
 import type { Field } from "../crypto/index.js";
 
 /** @internal */
@@ -91,9 +91,6 @@ export function hornerEval(coeffs: Field[], z: Field): Field {
 }
 
 export function fiatShamirZ(coeffs: Field[]): Field {
-    const packed = AbiCoder.defaultAbiCoder().encode(
-        ["uint256[]"],
-        [coeffs.map((c) => c.toString())],
-    );
+    const packed = encodeAbiParameters([{ type: "uint256[]" }], [coeffs]);
     return BigInt(keccak256(packed)) % BN254_R;
 }

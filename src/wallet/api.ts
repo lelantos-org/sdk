@@ -55,6 +55,10 @@ export interface WalletApi {
     /// Atomic shielded swap; legs bundled via `submitter.submitSwap`.
     swap(args: SwapOptions): Promise<TransactionResult>;
     markSpent(noteIds: string[]): Promise<void>;
+    /// Drop notes flagged `spent: true` from the underlying store. Returns
+    /// the number of notes pruned. Balance is unaffected; this only shrinks
+    /// the on-disk file. Live notes and reconcile state are preserved.
+    compact(): Promise<{ removed: number }>;
 }
 
 // Re-export option, result, and selection types so existing

@@ -13,7 +13,7 @@ export type Hex = string;
 export type EthAddress = string;
 
 /** @internal */
-/// Bech32m-encoded shielded address (`lelantos2…`). Decoded via
+/// Bech32m-encoded shielded address (`sswap1…`). Decoded via
 /// `decodeAddress` from `./address.js`.
 export type ShieldedAddress = string;
 

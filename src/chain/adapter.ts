@@ -1,4 +1,4 @@
-// Pluggable chain layer. Bridges a transport (ethers/viem/web3.js) to:
+// Pluggable chain layer. Bridges a transport (viem/web3.js) to:
 // asset/fee lookup, Permit2 witness signing, `cancelIntent` broadcast,
 // `escrowed(id)` reads.
 
@@ -9,6 +9,9 @@ export interface AssetEntry {
     token: string;
     /// circuit-units → ERC20-base-units multiplier.
     scale: bigint;
+    /// Owner-flipped flag. Disabled assets block new deposits; existing
+    /// notes / escrows remain spendable.
+    disabled: boolean;
 }
 
 /** @internal */
@@ -28,22 +31,25 @@ export interface Permit2SignArgs {
 }
 
 /** @internal */
-/// `MASP.escrowed(id)` view. `cm0/cm1/publicIn/feeBpsAtSubmit` are
-/// folded into `digest`; reconstruct via the `IntentEscrowed` log.
+/// `MASP.escrowed(id)` view. `cm0/cm1/publicIn` folded into `digest`;
+/// reconstruct via the `IntentEscrowed` log. `feeBpsAtSubmit` now lives
+/// on-chain so flush/cancel no longer need it from calldata.
 export interface EscrowedIntentView {
     digest: string;
     payer: string;
     /// block number of submitIntent.
     submittedAt: number;
     publicAssetId: bigint;
+    feeBpsAtSubmit: number;
 }
 
 /** @internal */
 /// Preimage fields for `cancelIntent`. On-chain digest check binds these
 /// to what was escrowed at submit. Sourced from `IntentEscrowedRecord`.
+/// `feeBpsAtSubmit` was removed from the call — contract reads it from
+/// escrow storage.
 export interface CancelIntentInputs {
     publicIn: bigint;
-    feeBpsAtSubmit: number;
     cm0: string;
     cm1: string;
     cvDep0: [bigint, bigint];

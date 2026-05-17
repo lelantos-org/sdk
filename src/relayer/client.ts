@@ -80,8 +80,9 @@ export interface SubmitSwapPayload {
 export interface SwapBlob {
     /// Allowlisted `ISwapAdapter` deployed alongside the wrapper.
     adapter: string;
-    /// Adapter-specific encoded calldata (UniV3: `abi.encode(uint24 fee)`
-    /// or path bytes). 0x-hex.
+    /// Adapter-specific encoded calldata. UniV3 single-hop is
+    /// `abi.encode(uint24 fee, uint160 sqrtPriceLimitX96)` (64B); multi-hop
+    /// uses `abi.encodePacked` path bytes. 0x-hex.
     route: string;
     /// Slim deposit intent for the B note. `payer` MUST equal the
     /// `swap_wrapper_address` configured on the relayer.
@@ -97,6 +98,10 @@ export interface SwapBlob {
     /// Slippage floor on the venue's output. Wrapper enforces
     /// `actualOut >= minOut`.
     minOut: bigint;
+    /// Hard expiry, unix seconds. Wrapper reverts `SwapExpired` once
+    /// `block.timestamp > deadline`. Optional on the wire — relayer
+    /// defaults if absent.
+    deadline?: bigint;
 }
 
 /** @internal */

@@ -3,7 +3,7 @@
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
-import { keccak256 } from "ethers";
+import { keccak256 } from "viem";
 import { BABYJUB_SUBGROUP_ORDER, type Field } from "../crypto/index.js";
 import { mnemonicToAccountKey } from "./hd.js";
 import * as metamask from "./metamask.js";
@@ -48,7 +48,9 @@ export function hexPrivateKeyToNsk(hex: string): Field {
     if (!/^0x[0-9a-fA-F]{64}$/.test(hex)) {
         throw new Error("expected 0x-prefixed 32-byte hex private key");
     }
-    const digest = keccak256(`0x${PK_DOMAIN_TAG_HEX}${hex.slice(2).toLowerCase()}`);
+    const digest = keccak256(
+        `0x${PK_DOMAIN_TAG_HEX}${hex.slice(2).toLowerCase()}` as `0x${string}`,
+    );
     const r = BigInt(digest) % BABYJUB_SUBGROUP_ORDER;
     return r === 0n ? 1n : r;
 }

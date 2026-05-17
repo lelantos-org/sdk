@@ -6,8 +6,8 @@
 // Everything chain-/prover-/note-source-default-shaped lives in
 // `./defaults.ts`.
 
-import type { Signer } from "ethers";
 import type { ChainAdapter } from "../chain/adapter.js";
+import type { Eip1193ProviderLike, EthSigner } from "../chain/eth-signer.js";
 import {
     isNetworkDeployed,
     type NetworkName,
@@ -48,14 +48,18 @@ export interface ConnectOptions {
     signature?: string;
     nsk?: bigint;
 
-    // chain layer — exactly one of chain / signer / privateKey
-    /// For viem/web3.js or hardware wallets.
+    // chain layer — exactly one of chain / signer / {provider,address} / privateKey
+    /// Pre-built `ChainAdapter` (caller owns construction).
     chain?: ChainAdapter;
-    /// SDK wraps in `EthersChainAdapter`.
-    signer?: Signer;
+    /// Pre-built `EthSigner` (wraps any wallet via the abstraction).
+    signer?: EthSigner;
+    /// Browser entrypoint: raw EIP-1193 provider + the signing account.
+    /// SDK builds the signer internally.
+    provider?: Eip1193ProviderLike;
+    address?: `0x${string}`;
     /// 0x-hex; for Node tests / scripts.
-    privateKey?: string;
-    /// Required when building from `signer` (without provider) or `privateKey`.
+    privateKey?: `0x${string}`;
+    /// Required when building the default adapter.
     rpcUrl?: string;
 
     /// Prover artifacts. Omitted → `bundledProverArtifacts()` resolves:
@@ -147,6 +151,8 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
         {
             chain: opts.chain,
             signer: opts.signer,
+            provider: opts.provider,
+            address: opts.address,
             privateKey: opts.privateKey,
             rpcUrl: opts.rpcUrl,
         },

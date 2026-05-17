@@ -15,8 +15,11 @@ export interface SwapQuote {
     venue: SwapVenue;
     /// Allowlisted `ISwapAdapter` address bound to the route on-chain.
     adapter: `0x${string}`;
-    /// Adapter-specific opaque blob (UniV3 = abi.encode(uint24 fee), or
-    /// abi.encodePacked path for multi-hop). Hex-encoded.
+    /// Adapter-specific opaque blob. UniV3 single-hop is now
+    /// `abi.encode(uint24 fee, uint160 sqrtPriceLimitX96)` (64B); set
+    /// `sqrtPriceLimitX96` to a tight bound around the quote to keep the
+    /// router's `SPL` check between the caller and the mempool. Multi-hop
+    /// uses `abi.encodePacked` path bytes as before. Hex-encoded.
     route: `0x${string}`;
     /// Quoter's expected output before slippage adjustment.
     expectedOut: bigint;

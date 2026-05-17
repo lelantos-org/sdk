@@ -7,12 +7,12 @@ import type { Note } from "../notes/note.js";
 import { freshNoteRandomness, freshOutput, freshOutputAuxRandomness } from "../notes/randomness.js";
 import type { SubmitSwapPayload } from "../relayer/client.js";
 import type { SwapOptions, TransactionResult } from "./api.js";
-import { BPS_DENOMINATOR } from "./constants.js";
+import { BPS_DENOMINATOR, PUBLIC_IN_MAX } from "./constants.js";
 import { ensureCover } from "./cover.js";
 import { buildInputSlots } from "./inputs.js";
 import { auxOutputToTransactAux, makeTransactionResult } from "./internal.js";
 import type { Wallet } from "./wallet.js";
-import { safePhase, warmAssetGen } from "./wallet.js";
+import { safePhase } from "./wallet.js";
 
 export async function executeSwap(wallet: Wallet, args: SwapOptions): Promise<TransactionResult> {
     if (!wallet.submitter.submitSwap) {
@@ -73,6 +73,11 @@ export async function executeSwap(wallet: Wallet, args: SwapOptions): Promise<Tr
     if (bValue <= 0n) {
         throw new Error(`swap: minOut ${quote.minOut} below scaleOut*(1+fee) (zero B-note)`);
     }
+    if (bValue > PUBLIC_IN_MAX) {
+        throw new Error(
+            `swap: publicIn ${bValue} exceeds uint48 cap; asset ${assetOut} scale ${entryOut.scale} too small for minOut ${quote.minOut}`,
+        );
+    }
 
     safePhase(args.onPhase, "proving");
     // Leg 1: withdraw → wrapper. MASP enforces `pi.relayer == msg.sender`.
@@ -97,7 +102,6 @@ export async function executeSwap(wallet: Wallet, args: SwapOptions): Promise<Tr
     // Leg 2: B-note deposit intent. Slot 0 = real B note, slot 1 = pad.
     const o0 = freshOutput();
     const o1 = freshNoteRandomness();
-    await warmAssetGen(wallet.J, assetOut);
     const intentBundle = buildDeposit({
         P: wallet.P,
         J: wallet.J,

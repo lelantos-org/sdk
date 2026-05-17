@@ -2,7 +2,7 @@
 //! Centralizes byte<->scalar conversion, packed-point decoding+subgroup
 //! validation, and blake2b 32-byte hashing.
 
-use blake2::digest::consts::U32;
+use blake2::digest::consts::{U12, U32};
 use blake2::{Blake2b, Digest};
 use num_bigint::{BigInt, Sign};
 
@@ -42,6 +42,15 @@ pub fn decode_subgroup_point(packed: &[u8; FIELD_BYTES]) -> Option<Point> {
 /// this shape (domain || R/epk || ... || shared_packed).
 pub fn blake2b_32(parts: &[&[u8]]) -> [u8; 32] {
     let mut h = Blake2b::<U32>::new();
+    for p in parts {
+        h.update(p);
+    }
+    h.finalize().into()
+}
+
+/// 12-byte blake2b digest. Used to derive a per-note AEAD nonce from epk.
+pub fn blake2b_12(parts: &[&[u8]]) -> [u8; 12] {
+    let mut h = Blake2b::<U12>::new();
     for p in parts {
         h.update(p);
     }

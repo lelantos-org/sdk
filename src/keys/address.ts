@@ -1,11 +1,11 @@
 // bech32m payment address.
 //
-//   HRP     "lelantos2"
+//   HRP     "sswap"
 //   payload pk_d (32 B, Baby-Jubjub packed)
 //        || dk  (32 B, little-endian field scalar — FMD detection seed)
 //        || pk  (32 B, little-endian field scalar — note-commitment binding)
 //
-// HRP carries the format version: bumping it (`lelantos` → `lelantos2`)
+// HRP carries the format version: bumping it (`lelantos` → `lelantos2` → `sswap`)
 // invalidates old strings and lets future format changes fail-fast.
 //
 // `pk = Poseidon(TAG_PK, ivk)` is exposed so any sender can construct a
@@ -17,7 +17,7 @@ import { bech32m } from "bech32";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Field, Jubjub, Point } from "../crypto/index.js";
 
-export const ADDRESS_HRP = "lelantos2";
+export const ADDRESS_HRP = "sswap";
 /** @internal */
 export const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
 const BECH32_LIMIT = 256;

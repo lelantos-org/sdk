@@ -20,4 +20,4 @@ export type {
     WithdrawOptions,
     WithdrawResult,
 } from "./api.js";
-export { safePhase, Wallet, warmAssetGen } from "./wallet.js";
+export { safePhase, Wallet } from "./wallet.js";
