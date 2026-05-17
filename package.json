@@ -1,6 +1,6 @@
 {
   "name": "@lelantos-org/sdk",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
@@ -130,7 +130,7 @@
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
   },
   "peerDependencies": {
-    "@lelantos-org/circuits": "*",
+    "@lelantos-org/circuits": "0.5.1",
     "snarkjs": "^0.7.4",
     "viem": "^2.49.3"
   },
