@@ -1,7 +1,7 @@
 // Coin-cover helper shared by `transfer` and `withdraw`: select notes,
 // consolidate-and-retry or throw on insufficient cover.
 
-import { InsufficientCoverError } from "./errors/index.js";
+import { InsufficientCoverError } from "./errors.js";
 import type { StoredNote } from "./note-store.js";
 import type { CoinSelector, ConsolidateFirst, DirectSelection, SelectOpts } from "./selection.js";
 

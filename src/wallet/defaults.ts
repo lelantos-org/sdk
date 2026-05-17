@@ -18,7 +18,7 @@ import { SnarkjsProver } from "../prover/interface.js";
 import type { ProverPaths } from "../prover/snarkjs.js";
 import { bundledProverArtifacts, resolveArtifacts } from "../prover/snarkjs.js";
 import type { WalletConfig } from "./config.js";
-import { WalletConfigError } from "./errors/index.js";
+import { WalletConfigError } from "./errors.js";
 import { FmdClient } from "./fmd-client.js";
 import { FmdMatchesNoteSource, FmdNoteSource, type NoteSource } from "./note-source.js";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";

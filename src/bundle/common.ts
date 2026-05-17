@@ -173,7 +173,7 @@ export async function finalize(
             kind,
             proof2x2: groth16ToWire(proof),
             pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
-            aux: [auxToWire(aux[0]), auxToWire(aux[1])],
+            aux: [aux[0], aux[1]],
         },
         cm: [buildNoteCommitment(common.P, outputs[0]), buildNoteCommitment(common.P, outputs[1])],
         producedNotes: [outputs[0], outputs[1]],
@@ -274,11 +274,4 @@ export const groth16ToWire = (p: Groth16Proof): SubmitTransactPayload["proof2x2"
     piC: p.pi_c,
     protocol: p.protocol,
     curve: p.curve,
-});
-
-/** @internal */
-export const auxToWire = (a: OutputAux): SubmitTransactPayload["aux"][number] => ({
-    clueR: a.clueR,
-    ephPub: a.ephPub,
-    ciphertext: a.ciphertext,
 });

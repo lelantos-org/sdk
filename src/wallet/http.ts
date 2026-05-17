@@ -5,7 +5,7 @@
 // SDK HTTP-speaking client (`wallet/fmd-client.ts`, `relayer/client.ts`)
 // MUST consume these — do not reimplement timeout/retry/backoff locally.
 
-import { NetworkError } from "./errors/index.js";
+import { NetworkError } from "./errors.js";
 
 type NetworkTimeoutCode = "RELAYER_TIMEOUT" | "FMD_TIMEOUT";
 type NetworkFailureCode = "RELAYER_FAILED" | "FMD_FAILED";

@@ -12,7 +12,7 @@ import {
     PERMIT2_DEFAULT_DEADLINE_SECS,
     PUBLIC_IN_MAX,
 } from "./constants.js";
-import { DepositAdapterError, type DepositStrategy } from "./errors/index.js";
+import { DepositAdapterError, type DepositStrategy } from "./errors.js";
 import { makeTransactionResult } from "./internal.js";
 import type { Wallet } from "./wallet.js";
 import { safePhase } from "./wallet.js";

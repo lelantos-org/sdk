@@ -1,6 +1,6 @@
 // Coin selector: SFRT — Smallest-First with Random Tiebreak.
 
-import { SelectionError } from "./errors/index.js";
+import { SelectionError } from "./errors.js";
 import type { StoredNote } from "./note-store.js";
 
 export interface SelectOpts {

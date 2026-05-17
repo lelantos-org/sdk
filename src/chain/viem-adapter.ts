@@ -26,7 +26,7 @@ import {
     signPermit2Witness,
 } from "../bundle/permit2.js";
 import { bytesToHex } from "../utils/wire.js";
-import { TxMiningError } from "../wallet/errors/index.js";
+import { TxMiningError } from "../wallet/errors.js";
 import type {
     AssetEntry,
     CancelIntentInputs,

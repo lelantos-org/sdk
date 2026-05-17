@@ -79,8 +79,8 @@
       "default": "./dist/chain/networks.js"
     },
     "./errors": {
-      "types": "./dist/wallet/errors/index.d.ts",
-      "default": "./dist/wallet/errors/index.js"
+      "types": "./dist/wallet/errors.d.ts",
+      "default": "./dist/wallet/errors.js"
     },
     "./wasm-prover": {
       "types": "./dist/prover/wasm-prover.d.ts",

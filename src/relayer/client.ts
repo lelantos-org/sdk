@@ -12,6 +12,7 @@
 
 import type { AuxOutput, DepositIntent, Permit2Sig } from "../bundle/permit2.js";
 import type { Field, Point } from "../crypto/index.js";
+import type { OutputAux } from "../notes/aux.js";
 import { createHttpClient, type HttpClient, type HttpClientOptions } from "../wallet/http.js";
 import {
     deserializeMerkleProof,
@@ -124,15 +125,10 @@ export interface TransactPubInputs {
 }
 
 /** @internal */
-export interface TransactAux {
-    /// Baby-Jubjub R = [r]·G — FMD clue group element.
-    clueR: Point;
-    /// Baby-Jubjub E = [e]·G — ECDH ephemeral pub.
-    ephPub: Point;
-    /// 2-byte big-endian clueBits prefix || ChaCha20-Poly1305 body.
-    /// Off-chain only; never enters the contract.
-    ciphertext: Uint8Array;
-}
+/// Wire alias for the canonical builder-side `OutputAux`. Same shape
+/// (`{clueR, ephPub, ciphertext}`), kept as a name the relayer wire
+/// docs can reference.
+export type TransactAux = OutputAux;
 
 /** @internal */
 export interface RelayerSubmitResponse {

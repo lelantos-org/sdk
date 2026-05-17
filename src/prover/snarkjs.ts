@@ -20,7 +20,7 @@ async function loadSnarkjs(): Promise<typeof SnarkjsT> {
     }
 }
 
-import { ProverArtifactsMissingError } from "../wallet/errors/index.js";
+import { ProverArtifactsMissingError } from "../wallet/errors.js";
 import type { ProverArtifacts } from "./artifacts.js";
 
 /// Companion package — published to GitHub Packages (not public npm),

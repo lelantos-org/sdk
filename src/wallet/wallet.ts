@@ -1,6 +1,7 @@
-// High-level Wallet. Owns keys + in-memory note cache; every external
-// dependency (ChainAdapter, NoteSource, Submitter, Prover, CoinSelector,
-// NoteStore) is injected.
+// High-level Wallet. Owns keys + `NoteCache`; every external dependency
+// (ChainAdapter, NoteSource, Submitter, Prover, CoinSelector, NoteStore)
+// is injected via `cfg`. Per-tx logic lives in `./{deposit,transfer,
+// withdraw,swap}.ts`; cache + persistence in `./note-cache.ts`.
 
 import { buildNullifierFromNsk, type Jubjub, Poseidon } from "../crypto/index.js";
 import { buildJubjub } from "../crypto/jubjub-wasm.js";
@@ -20,14 +21,10 @@ import type {
     WithdrawOptions,
 } from "./api.js";
 import type { WalletConfig } from "./config.js";
-import {
-    AWAIT_COMMITMENTS_DEFAULT_MAX_ATTEMPTS,
-    AWAIT_COMMITMENTS_DEFAULT_POLL_MS,
-    AWAIT_COMMITMENTS_SYNC_LIMIT,
-} from "./constants.js";
 import { defaultNoteSource, defaultProver, defaultSubmitter, validateConfig } from "./defaults.js";
 import { executeDeposit } from "./deposit.js";
 import { toWalletNote } from "./internal.js";
+import { type AwaitCommitmentsOpts, awaitCommitments, NoteCache } from "./note-cache.js";
 import type { NoteSource } from "./note-source.js";
 import { InMemoryNoteStore, type NoteStore, type NotesFile } from "./note-store.js";
 import {
@@ -61,15 +58,32 @@ export class Wallet implements WalletApi {
     readonly keys: SpendingKey;
     readonly address: string;
     readonly cfg: WalletConfig;
-    readonly noteStore: NoteStore;
-    readonly noteSource: NoteSource;
-    readonly submitter: Submitter;
-    readonly prover: Prover;
-    readonly selector: CoinSelector;
-    readonly scanner: Scanner;
-    /** @internal — exposed for the per-tx helper modules in `./{deposit,transfer,withdraw,swap}.ts`. */
-    file: NotesFile;
+    /** @internal — cache + persistence. Use `wallet.file` for read access. */
+    readonly cache: NoteCache;
 
+    /** @internal — exposed for per-tx helper modules. */
+    get file(): NotesFile {
+        return this.cache.file;
+    }
+
+    get noteStore(): NoteStore {
+        return this.cache.store;
+    }
+    get noteSource(): NoteSource {
+        return this.cfg.noteSource as NoteSource;
+    }
+    get submitter(): Submitter {
+        return this.cfg.submitter as Submitter;
+    }
+    get prover(): Prover {
+        return this.cfg.prover as Prover;
+    }
+    get selector(): CoinSelector {
+        return this.cfg.selector as CoinSelector;
+    }
+    get scanner(): Scanner {
+        return this.cfg.scanner as Scanner;
+    }
     get chain(): WalletConfig["chain"] {
         return this.cfg.chain;
     }
@@ -80,26 +94,14 @@ export class Wallet implements WalletApi {
         keys: SpendingKey;
         address: string;
         cfg: WalletConfig;
-        file: NotesFile;
-        noteStore: NoteStore;
-        noteSource: NoteSource;
-        submitter: Submitter;
-        prover: Prover;
-        selector: CoinSelector;
-        scanner: Scanner;
+        cache: NoteCache;
     }) {
         this.P = args.P;
         this.J = args.J;
         this.keys = args.keys;
         this.address = args.address;
         this.cfg = args.cfg;
-        this.file = args.file;
-        this.noteStore = args.noteStore;
-        this.noteSource = args.noteSource;
-        this.submitter = args.submitter;
-        this.prover = args.prover;
-        this.selector = args.selector;
-        this.scanner = args.scanner;
+        this.cache = args.cache;
     }
 
     /// Single-call wallet builder. See `./connect.ts` for full options.
@@ -171,7 +173,7 @@ export class Wallet implements WalletApi {
         const address = addressFromSpendingKey(J, keys);
 
         const noteStore = cfg.noteStore ?? new InMemoryNoteStore();
-        const file = await noteStore.load();
+        const cache = await NoteCache.open(noteStore);
 
         const noteSource = cfg.noteSource ?? defaultNoteSource(cfg, J);
         const submitter = cfg.submitter ?? defaultSubmitter(cfg);
@@ -185,13 +187,7 @@ export class Wallet implements WalletApi {
             keys,
             address,
             cfg: { ...cfg, noteStore, noteSource, submitter, prover, selector, scanner },
-            file,
-            noteStore,
-            noteSource,
-            submitter,
-            prover,
-            selector,
-            scanner,
+            cache,
         });
     }
 
@@ -207,13 +203,13 @@ export class Wallet implements WalletApi {
                 ivk: this.keys.ivk,
                 dk: this.keys.dk,
                 source: this.noteSource,
-                store: this.noteStore,
+                store: this.cache.store,
                 scanner: this.scanner,
             },
             opts ?? {},
         );
         await this.reconcileSpentOnChain();
-        this.file = await this.noteStore.load();
+        await this.cache.refresh();
         return result;
     }
 
@@ -223,81 +219,41 @@ export class Wallet implements WalletApi {
      * @internal
      */
     async reconcileSpentOnChain(): Promise<void> {
-        const file = await this.noteStore.load();
-        const candidates = file.notes
+        const candidates = this.cache.notes
             .filter((n) => !n.spent)
             .map((note) => ({
-                note,
+                id: note.id,
                 nf: buildNullifierFromNsk(this.P, this.keys.nsk, BigInt(note.rho)),
             }));
         if (candidates.length === 0) return;
         const spent = await this.noteSource.spentSet(candidates.map((c) => c.nf));
         if (spent.size === 0) return;
-        let mutated = false;
-        for (const { note, nf } of candidates) {
-            if (spent.has(nf)) {
-                note.spent = true;
-                mutated = true;
-            }
-        }
-        if (mutated) await this.noteStore.save(file);
+        const spentIds = new Set(candidates.filter((c) => spent.has(c.nf)).map((c) => c.id));
+        await this.cache.applySpent((n) => spentIds.has(n.id));
     }
 
     /// Reload in-memory cache from `NoteStore` after external mutation.
     async refresh(): Promise<void> {
-        this.file = await this.noteStore.load();
+        await this.cache.refresh();
     }
 
     async compact(): Promise<{ removed: number }> {
-        const file = await this.noteStore.load();
-        const before = file.notes.length;
-        const live = file.notes.filter((n) => !n.spent);
-        const removed = before - live.length;
-        if (removed === 0) return { removed: 0 };
-        file.notes = live;
-        await this.noteStore.save(file);
-        this.file = file;
-        return { removed };
+        return this.cache.compact();
     }
 
     /// Resolve once every `cms` entry is persisted locally. Polls `sync()`
     /// with backoff until observed or `signal` aborts.
-    async awaitCommitments(
-        cms: string[],
-        opts: { signal?: AbortSignal; pollMs?: number; maxAttempts?: number } = {},
-    ): Promise<void> {
-        if (cms.length === 0) return;
-        const target = cms.map((c) => c.toLowerCase());
-        const pollMs = opts.pollMs ?? AWAIT_COMMITMENTS_DEFAULT_POLL_MS;
-        const maxAttempts = opts.maxAttempts ?? AWAIT_COMMITMENTS_DEFAULT_MAX_ATTEMPTS;
-        const allSeen = (): boolean => {
-            const seen = new Set(this.file.notes.map((n) => n.cm.toLowerCase()));
-            return target.every((c) => seen.has(c));
-        };
-        const sleep = (ms: number) =>
-            new Promise<void>((resolve) => {
-                if (opts.signal?.aborted) return resolve();
-                const t = setTimeout(() => {
-                    opts.signal?.removeEventListener("abort", onAbort);
-                    resolve();
-                }, ms);
-                const onAbort = () => {
-                    clearTimeout(t);
-                    resolve();
-                };
-                opts.signal?.addEventListener("abort", onAbort, { once: true });
-            });
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            if (opts.signal?.aborted) return;
-            if (allSeen()) return;
-            await this.sync({ limit: AWAIT_COMMITMENTS_SYNC_LIMIT });
-            if (opts.signal?.aborted || allSeen()) return;
-            await sleep(pollMs);
-        }
+    async awaitCommitments(cms: string[], opts: AwaitCommitmentsOpts = {}): Promise<void> {
+        await awaitCommitments(
+            cms,
+            () => this.cache.notes,
+            (limit) => this.sync({ limit }),
+            opts,
+        );
     }
 
     notes(filter: NotesFilter): WalletNote[] {
-        return this.file.notes
+        return this.cache.notes
             .filter((n) => {
                 if (filter.spent !== undefined && n.spent !== filter.spent) return false;
                 if (BigInt(n.asset) !== filter.asset) return false;
@@ -307,19 +263,19 @@ export class Wallet implements WalletApi {
     }
 
     allNotes(filter: { spent?: boolean } = {}): WalletNote[] {
-        return this.file.notes
+        return this.cache.notes
             .filter((n) => filter.spent === undefined || n.spent === filter.spent)
             .map(toWalletNote);
     }
 
     balance(asset: bigint): bigint {
-        return this.file.notes
+        return this.cache.notes
             .filter((n) => !n.spent && BigInt(n.asset) === asset)
             .reduce((s, n) => s + BigInt(n.value), 0n);
     }
 
     selectNotes(asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult {
-        return this.selector.select(this.file.notes, asset, target, opts);
+        return this.selector.select(this.cache.notes, asset, target, opts);
     }
 
     /// Shield ERC-20 into the MASP via Permit2 escrow. Funds sit in
@@ -336,7 +292,7 @@ export class Wallet implements WalletApi {
         id: bigint,
         inputs: import("../chain/adapter.js").CancelIntentInputs,
     ): Promise<{ txHash: string }> {
-        const { DepositAdapterError } = await import("./errors/index.js");
+        const { DepositAdapterError } = await import("./errors.js");
         if (!this.cfg.chain.cancelIntent) {
             throw new DepositAdapterError("witness", ["cancelIntent"]);
         }
@@ -381,11 +337,7 @@ export class Wallet implements WalletApi {
     /// Called automatically by `transfer` / `withdraw`; exposed for
     /// alternative spend flows.
     async markSpent(noteIds: string[]): Promise<void> {
-        const ids = new Set(noteIds);
-        this.file.notes.forEach((n) => {
-            if (ids.has(n.id)) n.spent = true;
-        });
-        await this.noteStore.save(this.file);
+        await this.cache.markSpent(noteIds);
     }
 
     /**

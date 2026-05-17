@@ -229,8 +229,6 @@ wallet.balance(1n);                                // bigint, unspent only
 ### Select notes manually
 
 ```ts
-import { selectNotes } from "@lelantos-org/sdk";
-
 const result = wallet.selectNotes(asset, target, {
     fee: 25n,
     dustThreshold: 100n,
@@ -276,19 +274,19 @@ The CLI's [`FileNoteStore`](../cli/src/notes-store.ts) is a working node-side re
 
 ## Custom chain adapter
 
-`EthersChainAdapter` ships in the SDK. To use viem / web3.js / a hardware wallet, implement `ChainAdapter`:
+`ViemChainAdapter` ships in the SDK. To use ethers / web3.js / a hardware wallet, implement `ChainAdapter`:
 
 ```ts
-import { type ChainAdapter, type AssetEntry, signErc2612Permit } from "@lelantos-org/sdk";
+import { type ChainAdapter, type AssetEntry } from "@lelantos-org/sdk";
 
-class ViemChainAdapter implements ChainAdapter {
+class EthersChainAdapter implements ChainAdapter {
     async chainId(): Promise<bigint> { ... }
     async payerAddress(): Promise<string> { ... }
     async fetchAsset(id: bigint): Promise<AssetEntry> { ... }
     async fetchFeeBps(): Promise<bigint> { ... }
-    async signPermit(args): Promise<Erc2612Permit> {
-        // Reuse the SDK helper; just plug your signer in.
-        return signErc2612Permit({ ... });
+    async signPermit(args) {
+        // Drive your signer (ethers, viem, hardware wallet) to produce the
+        // EIP-2612 permit; return { v, r, s, deadline, nonce }.
     }
 }
 ```
@@ -301,7 +299,7 @@ Six injection points on `WalletConfig`. Each has a default.
 
 | Interface | Default | Use case |
 |---|---|---|
-| `ChainAdapter` | `EthersChainAdapter` | viem / web3.js / hardware-wallet signing |
+| `ChainAdapter` | `ViemChainAdapter` | ethers / web3.js / hardware-wallet signing |
 | `NoteSource` | `FmdNoteSource` (over `FmdClient`) | alt indexer, P2P feed, unit-test mock |
 | `Submitter` | `HttpRelayerSubmitter` | multi-relayer race, direct-on-chain submit, test mock |
 | `Prover` | `SnarkjsProver` (in-process) | remote prover, Web Worker prover, mock |
@@ -419,21 +417,19 @@ Set `maspAddress` or `relayerAddress` to `null` to mark preset as placeholder; `
 ## Browser usage
 
 ```ts
-import { Wallet, EthersChainAdapter, InMemoryNoteStore } from "@lelantos-org/sdk";
-import { BrowserProvider } from "ethers";
+import { Wallet, ViemChainAdapter, Eip1193Signer, InMemoryNoteStore } from "@lelantos-org/sdk";
 
-// Get a signer from MetaMask:
-const provider = new BrowserProvider(window.ethereum);
-await provider.send("eth_requestAccounts", []);
-const signer = await provider.getSigner();
+// Wrap the EIP-1193 provider exposed by MetaMask (or any injected wallet).
+await window.ethereum.request({ method: "eth_requestAccounts" });
+const signer = new Eip1193Signer(window.ethereum);
 
 const wallet = await Wallet.create(
     { type: "mnemonic", mnemonic },
     {
         ...config,
-        chain: new EthersChainAdapter({
+        chain: new ViemChainAdapter({
             rpcUrl: "...",
-            signer,                  // pass a Signer directly (no privateKey needed)
+            signer,                  // any EthSigner (Eip1193Signer / PrivateKeySigner / custom)
             maspAddress: "0x...",
         }),
     },
@@ -475,7 +471,6 @@ import {
     scanNotes,
     buildDeposit, buildTransfer, buildWithdraw,
     RelayerClient,
-    signErc2612Permit,
     prove, verify, configureProver,
 } from "@lelantos-org/sdk";
 ```

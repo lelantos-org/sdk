@@ -6,14 +6,14 @@
 
 import type { AuxOutput } from "../bundle/permit2.js";
 import type { Field } from "../crypto/index.js";
+import type { OutputAux } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
-import type { TransactAux } from "../relayer/client.js";
 import type { TransactionResult, TransferResult, WalletNote } from "./api.js";
 import type { StoredNote } from "./note-store.js";
 
-/// Bridge flat-scalar `AuxOutput` (piHash shape) → point-as-tuple
-/// `TransactAux` (relayer wire shape) for swap.
-export function auxOutputToTransactAux(a: AuxOutput): TransactAux {
+/// Inverse of `auxOutputToWire`: flat-scalar wire `AuxOutput` (piHash shape)
+/// → point-tuple `OutputAux` (builder/relayer shape) for swap.
+export function auxOutputFromWire(a: AuxOutput): OutputAux {
     return {
         clueR: [a.clueRx, a.clueRy],
         ephPub: [a.ephPubX, a.ephPubY],

@@ -30,6 +30,7 @@ export {
     type SwapQuote,
     type SwapQuoteRequest,
 } from "./bundle/swap-quote.js";
+export { buildTransfer } from "./bundle/transfer.js";
 
 export { buildWithdraw } from "./bundle/withdraw.js";
 export {
@@ -40,6 +41,7 @@ export {
 } from "./bundle/witness.js";
 // ── chain adapters ───────────────────────────────────────────────────────
 export {
+    type AssetEntry,
     type ChainAdapter,
     supportsAllowanceTransfer,
 } from "./chain/adapter.js";
@@ -63,9 +65,13 @@ export {
 export {
     BABYJUB_SUBGROUP_ORDER,
     buildNoteCommitment,
+    buildNullifier,
+    buildNullifierFromNsk,
     type Field,
     fromLeBytes,
     Jubjub,
+    type MerkleProof,
+    MerkleTree,
     type Point,
     Poseidon,
     toLeBytes,
@@ -83,9 +89,15 @@ export {
     fmdFlag,
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,
+    fmdTest,
 } from "./fmd/fmd.js";
 // ── keys / addresses ─────────────────────────────────────────────────────
-export { ADDRESS_HRP } from "./keys/address.js";
+export {
+    ADDRESS_HRP,
+    type DecodedAddress,
+    decodeAddress,
+    encodeAddress,
+} from "./keys/address.js";
 
 export {
     generateMnemonic,
@@ -94,10 +106,15 @@ export {
     resolveNsk,
 } from "./keys/key-source.js";
 export {
+    addressFromSpendingKey,
     buildSpendingKey,
     deriveKeysFromMnemonic,
     deriveKeysFromNsk,
+    type FullViewingKey,
+    fullViewingKeyFromSpending,
     type SpendingKey,
+    type ViewingKey,
+    viewingKeyFromSpending,
 } from "./keys/keys.js";
 export * as metamask from "./keys/metamask.js";
 // ── notes (encoding, encryption, FMD aux) ────────────────────────────────
@@ -106,15 +123,21 @@ export {
     encodeNotePayload,
     withClueBitsPrefix,
 } from "./notes/codec.js";
-export { encryptNote } from "./notes/encrypt.js";
+export { decryptNote, encryptNote } from "./notes/encrypt.js";
 export type { EncryptedNote, Note, SpentNote } from "./notes/note.js";
 
 // ── prover backends ──────────────────────────────────────────────────────
 
 // ── shared types + version ───────────────────────────────────────────────
 export type { ProverArtifacts } from "./prover/artifacts.js";
+export { type Prover, SnarkjsProver } from "./prover/interface.js";
 export { nodeWallet } from "./prover/presets.js";
-export type { ProverPaths } from "./prover/snarkjs.js";
+export {
+    configureProver,
+    type ProverPaths,
+    prove,
+    verify,
+} from "./prover/snarkjs.js";
 // `WasmProver` lives at `@lelantos-org/sdk/wasm-prover` so the main barrel
 // does not pull in `wasm-bindgen-rayon` worker glue. Browser apps that opt
 // out via `useWasmProver: false` pay zero bundle cost.
@@ -126,6 +149,7 @@ export {
 export {
     RelayerClient,
     type SubmitSwapPayload,
+    type SubmitTransactPayload,
 } from "./relayer/client.js";
 // ── sync engine ──────────────────────────────────────────────────────────
 export {
@@ -159,7 +183,7 @@ export {
     WalletConfigError,
     WalletError,
     type WalletErrorCode,
-} from "./wallet/errors/index.js";
+} from "./wallet/errors.js";
 export {
     type CreateSubscriptionInput,
     FmdClient,

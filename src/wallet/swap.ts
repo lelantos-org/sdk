@@ -10,7 +10,7 @@ import type { SwapOptions, TransactionResult } from "./api.js";
 import { BPS_DENOMINATOR, PUBLIC_IN_MAX } from "./constants.js";
 import { ensureCover } from "./cover.js";
 import { buildInputSlots } from "./inputs.js";
-import { auxOutputToTransactAux, makeTransactionResult } from "./internal.js";
+import { auxOutputFromWire, makeTransactionResult } from "./internal.js";
 import type { Wallet } from "./wallet.js";
 import { safePhase } from "./wallet.js";
 
@@ -140,10 +140,7 @@ export async function executeSwap(wallet: Wallet, args: SwapOptions): Promise<Tr
             adapter: quote.adapter,
             route: quote.route,
             intentD: intentBundle.intent,
-            auxD: [
-                auxOutputToTransactAux(intentBundle.aux[0]),
-                auxOutputToTransactAux(intentBundle.aux[1]),
-            ],
+            auxD: [auxOutputFromWire(intentBundle.aux[0]), auxOutputFromWire(intentBundle.aux[1])],
             tokenIn: entryIn.token,
             tokenOut: entryOut.token,
             amountIn: amountInUnits,

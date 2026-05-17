@@ -23,7 +23,7 @@ import type { Scanner } from "../sync/scanner.js";
 import { configureWasm, type WasmConfig } from "../wasm/config.js";
 import type { SyncStrategy, WalletConfig } from "./config.js";
 import { buildConnectProver, defaultChainAdapter } from "./defaults.js";
-import { NetworkNotDeployedError, WalletConfigError } from "./errors/index.js";
+import { NetworkNotDeployedError, WalletConfigError } from "./errors.js";
 import { Wallet, type WalletApi } from "./index.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
