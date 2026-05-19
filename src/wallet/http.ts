@@ -19,13 +19,23 @@ export interface HttpClientOptions {
     backoffMs?: number;
     /// Defaults to bound `globalThis.fetch`.
     fetchImpl?: typeof fetch;
+    /// Invoked when the server returns 402, before `NetworkError` is thrown.
+    /// Return a `Response` to replace the 402 (its ok/non-ok status is then
+    /// honored) or null to fall through to the normal error path. Owns its
+    /// own retry semantics — the outer retry loop does NOT loop on the
+    /// returned response.
+    onPaymentRequired?: (
+        res: Response,
+        url: string,
+        init: RequestInit | undefined,
+    ) => Promise<Response | null>;
 }
 
 export interface HttpClient {
     fetch(url: string, init?: RequestInit): Promise<Response>;
 }
 
-const DEFAULTS: Required<Omit<HttpClientOptions, "fetchImpl">> = {
+const DEFAULTS: Required<Omit<HttpClientOptions, "fetchImpl" | "onPaymentRequired">> = {
     timeoutMs: 30_000,
     retries: 2,
     backoffMs: 250,
@@ -41,6 +51,7 @@ export function createHttpClient(
     const retries = opts.retries ?? DEFAULTS.retries;
     const backoffMs = opts.backoffMs ?? DEFAULTS.backoffMs;
     const fetchImpl = opts.fetchImpl ?? ((...a) => fetch(...a));
+    const onPaymentRequired = opts.onPaymentRequired;
 
     async function attempt(url: string, init?: RequestInit): Promise<Response> {
         const ctrl = new AbortController();
@@ -57,7 +68,11 @@ export function createHttpClient(
             let lastErr: unknown;
             for (let i = 0; i <= retries; i++) {
                 try {
-                    const res = await attempt(url, init);
+                    let res = await attempt(url, init);
+                    if (res.status === 402 && onPaymentRequired) {
+                        const handled = await onPaymentRequired(res, url, init);
+                        if (handled) res = handled;
+                    }
                     if (res.ok) return res;
                     if (res.status >= 500 && i < retries) {
                         await sleep(backoffMs * 2 ** i);

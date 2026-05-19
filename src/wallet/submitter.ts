@@ -8,6 +8,7 @@ import {
     type SubmitSwapPayload,
     type SubmitTransactPayload,
 } from "../relayer/client.js";
+import type { HttpClientOptions } from "./http.js";
 
 export interface Submitter {
     /// Spend op. Relayer attaches the matching tree_update_batch SNARK + tpi.
@@ -21,8 +22,12 @@ export interface Submitter {
 export class HttpRelayerSubmitter implements Submitter {
     private readonly client: RelayerClient;
 
-    constructor(baseUrl: string, fetchImpl?: typeof fetch) {
-        this.client = new RelayerClient(baseUrl, fetchImpl ?? ((...args) => fetch(...args)));
+    constructor(baseUrl: string, opts?: HttpClientOptions | typeof fetch) {
+        // Back-compat: `opts` may be a raw `fetch` impl. Otherwise it's the
+        // full options bag (timeouts, retries, 402 hook, custom fetch).
+        const httpOpts: HttpClientOptions =
+            typeof opts === "function" ? { fetchImpl: opts } : (opts ?? {});
+        this.client = new RelayerClient(baseUrl, httpOpts);
     }
 
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {

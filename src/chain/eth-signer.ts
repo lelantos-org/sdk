@@ -52,8 +52,8 @@ export class Eip1193Signer implements EthSigner {
         readonly chainId: bigint,
     ) {}
 
-    async getAddress(): Promise<string> {
-        return this.address;
+    getAddress(): Promise<string> {
+        return Promise.resolve(this.address);
     }
 
     async signTypedData(
@@ -127,13 +127,14 @@ export class PrivateKeySigner implements EthSigner {
         primaryType: string,
         message: Record<string, unknown>,
     ): Promise<string> {
-        const sig = await this.account.signTypedData({
+        // viem's signTypedData generic can't infer from the abstract EthSigner
+        // boundary types; casts are unavoidable here.
+        return this.account.signTypedData({
             domain,
             types: types as any,
             primaryType,
             message: message as any,
         });
-        return sig;
     }
 
     async sendTransaction(args: {
@@ -186,7 +187,8 @@ function stringifyBigInts(v: unknown): unknown {
 }
 
 function bigintToHex(n: bigint): string {
-    return `0x${n.toString(16)}`;
+    const hex = n.toString(16);
+    return `0x${hex.length % 2 ? `0${hex}` : hex}`;
 }
 
 /// Convenience helper: assemble a serializable signature from already-known

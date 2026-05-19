@@ -57,7 +57,7 @@ export async function executeWithdraw(
         ...freshNoteRandomness(),
     };
 
-    const merkleRoot = (await wallet.noteSource.fetchPath(selection.notes[0].cm)).root;
+    const merkleRoot = wallet.treeStore.root();
 
     safePhase(args.onPhase, "proving");
     const builder = kind === "withdrawNative" ? buildWithdrawNative : buildWithdraw;

@@ -5,12 +5,11 @@ import {
     buildNoteCommitment,
     buildNullifierFromNsk,
     type Field,
-    fmdLegendreWitness,
     type Jubjub,
     type Point,
     type Poseidon,
 } from "../crypto/index.js";
-import { TAG_FMD_BIT } from "../fmd/fmd.js";
+import type { OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note, SpentNote } from "../notes/note.js";
 
 export interface SpendableCachedNote {
@@ -20,9 +19,6 @@ export interface SpendableCachedNote {
 }
 
 /** @internal */
-/// Path supplied externally (e.g. by the relayer's `/path` endpoint).
-/// Caller is responsible for verifying the path against an on-chain
-/// `isKnownRoot` before trusting it for spending.
 export function toSpentNoteFromPath(
     P: Poseidon,
     cached: SpendableCachedNote,
@@ -43,15 +39,6 @@ export function toSpentNoteFromPath(
     };
 }
 
-export interface OutputClueWitness {
-    /// FMD blinding scalar r ∈ Z_q*. R = r·G_8 = (clueRx, clueRy).
-    r: Field;
-    /// γ recipient flag-key points fk[i] = dk[i]·G_8.
-    fk: Point[];
-    /// 14-bit packed clueBits, LSB first. First γ bits = 1 - lsb1(Poseidon(...)).
-    clueBits: Field;
-}
-
 /** @internal */
 export interface BuildOpts {
     publicAssetId: Field;
@@ -59,9 +46,7 @@ export interface BuildOpts {
     publicOut: Field;
     inputs: SpentNote[];
     outputs: Note[];
-    /// FMD clue witnesses per output. Required: pad/dummy outputs also need
-    /// a real (r, fk) — circuit constraints fire unconditionally.
-    outputClues: OutputClueWitness[];
+    outputClues: OutputAuxWithWitness["witness"][];
     merkleRoot: Field;
     recipientAddress?: Field;
     chainId?: Field;
@@ -94,19 +79,16 @@ export function toCircomInput(
     const payerAddress = opts.payerAddress ?? 0n;
     const relayerAddress = opts.relayerAddress ?? 0n;
 
-    const out_cm = outputs.map((o) => buildNoteCommitment(P, o));
-
-    const in_cv: Point[] = inputs.map((i) =>
+    const outCm = outputs.map((o) => buildNoteCommitment(P, o));
+    const inCv: Point[] = inputs.map((i) =>
         J.valueCommit(i.value, J.hashToAssetGen(i.asset), i.rcv),
     );
-    const out_cv: Point[] = outputs.map((o) =>
+    const outCv: Point[] = outputs.map((o) =>
         J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcv),
     );
-
-    // Deposit-anchor cv_dep: same Pedersen shape as cv but with the rcv_dep
-    // blinder so leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) re-derives
-    // consistently from the spender's side.
-    const out_cv_dep: Point[] = outputs.map((o) =>
+    // cv_dep anchors (asset, value, rcv_dep) into the Merkle leaf:
+    //   leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)
+    const outCvDep: Point[] = outputs.map((o) =>
         J.valueCommit(o.value, J.hashToAssetGen(o.asset), o.rcvDep),
     );
 
@@ -116,17 +98,17 @@ export function toCircomInput(
         z: z.toString(),
         merkle_root: merkleRoot.toString(),
         nullifier: inputs.map((i) => i.nf.toString()),
-        out_cm: out_cm.map((c) => c.toString()),
+        out_cm: outCm.map((c) => c.toString()),
         public_asset_id: publicAssetId.toString(),
         public_in: publicIn.toString(),
         public_out: publicOut.toString(),
-        in_cv: in_cv.map((p) => [p[0].toString(), p[1].toString()]),
-        out_cv: out_cv.map((p) => [p[0].toString(), p[1].toString()]),
+        in_cv: inCv.map((p) => [p[0].toString(), p[1].toString()]),
+        out_cv: outCv.map((p) => [p[0].toString(), p[1].toString()]),
         recipient_address: recipientAddress.toString(),
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
-        out_cv_dep: out_cv_dep.map((p) => [p[0].toString(), p[1].toString()]),
+        out_cv_dep: outCvDep.map((p) => [p[0].toString(), p[1].toString()]),
 
         in_asset: inputs.map((i) => i.asset.toString()),
         in_value: inputs.map((i) => i.value.toString()),
@@ -150,37 +132,10 @@ export function toCircomInput(
         out_rcv: outputs.map((o) => o.rcv.toString()),
         out_rcv_dep: outputs.map((o) => o.rcvDep.toString()),
 
-        out_r: opts.outputClues.map((c) => c.r.toString()),
-        out_fk: opts.outputClues.map((c) => c.fk.map((p) => [p[0].toString(), p[1].toString()])),
         out_clue_bits: opts.outputClues.map((c) => c.clueBits.toString()),
-        ...fmdLegendreInputs(P, J, opts.outputClues),
+        out_clue_Rx: opts.outputClues.map((c) => c.clueRx.toString()),
+        out_clue_Ry: opts.outputClues.map((c) => c.clueRy.toString()),
     };
-}
-
-// Legendre (bit, y) witness pair per (output, γ-slot) for the in-circuit
-// `HashToBit` gadget. Hash layout: Poseidon(TAG_FMD_BIT, R.x, R.y, i, S.x, S.y).
-function fmdLegendreInputs(
-    P: Poseidon,
-    J: Jubjub,
-    clues: OutputClueWitness[],
-): { out_legendre_bit: string[][]; out_legendre_y: string[][] } {
-    const bits: string[][] = [];
-    const ys: string[][] = [];
-    for (const c of clues) {
-        const R = J.mulPointEscalar(J.base8, c.r);
-        const rowBits: string[] = [];
-        const rowYs: string[] = [];
-        for (let i = 0; i < c.fk.length; i++) {
-            const S = J.mulPointEscalar(c.fk[i], c.r);
-            const h = P.hash([TAG_FMD_BIT, R[0], R[1], BigInt(i), S[0], S[1]]);
-            const w = fmdLegendreWitness(h);
-            rowBits.push(w.bit.toString());
-            rowYs.push(w.y.toString());
-        }
-        bits.push(rowBits);
-        ys.push(rowYs);
-    }
-    return { out_legendre_bit: bits, out_legendre_y: ys };
 }
 
 /** @internal */

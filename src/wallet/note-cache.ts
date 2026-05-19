@@ -70,7 +70,7 @@ export class NoteCache {
         return this.snapshot;
     }
 
-    get notes(): StoredNote[] {
+    get notes(): readonly StoredNote[] {
         return this.snapshot.notes;
     }
 
@@ -94,20 +94,17 @@ export class NoteCache {
     async markSpent(ids: Iterable<string>): Promise<void> {
         const set = new Set(ids);
         if (set.size === 0) return;
-        let mutated = false;
-        for (const n of this.snapshot.notes) {
-            if (set.has(n.id) && !n.spent) {
-                n.spent = true;
-                mutated = true;
-            }
-        }
-        if (mutated) await this.store.save(this.snapshot);
+        await this._mutate((n) => set.has(n.id));
     }
 
     /// Apply spent-set reconciliation. `predicate(note)` returns true when
     /// the note's nullifier was observed on-chain. Persists once if any
     /// flip occurred.
     async applySpent(predicate: (note: StoredNote) => boolean): Promise<void> {
+        await this._mutate(predicate);
+    }
+
+    private async _mutate(predicate: (n: StoredNote) => boolean): Promise<void> {
         let mutated = false;
         for (const n of this.snapshot.notes) {
             if (!n.spent && predicate(n)) {

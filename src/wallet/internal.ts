@@ -83,6 +83,15 @@ export function makeTransactionResult(args: MakeTransactionResultArgs): Transact
         (acc, i) => acc + BigInt(args.built.producedNotes[i].value),
         0n,
     );
+    // Commitments any party will actually scan — drops zero-value pad
+    // outputs. Receiver-side waiters should subset this against their own
+    // address rather than waiting on the full `commitments` pair.
+    const nonZeroCommitments: string[] = [];
+    for (let i = 0; i < commitments.length; i++) {
+        if (BigInt(args.built.producedNotes[i].value) > 0n) {
+            nonZeroCommitments.push(commitments[i]);
+        }
+    }
 
     switch (args.kind) {
         case "deposit":
@@ -90,6 +99,7 @@ export function makeTransactionResult(args: MakeTransactionResultArgs): Transact
                 kind: "deposit",
                 txHash: args.txHash,
                 commitments,
+                nonZeroCommitments,
                 ownCommitments,
                 ownInflow,
                 sent: args.sent ?? 0n,
@@ -100,6 +110,7 @@ export function makeTransactionResult(args: MakeTransactionResultArgs): Transact
                 kind: "transfer",
                 txHash: args.txHash,
                 commitments,
+                nonZeroCommitments,
                 spent,
                 inputSum: args.inputSum ?? 0n,
                 sent: args.sent ?? 0n,
@@ -114,6 +125,7 @@ export function makeTransactionResult(args: MakeTransactionResultArgs): Transact
                 kind: "withdraw",
                 txHash: args.txHash,
                 commitments,
+                nonZeroCommitments,
                 spent,
                 inputSum: args.inputSum ?? 0n,
                 sent: args.sent ?? 0n,
@@ -126,6 +138,7 @@ export function makeTransactionResult(args: MakeTransactionResultArgs): Transact
                 kind: "swap",
                 txHash: args.txHash,
                 commitments,
+                nonZeroCommitments,
                 spent,
                 inputSum: args.inputSum ?? 0n,
                 sent: args.sent ?? 0n,

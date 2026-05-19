@@ -28,7 +28,7 @@ import { Wallet, type WalletApi } from "./index.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
 import type { CoinSelector } from "./selection.js";
-import type { Submitter } from "./submitter.js";
+import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 
 /// Pick exactly one.
 export type ConnectKeyOptions =
@@ -168,6 +168,10 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
         runtime,
     );
 
+    const submitter =
+        opts.submitter ??
+        (preset.relayerUrl ? new HttpRelayerSubmitter(preset.relayerUrl) : undefined);
+
     const cfg: WalletConfig = {
         chainId: preset.chainId,
         treeDepth: preset.treeDepth,
@@ -179,7 +183,7 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
             opts.proverArtifacts && !prover ? resolveArtifacts(opts.proverArtifacts) : undefined,
         noteStore: opts.noteStore,
         noteSource: opts.noteSource,
-        submitter: opts.submitter,
+        submitter,
         prover,
         selector: opts.selector,
         scanner: opts.scanner,

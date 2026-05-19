@@ -21,7 +21,14 @@ import type {
     WithdrawOptions,
 } from "./api.js";
 import type { WalletConfig } from "./config.js";
-import { defaultNoteSource, defaultProver, defaultSubmitter, validateConfig } from "./defaults.js";
+import {
+    defaultFmdClient,
+    defaultNoteSource,
+    defaultProver,
+    defaultSubmitter,
+    defaultTreeStore,
+    validateConfig,
+} from "./defaults.js";
 import { executeDeposit } from "./deposit.js";
 import { toWalletNote } from "./internal.js";
 import { type AwaitCommitmentsOpts, awaitCommitments, NoteCache } from "./note-cache.js";
@@ -37,6 +44,7 @@ import type { Submitter } from "./submitter.js";
 import { executeSwap } from "./swap.js";
 import { type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
 import { executeTransfer } from "./transfer.js";
+import type { TreeStore } from "./tree-store.js";
 import { executeWithdraw, type WithdrawKind } from "./withdraw.js";
 
 /**
@@ -71,6 +79,9 @@ export class Wallet implements WalletApi {
     }
     get noteSource(): NoteSource {
         return this.cfg.noteSource as NoteSource;
+    }
+    get treeStore(): TreeStore {
+        return this.cfg.treeStore as TreeStore;
     }
     get submitter(): Submitter {
         return this.cfg.submitter as Submitter;
@@ -175,7 +186,9 @@ export class Wallet implements WalletApi {
         const noteStore = cfg.noteStore ?? new InMemoryNoteStore();
         const cache = await NoteCache.open(noteStore);
 
-        const noteSource = cfg.noteSource ?? defaultNoteSource(cfg, J);
+        const fmd = defaultFmdClient(cfg);
+        const noteSource = cfg.noteSource ?? defaultNoteSource(fmd, cfg, J);
+        const treeStore = cfg.treeStore ?? defaultTreeStore(fmd, P);
         const submitter = cfg.submitter ?? defaultSubmitter(cfg);
         const prover = cfg.prover ?? (await defaultProver(cfg));
         const selector = cfg.selector ?? new SfrtCoinSelector();
@@ -186,7 +199,7 @@ export class Wallet implements WalletApi {
             J,
             keys,
             address,
-            cfg: { ...cfg, noteStore, noteSource, submitter, prover, selector, scanner },
+            cfg: { ...cfg, noteStore, noteSource, treeStore, submitter, prover, selector, scanner },
             cache,
         });
     }
@@ -371,7 +384,7 @@ export class Wallet implements WalletApi {
 
     /** @internal */
     inputsCtx() {
-        return { pk: this.keys.pk, nsk: this.keys.nsk, noteSource: this.noteSource };
+        return { pk: this.keys.pk, nsk: this.keys.nsk, treeStore: this.treeStore };
     }
 }
 

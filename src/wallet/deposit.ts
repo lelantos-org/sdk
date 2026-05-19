@@ -26,6 +26,10 @@ export async function executeDeposit(
     const payer = await wallet.cfg.chain.payerAddress();
     const assetEntry = await wallet.cfg.chain.fetchAsset(asset);
     const feeBps = await wallet.resolveFeeBps();
+    if (args.amount <= 0n) {
+        const { WalletConfigError } = await import("./errors.js");
+        throw new WalletConfigError("deposit amount must be positive (nonzero)");
+    }
     if (args.amount > PUBLIC_IN_MAX) {
         throw new Error(
             `deposit: amount ${args.amount} exceeds uint48 publicIn cap; asset ${asset} scale ${assetEntry.scale} too small`,

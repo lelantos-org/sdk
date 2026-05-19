@@ -12,6 +12,7 @@ import {
 import type { DeployedNetworkPreset } from "../chain/networks.js";
 import { ViemChainAdapter } from "../chain/viem-adapter.js";
 import type { Jubjub } from "../crypto/index.js";
+import type { Poseidon } from "../crypto/poseidon.js";
 import type { ProverArtifacts } from "../prover/artifacts.js";
 import type { Prover } from "../prover/interface.js";
 import { SnarkjsProver } from "../prover/interface.js";
@@ -22,6 +23,7 @@ import { WalletConfigError } from "./errors.js";
 import { FmdClient } from "./fmd-client.js";
 import { FmdMatchesNoteSource, FmdNoteSource, type NoteSource } from "./note-source.js";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
+import { TreeStore } from "./tree-store.js";
 
 /// Aggregate validation; collects every problem before throwing. Skips
 /// prover validation — `defaultProver` resolves bundled artifacts.
@@ -36,16 +38,19 @@ export function validateConfig(cfg: WalletConfig): void {
     if (missing.length) throw new WalletConfigError(missing);
 }
 
-export function defaultNoteSource(cfg: WalletConfig, J: Jubjub): NoteSource {
-    const fmd = new FmdClient(cfg.fmdUrl as string, cfg.chainId);
+export function defaultFmdClient(cfg: WalletConfig): FmdClient {
+    return new FmdClient(cfg.fmdUrl as string, cfg.chainId);
+}
+
+export function defaultNoteSource(fmd: FmdClient, cfg: WalletConfig, J: Jubjub): NoteSource {
     if (cfg.syncStrategy?.kind === "matches") {
-        return new FmdMatchesNoteSource({
-            fmd,
-            J,
-            subscriptionId: cfg.syncStrategy.subscriptionId,
-        });
+        return new FmdMatchesNoteSource(fmd, J, cfg.syncStrategy.subscriptionId);
     }
-    return new FmdNoteSource({ fmd, J });
+    return new FmdNoteSource(fmd, J);
+}
+
+export function defaultTreeStore(fmd: FmdClient, P: Poseidon): TreeStore {
+    return new TreeStore(P, fmd);
 }
 
 export function defaultSubmitter(cfg: WalletConfig): Submitter {

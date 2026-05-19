@@ -145,7 +145,6 @@ export async function finalize(
         throw new Error("BundleCommon: either `prover` or `proverPaths` is required");
     }
     const aux: [OutputAux, OutputAux] = [auxAndWitness[0].aux, auxAndWitness[1].aux];
-    const outputClues = auxAndWitness.map((a) => a.witness);
 
     const { J, asset } = common;
 
@@ -155,7 +154,7 @@ export async function finalize(
         publicOut,
         inputs,
         outputs,
-        outputClues,
+        outputClues: auxAndWitness.map((a) => a.witness),
         merkleRoot,
         recipientAddress: addrToField(common.recipientAddress),
         chainId: common.chainId,
@@ -164,7 +163,7 @@ export async function finalize(
         z: 0n,
     });
 
-    const z = computeFiatShamirZ(baseInput, aux, outputClues);
+    const z = computeFiatShamirZ(baseInput);
     const proof = await runProver(common, { ...baseInput, z: z.toString() });
 
     return {
@@ -200,19 +199,8 @@ export function fieldToBytes32(f: Field): string {
 }
 
 /** @internal */
-export function computeFiatShamirZ(
-    baseInput: CircomInput,
-    aux: [OutputAux, OutputAux],
-    outputClues: OutputAuxWithWitness["witness"][],
-): bigint {
-    // Structural cast: baseInput satisfies FlattenInput but TS can't prove it.
-    const flattenInput: FlattenInput = {
-        ...(baseInput as unknown as FlattenInput),
-        out_clue_Rx: aux.map((a) => a.clueR[0]),
-        out_clue_Ry: aux.map((a) => a.clueR[1]),
-        out_clue_bits: outputClues.map((c) => c.clueBits),
-    };
-    return fiatShamirZ(flatten(flattenInput));
+export function computeFiatShamirZ(baseInput: CircomInput): bigint {
+    return fiatShamirZ(flatten(baseInput as unknown as FlattenInput));
 }
 
 /** @internal */

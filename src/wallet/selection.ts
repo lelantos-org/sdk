@@ -42,7 +42,7 @@ export type SelectionResult = DirectSelection | ConsolidateFirst;
 /// randomized tiebreak restores indistinguishability (Chen & Bonneau FC'25);
 /// smallest-pair drains dust so wallet note count shrinks over time.
 export function selectNotes(
-    all: StoredNote[],
+    all: readonly StoredNote[],
     asset: bigint,
     target: bigint,
     opts: SelectOpts = {},
@@ -199,12 +199,22 @@ function defaultRng(): number {
 
 /// Pluggable selection strategy passed via `WalletConfig.selector`.
 export interface CoinSelector {
-    select(all: StoredNote[], asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
+    select(
+        all: readonly StoredNote[],
+        asset: bigint,
+        target: bigint,
+        opts?: SelectOpts,
+    ): SelectionResult;
 }
 
 /// Smallest-First with Random Tiebreak.
 export class SfrtCoinSelector implements CoinSelector {
-    select(all: StoredNote[], asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult {
+    select(
+        all: readonly StoredNote[],
+        asset: bigint,
+        target: bigint,
+        opts?: SelectOpts,
+    ): SelectionResult {
         return selectNotes(all, asset, target, opts);
     }
 }

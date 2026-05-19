@@ -140,7 +140,7 @@ export class WasmJubjub {
         );
     }
 
-    // FMD2 (Niwl) v2 detection. Mirrors `fmdTest` in `sdk/src/fmd.ts` and in-circuit `ClueCheck`.
+    // FMD2 (Niwl) v2 detection. Mirrors `fmdTest` in `sdk/src/fmd.ts`.
     // Hash stays in JS so the wasm artifact does not need a Poseidon dependency.
     fmdTest(
         P: Poseidon,

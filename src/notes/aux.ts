@@ -31,12 +31,12 @@ export interface OutputAux {
 /** @internal */
 export interface OutputAuxWithWitness {
     aux: OutputAux;
-    /// Witnesses fed to the in-circuit ClueCheck. Must match `aux.clueR`
-    /// (R = r·G_8) and the `clueBits` packed in `aux.ciphertext[0..2]`.
+    /// Plain public inputs for the clue: client-computed off-circuit,
+    /// PolyEval-bound to the proof. Relayer cannot alter without invalidating.
     witness: {
-        r: Field;
-        fk: Point[];
         clueBits: Field;
+        clueRx: Field;
+        clueRy: Field;
     };
 }
 
@@ -57,14 +57,7 @@ export const EMPTY_AUX: OutputAux = {
 /** @internal */
 export interface BuildAuxArgs {
     J: Jubjub;
-    /// Poseidon hasher (BN254 circomlib parameters). Used by fmdFlag for
-    /// SNARK-friendly bit derivation; must match the in-circuit `ClueCheck`
-    /// template instance.
     P: Poseidon;
-    /// Recipient flag-key (group elements). Caller derives via:
-    ///   fmdFlagKeyFromDetection(J, fmdGenDetectionKey(seedFn, gamma)).
-    /// For convenience pass the Detection-key seed scalar in `dkSeed` and
-    /// let `buildOutputAux` derive both — see `buildOutputAuxFromAddress`.
     recipientFlagKey: FmdFlagKey;
     recipientPkD: Point;
     note: NotePayload;
@@ -105,9 +98,9 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
     return {
         aux: { clueR: clueRPoint, ephPub, ciphertext },
         witness: {
-            r: fmdR,
-            fk: recipientFlagKey.X,
             clueBits: clueBitsField,
+            clueRx: clueRPoint[0],
+            clueRy: clueRPoint[1],
         },
     };
 }

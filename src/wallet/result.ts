@@ -6,6 +6,10 @@ interface TxResultBase {
     txHash: string;
     /// 0x-hex commitments created by the tx. Always length 2.
     commitments: [string, string];
+    /// Subset of `commitments` with non-zero value (zero-value outputs are
+    /// circuit pads that no party's scanner accepts). Receiver-side
+    /// waiters should `filter` this against their own commitments.
+    nonZeroCommitments: string[];
     /// Subset of `commitments` recoverable via this wallet's FMD scan.
     ownCommitments: string[];
     /// Total value of own outputs; pending balance once FMD indexes them.

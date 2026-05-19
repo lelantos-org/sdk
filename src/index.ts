@@ -35,7 +35,6 @@ export { buildTransfer } from "./bundle/transfer.js";
 export { buildWithdraw } from "./bundle/withdraw.js";
 export {
     dummyInputAt,
-    type OutputClueWitness,
     type SpendableCachedNote,
     toCircomInput,
 } from "./bundle/witness.js";
@@ -214,8 +213,8 @@ export {
 export {
     FmdMatchesNoteSource,
     FmdNoteSource,
+    type JubjubPacker,
     type ListNotesOpts,
-    type MerklePath,
     type NoteSource,
 } from "./wallet/note-source.js";
 export {

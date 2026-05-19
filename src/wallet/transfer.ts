@@ -49,7 +49,7 @@ export async function executeTransfer(
         ...freshNoteRandomness(),
     };
 
-    const merkleRoot = (await wallet.noteSource.fetchPath(selection.notes[0].cm)).root;
+    const merkleRoot = wallet.treeStore.root();
 
     safePhase(args.onPhase, "proving");
     const built = await buildTransfer({

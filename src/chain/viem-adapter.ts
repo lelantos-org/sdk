@@ -39,11 +39,11 @@ import type {
 import type { EthSigner } from "./eth-signer.js";
 
 export const MASP_ABI = parseAbi([
-    "function asset(uint64) view returns (address token, uint256 scale, bool disabled)",
+    "function asset(uint64) view returns (address token, bool disabled, uint256 scale)",
     "function feeBps() view returns (uint16)",
     "function treasury() view returns (address)",
     "function cancelDelay() view returns (uint32)",
-    "function WETH() view returns (address)",
+    "function WRAPPED_NATIVE() view returns (address)",
     "function nextIntentId() view returns (uint256)",
     "function escrowed(uint256) view returns (bytes32 digest, address payer, uint32 submittedAt, uint64 publicAssetId, uint16 feeBpsAtSubmit)",
     "function submitIntent((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d,(uint256 nonce,uint256 deadline,uint256 maxTotal,bytes signature) sig,(uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
@@ -84,14 +84,10 @@ export interface ViemChainAdapterOpts {
 export class ViemChainAdapter implements ChainAdapter {
     readonly publicClient: PublicClient;
     readonly signer: EthSigner;
-    /** @internal */
-    readonly _maspAddress: `0x${string}`;
-    /** @internal */
-    readonly _permit2Address: `0x${string}`;
-    /** @internal */
-    readonly chainIdOverride?: bigint;
-    /** @internal */
-    cachedChainId?: bigint;
+    private readonly _maspAddress: `0x${string}`;
+    private readonly _permit2Address: `0x${string}`;
+    private readonly chainIdOverride?: bigint;
+    private cachedChainId?: bigint;
 
     constructor(opts: ViemChainAdapterOpts) {
         this.publicClient = createPublicClient({ transport: http(opts.rpcUrl) });
@@ -114,12 +110,12 @@ export class ViemChainAdapter implements ChainAdapter {
     }
 
     async fetchAsset(id: bigint): Promise<AssetEntry> {
-        const [token, scale, disabled] = (await this.publicClient.readContract({
+        const [token, disabled, scale] = (await this.publicClient.readContract({
             address: this._maspAddress,
             abi: MASP_ABI,
             functionName: "asset",
             args: [id],
-        })) as [string, bigint, boolean];
+        })) as [string, boolean, bigint];
         return { token, scale, disabled };
     }
 
@@ -150,7 +146,10 @@ export class ViemChainAdapter implements ChainAdapter {
         };
     }
 
-    async fetchIntentEscrowed(id: bigint): Promise<IntentEscrowedRecord | null> {
+    async fetchIntentEscrowed(
+        id: bigint,
+        fromBlock: bigint = 0n,
+    ): Promise<IntentEscrowedRecord | null> {
         const event = MASP_ABI.find((a) => a.type === "event" && a.name === "IntentEscrowed") as
             | Extract<(typeof MASP_ABI)[number], { type: "event" }>
             | undefined;
@@ -159,7 +158,7 @@ export class ViemChainAdapter implements ChainAdapter {
             address: this._maspAddress,
             event,
             args: { id } as never,
-            fromBlock: 0n,
+            fromBlock,
             toBlock: "latest",
         });
         if (logs.length === 0) return null;
@@ -348,7 +347,6 @@ export class ViemChainAdapter implements ChainAdapter {
             hash,
             pollingInterval: 1000,
         });
-        if (!receipt) throw new TxMiningError("submitIntent: no receipt");
         const events = parseEventLogs({
             abi: MASP_ABI,
             eventName: "IntentEscrowed",

@@ -59,7 +59,7 @@ export async function executeSwap(wallet: Wallet, args: SwapOptions): Promise<Tr
         ...freshNoteRandomness(),
     };
 
-    const merkleRoot = (await wallet.noteSource.fetchPath(selection.notes[0].cm)).root;
+    const merkleRoot = wallet.treeStore.root();
 
     const [entryIn, entryOut] = await Promise.all([
         wallet.cfg.chain.fetchAsset(assetIn),

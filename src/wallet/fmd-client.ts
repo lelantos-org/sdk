@@ -40,6 +40,19 @@ export interface SubscriptionOut {
     active: boolean;
 }
 
+export interface CommitmentChunkEntry {
+    leafIndex: number;
+    cmHex: string;
+    cvDepX: string;
+    cvDepY: string;
+}
+
+export interface CommitmentChunkOut {
+    chunkId: number;
+    entries: CommitmentChunkEntry[];
+    isComplete: boolean;
+}
+
 export interface CreateSubscriptionInput {
     detectionKeyHex: string;
     gamma: number;
@@ -128,6 +141,12 @@ export class FmdClient {
             nullifiers,
         });
         return new Set(out.spent.map((h) => BigInt(h)));
+    }
+
+    async fetchCommitmentChunk(chunkId: number): Promise<CommitmentChunkOut> {
+        return this.getJson<CommitmentChunkOut>(`/v1/commitments/chunk/${chunkId}`, {
+            chainId: this.chainId,
+        });
     }
 
     listSubscriptions(): Promise<SubscriptionOut[]> {

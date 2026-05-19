@@ -4,6 +4,7 @@ import type { ChainAdapter } from "../chain/adapter.js";
 import type { ProverPaths } from "../prover/snarkjs.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
+import type { TreeStore } from "./tree-store.js";
 
 /// Default `NoteSource` strategy. `full` → `/v1/notes` firehose;
 /// `matches` → server-side FMD-filtered `/v1/matches`. Ignored when
@@ -37,6 +38,8 @@ export interface WalletConfig {
     noteStore?: NoteStore;
     /// Defaults to fmd-webserver.
     noteSource?: NoteSource;
+    /// Defaults to a TreeStore backed by fmd-webserver commitment chunks.
+    treeStore?: TreeStore;
     /// Default `{ kind: "full" }`.
     syncStrategy?: SyncStrategy;
     /// Defaults to HTTP relayer.
