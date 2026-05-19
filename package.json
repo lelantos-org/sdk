@@ -130,7 +130,7 @@
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
   },
   "peerDependencies": {
-    "@lelantos-org/circuits": "0.5.1",
+    "@lelantos-org/circuits": "0.6.4",
     "snarkjs": "^0.7.4",
     "viem": "^2.49.3"
   },
