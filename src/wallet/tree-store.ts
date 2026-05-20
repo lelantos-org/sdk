@@ -4,25 +4,49 @@
 // Leaf hash: Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) — matches the server.
 // Chunk size: 1024 (power of 4, aligns to quaternary tree levels).
 // Complete chunks are CDN-immutable; only the last partial chunk is re-fetched.
+//
+// sync() fetches up to FETCH_WINDOW chunks in parallel (complete chunks are
+// served from CDN so parallel fetches are effectively free), then inserts
+// leaves sequentially to reconstruct the tree in order.
+//
+// Persistence: pass a `TreePersistence` implementation to `TreeStore.withPersistence`
+// to restore state across page loads. The SDK calls `load` once at startup and
+// `save` after every successful `sync()`. Implement two async methods; bring
+// your own storage backend (IndexedDB, localStorage, SQLite, …).
 
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleProof, MerkleTree } from "../crypto/merkle.js";
 import { TAG_LEAF } from "../crypto/tags.js";
-import type { CommitmentChunkEntry, FmdClient } from "./fmd-client.js";
+import type { CommitmentChunkEntry, CommitmentChunkOut, FmdClient } from "./fmd-client.js";
 
+const FETCH_WINDOW = 8;
 const CHUNK_SIZE = 1024;
 const TREE_DEPTH = 10;
 
 export interface TreeStoreState {
-    /// Merkle leaf field elements in insertion order (leaf_index = array index).
     leaves: bigint[];
-    /// Number of leaves synced (= leaves.length). Used as cursor.
     syncedCount: number;
+}
+
+/// Plug in any storage backend to persist the Merkle tree across page loads.
+///
+/// @example
+/// ```ts
+/// class MyPersistence implements TreePersistence {
+///     async load() { return JSON.parse(localStorage.getItem("tree") ?? "null"); }
+///     async save(state) { localStorage.setItem("tree", JSON.stringify(state)); }
+/// }
+/// const wallet = await Wallet.connect({ ..., treePersistence: new MyPersistence() });
+/// ```
+export interface TreePersistence {
+    load(): Promise<TreeStoreState | null>;
+    save(state: TreeStoreState): Promise<void>;
 }
 
 export class TreeStore {
     private tree: MerkleTree;
     private syncedCount = 0;
+    private persistence?: TreePersistence;
 
     constructor(
         private readonly P: Poseidon,
@@ -31,7 +55,20 @@ export class TreeStore {
         this.tree = new MerkleTree(P, TREE_DEPTH);
     }
 
-    /// Restore from a previously persisted state (e.g. IndexedDB).
+    /// Build a TreeStore and restore any previously persisted state.
+    /// Use this instead of `new TreeStore(...)` when you want persistence.
+    static async withPersistence(
+        P: Poseidon,
+        fmd: FmdClient,
+        persistence: TreePersistence,
+    ): Promise<TreeStore> {
+        const store = new TreeStore(P, fmd);
+        store.persistence = persistence;
+        const saved = await persistence.load();
+        if (saved) store.loadState(saved);
+        return store;
+    }
+
     loadState(state: TreeStoreState): void {
         this.tree = new MerkleTree(this.P, TREE_DEPTH);
         for (const leaf of state.leaves) {
@@ -40,35 +77,38 @@ export class TreeStore {
         this.syncedCount = state.syncedCount;
     }
 
-    /// Snapshot for persistence.
     saveState(): TreeStoreState {
-        return {
-            leaves: [...this.tree.leaves],
-            syncedCount: this.syncedCount,
-        };
+        return { leaves: [...this.tree.leaves], syncedCount: this.syncedCount };
     }
 
-    /// Fetch any new chunks since last sync and insert their leaves.
+    /// Fetch new chunks since last sync and insert their leaves, then persist.
+    ///
+    /// Maintains a sliding window of FETCH_WINDOW parallel requests. Results
+    /// are consumed in chunk-id order so tree insertion stays sequential. The
+    /// window is abandoned once an incomplete chunk is seen — at most
+    /// FETCH_WINDOW-1 speculative requests, each cheap (empty partial chunk).
     async sync(): Promise<void> {
-        let chunkId = Math.floor(this.syncedCount / CHUNK_SIZE);
+        let nextFetch = Math.floor(this.syncedCount / CHUNK_SIZE);
+        const inflight: Promise<CommitmentChunkOut>[] = [];
+
         for (;;) {
-            const chunk = await this.fmd.fetchCommitmentChunk(chunkId);
+            while (inflight.length < FETCH_WINDOW) {
+                inflight.push(this.fmd.fetchCommitmentChunk(nextFetch++));
+            }
+            const chunk = await inflight.shift()!;
             for (const entry of chunk.entries) {
                 if (entry.leafIndex < this.syncedCount) continue;
-                const leaf = this.computeLeaf(entry);
-                this.tree.insert(leaf);
+                this.tree.insert(this.computeLeaf(entry));
                 this.syncedCount = entry.leafIndex + 1;
             }
             if (!chunk.isComplete) break;
-            chunkId++;
         }
+
+        if (this.persistence) await this.persistence.save(this.saveState());
     }
 
-    /// Compute Merkle proof for `leafIndex`. Call `sync()` first if potentially stale.
     getPath(leafIndex: number): MerkleProof & { root: Field } {
-        const proof = this.tree.proof(leafIndex);
-        const root = this.tree.root();
-        return { ...proof, root };
+        return { ...this.tree.proof(leafIndex), root: this.tree.root() };
     }
 
     root(): Field {
@@ -77,9 +117,7 @@ export class TreeStore {
 
     private computeLeaf(entry: CommitmentChunkEntry): Field {
         const cm = hexToField(entry.cmHex);
-        const cvX = BigInt(entry.cvDepX);
-        const cvY = BigInt(entry.cvDepY);
-        return this.P.hash([TAG_LEAF, cm, cvX, cvY]);
+        return this.P.hash([TAG_LEAF, cm, BigInt(entry.cvDepX), BigInt(entry.cvDepY)]);
     }
 }
 

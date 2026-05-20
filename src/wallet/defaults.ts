@@ -23,7 +23,7 @@ import { WalletConfigError } from "./errors.js";
 import { FmdClient } from "./fmd-client.js";
 import { FmdMatchesNoteSource, FmdNoteSource, type NoteSource } from "./note-source.js";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
-import { TreeStore } from "./tree-store.js";
+import { type TreePersistence, TreeStore } from "./tree-store.js";
 
 /// Aggregate validation; collects every problem before throwing. Skips
 /// prover validation — `defaultProver` resolves bundled artifacts.
@@ -49,8 +49,12 @@ export function defaultNoteSource(fmd: FmdClient, cfg: WalletConfig, J: Jubjub):
     return new FmdNoteSource(fmd, J);
 }
 
-export function defaultTreeStore(fmd: FmdClient, P: Poseidon): TreeStore {
-    return new TreeStore(P, fmd);
+export function defaultTreeStore(
+    fmd: FmdClient,
+    P: Poseidon,
+    persistence?: TreePersistence,
+): Promise<TreeStore> | TreeStore {
+    return persistence ? TreeStore.withPersistence(P, fmd, persistence) : new TreeStore(P, fmd);
 }
 
 export function defaultSubmitter(cfg: WalletConfig): Submitter {

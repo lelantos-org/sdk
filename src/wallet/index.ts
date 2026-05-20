@@ -20,4 +20,6 @@ export type {
     WithdrawOptions,
     WithdrawResult,
 } from "./api.js";
+export type { TreePersistence, TreeStoreState } from "./tree-store.js";
+export { TreeStore } from "./tree-store.js";
 export { safePhase, Wallet } from "./wallet.js";

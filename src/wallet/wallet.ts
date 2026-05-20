@@ -188,7 +188,7 @@ export class Wallet implements WalletApi {
 
         const fmd = defaultFmdClient(cfg);
         const noteSource = cfg.noteSource ?? defaultNoteSource(fmd, cfg, J);
-        const treeStore = cfg.treeStore ?? defaultTreeStore(fmd, P);
+        const treeStore = cfg.treeStore ?? (await defaultTreeStore(fmd, P, cfg.treePersistence));
         const submitter = cfg.submitter ?? defaultSubmitter(cfg);
         const prover = cfg.prover ?? (await defaultProver(cfg));
         const selector = cfg.selector ?? new SfrtCoinSelector();

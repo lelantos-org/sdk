@@ -29,6 +29,7 @@ import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
 import type { CoinSelector } from "./selection.js";
 import { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
+import type { TreePersistence, TreeStore } from "./tree-store.js";
 
 /// Pick exactly one.
 export type ConnectKeyOptions =
@@ -81,6 +82,11 @@ export interface ConnectOptions {
 
     noteStore?: NoteStore;
     noteSource?: NoteSource;
+    /// Pre-built tree store. Use `treePersistence` instead for the common case.
+    treeStore?: TreeStore;
+    /// Persistence backend for the Merkle tree (e.g. IndexedDB in the browser).
+    /// The SDK restores state at startup and saves after every sync.
+    treePersistence?: TreePersistence;
     submitter?: Submitter;
     selector?: CoinSelector;
     scanner?: Scanner;
@@ -183,6 +189,8 @@ export async function connect(opts: ConnectOptions): Promise<WalletApi> {
             opts.proverArtifacts && !prover ? resolveArtifacts(opts.proverArtifacts) : undefined,
         noteStore: opts.noteStore,
         noteSource: opts.noteSource,
+        treeStore: opts.treeStore,
+        treePersistence: opts.treePersistence,
         submitter,
         prover,
         selector: opts.selector,
