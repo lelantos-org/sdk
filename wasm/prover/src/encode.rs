@@ -30,7 +30,9 @@ impl ProveOutput {
 }
 
 pub fn public_signals(witness: &[Fr], n_public: usize) -> Vec<String> {
-    witness.iter().skip(1).take(n_public).map(fr).collect()
+    let mut out = Vec::with_capacity(n_public);
+    out.extend(witness.iter().skip(1).take(n_public).map(fr));
+    out
 }
 
 fn fr(f: &Fr) -> String {

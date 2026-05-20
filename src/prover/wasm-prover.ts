@@ -87,6 +87,8 @@ async function loadBytes(path: string): Promise<Uint8Array> {
     return new Uint8Array(await res.arrayBuffer());
 }
 
+const _buildCache = new Map<string, Promise<WasmProver>>();
+
 export class WasmProver implements Prover {
     private constructor(
         private readonly session: ProverSession,
@@ -94,6 +96,18 @@ export class WasmProver implements Prover {
     ) {}
 
     static async build(paths: ProverPaths): Promise<WasmProver> {
+        const key = `${paths.zkeyPath}\0${paths.wasmPath}`;
+        const cached = _buildCache.get(key);
+        if (cached) return cached;
+        const p = WasmProver._doBuild(paths).catch((err) => {
+            _buildCache.delete(key);
+            throw err;
+        });
+        _buildCache.set(key, p);
+        return p;
+    }
+
+    private static async _doBuild(paths: ProverPaths): Promise<WasmProver> {
         const [Session, zkeyBytes, circuitWasm] = await Promise.all([
             loadProver(),
             loadBytes(paths.zkeyPath),

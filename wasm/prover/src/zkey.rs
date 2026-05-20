@@ -239,11 +239,11 @@ struct HeaderGroth {
 }
 
 impl HeaderGroth {
-    fn read<R: Read>(mut reader: &mut R) -> IoResult<Self> {
+    fn read<R: Read + Seek>(mut reader: &mut R) -> IoResult<Self> {
         let n8q = u32::deserialize_uncompressed(&mut reader)?;
-        skip(&mut reader, n8q as usize)?; // q
+        reader.seek(SeekFrom::Current(n8q as i64))?; // q
         let n8r = u32::deserialize_uncompressed(&mut reader)?;
-        skip(&mut reader, n8r as usize)?; // r
+        reader.seek(SeekFrom::Current(n8r as i64))?; // r
         let n_vars = u32::deserialize_uncompressed(&mut reader)? as usize;
         let n_public = u32::deserialize_uncompressed(&mut reader)? as usize;
         let domain_size = u32::deserialize_uncompressed(&mut reader)?;
@@ -255,12 +255,6 @@ impl HeaderGroth {
             vk,
         })
     }
-}
-
-fn skip<R: Read>(reader: &mut R, n: usize) -> IoResult<()> {
-    let mut buf = vec![0u8; n];
-    reader.read_exact(&mut buf)?;
-    Ok(())
 }
 
 /// snarkjs writes Fr coefficients pre-multiplied by R^2. `Fr::new_unchecked(bigint)` then
