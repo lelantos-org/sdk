@@ -210,17 +210,20 @@ export class Wallet implements WalletApi {
         limit?: number;
         onProgress?: (p: SyncProgress) => void;
     }): Promise<SyncResult> {
-        const result = await syncWallet(
-            {
-                J: this.J,
-                ivk: this.keys.ivk,
-                dk: this.keys.dk,
-                source: this.noteSource,
-                store: this.cache.store,
-                scanner: this.scanner,
-            },
-            opts ?? {},
-        );
+        const [result] = await Promise.all([
+            syncWallet(
+                {
+                    J: this.J,
+                    ivk: this.keys.ivk,
+                    dk: this.keys.dk,
+                    source: this.noteSource,
+                    store: this.cache.store,
+                    scanner: this.scanner,
+                },
+                opts ?? {},
+            ),
+            this.treeStore.sync(),
+        ]);
         await this.reconcileSpentOnChain();
         await this.cache.refresh();
         return result;

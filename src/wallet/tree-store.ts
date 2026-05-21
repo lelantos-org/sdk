@@ -71,9 +71,7 @@ export class TreeStore {
 
     loadState(state: TreeStoreState): void {
         this.tree = new MerkleTree(this.P, TREE_DEPTH);
-        for (const leaf of state.leaves) {
-            this.tree.insert(leaf);
-        }
+        this.tree.setLeaves(state.leaves);
         this.syncedCount = state.syncedCount;
     }
 
@@ -96,10 +94,10 @@ export class TreeStore {
                 inflight.push(this.fmd.fetchCommitmentChunk(nextFetch++));
             }
             const chunk = await inflight.shift()!;
-            for (const entry of chunk.entries) {
-                if (entry.leafIndex < this.syncedCount) continue;
-                this.tree.insert(this.computeLeaf(entry));
-                this.syncedCount = entry.leafIndex + 1;
+            const newEntries = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
+            if (newEntries.length > 0) {
+                this.tree.bulkInsert(newEntries.map((e) => this.computeLeaf(e)));
+                this.syncedCount = newEntries[newEntries.length - 1].leafIndex + 1;
             }
             if (!chunk.isComplete) break;
         }
