@@ -40,6 +40,7 @@ export async function executeWithdraw(
     );
 
     const ownAddr = decodeAddress(wallet.J, wallet.address);
+    await wallet.treeStore.sync();
     const inputs = await buildInputSlots(wallet.inputsCtx(), selection.notes, asset);
 
     const remainder = selection.sum - publicOut;

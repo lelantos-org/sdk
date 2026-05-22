@@ -33,6 +33,7 @@ export async function executeTransfer(
 
     const recipient = decodeAddress(wallet.J, args.to);
     const ownAddr = decodeAddress(wallet.J, wallet.address);
+    await wallet.treeStore.sync();
     const inputs = await buildInputSlots(wallet.inputsCtx(), selection.notes, asset);
 
     const changeValue = selection.sum - sendValue;

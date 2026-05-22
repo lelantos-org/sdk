@@ -32,6 +32,14 @@ export interface WalletApi {
     readonly scanner: Scanner;
     readonly selector: CoinSelector;
 
+    /// Pull encrypted notes only. Sufficient for balance display; does not sync the Merkle tree.
+    syncNotes(opts?: {
+        limit?: number;
+        onProgress?: (p: SyncProgress) => void;
+    }): Promise<SyncResult>;
+    /// Fetch new Merkle commitment chunks and rebuild the local tree. Required before spending.
+    syncTree(): Promise<void>;
+    /// Pull notes and sync the tree in parallel. Convenience wrapper around `syncNotes` + `syncTree`.
     sync(opts?: { limit?: number; onProgress?: (p: SyncProgress) => void }): Promise<SyncResult>;
     refresh(): Promise<void>;
     /// Block until every commitment in `cms` is in the local store,

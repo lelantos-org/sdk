@@ -204,26 +204,48 @@ export class Wallet implements WalletApi {
         });
     }
 
+    private async _syncNotes(opts?: {
+        limit?: number;
+        onProgress?: (p: SyncProgress) => void;
+    }): Promise<SyncResult> {
+        return syncWallet(
+            {
+                J: this.J,
+                ivk: this.keys.ivk,
+                dk: this.keys.dk,
+                source: this.noteSource,
+                store: this.cache.store,
+                scanner: this.scanner,
+            },
+            opts ?? {},
+        );
+    }
+
     /// Pull encrypted notes, trial-decrypt with `ivk + dk`, persist hits.
-    /// Idempotent — resumes from `lastIndex` cursor.
+    /// Idempotent — resumes from `lastIndex` cursor. Does not sync the tree.
+    async syncNotes(opts?: {
+        limit?: number;
+        onProgress?: (p: SyncProgress) => void;
+    }): Promise<SyncResult> {
+        const result = await this._syncNotes(opts);
+        await this.reconcileSpentOnChain();
+        await this.cache.refresh();
+        return result;
+    }
+
+    /// Fetch new Merkle commitment chunks and rebuild the local tree.
+    /// Idempotent — resumes from `syncedCount` cursor. Does not scan notes.
+    async syncTree(): Promise<void> {
+        await this.treeStore.sync();
+    }
+
+    /// Pull encrypted notes and sync the Merkle tree in parallel.
+    /// Convenience wrapper around `syncNotes` + `syncTree`.
     async sync(opts?: {
         limit?: number;
         onProgress?: (p: SyncProgress) => void;
     }): Promise<SyncResult> {
-        const [result] = await Promise.all([
-            syncWallet(
-                {
-                    J: this.J,
-                    ivk: this.keys.ivk,
-                    dk: this.keys.dk,
-                    source: this.noteSource,
-                    store: this.cache.store,
-                    scanner: this.scanner,
-                },
-                opts ?? {},
-            ),
-            this.treeStore.sync(),
-        ]);
+        const [result] = await Promise.all([this._syncNotes(opts), this.treeStore.sync()]);
         await this.reconcileSpentOnChain();
         await this.cache.refresh();
         return result;

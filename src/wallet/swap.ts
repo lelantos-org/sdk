@@ -42,6 +42,7 @@ export async function executeSwap(wallet: Wallet, args: SwapOptions): Promise<Tr
 
     const ownAddr = decodeAddress(wallet.J, wallet.address);
     const bRecipient = decodeAddress(wallet.J, args.bRecipient ?? wallet.address);
+    await wallet.treeStore.sync();
     const inputs = await buildInputSlots(wallet.inputsCtx(), selection.notes, assetIn);
 
     const remainder = selection.sum - publicOut;
