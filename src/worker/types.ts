@@ -2,11 +2,10 @@
 //
 // One `WorkerLike` for the whole SDK.
 //
-// Members are declared with METHOD syntax, not property-with-arrow, on
-// purpose: method parameters stay bivariant under `strictFunctionTypes`,
-// which is what lets one interface accept both a DOM `Worker` (whose
-// transfer list is `Transferable[]`) and a `node:worker_threads` Worker
-// (`TransferListItem[]`) without falling back to `any`.
+// Members use method syntax rather than property-with-arrow: method
+// parameters stay bivariant under `strictFunctionTypes`, which lets one
+// interface accept both a DOM `Worker` (transfer list `Transferable[]`) and a
+// `node:worker_threads` Worker (`TransferListItem[]`) without an `any`.
 
 /**
  * Minimal worker surface. Satisfied by a DOM `Worker`, a
@@ -68,9 +67,9 @@ export interface MethodSpec {
 /**
  * Per-domain method table: maps a method name to its params and result.
  *
- * Declare domain tables as plain types, WITHOUT `extends MethodMap` — the
+ * Declare domain tables as plain types, without `extends MethodMap`: the
  * generic constraint checks them either way, and inheriting the index
- * signature would widen every handler's parameter to `unknown`:
+ * signature would widen every handler's parameter to `unknown`.
  *
  * ```ts
  * type ScannerMethods = {

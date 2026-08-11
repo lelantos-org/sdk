@@ -12,9 +12,9 @@ type TestMethods = {
 };
 
 /**
- * In-memory worker double. No real Worker is spawned: every bug these
- * transports have ever had lives in the correlation logic, and a real
- * spawn is flaky across Node/browser under `pool: "forks"`.
+ * In-memory worker double. No real Worker is spawned: these tests target the
+ * correlation logic, and a real spawn is flaky across Node/browser under
+ * `pool: "forks"`.
  */
 class FakeWorker implements WorkerLike {
     onmessage: ((ev: { data: unknown }) => void) | null = null;
@@ -74,9 +74,9 @@ describe("createWorkerRpc", () => {
         expect(await b).toBe(20);
     });
 
-    // Regression for the scanner pool's save/replace/restore of
-    // `worker.onmessage`: two concurrent calls clobbered each other's
-    // handler chain, so one of them never settled.
+    // The client holds one persistent `onmessage` handler and correlates by
+    // id. A per-call save/replace/restore of the handler would let two
+    // concurrent calls clobber each other, leaving one unsettled.
     it("settles both of two concurrent calls on one worker", async () => {
         const w = new FakeWorker();
         const c = rpc(w);

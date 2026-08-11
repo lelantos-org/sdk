@@ -8,10 +8,9 @@
 //   ./chain ./permit2 ./prover ./relayer ./fmd-server ./quoter ./sync
 //   ./wallet ./presets ./log ./networks ./errors
 //
-// Every name is forwarded explicitly, and only from a domain barrel — never
-// a leaf module. `export *` is banned repo-wide: `package.json#exports` has
+// Every name is forwarded explicitly, and only from a domain barrel — never a
+// leaf module. `export *` is banned repo-wide, and `package.json#exports` has
 // no wildcard, so a symbol is public if and only if a barrel forwards it.
-// Barrel discipline IS the public-API control.
 //
 // Sections follow the tier ladder (core → crypto → domain → protocol →
 // adapters → builders → wallet), so ordering drift is mechanically visible.
@@ -70,6 +69,7 @@ export {
     buildNoteCommitment,
     buildNullifier,
     buildNullifierFromNsk,
+    deriveSubscriptionToken,
     type Field,
     fromLeBytes,
     Jubjub,
@@ -114,6 +114,7 @@ export {
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,
     fmdTest,
+    subscriptionTokenToHex,
 } from "./fmd/index.js";
 
 // ── notes ────────────────────────────────────────────────────────────────
@@ -174,12 +175,16 @@ export {
 // ── services ─────────────────────────────────────────────────────────────
 export { RelayerClient } from "./services/relayer/index.js";
 export {
+    type CommitmentChunkEntry,
+    type CommitmentChunkOut,
     type CreateSubscriptionInput,
     FmdClient,
     type FmdMatchOut,
     type FmdNoteOut,
-    type FmdPath,
     type FmdTreeState,
+    GAMMA_MAX,
+    GAMMA_MIN,
+    type NullifierChunkOut,
     type SubscriptionOut,
 } from "./services/fmd-server/index.js";
 export {
@@ -235,6 +240,9 @@ export {
     type NotesFilter,
     type NoteSource,
     type NoteStore,
+    type NullifierPersistence,
+    NullifierStore,
+    type NullifierStoreState,
     type OnPhase,
     parseAmount,
     type SelectionResult,

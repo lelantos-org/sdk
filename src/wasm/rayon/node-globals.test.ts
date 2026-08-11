@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { installWorkerGlobals, withWorkerGlobals } from "./node-globals.js";
 
-// Regression: the previous polyfill installed `self`, `addEventListener`,
-// `removeEventListener` and `postMessage` on globalThis and never removed
-// them. After the WASM prover loaded once, the Node main thread answered
-// yes to the conventional worker-context check —
+// The stubs (`self`, `addEventListener`, `removeEventListener`,
+// `postMessage`) must not outlive the pkg module load. Left on globalThis they
+// make the Node main thread answer yes to the conventional worker-context
+// check —
 //   typeof self !== "undefined" && typeof postMessage === "function"
 // — for the rest of the process, for every library in it.
 

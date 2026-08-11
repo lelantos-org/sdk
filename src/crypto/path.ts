@@ -1,11 +1,10 @@
 // Merkle path recomputation — the verification counterpart to
 // `MerkleTree.proof()`.
 //
-// This is a second, independent implementation of the same quaternary node
-// hashing as `merkle.ts`. That is deliberate (one builds, one checks), and
-// `path.test.ts` cross-validates the two against each other: a divergence
-// here would mean the wallet proves membership against a root the chain
-// never had.
+// A second, independent implementation of the same quaternary node hashing as
+// `merkle.ts`: one builds, one checks. `path.test.ts` cross-validates the two,
+// since a divergence would let the wallet prove membership against a root the
+// chain never held.
 
 import type { Field, Poseidon } from "./poseidon.js";
 import { TAG_MERKLE } from "./tags.js";
@@ -41,11 +40,8 @@ export interface PathCheck {
 }
 
 /**
- * Check a path against the set of roots the chain accepts.
- *
- * Returns the computed root alongside the verdict: a bare `false` gives a
- * caller nothing to debug with, and this is the check that stands between a
- * wallet and an unspendable note.
+ * Check a path against the set of roots the chain accepts. Returns the
+ * computed root alongside the verdict so a rejection is diagnosable.
  */
 export async function verifyPath(
     P: Poseidon,

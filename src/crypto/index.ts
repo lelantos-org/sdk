@@ -7,7 +7,14 @@ export {
 export { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
 export type { NoteCommitInput } from "./commit.js";
 export { buildNoteCommitment } from "./commit.js";
-export { deriveDk, deriveIvk, deriveNk, derivePk, derivePkFromIvk } from "./derive.js";
+export {
+    deriveDk,
+    deriveIvk,
+    deriveNk,
+    derivePk,
+    derivePkFromIvk,
+    deriveSubscriptionToken,
+} from "./derive.js";
 export type { Point } from "./jubjub.js";
 export { H_BASE, Jubjub } from "./jubjub.js";
 export {
@@ -33,4 +40,5 @@ export {
     TAG_NK,
     TAG_PK,
     TAG_RHO,
+    TAG_SUB_TOKEN,
 } from "./tags.js";

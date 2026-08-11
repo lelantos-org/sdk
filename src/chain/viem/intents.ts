@@ -93,8 +93,8 @@ async function sendAndExtractIntentId(
         logs: receipt.logs,
     });
     if (events.length === 0) {
-        // The hash was in scope and dropped before: without it the caller
-        // cannot inspect a transaction that did mine.
+        // Carry the hash: the transaction mined, so the caller needs it to
+        // inspect what happened.
         throw new TxMiningError("submitIntent: IntentEscrowed log not found", { txHash: hash });
     }
     return { txHash: hash, intentId: (events[0].args as { id: bigint }).id };

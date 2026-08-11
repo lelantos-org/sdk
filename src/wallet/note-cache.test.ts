@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { awaitCommitments } from "./note-cache.js";
 import type { StoredNote } from "./note-store.js";
 
-// The old version looped up to 30 times and then returned normally whether
-// or not the commitments had arrived, so "the indexer is behind" was
-// indistinguishable from success. Its internal sleep also resolved plainly
-// on abort, making a cancelled wait look like a completed one.
+// `awaitCommitments` must report which of the three outcomes it reached:
+// every commitment seen, the attempt cap exhausted, or the wait aborted.
+// Collapsing any two of them hides a lagging indexer or a cancelled wait
+// behind a plain return.
 
 function note(cm: string): StoredNote {
     return {

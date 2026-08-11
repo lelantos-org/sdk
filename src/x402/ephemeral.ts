@@ -6,10 +6,10 @@
 // operator's account, and recoverable from the same seed on any machine.
 //
 // Derivation mirrors `hexPrivateKeyToNsk` in `../keys/key-source.ts` — a
-// domain-tagged keccak — so it works from ANY `KeySource` (mnemonic, EIP-712
-// signature, raw nsk), not just mnemonics. Deriving *from* nsk also means
-// these keys are exactly as sensitive as the shielded wallet itself: whoever
-// holds nsk holds them.
+// domain-tagged keccak — so it works from any `KeySource` (mnemonic, EIP-712
+// signature, raw nsk), not just mnemonics. Deriving from nsk also makes these
+// keys exactly as sensitive as the shielded wallet: whoever holds nsk holds
+// them.
 
 import { keccak256 } from "viem";
 import { toLeBytes } from "../core/bytes.js";

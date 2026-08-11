@@ -64,9 +64,9 @@ export class WorkerPoolScanner implements Scanner {
     }
 
     /**
-     * Replace a dead worker. The scan that killed it is NOT retried: its
-     * input buffers were transferred and are now detached, so a resend would
-     * scan empty ciphertexts and report no hits.
+     * Replace a dead worker. The scan that killed it is not retried: its input
+     * buffers were transferred and are now detached, so a resend would scan
+     * empty ciphertexts and report no hits.
      */
     private recycle(index: number): void {
         log.warn("recycling scanner worker", { index });

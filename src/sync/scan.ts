@@ -78,9 +78,9 @@ export function scanNotes(
             hits.push({ ...payload, cm: inp.cm, leafIndex: inp.leafIndex });
             if (stats) stats.hits++;
         } catch (err) {
-            // One corrupt note must not abort a scan — but a decode failure
-            // after a VERIFIED ChaCha tag means the payload encoding has
-            // drifted, which is a protocol bug worth surfacing.
+            // One corrupt note must not abort a scan, but a decode failure
+            // after a verified ChaCha tag means the payload encoding has
+            // drifted — a protocol bug worth surfacing.
             if (stats) stats.decodeFailed++;
             if (log.enabled("debug")) {
                 log.debug("note decrypted but failed to decode", {

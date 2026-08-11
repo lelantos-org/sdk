@@ -10,7 +10,7 @@ export interface Scanner {
      *
      * There is no client-side FMD pre-filter: the note feed does not carry
      * `clue.R`, so one is not implementable here today. For FMD filtering
-     * use `syncStrategy: { kind: "matches", subscriptionId }`, which does it
+     * use `syncStrategy: { kind: "matches", token }`, which does it
      * server-side — trading some anonymity for bandwidth. See
      * `./worker/protocol.ts` for the full reasoning.
      */

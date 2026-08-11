@@ -1,15 +1,15 @@
 // Scanner worker wire types. Transport is `src/worker/` — this module owns
 // only the payload shapes and their codecs.
 //
-// NO CLIENT-SIDE FMD PRE-FILTER
+// No client-side FMD pre-filter
 // -----------------------------
 // The protocol carries no detection key or per-input clue: `/v1/notes` does
 // not return `clue.R`, so the worker cannot FMD-reject before trial-decrypt.
-// Adding one needs a wire change on fmd-webserver and is not clearly a win —
-// γ=5 with early exit costs ~2 Baby-Jubjub scalar muls plus two Poseidon-6
-// hashes per non-matching note, against one wasm call for trial-decrypt. FMD's
-// payoff is server-side bandwidth, which `FmdMatchesNoteSource`
-// (`syncStrategy: { kind: "matches" }`) already delivers.
+// Adding one would need a wire change on fmd-webserver, and the local saving
+// is marginal — γ=5 with early exit costs ~2 Baby-Jubjub scalar muls plus two
+// Poseidon-6 hashes per non-matching note, against one wasm call for
+// trial-decrypt. FMD's payoff is server-side bandwidth, which
+// `FmdMatchesNoteSource` (`syncStrategy: { kind: "matches" }`) delivers.
 
 import type { ScanHit, ScanInput } from "../scan.js";
 
@@ -96,11 +96,10 @@ export function decodeHit(w: WireScanHit): ScanHit {
 /**
  * Buffers to transfer rather than copy.
  *
- * ⚠️ These are the CALLER'S arrays, straight from `NoteSource.listNotes`.
+ * These are the caller's arrays, straight from `NoteSource.listNotes`.
  * Transferring detaches them, so a scan request consumes its inputs and can
  * never be re-sent. The pool must recycle a failed worker rather than retry
- * the request — a resend would scan zero-length ciphertexts and silently
- * report no hits.
+ * the request: a resend would scan zero-length ciphertexts and report no hits.
  */
 export function transferablesOf(inputs: WireScanInput[]): Transferable[] {
     const xs: Transferable[] = [];

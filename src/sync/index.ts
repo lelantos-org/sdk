@@ -1,7 +1,7 @@
 // Note scanning: the scanner port, the in-process implementation, and the
 // worker pool.
 //
-// `./worker/entry.ts` is NOT re-exported: it is the Worker bootstrap for
+// `./worker/entry.ts` is not re-exported: it is the Worker bootstrap for
 // `WorkerPoolScanner`, published as the `@lelantos-org/sdk/scanner-worker`
 // subpath. Re-exporting it would force every consumer to resolve worker
 // bootstrap glue at module load.

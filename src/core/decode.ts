@@ -44,6 +44,12 @@ export function str(v: unknown, path: string): string {
     return v;
 }
 
+/** Strict: `0`, `1`, `"true"` and `null` are all rejected. */
+export function bool(v: unknown, path: string): boolean {
+    if (typeof v !== "boolean") fail(path, "a boolean", v);
+    return v;
+}
+
 /** A safe integer. Rejects floats, NaN and anything past 2^53. */
 export function int(v: unknown, path: string): number {
     if (typeof v !== "number" || !Number.isSafeInteger(v)) fail(path, "a safe integer", v);
@@ -52,6 +58,7 @@ export function int(v: unknown, path: string): number {
 
 const DECIMAL = /^-?\d+$/;
 const HEX = /^0[xX][0-9a-fA-F]+$/;
+const HEX_BODY = /^[0-9a-fA-F]*$/;
 
 /**
  * A field element as a decimal string, a `0x`-hex string, or a JSON number.
@@ -66,11 +73,26 @@ export function bigintFrom(v: unknown, path: string): bigint {
     return fail(path, "a decimal or 0x-hex integer", v);
 }
 
+/**
+ * A hex integer, `0x`-prefixed or bare.
+ *
+ * Deliberately separate from `bigintFrom`: a bare-hex field whose value
+ * happens to be all decimal digits ("1234") is also a valid decimal string, so
+ * routing bare hex through `bigintFrom` decodes the wrong number silently.
+ * Use this wherever the server emits hex without the prefix.
+ */
+export function hexInt(v: unknown, path: string): bigint {
+    const s = str(v, path);
+    const body = s.startsWith("0x") || s.startsWith("0X") ? s.slice(2) : s;
+    if (body.length === 0 || !HEX_BODY.test(body)) fail(path, "a hex integer", v);
+    return BigInt(`0x${body}`);
+}
+
 /** Hex bytes, `0x`-prefixed or bare. Rejects odd length and non-hex. */
 export function hexBytes(v: unknown, path: string): Uint8Array {
     const s = str(v, path);
     const body = s.startsWith("0x") || s.startsWith("0X") ? s.slice(2) : s;
-    if (body.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(body)) {
+    if (body.length % 2 !== 0 || !HEX_BODY.test(body)) {
         fail(path, "an even-length hex string", v);
     }
     const out = new Uint8Array(body.length / 2);

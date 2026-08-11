@@ -6,12 +6,11 @@ import { BN254_FR, type Field } from "../core/field.js";
 import type { CircomPublicInputs } from "./input.js";
 
 /**
- * `flatten` is tolerant at its boundary: it accepts either decimal strings
- * (what the circuit witness carries) or native bigints (what callers
- * assembling PIs by hand find natural).
+ * `flatten` accepts either decimal strings (what the circuit witness carries)
+ * or native bigints (what callers assembling PIs by hand supply).
  *
- * DERIVED from `CircomPublicInputs` rather than re-declared, so the two
- * cannot drift and no cast is needed at the call site.
+ * Derived from `CircomPublicInputs` rather than re-declared, so the two cannot
+ * drift and no cast is needed at the call site.
  */
 type Loose<T> = T extends string
     ? string | bigint

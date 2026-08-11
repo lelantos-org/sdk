@@ -15,10 +15,9 @@ function treeOf(depth: number, count: number): MerkleTree {
     return t;
 }
 
-// `MerkleTree` builds paths, `rootFromPath` checks them. They are separate
-// implementations of the same quaternary hashing, and nothing previously
-// asserted they agree — a divergence would let the wallet prove membership
-// against a root the chain never held.
+// `MerkleTree` builds paths, `rootFromPath` checks them: separate
+// implementations of the same quaternary hashing. A divergence would let the
+// wallet prove membership against a root the chain never held.
 describe("rootFromPath vs MerkleTree.proof", () => {
     for (const depth of [2, 3, 10]) {
         it(`agrees at depth ${depth} for every leaf`, () => {

@@ -1,9 +1,8 @@
 // Tier 0. Nothing here imports anything else under `src/`.
 //
-// This is the floor the rest of the SDK stands on: field constants, byte and
-// hex codecs, randomness, fee arithmetic, the error taxonomy, and HTTP.
-// Anything duplicated across two domains belongs here rather than in either
-// of them.
+// Field constants, byte and hex codecs, randomness, fee arithmetic, the error
+// taxonomy, and HTTP. Anything shared by two domains belongs here rather than
+// in either of them.
 
 export { type RetryPolicy, retry, type SleepOutcome, sleep, withTimeout } from "./async.js";
 export { bitAt, packBits, unpackBits } from "./bits.js";
@@ -13,6 +12,7 @@ export {
     arr,
     arrN,
     bigintFrom,
+    bool,
     hexBytes,
     int,
     mapArr,

@@ -12,13 +12,12 @@
 // `@x402/mcp` — should register `shieldedExact` / `unshieldedExact` on it
 // directly instead; both are structurally `SchemeNetworkClient`.
 //
-// EXACTLY-ONCE
+// Exactly-once
 // ------------
-// A payment is attached to at most ONE retry per call. There is no loop: if
-// the paid request comes back 402 again, that is `payment-rejected`, not a
-// reason to pay twice. This wrapper also sits outside `createHttpClient`'s
-// retry machinery for the same reason — 5xx retries must never re-run a
-// payment.
+// A payment is attached to at most one retry per call. There is no loop: a
+// paid request that comes back 402 is `payment-rejected`, not a reason to pay
+// twice. This wrapper also sits outside `createHttpClient`'s retry machinery
+// for the same reason — 5xx retries must never re-run a payment.
 
 import { X402PaymentError } from "../core/errors.js";
 import { getLogger } from "../log/logger.js";
@@ -48,14 +47,13 @@ export interface PaymentRecord {
 
 export interface X402Options {
     /**
-     * Required. An agent that can spend without a ceiling is a footgun, so
-     * there is no default. Human decimal units, applied per asset.
+     * Required, so an autonomous payer always has a ceiling. Human decimal
+     * units, applied per asset.
      */
     budget: Budget;
     /**
-     * Also pay servers that only speak standard EVM `exact`. This unshields
-     * into a throwaway address — a real privacy downgrade — so it is off
-     * unless you ask for it.
+     * Also pay servers that only speak standard EVM `exact`. Unshields into a
+     * throwaway address, so it is off by default.
      */
     allowUnshielded?: boolean;
     /** Only pay these hostnames. Unset means any host. */
@@ -140,7 +138,7 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
         };
 
         // The payment is made. Record it before the retry so a network failure
-        // on the retry cannot under-count what was actually spent.
+        // on the retry cannot under-count what was spent.
         ledger.record(chosen.quote.amount, chosen.quote.asset.id);
 
         const paid = await doFetch(input, withPaymentHeader(init, payload));

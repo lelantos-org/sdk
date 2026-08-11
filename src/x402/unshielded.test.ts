@@ -78,8 +78,8 @@ describe("unshieldedExact", () => {
         expect(payload.authorization.validAfter).toBe("0");
         expect(payload.authorization.nonce).toMatch(/^0x[0-9a-f]{64}$/);
 
-        // The whole point of the domain fields: a signature computed against
-        // the wrong separator would still be well-formed but unusable.
+        // A signature computed against the wrong domain separator is still
+        // well-formed, so only verification catches it.
         const valid = await verifyTypedData({
             address: account.address,
             domain: {
@@ -221,8 +221,8 @@ describe("unshieldedExact.quote", () => {
     });
 
     it("prices a non-default asset id, which the selector must not second-guess", async () => {
-        // Regression: the selector used to re-derive the price itself against
-        // asset 1n, so any `assetIds` override silently skipped every offer.
+        // Re-deriving the price against asset 1n in the selector would make
+        // any `assetIds` override skip every offer.
         const OTHER = { ...USDC, id: 7n };
         const wallet = {
             keys: { nsk: NSK },

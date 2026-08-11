@@ -12,12 +12,12 @@
 // Update these constants only with a contract/relayer upgrade that bumps
 // the corresponding domain version.
 //
-// `computePiHash` was re-pinned when `DepositIntent` gained `rcvDepPad`
-// (the per-leaf deposit binding in tree_update_batch — see circuits §14).
-// The new value was cross-checked against a hand-rolled ABI encoder built
-// from the spec, not copied from `encodeAbiParameters` output. This REQUIRES
-// the matching `PubInputs.DepositIntent` struct change on-chain; until the
-// contract ships the extra field, `submitIntent` will revert.
+// The `computePiHash` vector covers a `DepositIntent` carrying `rcvDepPad`
+// (the per-leaf deposit binding in tree_update_batch — see circuits §14), and
+// is cross-checked against a hand-rolled ABI encoder built from the spec
+// rather than copied from `encodeAbiParameters` output. It requires the
+// matching `PubInputs.DepositIntent` struct on-chain; without that field,
+// `submitIntent` reverts.
 
 import { describe, expect, it } from "vitest";
 import { fiatShamirZ } from "./circuit/index.js";

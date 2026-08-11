@@ -17,14 +17,13 @@ import {
     serializeSubmitTransact,
 } from "./codec.js";
 
-// GOLDEN FIXTURES.
+// Golden fixtures.
 //
-// The same three DepositIntent fields go out as decimal STRINGS to
-// /v1/intent and as JSON NUMBERS inside /v1/swap, because the relayer's Rust
-// DTOs declare them differently (String vs u64, and serde's u64 rejects
-// strings). That looks like an inconsistency worth "cleaning up"; it is not,
-// and unifying it breaks one endpoint. These fixtures make such a change
-// fail here instead of in production.
+// The same three DepositIntent fields go out as decimal strings to /v1/intent
+// and as JSON numbers inside /v1/swap, because the relayer's Rust DTOs declare
+// them differently (String vs u64, and serde's u64 rejects strings). Unifying
+// the two encodings breaks one endpoint; these fixtures make that change fail
+// here rather than in production.
 
 const aux: TransactAux = {
     clueR: [1n, 2n],
@@ -145,8 +144,8 @@ describe("outbound encoding (golden)", () => {
         ]);
     });
 
-    // The real defect behind the split-brain: Number(bigint) truncates
-    // silently, and publicAssetId is an uncapped u64.
+    // `Number(bigint)` truncates silently, and publicAssetId is an uncapped
+    // u64.
     it("refuses to truncate a u64 field past 2^53 instead of corrupting it", () => {
         const big = BigInt(Number.MAX_SAFE_INTEGER) + 1n;
         const payload: SubmitTransactPayload = {

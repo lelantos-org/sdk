@@ -34,17 +34,15 @@ interface NodeWorkerLike {
 }
 
 /**
- * Parent CLI flags that a worker spawned from a FILE cannot accept.
+ * Parent CLI flags that a worker spawned from a file cannot accept.
  *
  * `node:worker_threads` defaults `execArgv` to the parent's, and a parent
  * running in eval mode (`node --input-type=module -e ...`) passes
- * `--input-type`, which makes every worker die instantly with
- * ERR_INPUT_TYPE_NOT_ALLOWED. The pool then silently degraded to
- * single-threaded — with logging off, there was nothing to see.
+ * `--input-type`, which kills every worker with ERR_INPUT_TYPE_NOT_ALLOWED and
+ * drops the pool to single-threaded.
  *
- * Everything else (`--max-old-space-size`, `--enable-source-maps`, ...) is
- * inherited as before; only the flags that are meaningless for a file entry
- * point are dropped.
+ * Only flags meaningless for a file entry point are dropped; everything else
+ * (`--max-old-space-size`, `--enable-source-maps`, ...) is inherited.
  */
 const INCOMPATIBLE_EXEC_ARGV = ["--input-type", "--eval", "-e", "--print", "-p"];
 
@@ -60,15 +58,14 @@ const spawned = new Set<NodeWorkerLike>();
 /**
  * Which pkg URL the installed global `Worker` is bound to.
  *
- * Keyed rather than a bare boolean: the previous `nodeRayonInstalled` flag
- * ignored the URL, so a second wasm module — or the same one re-configured
- * via `configureProverWasm` — silently kept spawning workers pointed at the
- * FIRST module's pkg. The failure mode was a 10s init timeout and a silent
- * drop to single-threaded.
+ * Keyed by URL rather than a bare installed flag: a second wasm module — or
+ * the same one re-configured via `configureProverWasm` — would otherwise keep
+ * spawning workers pointed at the first module's pkg, surfacing as a 10s init
+ * timeout and a drop to single-threaded.
  */
 let installedFor: string | null = null;
 
-/** Whatever occupied `globalThis.Worker` before we installed ours. */
+/** Whatever occupied `globalThis.Worker` before this adapter was installed. */
 let previousWorker: unknown;
 
 export async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> {
@@ -110,9 +107,8 @@ export async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> 
                 if (code !== 0) log.debug("rayon worker exited", { target, code });
             });
 
-            // unref AFTER attaching listeners: Node re-refs a MessagePort
-            // when a "message" listener is added, so unref'ing first is
-            // silently undone. (Measured: hasRef stayed true.)
+            // unref after attaching listeners: Node re-refs a MessagePort when
+            // a "message" listener is added, so unref'ing first is undone.
             this.w.unref();
         }
 

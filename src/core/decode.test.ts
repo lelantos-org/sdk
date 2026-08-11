@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { arr, arrN, bigintFrom, hexBytes, int, mapArr, obj, opt, str, tuple2 } from "./decode.js";
+import {
+    arr,
+    arrN,
+    bigintFrom,
+    bool,
+    hexBytes,
+    hexInt,
+    int,
+    mapArr,
+    obj,
+    opt,
+    str,
+    tuple2,
+} from "./decode.js";
 import { isWalletError } from "./errors.js";
 
 function pathOf(fn: () => unknown): string | undefined {
@@ -56,6 +69,41 @@ describe("bigintFrom", () => {
     });
 });
 
+describe("hexInt", () => {
+    it("accepts prefixed and bare hex", () => {
+        expect(hexInt("0x2a", "$")).toBe(42n);
+        expect(hexInt("0X2A", "$")).toBe(42n);
+        expect(hexInt("2a", "$")).toBe(42n);
+        expect(hexInt("dead", "$")).toBe(0xdeadn);
+    });
+
+    it("reads an all-digit bare-hex value as hex, not decimal", () => {
+        // The reason this exists rather than reusing `bigintFrom`: the server
+        // sends `commitmentHex` and `cmHex` without a `0x`, and a value made
+        // only of decimal digits is also a valid decimal string. `bigintFrom`
+        // would decode 4660 here and nothing downstream would notice.
+        expect(hexInt("1234", "$")).toBe(0x1234n);
+        expect(bigintFrom("1234", "$")).toBe(1234n);
+    });
+
+    it("rejects non-hex and empty instead of decoding to zero", () => {
+        expect(() => hexInt("", "$")).toThrow(/hex integer/);
+        expect(() => hexInt("0x", "$")).toThrow(/hex integer/);
+        expect(() => hexInt("0xzz", "$")).toThrow(/hex integer/);
+        expect(() => hexInt(42, "$")).toThrow(/expected a string/);
+    });
+});
+
+describe("bool", () => {
+    it("rejects the truthy stand-ins JSON often carries", () => {
+        expect(bool(true, "$")).toBe(true);
+        expect(bool(false, "$")).toBe(false);
+        expect(() => bool(1, "$")).toThrow(/expected a boolean/);
+        expect(() => bool("true", "$")).toThrow(/expected a boolean/);
+        expect(() => bool(null, "$")).toThrow(/got null/);
+    });
+});
+
 describe("hexBytes", () => {
     it("accepts prefixed and bare hex, including empty", () => {
         expect(hexBytes("0xdead", "$")).toEqual(new Uint8Array([0xde, 0xad]));
@@ -64,8 +112,8 @@ describe("hexBytes", () => {
     });
 
     it("rejects odd length and non-hex instead of emitting zero bytes", () => {
-        // The old inline decoder used parseInt per byte, so "zz" became NaN
-        // and then 0 — corrupt input decoded to plausible-looking data.
+        // Per-byte `parseInt` would turn "zz" into NaN and then 0, decoding
+        // corrupt input to plausible-looking data.
         expect(() => hexBytes("0xabc", "$")).toThrow(/even-length hex/);
         expect(() => hexBytes("zz", "$")).toThrow(/even-length hex/);
         expect(() => hexBytes(5, "$")).toThrow(/expected a string/);

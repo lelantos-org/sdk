@@ -6,19 +6,18 @@ import { describe, expect, it } from "vitest";
 
 const run = promisify(execFile);
 
-// Regression for the worst bug in the wasm layer: rayon workers park in
-// `Atomics.wait` inside wasm and hold a live MessagePort each, so ANY Node
-// process that touched the WASM prover hung forever instead of exiting.
-// `node script.mjs` had to call `process.exit()` to terminate.
+// Rayon workers park in `Atomics.wait` inside wasm and each hold a live
+// MessagePort, so without `unref()` any Node process that touches the WASM
+// prover never exits on its own.
 //
-// This has to run in a CHILD PROCESS — the whole assertion is "the event
-// loop drains", which cannot be observed from inside the process under
-// test, and vitest's own loop is not it.
+// The assertion is that the event loop drains, which cannot be observed from
+// inside the process under test — vitest's own loop is not it — so this runs
+// in a child process.
 //
-// It also has to run against `dist/`, because the fix depends on real
-// `node:worker_threads` semantics (a MessagePort re-refs when a "message"
-// listener is attached, which is why `unref()` must come after `on()`).
-// A fake worker would not catch a change in that behaviour.
+// It also runs against `dist/`, because the behaviour depends on real
+// `node:worker_threads` semantics: a MessagePort re-refs when a "message"
+// listener is attached, which is why `unref()` must come after `on()`. A fake
+// worker would not catch a change there.
 
 const DIST = fileURLToPath(new URL("../../../dist/prover/wasm-prover.js", import.meta.url));
 const built = existsSync(DIST);
@@ -28,7 +27,7 @@ describe.skipIf(!built)("rayon pool does not pin the Node event loop", () => {
         const script = `
             const { WasmProver } = await import(${JSON.stringify(DIST)});
             await WasmProver.preload();
-            // Deliberately no process.exit(): the point is that the loop drains.
+            // No process.exit(): the assertion is that the loop drains.
         `;
         const started = Date.now();
         const { stdout } = await run(process.execPath, ["--input-type=module", "-e", script], {

@@ -83,7 +83,7 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
         (acc, i) => acc + BigInt(args.built.producedNotes[i].value),
         0n,
     );
-    // Commitments any party will actually scan — drops zero-value pad
+    // Commitments any party will scan — drops zero-value pad
     // outputs. Receiver-side waiters should subset this against their own
     // address rather than waiting on the full `commitments` pair.
     const nonZeroCommitments: string[] = [];

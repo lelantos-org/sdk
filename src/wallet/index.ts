@@ -57,6 +57,13 @@ export {
     type StoredNote,
 } from "./note-store.js";
 export {
+    type NullifierPersistence,
+    NullifierStore,
+    type NullifierStoreState,
+    type NullifierSyncOpts,
+    type NullifierSyncSummary,
+} from "./nullifier-store.js";
+export {
     type CoinSelector,
     type ConsolidateFirst,
     type DirectSelection,

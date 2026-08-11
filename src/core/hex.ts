@@ -21,9 +21,7 @@ const HEX_BODY = /^[0-9a-fA-F]*$/;
 /**
  * Decode an optionally-`0x`-prefixed even-length hex string.
  *
- * @throws {TypeError} on odd length or a non-hex character. The previous
- * implementation used `parseInt` per byte, which silently produced `NaN`
- * (coerced to 0) for malformed input.
+ * @throws {TypeError} on odd length or a non-hex character.
  */
 export function hexToBytes(h: string): Uint8Array {
     const s = h.startsWith("0x") || h.startsWith("0X") ? h.slice(2) : h;

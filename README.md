@@ -1,18 +1,55 @@
-# # Lelantos SDK
+# Lelantos SDK
 
-Client SDK for the Lelantos MASP. Three layers:
+Client SDK for the Lelantos MASP: shielded deposits, transfers, withdrawals,
+note sync, and balances.
 
-- **`WalletApi` interface + `Wallet` class** — high-level, single-call deposit / transfer / withdraw / sync / balance. Use for app integration.
-- **Pluggable interfaces** — `ChainAdapter`, `NoteSource`, `Submitter`, `Prover`, `CoinSelector`, `NoteStore`. Swap any one for tests or alternative transports.
-- **Low-level primitives** — keys, FMD, note encryption, witness builders, prover wrapper. Use for tests, custom flows, advanced integrations.
+The package exposes three layers:
 
-Circuit-encoding and note-store-format helpers live at
-`@lelantos-org/sdk/internal`; they track the circuit rather than the wallet
-API and can move in any release.
+- **Wallet API** — `connect()` returns a `Wallet` implementing `WalletApi`, with
+  single-call `deposit` / `transfer` / `withdraw` / `sync` / `balance`.
+- **Pluggable interfaces** — `ChainAdapter`, `NoteSource`, `Submitter`,
+  `Prover`, `CoinSelector`, and `NoteStore` can each be replaced independently.
+- **Primitives** — keys, FMD, note encryption, witness builders, and the prover
+  wrapper, for custom flows.
 
-Browser-safe: SDK uses Web Crypto + `fetch`; no `node:*` imports. Works in Node 24+, modern browsers, Deno.
+Runtime requirements: Node 24+, modern browsers, or Deno. The SDK uses Web
+Crypto and `fetch`; it contains no `node:*` imports.
 
-> **Usage guide:** see [SDK.md](./SDK.md) for the full walkthrough — wallet creation, deposit/transfer/withdraw, sync + balance, custom storage, pluggables, browser, low-level primitives, and errors.
+Full walkthrough: [SDK.md](./SDK.md).
+
+## Installation
+
+The package is published to **GitHub Packages** with restricted access.
+Consumers need a token with the `read:packages` scope.
+
+1. Add `.npmrc` to the consuming repository:
+
+   ```
+   @lelantos-org:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
+   ```
+
+2. Export a token, then install:
+
+   ```bash
+   export NODE_AUTH_TOKEN=$(gh auth token)   # or a PAT with read:packages
+   npm install @lelantos-org/sdk @lelantos-org/circuits
+   ```
+
+   `@lelantos-org/circuits` is an optional peer dependency. When present,
+   `connect()` resolves prover artifacts automatically on Node. Browser callers
+   pass `proverArtifacts: { circuit, zkey }` to `connect()` instead; see
+   [SDK.md](./SDK.md) for the bundler asset-import pattern.
+
+3. In CI, pass the auto-provisioned `GITHUB_TOKEN`:
+
+   ```yaml
+   - run: npm ci
+     env:
+       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+   ```
+
+## Quickstart
 
 ```ts
 import { connect, formatAmount, parseAmount } from "@lelantos-org/sdk";
@@ -29,87 +66,45 @@ await wallet.sync();
 console.log(formatAmount(wallet.balance(weth.id), weth, { symbol: true }));
 ```
 
-Amounts are in **circuit units** (`tokenBaseUnits = amount * asset.scale`).
-`wallet.asset(id)` resolves `scale`/`symbol`/`decimals`; `parseAmount` and
-`formatAmount` convert to and from what a user types.
+## Amounts
 
-Install the companion `@lelantos-org/circuits` package alongside the SDK
-so `connect()` auto-resolves prover artifacts on Node:
-
-```bash
-npm install @lelantos-org/sdk @lelantos-org/circuits
-```
-
-Browser callers pass `proverArtifacts: { circuit, zkey }` to
-`connect()` explicitly — see SDK.md for the bundler asset-import
-pattern.
-
----
-
-## Installation
-
-Published privately on **GitHub Packages**. Consumers need a token with `read:packages` scope.
-
-1. Create `.npmrc` in the consuming repo:
-
-   ```
-   @lelantos-org:registry=https://npm.pkg.github.com
-   //npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
-   ```
-
-2. Export a token before installing:
-
-   ```bash
-   export NODE_AUTH_TOKEN=$(gh auth token)   # or a PAT with read:packages
-   npm install @lelantos-org/sdk
-   ```
-
-3. **CI** — pass the auto-provisioned `GITHUB_TOKEN` (same org grants read on packages):
-
-   ```yaml
-   - run: npm ci
-     env:
-       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-   ```
-
----
+All amounts are expressed in **circuit units**, where
+`tokenBaseUnits = amount * asset.scale`. `wallet.asset(id)` resolves an asset's
+`scale`, `symbol`, and `decimals`; `parseAmount` and `formatAmount` convert
+between circuit units and user-facing decimal strings.
 
 ## Address format
 
-- **HRP**: `sswap`
-- **Payload (96 B)**: `pk_d (32, packed Baby-Jubjub) || dk (32, LE Field) || pk (32, LE Field)`
-- **Encoding**: bech32m
+| Field    | Value                                                                      |
+| -------- | -------------------------------------------------------------------------- |
+| HRP      | `sswap`                                                                     |
+| Encoding | bech32m                                                                     |
+| Payload  | 96 B: `pk_d` (32 B, packed Baby-Jubjub) \|\| `dk` (32 B, LE field) \|\| `pk` (32 B, LE field) |
 
-`pk` is published so any sender can construct a valid note commitment for the recipient. Spend authority remains gated by `nsk` (private). See [contracts/src/MASP.sol](../contracts/src/MASP.sol).
-
----
-
-## Circuit parity
-
-`buildNoteCommitment` and `buildNullifier` in `crypto/` are byte-identical to the templates in `circuits/src/lib/note.circom`. `circuits/src/test/helpers.ts` re-exports from this SDK so circuit tests exercise the same code path.
-
----
-
-## Testing
-
-```bash
-npm test              # vitest suite across crypto, address, keys, fmd, permit2, selection, scanner
-npm run build         # tsc → dist/
-```
-
-CLI demo at [`../cli`](../cli) wires this SDK into a `lel` binary covering wallet management, scan, transact, chain debug.
-
----
-
-## Stability
-
-Pre-1.0. **No semver guarantees** until `v1.0.0`. Minor versions may include breaking API changes. Pin to an exact version (`"@lelantos-org/sdk": "0.1.0"`) and read the changelog before bumping.
+`pk` is published so that any sender can construct a valid note commitment for
+the recipient. Spend authority remains gated by `nsk`, which stays private.
 
 ## Browser CSP
 
-WASM modules are loaded via ESM dynamic `import()` calls; no
-`new Function` or `eval` is used. Allow `'wasm-unsafe-eval'` in your
-`script-src` directive; nothing else is required under the default CSP.
-If you bundle the SDK and your bundler rewrites the package's `#wasm/*`
-subpath imports, pass a `wasm: { … }` loader to `connect()` so the
-runtime resolves modules through your bundler's asset pipeline.
+WASM modules are loaded through ESM dynamic `import()`; neither `new Function`
+nor `eval` is used. Allow `'wasm-unsafe-eval'` in the `script-src` directive;
+nothing else is required under the default CSP.
+
+If a bundler rewrites the package's `#wasm/*` subpath imports, pass a
+`wasm: { … }` loader to `connect()` so the runtime resolves the modules through
+the bundler's asset pipeline.
+
+## Development
+
+```bash
+npm test          # vitest suite
+npm run build     # tsc → dist/
+npm run check     # biome lint + format
+npm run typecheck # tsc --noEmit, source and tests
+```
+
+## Stability
+
+Pre-1.0: no semantic-versioning guarantees apply before `v1.0.0`, and minor
+releases may contain breaking API changes. Pin an exact version and review the
+changelog before upgrading.

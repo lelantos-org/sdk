@@ -81,6 +81,8 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
         noteSource: opts.noteSource,
         treeStore: opts.treeStore,
         treePersistence: opts.treePersistence,
+        nullifierStore: opts.nullifierStore,
+        nullifierPersistence: opts.nullifierPersistence,
         submitter,
         prover,
         selector: opts.selector,

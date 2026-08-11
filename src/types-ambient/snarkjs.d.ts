@@ -1,17 +1,8 @@
 // Ambient types for `snarkjs`, which ships as untyped JavaScript.
 //
-// SCOPE: exactly the calls `prover/snarkjs.ts` makes, and nothing else.
-//
-// Nothing verifies these against the real package — they are a hand-written
-// assertion that `tsc` then trusts, so a signature change upstream compiles
-// clean and fails at runtime. That is inherent to ambient declarations, and
-// it is the reason to keep the surface as small as the code allows: every
-// member declared here is a claim someone has to keep true, and members the
-// SDK never calls are claims nobody will ever check.
-//
-// Previously this also declared `exportSolidityCallData`, `groth16.prove`,
-// `wtns.calculate` and `zKey.exportVerificationKey` — none of which the SDK
-// calls.
+// Scope: exactly the calls `prover/snarkjs.ts` makes. These declarations are
+// unverified against the real package, so an upstream signature change
+// compiles clean and fails at runtime. Keep the surface minimal.
 
 declare module "snarkjs" {
     export interface Groth16Proof {

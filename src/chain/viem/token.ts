@@ -66,8 +66,8 @@ export async function tokenApprove(
         args: [addr(spender), amount],
     });
     const hash = await ctx.signer.sendTransaction({ to: addr(token), data });
-    // Guarded: the tx is already broadcast, so a throwing callback here used
-    // to abort the flow and lose the hash of a tx that will still mine.
+    // Guarded: the tx is already broadcast, so a throwing callback must not
+    // abort the flow and lose the hash of a tx that will still mine.
     safeCall("onTxHash", onTxHash, hash);
     await waitTxReceipt(ctx, hash);
     return { txHash: hash };

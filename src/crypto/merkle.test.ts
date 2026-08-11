@@ -162,16 +162,13 @@ describe("MerkleTree", () => {
         // small for the tree aliases one level's key onto another's and
         // silently corrupts the root.
         //
-        // This is asserted on the key arithmetic rather than through a real
-        // tree on purpose: the old hardcoded 2^18 stride only collides once
-        // a level-1 index reaches 2^18, which needs >4^10 leaves. No unit
-        // test can allocate that, so a tree-level test would pass against
-        // the broken version and prove nothing.
-        // The invariant, not a sample: the stride must exceed every index
-        // reachable at any level, otherwise `level * stride + index` for one
-        // level lands inside the next level's range. Sampling a few indices
-        // per level misses this — the aliasing indices are precisely the
-        // multiples of the stride.
+        // Asserted on the key arithmetic rather than through a real tree:
+        // aliasing needs a level-1 index of at least the stride, which for a
+        // depth-10 stride means >4^10 leaves — more than a unit test can
+        // allocate. The assertion is the invariant, not a sample: the stride
+        // must exceed every index reachable at any level, otherwise
+        // `level * stride + index` for one level lands inside the next
+        // level's range.
         it("stride exceeds the widest reachable index at every level", () => {
             for (const depth of [4, 10, 12, 20, 25]) {
                 const stride = cacheKeyStride(depth);
@@ -184,16 +181,16 @@ describe("MerkleTree", () => {
             }
         });
 
-        it("the previous hardcoded 2^18 stride was correct at depth 10 and broken above", () => {
-            const OLD = 2 ** 18;
+        it("a stride fixed at 2^18 would hold at depth 10 and alias above it", () => {
+            const FIXED = 2 ** 18;
             // Depth 10: largest level-1 index is 4^9 - 1 = 2^18 - 1. Fits, just.
-            expect(4 ** 9).toBe(OLD);
-            expect(cacheKeyStride(10)).toBe(OLD);
+            expect(4 ** 9).toBe(FIXED);
+            expect(cacheKeyStride(10)).toBe(FIXED);
 
-            // Depth 11: level-1 indices run to 4^10 - 1, four times the old
+            // Depth 11: level-1 indices run to 4^10 - 1, four times that
             // stride, so (1, 2^18) collides head-on with (2, 0).
-            expect(4 ** 10).toBeGreaterThan(OLD);
-            expect(1 * OLD + OLD).toBe(2 * OLD + 0);
+            expect(4 ** 10).toBeGreaterThan(FIXED);
+            expect(1 * FIXED + FIXED).toBe(2 * FIXED + 0);
             expect(cacheKeyStride(11)).toBeGreaterThanOrEqual(4 ** 10);
         });
 

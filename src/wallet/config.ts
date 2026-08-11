@@ -5,16 +5,18 @@ import type { Prover, ProverPaths } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
+import type { NullifierPersistence, NullifierStore } from "./nullifier-store.js";
 import type { CoinSelector } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import type { TreePersistence, TreeStore } from "./tree-store.js";
 
 /**
  * Default `NoteSource` strategy. `full` → `/v1/notes` firehose;
- * `matches` → server-side FMD-filtered `/v1/matches`. Ignored when
+ * `matches` → server-side FMD-filtered `/v1/matches`, addressed by the
+ * capability token `FmdClient.createSubscription` returns once. Ignored when
  * `noteSource` is set.
  */
-export type SyncStrategy = { kind: "full" } | { kind: "matches"; subscriptionId: number };
+export type SyncStrategy = { kind: "full" } | { kind: "matches"; token: string };
 
 export interface WalletConfig {
     /** Bound into SNARK + FMD query. */
@@ -45,6 +47,10 @@ export interface WalletConfig {
      * page loads. Ignored when `treeStore` is provided directly.
      */
     treePersistence?: TreePersistence;
+    /** Defaults to a NullifierStore backed by fmd-webserver nullifier chunks. */
+    nullifierStore?: NullifierStore;
+    /** As `treePersistence`, for the spent set. Ignored when `nullifierStore` is set. */
+    nullifierPersistence?: NullifierPersistence;
     /** Default `{ kind: "full" }`. */
     syncStrategy?: SyncStrategy;
     /** Defaults to HTTP relayer. */
@@ -63,15 +69,15 @@ export interface WalletConfig {
 /**
  * `WalletConfig` after `connect()` has filled in every default.
  *
- * The distinction is load-bearing. `WalletConfig` is all-optional because a
- * caller may omit anything; `Wallet` then had eight getters of the form
- * `return this.cfg.x as T`, each asserting a default it could not see. With
- * the resolved type those casts are gone and the compiler checks the wiring.
+ * `WalletConfig` is all-optional because a caller may omit anything. Marking
+ * the resolved pluggables required here lets `Wallet` read them without a
+ * cast, so the compiler checks the wiring instead of an assertion.
  */
 export interface ResolvedWalletConfig extends WalletConfig {
     noteStore: NoteStore;
     noteSource: NoteSource;
     treeStore: TreeStore;
+    nullifierStore: NullifierStore;
     submitter: Submitter;
     prover: Prover;
     selector: CoinSelector;

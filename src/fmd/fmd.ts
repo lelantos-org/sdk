@@ -89,6 +89,19 @@ export function detectionKeyToHex(dk: FmdDetectionKey): string {
     return bytesToBareHex(detectionKeyToBytes(dk));
 }
 
+/**
+ * Encode a `deriveSubscriptionToken` output as the bare 32-byte hex that
+ * `POST /v1/subscriptions` and `GET /v1/matches` expect. LE-32, matching
+ * `detectionKeyToHex`.
+ *
+ * Not reduced mod `BABYJUB_SUBGROUP_ORDER`, unlike the detection scalars: the
+ * token is not a curve scalar but an opaque identifier the server hashes and
+ * compares, and reducing it would discard entropy.
+ */
+export function subscriptionTokenToHex(token: Field): string {
+    return bytesToBareHex(toLeBytes(token, FIELD_BYTES));
+}
+
 export function fmdGenDetectionKey(
     randomScalar: () => Field,
     gamma = FMD_DEFAULT_GAMMA,

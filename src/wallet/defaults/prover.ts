@@ -109,6 +109,6 @@ export async function buildConnectProver(
 }
 
 /**
- * Fill in every omitted pluggable, producing the config the `Wallet` actually
- * runs on. Single source of the defaulting rules.
+ * Fill in every omitted pluggable, producing the config the `Wallet` runs on.
+ * Single source of the defaulting rules.
  */

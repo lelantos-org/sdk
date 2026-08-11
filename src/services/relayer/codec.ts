@@ -1,20 +1,19 @@
 // Wire-format (de)serializers for the relayer HTTP protocol.
 //
-// OUTBOUND BIGINT ENCODING IS NOT UNIFORM, AND MUST NOT BE.
-//
-// The relayer's Rust DTOs disagree with each other about the same three
-// fields of the same struct:
+// Outbound bigint encoding is not uniform, and must not be made uniform: the
+// relayer's Rust DTOs declare the same three fields of the same struct
+// differently.
 //
 //   POST /v1/intent   DepositIntent.{chainId,publicAssetId,publicIn}
-//                     -> DECIMAL STRINGS (the DTO declares them String)
+//                     -> decimal strings (the DTO declares them String)
 //   POST /v1/swap     swap.intentD, same three fields
-//                     -> JSON NUMBERS   (the DTO declares them u64, and
+//                     -> JSON numbers   (the DTO declares them u64, and
 //                        serde's u64 deserializer rejects strings)
 //
-// Unifying these from the SDK side breaks one endpoint or the other. The
-// choice is explicit at every call site through `u64Num` and `decStr` rather
-// than a bare `Number(...)` or `.toString()`; `codec.test.ts` pins both
-// encodings with golden fixtures.
+// Unifying them from the SDK side breaks one endpoint or the other. The choice
+// is explicit at every call site through `u64Num` and `decStr` rather than a
+// bare `Number(...)` or `.toString()`; `codec.test.ts` pins both encodings
+// with golden fixtures.
 
 import { bigintFrom, hexBytes, int, mapArr, obj, tuple2 } from "../../core/decode.js";
 import { WireFormatError } from "../../core/errors.js";

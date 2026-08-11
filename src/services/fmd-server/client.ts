@@ -1,21 +1,30 @@
 // Typed fmd-webserver HTTP client.
 //
-// Backend hex inconsistency: /v1/path + /v1/tree-state return 0x-hex;
-// /v1/notes returns BARE hex (no 0x) for cm + ciphertext.
+// The server deliberately exposes no per-item lookups: there is no
+// `/v1/path/{cm}` and no "is this nullifier spent?" query, because either one
+// would tell the server (and every proxy log on the way) exactly which note a
+// caller is about to spend. Clients page the commitment and nullifier chunk
+// feeds instead and answer both questions locally — see `TreeStore` and
+// `NullifierStore`.
+//
+// Wire encoding stops here. Every response is validated through `core/decode`
+// and returned as domain values (`Field`, `Point`, `Uint8Array`), so a
+// malformed response raises a `WireFormatError` naming the offending JSON path
+// instead of a `TypeError` surfacing later inside a store.
+//
+// That validation is not cosmetic. The backend is inconsistent about the `0x`
+// prefix — tree state, nullifiers and clue bits carry it; note/match
+// commitments and ciphertexts and chunk commitments do not. Bare hex is
+// decoded with `hexInt`/`hexBytes` and never with `bigintFrom`, because a
+// bare-hex value that happens to be all decimal digits would otherwise decode
+// as decimal.
 
-import { bigintFrom, int, mapArr, obj } from "../../core/decode.js";
-import { fieldToBytes32 } from "../../core/hex.js";
+import { bigintFrom, bool, hexBytes, hexInt, int, mapArr, obj } from "../../core/decode.js";
 import { createJsonClient, type HttpClientOptions, type JsonClient } from "../../core/http.js";
-import type { Field } from "../../crypto/index.js";
-
-export interface FmdPath {
-    leafIndex: number;
-    pathElements: Field[][];
-    pathIndices: number[];
-    root: Field;
-}
+import type { Field, Point } from "../../crypto/index.js";
 
 export interface FmdTreeState {
+    chainId: number;
     leafCount: number;
     root: Field;
     frontier: Field[][];
@@ -23,135 +32,225 @@ export interface FmdTreeState {
 
 export interface FmdNoteOut {
     id: number;
+    chainId: number;
+    blockNumber: number;
     leafIndex: number;
-    commitmentHex: string; // BARE hex (no 0x)
-    ciphertextHex: string; // BARE hex (no 0x)
-    ephPubX: string; // decimal
-    ephPubY: string; // decimal
-    blockNumber?: number;
-    chainId?: number;
+    cm: Field;
+    /** First 2 ciphertext bytes as a big-endian u16. FMD bucket tag. */
+    clueBits: number;
+    ciphertext: Uint8Array;
+    /** Sender's ECDH ephemeral public point; feeds `decryptNote`. */
+    ephPub: Point;
 }
 
-/** Server-side FMD-filtered note. Wire field `note_id` normalised to `id`. */
+/** Server-side FMD-filtered note. Wire field `noteId` normalised to `id`. */
 export interface FmdMatchOut extends FmdNoteOut {}
 
+/**
+ * Result of `POST /v1/subscriptions`. Neither the token nor the detection key
+ * is echoed: the caller derives and supplies both.
+ *
+ * `created` is `false` when the token already had a subscription behind it
+ * and this call re-attached to it, as when a wallet re-derives after losing
+ * local state. That subscription's backfill is already under way or complete,
+ * so matches may be available immediately.
+ */
 export interface SubscriptionOut {
-    id: number;
-    detectionKeyHex: string;
     gamma: number;
     active: boolean;
+    created: boolean;
 }
 
 export interface CommitmentChunkEntry {
     leafIndex: number;
-    cmHex: string;
-    cvDepX: string;
-    cvDepY: string;
+    cm: Field;
+    /** Value-commitment point; hashed together with `cm` into the Merkle leaf. */
+    cvDep: Point;
 }
 
 export interface CommitmentChunkOut {
     chunkId: number;
     entries: CommitmentChunkEntry[];
+    /** `false` marks the tail chunk — the client stops paging here. */
     isComplete: boolean;
 }
+
+export interface NullifierChunkOut {
+    chunkId: number;
+    /** Ascending by insertion order. */
+    nullifiers: Field[];
+    isComplete: boolean;
+}
+
+/**
+ * γ sets the false-positive rate at `2^-γ`. Server-enforced range; it
+ * additionally caps γ against the current note count so a match set always
+ * keeps enough decoys, and rejects a `detectionKeyHex` that is not exactly
+ * `gamma * 32` bytes.
+ */
+export const GAMMA_MIN = 1;
+export const GAMMA_MAX = 16;
 
 export interface CreateSubscriptionInput {
     detectionKeyHex: string;
     gamma: number;
+    /**
+     * Capability token for `/v1/matches` and `DELETE /v1/subscriptions`,
+     * bare 32-byte hex. Build it with `deriveSubscriptionToken` +
+     * `subscriptionTokenToHex` — never from `dk` or the detection key, both
+     * of which are recoverable by senders and by the server.
+     */
+    tokenHex: string;
 }
+
+// ─── decoders ────────────────────────────────────────────────────────────────
+
+/** Curve points arrive as sibling decimal fields, `<prefix>X` and `<prefix>Y`. */
+function point(d: Record<string, unknown>, prefix: string, path: string): Point {
+    return [
+        bigintFrom(d[`${prefix}X`], `${path}.${prefix}X`),
+        bigintFrom(d[`${prefix}Y`], `${path}.${prefix}Y`),
+    ];
+}
+
+/** Shared by `/v1/notes` and `/v1/matches`, which differ only in the id field. */
+function note(raw: unknown, idField: "id" | "noteId", path: string): FmdNoteOut {
+    const d = obj(raw, path);
+    return {
+        id: int(d[idField], `${path}.${idField}`),
+        chainId: int(d.chainId, `${path}.chainId`),
+        blockNumber: int(d.blockNumber, `${path}.blockNumber`),
+        leafIndex: int(d.leafIndex, `${path}.leafIndex`),
+        cm: hexInt(d.commitmentHex, `${path}.commitmentHex`),
+        // A u16 bucket tag, so it always fits a JS number.
+        clueBits: Number(hexInt(d.clueBitsHex, `${path}.clueBitsHex`)),
+        ciphertext: hexBytes(d.ciphertextHex, `${path}.ciphertextHex`),
+        ephPub: point(d, "ephPub", path),
+    };
+}
+
+function treeState(raw: unknown): FmdTreeState {
+    const d = obj(raw, "$");
+    return {
+        chainId: int(d.chainId, "$.chainId"),
+        leafCount: int(d.leafCount, "$.leafCount"),
+        root: hexInt(d.rootHex, "$.rootHex"),
+        frontier: mapArr(d.frontierHex, "$.frontierHex", (lvl, p) => mapArr(lvl, p, hexInt)),
+    };
+}
+
+function commitmentChunk(raw: unknown): CommitmentChunkOut {
+    const d = obj(raw, "$");
+    return {
+        chunkId: int(d.chunkId, "$.chunkId"),
+        entries: mapArr(d.entries, "$.entries", (e, p) => {
+            const entry = obj(e, p);
+            return {
+                leafIndex: int(entry.leafIndex, `${p}.leafIndex`),
+                cm: hexInt(entry.cmHex, `${p}.cmHex`),
+                cvDep: point(entry, "cvDep", p),
+            };
+        }),
+        isComplete: bool(d.isComplete, "$.isComplete"),
+    };
+}
+
+function nullifierChunk(raw: unknown): NullifierChunkOut {
+    const d = obj(raw, "$");
+    return {
+        chunkId: int(d.chunkId, "$.chunkId"),
+        nullifiers: mapArr(d.nullifiers, "$.nullifiers", hexInt),
+        isComplete: bool(d.isComplete, "$.isComplete"),
+    };
+}
+
+function subscription(raw: unknown): SubscriptionOut {
+    const d = obj(raw, "$");
+    return {
+        gamma: int(d.gamma, "$.gamma"),
+        active: bool(d.active, "$.active"),
+        created: bool(d.created, "$.created"),
+    };
+}
+
+// ─── client ──────────────────────────────────────────────────────────────────
 
 export class FmdClient {
     private readonly json: JsonClient;
+    /** Pre-stringified: a path segment on the chunk feeds, a query param elsewhere. */
+    private readonly chainId: string;
 
-    constructor(
-        baseUrl: string,
-        private readonly chainId: bigint,
-        opts: HttpClientOptions = {},
-    ) {
-        // `chainId` rides every request; callers never pass it.
+    constructor(baseUrl: string, chainId: bigint, opts: HttpClientOptions = {}) {
+        this.chainId = String(chainId);
         this.json = createJsonClient(
             baseUrl,
             { timeout: "FMD_TIMEOUT", failure: "FMD_FAILED" },
-            { ...opts, defaultParams: { chainId: String(chainId) } },
+            opts,
         );
-    }
-
-    async fetchPath(cmHex: string): Promise<FmdPath> {
-        const raw = await this.json.get<unknown>(`/v1/path/${encodeURIComponent(cmHex)}`);
-        const d = obj(raw, "$");
-        return {
-            leafIndex: int(d.leafIndex, "$.leafIndex"),
-            pathElements: mapArr(d.pathElementsHex, "$.pathElementsHex", (lvl, p) =>
-                mapArr(lvl, p, bigintFrom),
-            ),
-            pathIndices: mapArr(d.pathIndices, "$.pathIndices", int),
-            root: bigintFrom(d.rootHex, "$.rootHex"),
-        };
     }
 
     async fetchTreeState(): Promise<FmdTreeState> {
-        const d = obj(await this.json.get<unknown>("/v1/tree-state"), "$");
-        return {
-            leafCount: int(d.leafCount, "$.leafCount"),
-            root: bigintFrom(d.rootHex, "$.rootHex"),
-            frontier: mapArr(d.frontierHex, "$.frontierHex", (lvl, p) =>
-                mapArr(lvl, p, bigintFrom),
-            ),
-        };
+        return treeState(
+            await this.json.get<unknown>("/v1/tree-state", { params: { chainId: this.chainId } }),
+        );
     }
 
-    listNotes(opts?: { limit?: number; after?: number }): Promise<FmdNoteOut[]> {
-        return this.json.get<FmdNoteOut[]>("/v1/notes", {
-            params: { limit: opts?.limit, after: opts?.after },
+    async listNotes(opts?: { limit?: number; after?: number }): Promise<FmdNoteOut[]> {
+        const raw = await this.json.get<unknown>("/v1/notes", {
+            params: { chainId: this.chainId, limit: opts?.limit, after: opts?.after },
         });
+        return mapArr(raw, "$", (row, p) => note(row, "id", p));
     }
 
-    /** Server-side FMD-filtered notes for a registered subscription. */
+    /**
+     * Server-side FMD-filtered notes for a subscription, addressed by the
+     * capability token from `createSubscription`.
+     */
     async listMatches(opts: {
-        subscription: number;
+        token: string;
         limit?: number;
         after?: number;
     }): Promise<FmdMatchOut[]> {
-        const rows = await this.json.get<Array<{ noteId: number } & Omit<FmdMatchOut, "id">>>(
-            "/v1/matches",
-            {
-                params: {
-                    subscription: opts.subscription,
-                    limit: opts.limit,
-                    after: opts.after,
-                },
-            },
-        );
-        return rows.map(({ noteId, ...rest }) => ({ id: noteId, ...rest }));
+        // The token is the whole authorisation, so nothing else — not even
+        // chainId — rides along; the subscription already pins the chain.
+        const raw = await this.json.get<unknown>("/v1/matches", {
+            params: { token: opts.token, limit: opts.limit, after: opts.after },
+        });
+        return mapArr(raw, "$", (row, p) => note(row, "noteId", p));
     }
 
-    /** Batch query on-chain spent-nullifier set. Server caps at 1024 per request. */
-    async spentSet(nfs: bigint[]): Promise<Set<bigint>> {
-        if (nfs.length === 0) return new Set();
-        const nullifiers = nfs.map(fieldToBytes32);
-        const out = obj(
-            await this.json.post<unknown>("/v1/spent", {
-                chainId: Number(this.chainId),
-                nullifiers,
-            }),
-            "$",
-        );
-        return new Set(mapArr(out.spent, "$.spent", bigintFrom));
-    }
-
+    /** Leaves `chunkId * 1024 .. +1024`. Complete chunks are immutable. */
     async fetchCommitmentChunk(chunkId: number): Promise<CommitmentChunkOut> {
-        return this.json.get<CommitmentChunkOut>(`/v1/commitments/chunk/${chunkId}`);
+        return commitmentChunk(
+            await this.json.get<unknown>(
+                `/v1/chains/${this.chainId}/commitments/chunks/${chunkId}`,
+            ),
+        );
     }
 
-    listSubscriptions(): Promise<SubscriptionOut[]> {
-        return this.json.get<SubscriptionOut[]>("/v1/subscriptions");
+    /**
+     * Spent nullifiers `chunkId * 1024 .. +1024` in insertion order. The whole
+     * set is paged down and filtered client-side — the server must never learn
+     * which nullifiers a wallet cares about.
+     */
+    async fetchNullifierChunk(chunkId: number): Promise<NullifierChunkOut> {
+        return nullifierChunk(
+            await this.json.get<unknown>(`/v1/chains/${this.chainId}/nullifiers/chunks/${chunkId}`),
+        );
     }
 
-    createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionOut> {
-        return this.json.post<SubscriptionOut>("/v1/subscriptions", input);
+    /**
+     * Idempotent under a stable `tokenHex`: a repeat with the same detection
+     * key and γ re-attaches to the existing subscription (`created: false`).
+     * A repeat with a *different* detection key is rejected 409 rather than
+     * repointing the row, which would hand this caller the match stream of
+     * whoever registered the token first.
+     */
+    async createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionOut> {
+        return subscription(await this.json.post<unknown>("/v1/subscriptions", input));
     }
 
-    async deleteSubscription(id: number): Promise<void> {
-        await this.json.del(`/v1/subscriptions/${id}`);
+    async deleteSubscription(token: string): Promise<void> {
+        await this.json.del(`/v1/subscriptions/${encodeURIComponent(token)}`);
     }
 }

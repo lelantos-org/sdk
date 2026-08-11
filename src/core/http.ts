@@ -1,19 +1,19 @@
 // Shared HTTP: AbortController timeout, exponential-backoff retry with
 // jitter, typed `NetworkError`, and a thin JSON layer on top.
 //
-// Every SDK HTTP-speaking client MUST consume these — do not reimplement
-// timeout/retry/backoff locally.
+// Every HTTP-speaking client in the SDK consumes these rather than
+// reimplementing timeout/retry/backoff locally.
 //
-// RETRY AND IDEMPOTENCY
+// Retry and idempotency
 // ---------------------
 // GET/HEAD retry freely. Non-idempotent requests (the submit endpoints)
-// carry a client-generated `Idempotency-Key` and only retry when
-// `retryOnSubmit` is on, which is the default.
+// carry a client-generated `Idempotency-Key` and retry only when
+// `retryOnSubmit` is on (the default).
 //
-// ⚠️ The key only prevents a duplicate spend if the relayer honors it. Until
-// that ships server-side, a relayer that broadcasts and *then* returns 5xx
-// can still be handed the same submission twice. Set `retryOnSubmit: false`
-// to trade that risk for surfacing transient 5xx to the caller.
+// The key prevents a duplicate spend only if the relayer honors it. Where it
+// does not, a relayer that broadcasts and then returns 5xx can be handed the
+// same submission twice; set `retryOnSubmit: false` to surface transient 5xx
+// to the caller instead.
 
 import { getLogger } from "../log/logger.js";
 import { retry, withTimeout } from "./async.js";
@@ -91,8 +91,8 @@ export function createHttpClient(
                 opts.timeoutMs ?? (idempotent ? DEFAULTS.timeoutMs : DEFAULTS.submitTimeoutMs);
             const allowRetry = idempotent || retryOnSubmit;
 
-            // One key for all attempts of this logical request — that is the
-            // whole point: the server must be able to recognise the repeat.
+            // One key for every attempt of a logical request, so the server
+            // can recognise the repeat.
             const request: RequestInit | undefined = idempotent
                 ? init
                 : { ...init, headers: { ...headersOf(init), "Idempotency-Key": idempotencyKey() } };
@@ -208,10 +208,19 @@ function idempotencyKey(): string {
 
 export type QueryParams = Record<string, string | number | boolean | undefined>;
 
+/**
+ * `headers` keeps per-request credentials out of the URL: proxies and browser
+ * history record a query string or path segment, but not a request header.
+ */
+export interface JsonRequestOptions {
+    params?: QueryParams;
+    headers?: Record<string, string>;
+}
+
 export interface JsonClient {
-    get<T>(path: string, opts?: { params?: QueryParams }): Promise<T>;
+    get<T>(path: string, opts?: JsonRequestOptions): Promise<T>;
     post<T>(path: string, body: unknown): Promise<T>;
-    del(path: string, opts?: { params?: QueryParams }): Promise<void>;
+    del(path: string, opts?: JsonRequestOptions): Promise<void>;
     /** Escape hatch for non-JSON responses. */
     readonly raw: HttpClient;
 }
@@ -251,9 +260,9 @@ export function createJsonClient(
 
     return {
         raw: http,
-        async get<T>(path: string, o?: { params?: QueryParams }): Promise<T> {
+        async get<T>(path: string, o?: JsonRequestOptions): Promise<T> {
             const target = url(path, o?.params);
-            return json<T>(await http.fetch(target), target);
+            return json<T>(await http.fetch(target, { headers: o?.headers }), target);
         },
         async post<T>(path: string, body: unknown): Promise<T> {
             const target = url(path);
@@ -264,8 +273,8 @@ export function createJsonClient(
             });
             return json<T>(res, target);
         },
-        async del(path: string, o?: { params?: QueryParams }): Promise<void> {
-            await http.fetch(url(path, o?.params), { method: "DELETE" });
+        async del(path: string, o?: JsonRequestOptions): Promise<void> {
+            await http.fetch(url(path, o?.params), { method: "DELETE", headers: o?.headers });
         },
     };
 }

@@ -13,6 +13,7 @@ import type { Scanner } from "../../sync/scanner.js";
 import type { SyncStrategy } from "../config.js";
 import type { NoteSource } from "../note-source.js";
 import type { NoteStore } from "../note-store.js";
+import type { NullifierPersistence, NullifierStore } from "../nullifier-store.js";
 import type { CoinSelector } from "../selection.js";
 import type { Submitter } from "../submitter.js";
 import type { TreePersistence, TreeStore } from "../tree-store.js";
@@ -137,6 +138,10 @@ export interface ConnectExtraOptions {
      * The SDK restores state at startup and saves after every sync.
      */
     treePersistence?: TreePersistence;
+    /** Pre-built spent-nullifier store. Use `nullifierPersistence` instead for the common case. */
+    nullifierStore?: NullifierStore;
+    /** As `treePersistence`, for the locally mirrored spent-nullifier set. */
+    nullifierPersistence?: NullifierPersistence;
     submitter?: Submitter;
     selector?: CoinSelector;
     scanner?: Scanner;

@@ -4,10 +4,10 @@ import { BN254_FR } from "../core/field.js";
 import { auxDigest } from "./abi-hash.js";
 import type { AuxOutput } from "./deposit-intent.js";
 
-// `auxDigest` is the preimage of the final PolyEval coefficient. Its whole
-// purpose is to cover the two aux fields the clue slots do not: `ephPub` and
-// `ciphertext`. If a mutation to either left the digest unchanged, a relayer
-// could corrupt the encrypted-note payload while the proof still verified.
+// `auxDigest` is the preimage of the final PolyEval coefficient, and covers
+// the two aux fields the clue slots do not: `ephPub` and `ciphertext`. If a
+// mutation to either left the digest unchanged, a relayer could corrupt the
+// encrypted-note payload while the proof still verified.
 
 function aux(over: Partial<AuxOutput> = {}): AuxOutput {
     return {
@@ -61,8 +61,8 @@ describe("auxDigest", () => {
 });
 
 describe("flatten", () => {
-    // Slots 0..29 keep the indices they had before the aux digest was added, so
-    // an existing PubInputs.sol layout only has to append.
+    // The aux digest occupies the last slot, leaving indices 0..29 fixed, so a
+    // PubInputs.sol layout only has to append.
     it("puts out_aux_digest in the final slot, index 30", () => {
         const input = {
             merkle_root: 1n,

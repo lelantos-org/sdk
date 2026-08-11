@@ -11,6 +11,7 @@ import { SfrtCoinSelector } from "../selection.js";
 import {
     defaultFmdClient,
     defaultNoteSource,
+    defaultNullifierStore,
     defaultSubmitter,
     defaultTreeStore,
 } from "./pluggables.js";
@@ -20,6 +21,7 @@ export { type ChainAdapterInputs, defaultChainAdapter } from "./chain.js";
 export {
     defaultFmdClient,
     defaultNoteSource,
+    defaultNullifierStore,
     defaultSubmitter,
     defaultTreeStore,
 } from "./pluggables.js";
@@ -36,6 +38,8 @@ export async function resolveConfig(
         noteStore: cfg.noteStore ?? new InMemoryNoteStore(),
         noteSource: cfg.noteSource ?? defaultNoteSource(fmd, cfg, deps.J),
         treeStore: cfg.treeStore ?? (await defaultTreeStore(fmd, deps.P, cfg.treePersistence)),
+        nullifierStore:
+            cfg.nullifierStore ?? (await defaultNullifierStore(fmd, cfg.nullifierPersistence)),
         submitter: cfg.submitter ?? defaultSubmitter(cfg),
         prover: cfg.prover ?? (await defaultProver(cfg)),
         selector: cfg.selector ?? new SfrtCoinSelector(),

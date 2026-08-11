@@ -6,6 +6,7 @@ import type { Jubjub } from "../../crypto/jubjub.js";
 import { FmdClient } from "../../services/fmd-server/client.js";
 import type { WalletConfig } from "../config.js";
 import { FmdMatchesNoteSource, FmdNoteSource, type NoteSource } from "../note-source.js";
+import { type NullifierPersistence, NullifierStore } from "../nullifier-store.js";
 import { HttpRelayerSubmitter, type Submitter } from "../submitter.js";
 import { type TreePersistence, TreeStore } from "../tree-store.js";
 
@@ -15,7 +16,7 @@ export function defaultFmdClient(cfg: WalletConfig): FmdClient {
 
 export function defaultNoteSource(fmd: FmdClient, cfg: WalletConfig, J: Jubjub): NoteSource {
     if (cfg.syncStrategy?.kind === "matches") {
-        return new FmdMatchesNoteSource(fmd, J, cfg.syncStrategy.subscriptionId);
+        return new FmdMatchesNoteSource(fmd, J, cfg.syncStrategy.token);
     }
     return new FmdNoteSource(fmd, J);
 }
@@ -26,6 +27,13 @@ export function defaultTreeStore(
     persistence?: TreePersistence,
 ): Promise<TreeStore> | TreeStore {
     return persistence ? TreeStore.withPersistence(P, fmd, persistence) : new TreeStore(P, fmd);
+}
+
+export function defaultNullifierStore(
+    fmd: FmdClient,
+    persistence?: NullifierPersistence,
+): Promise<NullifierStore> | NullifierStore {
+    return persistence ? NullifierStore.withPersistence(fmd, persistence) : new NullifierStore(fmd);
 }
 
 export function defaultSubmitter(cfg: WalletConfig): Submitter {

@@ -54,8 +54,8 @@ interface Pending {
 /**
  * Wrap a worker in a typed request/response client.
  *
- * ⚠️ Buffers passed via `opts.transfer` are DETACHED — the caller must not
- * touch them afterwards, and a transferred request can never be re-sent.
+ * Buffers passed via `opts.transfer` are detached: the caller must not touch
+ * them afterwards, and a transferred request can never be re-sent.
  */
 export function createWorkerRpc<M extends MethodMap>(
     worker: WorkerLike,

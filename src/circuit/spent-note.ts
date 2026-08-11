@@ -51,8 +51,8 @@ export interface DummyBlinders {
 //
 // nf = Poseidon(TAG_NF, nk, rho, cm) with nk = Poseidon(TAG_NK, 0); fresh `rho`
 // keeps nf distinct from prior dummies and any real spend. `cm` must be the
-// commitment SpentNote actually recomputes from the dummy's (zero) fields —
-// the circuit feeds that into the nullifier, so a placeholder 0 would fail.
+// commitment SpentNote recomputes from the dummy's (zero) fields, since the
+// circuit feeds that into the nullifier; a placeholder 0 fails.
 //
 // `rho` has no default and `rcv` defaults to a fresh scalar because both are
 // publicly visible: a reused rho repeats the nullifier, and `cv = 0·gen +

@@ -255,10 +255,9 @@ function extractPubInputs(
     publicIn: bigint,
     publicOut: bigint,
 ): TransactPubInputs {
-    // The explicit re-parse IS the trust boundary between the prover witness
-    // (decimal strings) and the relayer wire format (bigints/points). With
-    // `CircomTransactInput` named, it needs no casts and no local coercers —
-    // there were three, two of them byte-identical.
+    // The explicit re-parse is the trust boundary between the prover witness
+    // (decimal strings) and the relayer wire format (bigints/points). Typing
+    // the witness as `CircomTransactInput` keeps it cast-free.
     const pair = (v: string[]): [bigint, bigint] => [BigInt(v[0]), BigInt(v[1])];
 
     return {

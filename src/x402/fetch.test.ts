@@ -17,7 +17,7 @@ const WETH: AssetInfo = {
     decimals: 18,
 };
 
-/** Only the members `x402()` actually touches. */
+/** Only the members `x402()` touches. */
 function stubWallet(overrides: Partial<WalletApi> = {}): WalletApi {
     const transfer = vi.fn(
         async (): Promise<TransferResult> => ({
@@ -229,9 +229,9 @@ describe("x402", () => {
     });
 
     it("pays an unshielded offer backed by a non-default asset id", async () => {
-        // Regression: the selector used to price eip155 offers itself against
-        // MASP asset 1n, so any `assetIds` override made every such offer get
-        // silently skipped. Pricing belongs to the mechanism.
+        // Pricing belongs to the mechanism: a selector that priced eip155
+        // offers itself against MASP asset 1n would skip every offer under an
+        // `assetIds` override.
         const USDC: AssetInfo = {
             id: 7n,
             token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",

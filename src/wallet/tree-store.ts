@@ -2,30 +2,17 @@
 // Merkle paths without revealing which note is being spent.
 //
 // Leaf hash: Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) — matches the server.
-// Chunk size: 1024 (power of 4, aligns to quaternary tree levels).
-// Complete chunks are CDN-immutable; only the last partial chunk is re-fetched.
-//
-// sync() fetches up to FETCH_WINDOW chunks in parallel (complete chunks are
-// served from CDN so parallel fetches are effectively free), then inserts
-// leaves sequentially to reconstruct the tree in order.
+// Paging over the chunk feed lives in `./chunk-feed.js`; this file only turns
+// the entries into leaves and keeps the tree in order.
 //
 // Persistence: pass a `TreePersistence` to `TreeStore.withPersistence`;
 // `load` runs once at startup, `save` after every successful `sync()`.
 
-import { hexToBigint } from "../core/hex.js";
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleProof, MerkleTree } from "../crypto/merkle.js";
 import { TAG_LEAF } from "../crypto/tags.js";
-import { getLogger } from "../log/logger.js";
-import type {
-    CommitmentChunkEntry,
-    CommitmentChunkOut,
-    FmdClient,
-} from "../services/fmd-server/client.js";
-
-const FETCH_WINDOW = 8;
-const CHUNK_SIZE = 1024;
-const TREE_DEPTH = 10;
+import type { CommitmentChunkEntry, FmdClient } from "../services/fmd-server/client.js";
+import { chunkOf, type PagingOpts, type PagingStop, pageChunks, TREE_DEPTH } from "./chunk-feed.js";
 
 export interface TreeStoreState {
     leaves: bigint[];
@@ -49,21 +36,16 @@ export interface TreePersistence {
     save(state: TreeStoreState): Promise<void>;
 }
 
-const log = getLogger("lelantos:wallet:tree");
-
-export interface TreeSyncOpts {
+export interface TreeSyncOpts extends PagingOpts {
     /** Per-chunk progress, so a stuck sync is observable. */
     onProgress?: (p: { chunkId: number; leaves: number; syncedCount: number }) => void;
-    /** Defaults to the tree's capacity in chunks — never unbounded. */
-    maxChunks?: number;
-    signal?: AbortSignal;
 }
 
 export interface TreeSyncSummary {
     chunksFetched: number;
     leavesAdded: number;
     syncedCount: number;
-    stoppedBy: "complete" | "maxChunks" | "aborted";
+    stoppedBy: PagingStop;
 }
 
 export class TreeStore {
@@ -102,59 +84,32 @@ export class TreeStore {
     }
 
     /**
-     * Fetch new chunks since last sync and insert their leaves, then persist.
-     *
-     * Maintains a sliding window of FETCH_WINDOW parallel requests. Results
-     * are consumed in chunk-id order so tree insertion stays sequential. The
-     * window is abandoned once an incomplete chunk is seen — at most
-     * FETCH_WINDOW-1 speculative requests, each cheap (empty partial chunk).
-     *
-     * The loop is bounded: the tree holds `arity^depth` leaves, so the chunk
-     * count has a hard ceiling even against a server that always answers
-     * `isComplete`.
+     * Fetch new chunks since last sync, insert their leaves, then persist.
+     * Idempotent — the tail chunk is re-fetched every sync, so entries already
+     * in the tree are dropped by leaf index rather than re-inserted.
      */
     async sync(opts: TreeSyncOpts = {}): Promise<TreeSyncSummary> {
-        const maxChunks = opts.maxChunks ?? Math.ceil(4 ** TREE_DEPTH / CHUNK_SIZE);
         const startCount = this.syncedCount;
-        let nextFetch = Math.floor(this.syncedCount / CHUNK_SIZE);
-        const inflight: Promise<CommitmentChunkOut>[] = [];
 
-        let chunksFetched = 0;
-        let stoppedBy: TreeSyncSummary["stoppedBy"] = "complete";
-
-        for (;;) {
-            if (opts.signal?.aborted) {
-                stoppedBy = "aborted";
-                break;
-            }
-            if (chunksFetched >= maxChunks) {
-                stoppedBy = "maxChunks";
-                log.warn("tree sync hit the chunk cap", {
-                    maxChunks,
+        const { chunksFetched, stoppedBy } = await pageChunks(
+            (chunkId) => this.fmd.fetchCommitmentChunk(chunkId),
+            chunkOf(this.syncedCount),
+            (chunk) => {
+                const fresh = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
+                if (fresh.length > 0) {
+                    this.tree.bulkInsert(fresh.map((e) => this.computeLeaf(e)));
+                    this.syncedCount = fresh[fresh.length - 1].leafIndex + 1;
+                }
+                opts.onProgress?.({
+                    chunkId: chunk.chunkId,
+                    leaves: fresh.length,
                     syncedCount: this.syncedCount,
                 });
-                break;
-            }
-            while (inflight.length < FETCH_WINDOW) {
-                inflight.push(this.fmd.fetchCommitmentChunk(nextFetch++));
-            }
-            const chunk = await inflight.shift()!;
-            chunksFetched++;
+            },
+            { maxChunks: opts.maxChunks, signal: opts.signal, feed: "commitments" },
+        );
 
-            const newEntries = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
-            if (newEntries.length > 0) {
-                this.tree.bulkInsert(newEntries.map((e) => this.computeLeaf(e)));
-                this.syncedCount = newEntries[newEntries.length - 1].leafIndex + 1;
-            }
-            opts.onProgress?.({
-                chunkId: chunk.chunkId,
-                leaves: newEntries.length,
-                syncedCount: this.syncedCount,
-            });
-            if (!chunk.isComplete) break;
-        }
-
-        if (this.persistence) await this.persistence.save(this.saveState());
+        await this.persistence?.save(this.saveState());
 
         return {
             chunksFetched,
@@ -173,7 +128,6 @@ export class TreeStore {
     }
 
     private computeLeaf(entry: CommitmentChunkEntry): Field {
-        const cm = hexToBigint(entry.cmHex);
-        return this.P.hash([TAG_LEAF, cm, BigInt(entry.cvDepX), BigInt(entry.cvDepY)]);
+        return this.P.hash([TAG_LEAF, entry.cm, entry.cvDep[0], entry.cvDep[1]]);
     }
 }

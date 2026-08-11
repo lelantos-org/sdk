@@ -68,11 +68,11 @@ export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]
  * array. Mirrors `PubInputs.sol`, which MUST recompute this from the aux
  * calldata rather than accept it as an input.
  *
- * The clue fields are already bound per output, but `ephPub` and `ciphertext`
- * were not: a relayer could leave the clue intact — proof still verifies, the
- * recipient's FMD scan still flags the note — while corrupting the payload, so
- * the recipient could not derive the ECDH secret and could not open a note
- * whose inputs are already spent.
+ * The clue fields are bound per output; this digest covers `ephPub` and
+ * `ciphertext` as well. Without it a relayer could leave the clue intact — the
+ * proof still verifies and the recipient's FMD scan still flags the note —
+ * while corrupting the payload, leaving the recipient unable to derive the
+ * ECDH secret or open a note whose inputs are already spent.
  *
  * Encoded as a dynamic `tuple[]`, so the length is part of the preimage and
  * arrays of different arity cannot collide.

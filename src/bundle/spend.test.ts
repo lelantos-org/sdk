@@ -9,10 +9,9 @@ import type { Prover } from "../prover/types.js";
 import type { InputSlot } from "./common.js";
 import { buildSpend, type SpendArgs } from "./spend.js";
 
-// `kind` is what routes the on-chain call: a transfer tagged
-// `withdrawNative` would be sent to MASP.withdrawNative and unwrap WETH to
-// a recipient. Collapsing the three builders into one made that a plain
-// argument, so it is asserted per kind here.
+// `kind` routes the on-chain call: a transfer tagged `withdrawNative` would
+// reach MASP.withdrawNative and unwrap WETH to a recipient. It is a plain
+// argument to the shared builder, so each kind is asserted here.
 
 /** Records the witness instead of proving; proving is minutes and 36 MB. */
 function recordingProver(): Prover & { last?: Record<string, unknown> } {

@@ -30,8 +30,7 @@ export {
     type ViewingKey,
     viewingKeyFromSpending,
 } from "./keys.js";
-// Flat, not `export * as metamask`: these work with any EIP-712 signer, and
-// the namespace was bypassed by the root barrel anyway.
+// Flat, not `export * as metamask`: these work with any EIP-712 signer.
 export {
     deriveNskFromSigner,
     LELANTOS_NSK_DOMAIN,

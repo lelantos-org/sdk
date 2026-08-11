@@ -1,21 +1,20 @@
 // The `eip155:<chainId>` payment mechanism — standard x402 `exact`.
 //
-// Opt-in, because it unshields. Its reason to exist is that almost every
-// x402 server in the wild speaks only EIP-3009 on a public chain; this pays
-// them from shielded funds by unshielding into a throwaway address first, so
-// the link is "some Lelantos withdrawal funded this address", not "the
-// operator's account paid this API".
+// Opt-in, because it unshields. Most deployed x402 servers speak only
+// EIP-3009 on a public chain, so this pays them from shielded funds by
+// unshielding into a throwaway address first: the observable link is "some
+// Lelantos withdrawal funded this address", not "the operator's account paid
+// this API".
 //
 // The ephemeral address never needs gas: EIP-3009 is a signed authorization
 // that the server's facilitator submits and pays for.
 //
-// LIMITS
+// Limits
 // ------
-// Only usable when the server offers a chain the MASP is deployed on AND an
-// EIP-3009-capable token (USDC and friends; most ERC-20s are not). There is
-// no bridging here — if the server wants USDC on Base and the pool is on
-// mainnet, this mechanism correctly refuses rather than silently doing
-// something else.
+// Usable only when the server offers both a chain the MASP is deployed on and
+// an EIP-3009-capable token (USDC and similar; most ERC-20s are not). No
+// bridging: if the server wants USDC on Base and the pool is on mainnet, this
+// mechanism refuses.
 
 import { privateKeyToAccount } from "viem/accounts";
 import { sleep } from "../core/async.js";
@@ -116,8 +115,8 @@ export function unshieldedExact(
 
         async quote(req: PaymentRequirements): Promise<PaymentQuote> {
             const { value, asset } = await read(req);
-            // Base units → circuit units, rounded up: a budget should never
-            // under-count what a payment will actually draw from the pool.
+            // Base units → circuit units, rounded up, so a budget never
+            // under-counts what a payment draws from the pool.
             return { amount: ceilDiv(value, asset.scale), asset };
         },
 

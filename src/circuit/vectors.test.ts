@@ -1,12 +1,12 @@
 // Cross-repo parity against the golden vectors shipped by
-// `@lelantos-org/circuits`, read straight out of the installed package via its
-// `./vectors` export — so there is no second copy to drift.
+// `@lelantos-org/circuits`, read out of the installed package via its
+// `./vectors` export so no second copy can drift.
 //
-// The circuits repo owns the circom, so it owns the layout. Neither repo
-// imports code from the other: they are held together by these vectors, whose
-// `y` values were read out of witnesses produced by the COMPILED circuit. So a
+// The circuits repo owns the circom, and so the layout. Neither repo imports
+// code from the other; the vectors are the contract between them, and their
+// `y` values come from witnesses produced by the compiled circuit. A
 // disagreement here means the SDK would build a witness the deployed verifier
-// rejects — not that two TypeScript files drifted.
+// rejects.
 //
 // Covered: the tag table, the empty-subtree ladder, key derivation, note
 // commitments, nullifiers, output rho, value commitments, leaf hashing, the
@@ -209,15 +209,14 @@ interface VectorFile<V> {
 // ── loading ──────────────────────────────────────────────────────────────
 
 // `@lelantos-org/circuits/vectors` resolves to the package's `vectors/index.json`;
-// the per-circuit files sit beside it and are exported individually. Resolution
-// (rather than a relative path) is what keeps the installed package the single
-// source: no vendored copy exists to fall out of date.
+// the per-circuit files sit beside it and are exported individually. Resolving
+// through the package, rather than a relative path, keeps the installed
+// package the single source.
 //
 // The package lives on GitHub Packages, so installing it needs a token with
 // `read:packages` — see the `NODE_AUTH_TOKEN` env in `.github/workflows/ci.yml`.
-// If it is missing, this suite throws at import rather than skipping: silent
-// absence would retire the only check that the SDK still agrees with the
-// deployed circuit.
+// Without it this suite throws at import rather than skipping, so the parity
+// check cannot go silently absent.
 const require_ = createRequire(import.meta.url);
 const VECTOR_DIR = new URL(".", pathToFileURL(require_.resolve("@lelantos-org/circuits/vectors")));
 

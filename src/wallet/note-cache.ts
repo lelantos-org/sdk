@@ -32,12 +32,12 @@ export interface AwaitCommitmentsResult {
 /**
  * Poll until every commitment in `cms` appears in `read()`.
  *
- * Returns a STATUS rather than void, so "the indexer is behind" and an
- * aborted wait are both distinguishable from success.
+ * Returns a status rather than void, so a lagging indexer and an aborted wait
+ * are both distinguishable from success.
  *
- * Does NOT throw by default: this runs AFTER a successful broadcast, so a
- * slow indexer is not a failed transaction. Pass `throwOnTimeout` when the
- * caller needs an exception.
+ * Does not throw by default: this runs after a successful broadcast, so a slow
+ * indexer is not a failed transaction. Pass `throwOnTimeout` when the caller
+ * needs an exception.
  */
 export async function awaitCommitments(
     cms: string[],
@@ -88,7 +88,7 @@ export async function awaitCommitments(
         if (missing().length === 0) return done("seen", attempts + 1);
         if (opts.signal?.aborted) return done("aborted", attempts + 1);
 
-        // Abort and elapse are distinguishable here; they were not before.
+        // `sleep` reports abort separately from a fully elapsed interval.
         if ((await sleep(pollMs, opts.signal)) === "aborted") {
             return done("aborted", attempts + 1);
         }

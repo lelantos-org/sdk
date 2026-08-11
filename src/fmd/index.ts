@@ -14,4 +14,5 @@ export {
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,
     fmdTest,
+    subscriptionTokenToHex,
 } from "./fmd.js";

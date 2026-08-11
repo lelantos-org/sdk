@@ -9,11 +9,8 @@ import type { StoredNote } from "../note-store.js";
 import { executeTransfer } from "../transfer.js";
 import { executeWithdraw } from "../withdraw.js";
 
-// These four executors used to take the whole `Wallet` and reach into ~10 of
-// its members, including two @internal back-doors that existed only for
-// them. Constructing a Wallet needs wasm, a chain adapter, a prover and a
-// note store — which is why none of them had a test. Against SpendContext
-// the whole fixture is an object literal.
+// The executors depend on `SpendContext`, not on `Wallet`, so the fixture
+// below is an object literal — no wasm, chain adapter, prover or note store.
 
 function storedNote(id: string, value: bigint, asset = 1n): StoredNote {
     return {

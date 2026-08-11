@@ -260,9 +260,15 @@ const r = await wallet.sync({ limit: 1000 });
 
 Pulls encrypted notes, trial-decrypts with wallet `ivk`, persists hits to `NoteStore`.
 
-`sync()` pulls notes and the Merkle tree in parallel. Split them when you
-only need one: `syncNotes()` is enough for a balance display, `syncTree()`
-is required before spending.
+`sync()` pulls notes, the Merkle tree, and the spent-nullifier set in parallel,
+then reconciles which local notes have been spent. Split them when you only
+need one: `syncNotes()` is enough for a balance display, `syncTree()` is
+required before spending, and `syncNullifiers()` refreshes the local spent set.
+
+The spent set is mirrored in full rather than queried per nullifier — asking
+the server "is nullifier N spent?" would name a note you own. Pass
+`nullifierPersistence` (alongside `treePersistence`) to keep both mirrors
+across page loads.
 
 Related methods:
 - `wallet.refresh()` — re-derive balances from store without network fetch.
@@ -280,15 +286,35 @@ Two strategies via `WalletConfig.syncStrategy` (selects default `NoteSource`; ig
 | Strategy | Endpoint | FMD runs | Anonymity | Bandwidth |
 |---|---|---|---|---|
 | `{ kind: "full" }` (default) | `/v1/notes` (firehose) | client-side (or skipped) | max — server sees no detection key | every encrypted note |
-| `{ kind: "matches", subscriptionId }` | `/v1/matches?subscription=…` | server-side via registered subscription | reduced — server learns FMD-positive subset | only false-positive subset |
+| `{ kind: "matches", token }` | `/v1/matches?token=…` | server-side via registered subscription | reduced — server learns FMD-positive subset | only false-positive subset |
 
 ```ts
 // Full firehose — no FMD on server, max anonymity.
 const wallet = await connect({ ...cfg, syncStrategy: { kind: "full" } });
 
-// Server-side FMD — register detection key once, then pull only matches.
-const wallet = await connect({ ...cfg, syncStrategy: { kind: "matches", subscriptionId: 42 } });
+// Server-side FMD — register a detection key under a token you derive.
+const tokenHex = subscriptionTokenToHex(deriveSubscriptionToken(P, keys.ivk));
+const fmd = new FmdClient(fmdUrl, chainId);
+await fmd.createSubscription({ detectionKeyHex, gamma: 8, tokenHex });
+const wallet = await connect({ ...cfg, syncStrategy: { kind: "matches", token: tokenHex } });
 ```
+
+The capability token is client-chosen, so there is nothing extra to persist:
+`deriveSubscriptionToken(P, ivk)` regenerates it from a secret the wallet
+already holds, and re-registering re-attaches to the same subscription
+(`created: false`) instead of duplicating it and re-running the backfill.
+
+Derive it from `ivk`, never from `dk` or the detection key — the γ detection
+scalars are a counter stream off the address's `dk`, so both are recoverable by
+senders and by the server, and a token built from either would be forgeable.
+Pass `epoch` to rotate: the token travels in the `/v1/matches` query string,
+which proxies and browser history record, so a leak needs a recovery path.
+
+`gamma` sets the false-positive rate at `2^-gamma`. It must be in
+`GAMMA_MIN..GAMMA_MAX` (1..16), and the server caps it further against the
+current note count so a match set always keeps enough decoys — a `gamma` that
+is too high is rejected with the applicable ceiling. `detectionKeyHex` must be
+exactly `gamma * 32` bytes, and `tokenHex` exactly 32 bytes.
 
 - No detection key: `scanNotes` trial-decrypts every note. Highest CPU, zero FMD leak.
 - Client-side FMD: pass detection key; clues pre-filter locally. CPU cut, server sees nothing.
@@ -451,12 +477,16 @@ const wallet = await Wallet.create(keySource, { ...cfg, selector: new LargestFir
 
 ### Custom note source (alt indexer)
 
+A `NoteSource` only supplies the encrypted-note feed. Merkle paths come from
+`TreeStore` and the spent set from `NullifierStore`, both built locally from
+chunk feeds — neither is a per-item server query, because asking for one path
+or one nullifier names the note you are about to spend.
+
 ```ts
-import { type NoteSource, type ScanInput, type MerklePath } from "@lelantos-org/sdk";
+import { type NoteSource, type ScanInput } from "@lelantos-org/sdk";
 
 class IndexerNoteSource implements NoteSource {
     async listNotes(opts): Promise<ScanInput[]> { /* fetch from your indexer */ }
-    async fetchPath(cmHex: string): Promise<MerklePath> { /* fetch from your indexer */ }
 }
 ```
 

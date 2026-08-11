@@ -1,13 +1,12 @@
 // Every typed error the SDK throws.
 //
-// THROWING RULE
+// Throwing rule
 // -------------
 // Throw a typed `WalletError` at every boundary the caller can act on:
 // config, network, prover, chain, selection, submission, wire format.
 // Throw a bare `Error` only for programmer errors inside a single module —
 // invariant violations that indicate an SDK bug, or structurally invalid
-// arguments to an `@internal` pure function. A code the caller cannot
-// branch on is noise.
+// arguments to an `@internal` pure function.
 //
 // This module sits at tier 0: it imports nothing from `src/`, so every
 // layer can throw typed errors without an upward dependency.

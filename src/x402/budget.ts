@@ -1,9 +1,9 @@
 // Spend limits for an autonomous payer.
 //
-// An agent decides on its own what to buy, so the failure to bound is not a
-// bad payment but an unbounded run of good ones. Every check runs *before* any
-// wallet method is called, so a refusal never leaves value in flight and
-// `X402PaymentError.reason` always means "nothing happened".
+// An agent chooses its own purchases, so the risk to bound is an unbounded run
+// of individually valid payments. Every check runs before any wallet method is
+// called, so a refusal never leaves value in flight and
+// `X402PaymentError.reason` always means nothing happened.
 //
 // Limits are written in human decimal units and interpreted per asset:
 // `{ total: "5" }` means five of each distinct asset paid, not five across all
@@ -84,7 +84,7 @@ export class BudgetLedger {
         }
     }
 
-    /** Call only once a payment has actually been made. */
+    /** Call only once a payment has been made. */
     record(amount: bigint, asset: bigint): void {
         this.totals.set(asset, (this.totals.get(asset) ?? 0n) + amount);
     }

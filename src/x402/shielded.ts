@@ -10,15 +10,15 @@
 // implementation-specific field, so any shielded pool can serve and accept
 // the same requirements. See `docs/x402-shielded-network.md`.
 //
-// PAYMENT FLOW
+// Payment flow
 // ------------
 // `extra.paymentFlow: "upfront"` — the transfer is submitted before the
-// resource is served, and the payload is the receipt. The alternative
-// (x402's default `authorization` flow: hand over an unsubmitted proof, let
-// the server settle it) is more trust-minimal, but needs a facilitator that
-// can relay a Lelantos bundle. Until one exists, upfront is the only
-// available model, and it carries a real risk: a server can take payment and
-// not answer. Hence `budget` is required, not optional.
+// resource is served, and the payload is the receipt. x402's default
+// `authorization` flow (hand over an unsubmitted proof, let the server settle
+// it) is more trust-minimal but needs a facilitator that can relay a Lelantos
+// bundle; until one exists, upfront is the only available model. It exposes
+// the payer to a server that takes payment and does not answer, which is why
+// `budget` is required rather than optional.
 
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";

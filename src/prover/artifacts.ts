@@ -127,9 +127,9 @@ export interface LoadArtifactOpts {
     /**
      * Download progress for the ~36 MB zkey.
      *
-     * NOTE: results are cached by URL, so only the first caller for a given
-     * path receives progress; a concurrent second caller awaits the same
-     * promise and sees none.
+     * Results are cached by URL, so only the first caller for a given path
+     * receives progress; a concurrent second caller awaits the same promise
+     * and sees none.
      */
     onProgress?: (p: { loaded: number; total?: number; url: string }) => void;
     signal?: AbortSignal;

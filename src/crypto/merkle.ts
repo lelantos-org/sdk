@@ -22,10 +22,9 @@ const MAX_DEPTH = 25;
  * with indices < 4^(depth-1) = 2^(2·depth-2). Anything smaller aliases one
  * level into the next.
  *
- * The previous implementation hardcoded 2^18. That is exactly right at
- * depth 10 — capacity 4^10 leaves puts the largest level-1 index at
- * 2^18 - 1 — and silently wrong for any deeper tree, where a level-1 index
- * runs past the stride and collides with a level-2 key.
+ * The stride must therefore track `depth`: a fixed value sized for one depth
+ * lets a level-1 index of a deeper tree run past it and collide with a
+ * level-2 key.
  *
  * @internal exported for the injectivity test; not part of the public API.
  */
@@ -85,8 +84,7 @@ export class MerkleTree {
 
     /**
      * Replace the whole leaf array. Clears the node cache, so this is safe
-     * on a tree that already has inserts — the previous contract required
-     * a freshly constructed tree but did not enforce it.
+     * on a tree that already holds inserts.
      */
     setLeaves(leaves: Field[]): void {
         this.leaves = [...leaves];
