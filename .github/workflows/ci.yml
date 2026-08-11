@@ -41,8 +41,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
 
+      # Production deps only. The tree's one GitHub Packages dependency
+      # (`@lelantos-org/circuits`, dev-only) cannot be signature-verified:
+      # GitHub Packages serves no registry signatures and no
+      # `/-/npm/v1/keys` endpoint, so npm cannot fetch verification keys for
+      # it and the audit fails on that package alone. Everything that ships
+      # to consumers comes from npmjs and is still verified here.
       - name: Audit npm package signatures
-        run: npm audit signatures
+        run: npm audit signatures --omit=dev
 
       - name: Build WASM crates
         run: cd wasm && just build
