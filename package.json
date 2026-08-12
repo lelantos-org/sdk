@@ -166,6 +166,7 @@
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:bundle-budget": "node scripts/bundle-budget.mjs",
     "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm",
+    "check:pack": "node scripts/check-pack.mjs",
     "prepare": "lefthook install >/dev/null 2>&1 || true",
     "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
   },

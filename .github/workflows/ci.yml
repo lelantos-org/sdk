@@ -77,6 +77,9 @@ jobs:
       - name: Bundle size budget
         run: npm run check:bundle-size
 
+      - name: "Per-entry eager bundle budget"
+        run: npm run check:bundle-budget
+
       - name: "Public API surface (diff against api-surface.json)"
         run: npm run check:api
 
@@ -97,22 +100,4 @@ jobs:
         run: npm run check:publish
 
       - name: Verify packed contents
-        run: |
-          npm pack --dry-run --json > /tmp/pack.json
-          node -e '
-            const j = JSON.parse(require("fs").readFileSync("/tmp/pack.json","utf8"))[0];
-            const need = [
-              "wasm/jubjub/pkg/jubjub_wasm.js",
-              "wasm/jubjub/pkg/jubjub_wasm_bg.wasm",
-              "wasm/jubjub/pkg/jubjub_wasm.d.ts",
-              "wasm/prover/pkg/prover.js",
-              "wasm/prover/pkg/prover_bg.wasm",
-              "wasm/prover/pkg/prover.d.ts",
-              "dist/wasm/rayon-worker-bootstrap.mjs",
-              "dist/index.js",
-            ];
-            const got = new Set(j.files.map(f => f.path));
-            const miss = need.filter(p => !got.has(p));
-            if (miss.length) { console.error("missing from npm package:", miss); process.exit(1); }
-            console.log("npm pack: all required files present");
-          '
+        run: npm run check:pack
