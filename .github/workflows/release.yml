@@ -31,6 +31,12 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
+
+      # See ci.yml: wasm-pack downloads binaryen when `wasm-opt` is not on
+      # PATH, and that download is unreliable from hosted runners.
+      - name: Install binaryen (provides wasm-opt)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
       - uses: extractions/setup-just@v2
 
       - name: Build WASM crates

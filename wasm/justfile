@@ -3,6 +3,12 @@ set shell := ["bash", "-ceuo", "pipefail"]
 # WASM crates consumed by @lelantos-org/sdk. Each crate's wasm-pack output lands
 # in its own `pkg/` (gitignored). SDK imports the generated JS/.d.ts via
 # relative paths from `sdk/src/**`.
+#
+# Release builds need `wasm-opt` (binaryen) on PATH — both crates set their
+# optimiser flags in `Cargo.toml` under `package.metadata.wasm-pack`. wasm-pack
+# falls back to downloading a pinned binaryen when it cannot find one, which is
+# slow and fails outright on some networks, so install it up front:
+# `brew install binaryen` / `apt-get install binaryen`. `build-dev` skips it.
 
 PROVER := "prover"
 JUBJUB := "jubjub"

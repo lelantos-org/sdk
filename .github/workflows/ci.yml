@@ -34,6 +34,15 @@ jobs:
         with:
           tool: wasm-pack
 
+      # wasm-pack uses `wasm-opt` from PATH when it can find one, and otherwise
+      # downloads a pinned binaryen from GitHub releases — a fetch that is not
+      # reliable from hosted runners and has no retry. Both crates set
+      # load-bearing `wasm-opt` flags (`-O4`, SIMD, threads) and the build is
+      # size-budgeted, so skipping the optimiser is not an option; installing it
+      # is. Keep this before any `just build`.
+      - name: Install binaryen (provides wasm-opt)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
       - uses: extractions/setup-just@v2
 
       - name: Install dependencies
