@@ -12,6 +12,7 @@
 // layer can throw typed errors without an upward dependency.
 
 import type { StoredNote } from "./note-record.js";
+import { DEFAULT_SHAPE, shapeId } from "./shape.js";
 
 /**
  * Every code the SDK can throw. Exported as a value so callers can
@@ -232,20 +233,24 @@ export class ProverError extends WalletError<"PROVER_FAILED"> {
  */
 export class ProverArtifactsMissingError extends WalletError<"PROVER_ARTIFACTS_MISSING"> {
     readonly tried: string[];
-    constructor(tried: string[], opts?: WalletErrorOptions) {
+    /** Shape whose artifacts were sought, e.g. `"2x2"`. */
+    readonly shape: string;
+    constructor(tried: string[], shape = shapeId(DEFAULT_SHAPE), opts?: WalletErrorOptions) {
         super(
             "PROVER_ARTIFACTS_MISSING",
-            `prover artifacts not found. Tried: ${tried.join(", ")}. ` +
+            `prover artifacts for the ${shape} circuit not found. ` +
+                `Tried: ${tried.join(", ")}. ` +
                 `Fixes (any one): pass \`proverArtifacts: { circuit, zkey }\` to ` +
                 `connect() (browser must do this — no built-in CDN); install ` +
                 `\`@lelantos-org/circuits\` (Node, auto-resolves); set ` +
                 `\`LELANTOS_PROVER_ARTIFACTS_DIR\` to a directory containing ` +
-                `2x2.wasm + 2x2_final.zkey; pass \`proverArtifactsCdn\` to ` +
+                `${shape}.wasm + ${shape}_final.zkey; pass \`proverArtifactsCdn\` to ` +
                 `point at a self-hosted CDN base URL.`,
             opts,
         );
         this.name = "ProverArtifactsMissingError";
         this.tried = tried;
+        this.shape = shape;
     }
 }
 

@@ -46,6 +46,12 @@ export function inputsCtx(ctx: SpendContext): {
     pk: Field;
     nsk: Field;
     treeStore: TreeStore;
+    nIn: number;
 } {
-    return { pk: ctx.keys.pk, nsk: ctx.keys.nsk, treeStore: ctx.treeStore };
+    return {
+        pk: ctx.keys.pk,
+        nsk: ctx.keys.nsk,
+        treeStore: ctx.treeStore,
+        nIn: ctx.cfg.shape.nIn,
+    };
 }

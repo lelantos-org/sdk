@@ -1,4 +1,5 @@
-// Build 1- or 2-slot `InputSlots`; pads with `null` for single-input spends.
+// Build the `InputSlots` mask for a spend, padding unused slots with `null`
+// so the circuit fills them with dummies.
 
 import type { InputSlot, InputSlots } from "../bundle/common.js";
 import type { SpendableCachedNote } from "../circuit/index.js";
@@ -11,6 +12,8 @@ export interface InputsCtx {
     pk: Field;
     nsk: Field;
     treeStore: TreeStore;
+    /** Input slots the circuit has. Selection never returns more than this. */
+    nIn: number;
 }
 
 export async function buildInputSlots(
@@ -18,8 +21,8 @@ export async function buildInputSlots(
     selected: StoredNote[],
     asset: bigint,
 ): Promise<InputSlots> {
-    if (selected.length === 0 || selected.length > 2) {
-        throw new Error(`buildInputSlots: expected 1 or 2 notes, got ${selected.length}`);
+    if (selected.length === 0 || selected.length > ctx.nIn) {
+        throw new Error(`buildInputSlots: expected 1..${ctx.nIn} notes, got ${selected.length}`);
     }
     const slots: (InputSlot | null)[] = selected.map((s): InputSlot => {
         const n = decodeStoredNote(s);
@@ -42,6 +45,6 @@ export async function buildInputSlots(
         };
         return { cached, pathElements: path.pathElements, pathIndices: path.pathIndices };
     });
-    while (slots.length < 2) slots.push(null);
-    return [slots[0], slots[1]] as InputSlots;
+    while (slots.length < ctx.nIn) slots.push(null);
+    return slots;
 }

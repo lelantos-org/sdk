@@ -69,6 +69,15 @@ export {
     tokenAmount,
 } from "./core/brand.js";
 
+// ── circuit shape ────────────────────────────────────────────────────────
+export {
+    type CircuitShape,
+    coeffCount,
+    DEFAULT_SHAPE,
+    TRANSACT_2X2,
+    TRANSACT_3X3,
+} from "./core/shape.js";
+
 // ── amounts + HTTP options ───────────────────────────────────────────────
 export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./core/units.js";
 export type { HttpClientOptions } from "./core/http.js";

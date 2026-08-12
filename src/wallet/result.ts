@@ -9,8 +9,11 @@ import type { DepositStrategy } from "../core/errors.js";
  */
 interface TxResultBase {
     txHash: Hex32;
-    /** Commitments created by the tx. Always length 2. */
-    commitments: [Hex32, Hex32];
+    /**
+     * Commitments created by the tx, in output-slot order. One per output
+     * slot of the transact circuit: three at the default 3×3 shape.
+     */
+    commitments: Hex32[];
     /**
      * Subset of `commitments` with non-zero value (zero-value outputs are
      * circuit pads that no party's scanner accepts). Receiver-side

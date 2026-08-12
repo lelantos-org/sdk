@@ -1,7 +1,7 @@
 // Private helpers used by `Wallet`.
 
 import { type AssetId, branded, type CircuitAmount, type Hex32 } from "../core/brand.js";
-import type { DepositStrategy } from "../core/errors.js";
+import { type DepositStrategy, InternalError } from "../core/errors.js";
 import { fieldToBytes32 } from "../core/hex.js";
 import type { Field } from "../crypto/index.js";
 import type { Note } from "../notes/note.js";
@@ -28,13 +28,20 @@ export function toWalletNote(s: StoredNote): WalletNote {
     };
 }
 
-/** The transact circuit has exactly two output slots. */
-export type OutputSlot = 0 | 1;
+/**
+ * Index of an output slot, `0 .. nOut - 1`.
+ *
+ * A plain `number` rather than a literal union: `nOut` is a property of the
+ * circuit shape, so the valid range is not known at compile time.
+ * `buildTransactionResult` bounds-checks against the commitments it was given.
+ */
+export type OutputSlot = number;
 
 /** Shared subset of `BuiltBundle` / `BuiltIntent`. */
 export interface BuiltLike {
-    cm: [Field, Field];
-    producedNotes: [Note, Note];
+    /** One per output slot: `nOut` at spend, always 2 for a deposit intent. */
+    cm: Field[];
+    producedNotes: Note[];
 }
 
 /**
@@ -74,27 +81,29 @@ export function makeTransactionResult<K extends TransactionKind>(
 const ZERO = branded<CircuitAmount>(0n);
 
 function buildTransactionResult(args: MakeTransactionResultArgs): TransactionResult {
-    const commitments: [Hex32, Hex32] = [
-        fieldToBytes32(args.built.cm[0]),
-        fieldToBytes32(args.built.cm[1]),
-    ];
+    const commitments: Hex32[] = args.built.cm.map(fieldToBytes32);
     const spent = args.spent ?? [];
     const ownIndices: OutputSlot[] = args.ownIndices ?? [];
     // Drop zero-value outputs: scanner skips them as self-pad, so waiters
     // on these commitments would hang.
-    const ownIndicesNonZero = ownIndices.filter(
-        (i) => BigInt(args.built.producedNotes[i].value) > 0n,
-    );
-    const ownCommitments = ownIndicesNonZero.map((i) => commitments[i]);
+    const valueAt = (i: OutputSlot): bigint => {
+        const note = args.built.producedNotes[i];
+        if (note === undefined) {
+            throw new InternalError(
+                `ownIndices names slot ${i}, which the bundle has no output for`,
+            );
+        }
+        return BigInt(note.value);
+    };
+    const ownIndicesNonZero = ownIndices.filter((i) => valueAt(i) > 0n);
+    const ownCommitments = ownIndicesNonZero.map((i) => commitments[i]!);
     const ownInflow = branded<CircuitAmount>(
-        ownIndicesNonZero.reduce((acc, i) => acc + BigInt(args.built.producedNotes[i].value), 0n),
+        ownIndicesNonZero.reduce((acc, i) => acc + valueAt(i), 0n),
     );
     // Commitments any party will scan — drops zero-value pad
     // outputs. Receiver-side waiters should subset this against their own
     // address rather than waiting on the full `commitments` pair.
-    const nonZeroCommitments: Hex32[] = ([0, 1] as const)
-        .filter((i) => BigInt(args.built.producedNotes[i].value) > 0n)
-        .map((i) => commitments[i]);
+    const nonZeroCommitments: Hex32[] = commitments.filter((_, i) => valueAt(i) > 0n);
 
     switch (args.kind) {
         case "deposit":

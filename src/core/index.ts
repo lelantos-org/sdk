@@ -106,6 +106,14 @@ export {
     requireWebCrypto,
     shortId,
 } from "./random.js";
+export {
+    type CircuitShape,
+    coeffCount,
+    DEFAULT_SHAPE,
+    shapeId,
+    TRANSACT_2X2,
+    TRANSACT_3X3,
+} from "./shape.js";
 export type { Eip1193ProviderLike, EthSigner } from "./signer.js";
 export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./units.js";
 export { type Url, urlToString } from "./url.js";

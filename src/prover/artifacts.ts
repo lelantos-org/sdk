@@ -5,6 +5,7 @@
 
 import { retry } from "../core/async.js";
 import { ProverArtifactsFailedError, ProverArtifactsMissingError } from "../core/errors.js";
+import { type CircuitShape, DEFAULT_SHAPE, shapeId } from "../core/shape.js";
 import { urlToString } from "../core/url.js";
 import { getLogger } from "../log/logger.js";
 import type { ProverArtifacts, ProverPaths } from "./types.js";
@@ -45,23 +46,32 @@ export function configureProver(paths: ProverPaths | ProverArtifacts): void {
 }
 
 /**
- * Resolve default Groth16 prover artifacts for the canonical 2x2 circuit.
- * Resolution order:
- *   1. `LELANTOS_PROVER_ARTIFACTS_DIR` env var (Node) — must contain
- *      `2x2.wasm` + `2x2_final.zkey`.
+ * Resolve default Groth16 prover artifacts for `shape`.
+ *
+ * Artifacts are named after the shape — `2x2.wasm` / `2x2_final.zkey`,
+ * `3x3.wasm` / `3x3_final.zkey` — which is the convention the circuits
+ * package builds under. Resolution order:
+ *   1. `LELANTOS_PROVER_ARTIFACTS_DIR` env var (Node) — must contain the
+ *      pair for the shape in use.
  *   2. Companion `@lelantos-org/circuits` npm package (Node) — via
  *      `import.meta.resolve`.
  *   3. Explicit `opts.cdn` URL (browser). No built-in browser default
  *      because the companion lives on GitHub Packages.
  *
- * Throws `ProverArtifactsMissingError` listing every path tried.
+ * Throws `ProverArtifactsMissingError` listing every path tried. A shape the
+ * companion has no proving key for fails here rather than at proof time.
  *
  * @internal
  */
 export async function bundledProverArtifacts(
-    opts: { runtime?: "node" | "browser" | undefined; cdn?: string | undefined } = {},
+    opts: {
+        runtime?: "node" | "browser" | undefined;
+        cdn?: string | undefined;
+        shape?: CircuitShape | undefined;
+    } = {},
 ): Promise<ProverArtifacts> {
     const runtime = opts.runtime ?? detectRuntime();
+    const id = shapeId(opts.shape ?? DEFAULT_SHAPE);
     const tried: string[] = [];
 
     if (runtime === "node") {
@@ -70,21 +80,21 @@ export async function bundledProverArtifacts(
         if (envDir) {
             tried.push(`env LELANTOS_PROVER_ARTIFACTS_DIR=${envDir}`);
             return {
-                circuit: `${envDir.replace(/\/$/, "")}/2x2.wasm`,
-                zkey: `${envDir.replace(/\/$/, "")}/2x2_final.zkey`,
+                circuit: `${envDir.replace(/\/$/, "")}/${id}.wasm`,
+                zkey: `${envDir.replace(/\/$/, "")}/${id}_final.zkey`,
             };
         }
-        const fromCompanion = await tryResolveCompanion();
+        const fromCompanion = await tryResolveCompanion(id);
         if (fromCompanion) return fromCompanion;
-        tried.push(`npm package ${COMPANION_PKG}`);
+        tried.push(`npm package ${COMPANION_PKG} (subpath ./${id}/${id}_final.zkey)`);
     } else if (opts.cdn) {
         const base = opts.cdn.replace(/\/$/, "");
-        return { circuit: `${base}/2x2.wasm`, zkey: `${base}/2x2_final.zkey` };
+        return { circuit: `${base}/${id}.wasm`, zkey: `${base}/${id}_final.zkey` };
     } else {
         tried.push("opts.cdn (browser requires explicit `proverArtifactsCdn`)");
     }
 
-    throw new ProverArtifactsMissingError(tried);
+    throw new ProverArtifactsMissingError(tried, id);
 }
 
 function detectRuntime(): "node" | "browser" {
@@ -92,15 +102,15 @@ function detectRuntime(): "node" | "browser" {
     return isBrowser ? "browser" : "node";
 }
 
-async function tryResolveCompanion(): Promise<ProverArtifacts | null> {
+async function tryResolveCompanion(id: string): Promise<ProverArtifacts | null> {
     // `import.meta.resolve` sync in Node ≥ 20.6; try/catch so a missing
     // companion returns null cleanly.
     try {
         const wasm = (import.meta as { resolve?: (s: string) => string }).resolve?.(
-            `${COMPANION_PKG}/2x2/2x2.wasm`,
+            `${COMPANION_PKG}/${id}/${id}.wasm`,
         );
         const zkey = (import.meta as { resolve?: (s: string) => string }).resolve?.(
-            `${COMPANION_PKG}/2x2/2x2_final.zkey`,
+            `${COMPANION_PKG}/${id}/${id}_final.zkey`,
         );
         if (!wasm || !zkey) return null;
         return { circuit: new URL(wasm), zkey: new URL(zkey) };

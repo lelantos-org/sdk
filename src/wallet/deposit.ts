@@ -89,7 +89,9 @@ export async function executeDeposit(
         built: { cm: built.cm, producedNotes: built.producedNotes },
         sent: args.amount,
         intentId,
-        // Both outputs credited to depositor's own shielded address.
+        // Both outputs credited to the depositor's own shielded address.
+        // Always two: `MASP.submitIntent` escrows a fixed pair of leaves,
+        // whatever arity the transact circuit has.
         ownIndices: [0, 1],
     });
 }

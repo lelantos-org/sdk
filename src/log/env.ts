@@ -47,7 +47,7 @@ export function envProverThreads(): number | undefined {
     return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/** Directory holding `2x2.wasm` + `2x2_final.zkey`, if set. */
+/** Directory holding `<shape>.wasm` + `<shape>_final.zkey`, if set. */
 export function envArtifactsDir(): string | undefined {
     return env("LELANTOS_PROVER_ARTIFACTS_DIR");
 }

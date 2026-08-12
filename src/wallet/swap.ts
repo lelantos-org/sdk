@@ -13,7 +13,7 @@ import type { SubmitSwapPayload } from "../protocol/transact.js";
 import type { SwapOptions, SwapResult } from "./api.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./internal.js";
-import { freshDepositSlots, prepareSpend, splitChangePair } from "./tx/steps.js";
+import { freshDepositSlots, prepareSpend, splitChange } from "./tx/steps.js";
 
 export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise<SwapResult> {
     if (!ctx.submitter.submitSwap) {
@@ -43,7 +43,9 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     const bRecipient = decodeAddress(ctx.J, args.bRecipient ?? ctx.address);
 
     const remainder = branded<CircuitAmount>(selection.sum - publicOut);
-    const [change0, change1] = splitChangePair(ctx.keys.pk, assetIn, remainder);
+    // All output slots are change back to self.
+    const nOut = ctx.cfg.shape.nOut;
+    const change = splitChange(ctx.keys.pk, assetIn, remainder, nOut);
 
     const [entryIn, entryOut] = await Promise.all([
         ctx.cfg.chain.fetchAsset(assetIn),
@@ -82,9 +84,9 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         inputs,
         merkleRoot,
         publicOut,
-        outputs: [change0, change1],
-        outputRecipients: [ownAddr, ownAddr],
-        outputRandomness: [freshOutputAuxRandomness(), freshOutputAuxRandomness()],
+        outputs: change,
+        outputRecipients: change.map(() => ownAddr),
+        outputRandomness: change.map(() => freshOutputAuxRandomness()),
     });
 
     // Leg 2: B-note deposit intent. Slot 0 = real B note, slot 1 = pad.
@@ -150,6 +152,6 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
-        ownIndices: [0, 1],
+        ownIndices: change.map((_, i) => i),
     });
 }

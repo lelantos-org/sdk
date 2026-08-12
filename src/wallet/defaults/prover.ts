@@ -3,6 +3,7 @@
 // `LazyProver` defers the (expensive, ~36 MB) build until the first proof,
 // so `connect()` stays fast for apps that only read balances.
 
+import type { CircuitShape } from "../../core/shape.js";
 import {
     bundledProverArtifacts,
     type ProverArtifacts,
@@ -40,7 +41,8 @@ async function wasmProverWithFallback(
  */
 export async function defaultProver(cfg: WalletConfig): Promise<Prover> {
     const paths =
-        cfg.proverPaths ?? (resolveArtifacts(await bundledProverArtifacts()) as ProverPaths);
+        cfg.proverPaths ??
+        (resolveArtifacts(await bundledProverArtifacts({ shape: cfg.shape })) as ProverPaths);
     return wasmProverWithFallback(paths);
 }
 
@@ -52,6 +54,8 @@ export interface ProverBuildInputs {
     proverArtifactsCdn?: string | undefined;
     useWasmProver?: boolean | undefined;
     proverWarmup?: "eager" | "lazy" | undefined;
+    /** Names the artifact pair to resolve. Defaults to `DEFAULT_SHAPE`. */
+    shape?: CircuitShape | undefined;
 }
 
 /**
@@ -99,7 +103,11 @@ export async function buildConnectProver(
     // `connect()`; only the zkey fetch/parse + thread-pool spin-up defer.
     const artifacts = inputs.proverArtifacts
         ? inputs.proverArtifacts
-        : await bundledProverArtifacts({ runtime, cdn: inputs.proverArtifactsCdn });
+        : await bundledProverArtifacts({
+              runtime,
+              cdn: inputs.proverArtifactsCdn,
+              shape: inputs.shape,
+          });
     const paths = resolveArtifacts(artifacts);
     if (!useWasm) return new SnarkjsProver(paths);
     const force = inputs.useWasmProver === true;

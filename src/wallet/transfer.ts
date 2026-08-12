@@ -10,7 +10,7 @@ import type { TransferOptions, TransferResult } from "./api.js";
 import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult, type OutputSlot } from "./internal.js";
-import { prepareSpend } from "./tx/steps.js";
+import { prepareSpend, splitChange } from "./tx/steps.js";
 
 export async function executeTransfer(
     ctx: SpendContext,
@@ -35,12 +35,10 @@ export async function executeTransfer(
         pk: recipient.pk,
         ...freshNoteRandomness(),
     };
-    const changeNote: Note = {
-        asset,
-        value: changeValue,
-        pk: ctx.keys.pk,
-        ...freshNoteRandomness(),
-    };
+    // Slot 0 is the recipient's; every remaining slot is change back to self,
+    // split so none of them is a zero-value pad.
+    const changeNotes = splitChange(ctx.keys.pk, asset, changeValue, ctx.cfg.shape.nOut - 1);
+    const outputs = [sendNote, ...changeNotes];
 
     safePhase(args.onPhase, "proving");
     const built = await buildSpend({
@@ -56,18 +54,20 @@ export async function executeTransfer(
         treeDepth: ctx.cfg.treeDepth,
         inputs,
         merkleRoot,
-        outputs: [sendNote, changeNote],
-        outputRecipients: [recipient, ownAddr],
-        outputRandomness: [freshOutputAuxRandomness(), freshOutputAuxRandomness()],
+        outputs,
+        outputRecipients: [recipient, ...changeNotes.map(() => ownAddr)],
+        outputRandomness: outputs.map(() => freshOutputAuxRandomness()),
     });
 
     safePhase(args.onPhase, "submitting");
     const { txHash } = await ctx.submitter.submit(built.payload);
     const spent = selection.notes.map((n) => n.id);
     await ctx.markSpent(spent);
-    // Output 0 = recipient (own only if self-transfer); output 1 = change.
+    // Slot 0 is the recipient's, so it is ours only on a self-transfer; the
+    // change slots always are.
     const isSelf = args.to === ctx.address;
-    const ownIndices: OutputSlot[] = isSelf ? [0, 1] : [1];
+    const changeSlots: OutputSlot[] = changeNotes.map((_, i) => i + 1);
+    const ownIndices: OutputSlot[] = isSelf ? [0, ...changeSlots] : changeSlots;
     return makeTransactionResult({
         kind: "transfer",
         txHash,

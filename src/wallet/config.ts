@@ -1,6 +1,7 @@
 // Wallet runtime configuration. Every external dependency is pluggable.
 
 import type { ChainAdapter } from "../chain/port.js";
+import type { CircuitShape } from "../core/shape.js";
 import type { Prover, ProverPaths } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
 import type { NoteSource } from "./note-source.js";
@@ -23,6 +24,12 @@ export interface WalletConfig {
     chainId: bigint;
     /** Matches deployed contract + circuit build. */
     treeDepth: number;
+    /**
+     * Input/output arity of the transact circuit. Defaults to
+     * `DEFAULT_SHAPE` (3×3). A 2×2 pool must pass `TRANSACT_2X2` explicitly —
+     * see `core/shape.ts`.
+     */
+    shape?: CircuitShape | undefined;
     /** SNARK-bound; must equal relayer pipeline signer or contract reverts. */
     relayerAddress: string;
     chain: ChainAdapter;
@@ -74,6 +81,7 @@ export interface WalletConfig {
  * cast, so the compiler checks the wiring instead of an assertion.
  */
 export interface ResolvedWalletConfig extends WalletConfig {
+    shape: CircuitShape;
     noteStore: NoteStore;
     noteSource: NoteSource;
     treeStore: TreeStore;

@@ -1,4 +1,5 @@
-// The transact circuit witness (2×2 is the deployed shape).
+// The transact circuit witness. Shape-agnostic: the arity is read off the
+// input arrays, and 2×2 is simply the deployed instance.
 //
 // `CircomTransactInput` is a named interface, shared by `flatten` and
 // `extractPubInputs`, so neither needs a cast or a re-parse of the same shape.
@@ -106,8 +107,8 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): CircomTr
     const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;
     // Shape is read off the arrays: the witness layout is identical for every
     // `Transact(DEPTH, N_IN, N_OUT)` instance, and only the zkey pins N. The
-    // deployed circuit is 2×2; 3×3 exists in the circuits package but ships no
-    // proving key yet.
+    // deployed circuit is 2×2; `core/shape.ts` describes what a wider shape
+    // additionally needs.
     if (inputs.length === 0) throw new Error("need at least one input slot");
     if (outputs.length === 0) throw new Error("need at least one output slot");
     if (opts.outputClues.length !== outputs.length) {

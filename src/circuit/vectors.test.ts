@@ -22,6 +22,7 @@ import { keccak256, toBytes } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bitAt } from "../core/bits.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "../core/field.js";
+import { coeffCount } from "../core/shape.js";
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
@@ -315,7 +316,8 @@ describe.each([
     });
 
     it("emits 9 + 3·N_IN + 8·N_OUT coefficients", () => {
-        expect(file.circuit.coeffCount).toBe(9 + 3 * nIn + 8 * nOut);
+        // `coeffCount` in core/shape.ts must reproduce what the package publishes.
+        expect(file.circuit.coeffCount).toBe(coeffCount({ nIn, nOut }));
         expect(flatten(file.vectors[0]!.witness)).toHaveLength(file.circuit.coeffCount);
     });
 });

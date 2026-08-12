@@ -7,6 +7,7 @@ import type { Eip1193ProviderLike, EthSigner } from "../../chain/eth-signer.js";
 import type { NetworkName, NetworkPreset } from "../../chain/networks.js";
 import type { ChainAdapter } from "../../chain/port.js";
 import type { WasmConfig } from "../../configure-wasm.js";
+import type { CircuitShape } from "../../core/shape.js";
 import type { ProverArtifacts } from "../../prover/artifacts.js";
 import type { Prover, ProverPaths } from "../../prover/types.js";
 import type { Scanner } from "../../sync/scanner.js";
@@ -105,7 +106,7 @@ export interface ConnectExtraOptions {
      * explicitly or set `proverArtifactsCdn`.
      */
     proverArtifacts?: ProverArtifacts | ProverPaths | undefined;
-    /** Self-hosted CDN base serving `2x2.wasm` + `2x2_final.zkey` at root. */
+    /** Self-hosted CDN base serving `<shape>.wasm` + `<shape>_final.zkey` at root. */
     proverArtifactsCdn?: string | undefined;
     /** Skips `proverArtifacts` resolution. */
     prover?: Prover | undefined;
@@ -146,6 +147,12 @@ export interface ConnectExtraOptions {
     selector?: CoinSelector | undefined;
     scanner?: Scanner | undefined;
     syncStrategy?: SyncStrategy | undefined;
+    /**
+     * Input/output arity of the transact circuit. Defaults to `DEFAULT_SHAPE`
+     * (3×3); pass `TRANSACT_2X2` for a pool still on the narrower circuit.
+     * Also selects which artifact pair `bundledProverArtifacts` resolves.
+     */
+    shape?: CircuitShape | undefined;
     /** See `WalletConfig.feeBps`. */
     feeBps?: bigint | undefined;
 

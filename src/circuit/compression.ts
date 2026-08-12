@@ -29,7 +29,8 @@ export type FlattenInput = {
  * `PubInputs.compress(Transact)` order:
  *
  *   9 scalar slots + 3·N_IN (nullifier, in_cv) + 8·N_OUT (out_cm, out_cv,
- *   out_cv_dep, 3 clue slots) = 31 coefficients at 2×2, 42 at 3×3.
+ *   out_cv_dep, 3 clue slots) — see `coeffCount` in `core/shape.ts`, which is
+ *   31 at 2×2 and 42 at 3×3.
  *
  * The shape is read off the input arrays rather than hardcoded, so a witness
  * for any `Transact(DEPTH, N_IN, N_OUT)` instance flattens correctly. Only

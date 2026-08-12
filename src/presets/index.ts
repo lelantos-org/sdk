@@ -3,6 +3,7 @@
 // `fastWallet` for browsers; `nodeWallet` for Node tests/scripts where Web
 // Workers cost more than they save.
 
+import type { CircuitShape } from "../core/shape.js";
 import type { KeySource } from "../keys/key-source.js";
 import { bundledProverArtifacts, resolveArtifacts } from "../prover/artifacts.js";
 import { preloadWasm } from "../prover/preload.js";
@@ -22,10 +23,15 @@ async function buildWasmProver(paths: ProverPaths) {
  * `config.proverPaths` if set, else bundled artifacts (env dir / companion
  * package). `undefined` defers to `Wallet.create` → `defaultProver`.
  */
-async function resolveProverPaths(config: { proverPaths?: ProverPaths | undefined }) {
+async function resolveProverPaths(config: {
+    proverPaths?: ProverPaths | undefined;
+    shape?: CircuitShape | undefined;
+}) {
     if (config.proverPaths) return config.proverPaths;
     try {
-        return resolveArtifacts(await bundledProverArtifacts()) as ProverPaths;
+        return resolveArtifacts(
+            await bundledProverArtifacts({ shape: config.shape }),
+        ) as ProverPaths;
     } catch {
         return undefined;
     }

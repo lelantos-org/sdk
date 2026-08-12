@@ -57,7 +57,9 @@ export async function prepareSpend(
         {
             asset: args.asset,
             target: args.target,
-            selectOpts: args.selectOpts,
+            // The circuit's arity is the ceiling; a caller may lower it but
+            // not raise it past what the proof can consume.
+            selectOpts: { maxInputs: ctx.cfg.shape.nIn, ...args.selectOpts },
             autoConsolidate: args.autoConsolidate,
         },
         (a, sel) => ctx.autoConsolidate(a, sel),
@@ -71,17 +73,26 @@ export async function prepareSpend(
 }
 
 /**
- * Split a change remainder across both output slots.
+ * Split a change remainder evenly across `slots` output notes.
  *
- * Both slots are always used: an unused slot would be a zero-value pad,
- * and two equalish notes preserve a 2-note cover for the next spend.
+ * Every slot is used: an unused one would be a zero-value pad, and several
+ * roughly equal notes preserve a multi-note cover for the next spend.
+ *
+ * An indivisible remainder goes to the *last* slots, so at two slots this
+ * emits `[floor(r/2), ceil(r/2)]` — the same pair, in the same order, as the
+ * two-slot-only version this replaced.
  */
-export function splitChangePair(pk: bigint, asset: bigint, remainder: bigint): [Note, Note] {
-    const half = remainder / 2n;
-    return [
-        { asset, value: half, pk, ...freshNoteRandomness() },
-        { asset, value: remainder - half, pk, ...freshNoteRandomness() },
-    ];
+export function splitChange(pk: bigint, asset: bigint, remainder: bigint, slots: number): Note[] {
+    if (slots < 1) throw new Error(`splitChange: need at least one slot, got ${slots}`);
+    const n = BigInt(slots);
+    const base = remainder / n;
+    const extra = remainder % n;
+    return Array.from({ length: slots }, (_, i) => ({
+        asset,
+        value: base + (BigInt(i) >= n - extra ? 1n : 0n),
+        pk,
+        ...freshNoteRandomness(),
+    }));
 }
 
 /** Fresh randomness for a deposit intent's real slot plus its pad slot. */

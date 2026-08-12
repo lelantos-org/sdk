@@ -22,7 +22,14 @@ export interface SubmitTransactPayload {
     chainId: bigint;
     /** On-chain entry point the relayer should call. */
     kind: SpendKind;
-    /** Snarkjs-shaped Groth16 proof for the transact_2x2 circuit. */
+    /**
+     * Snarkjs-shaped Groth16 proof for the transact circuit.
+     *
+     * The field name pins the 2×2 shape and is the relayer's contract, not
+     * this SDK's — a wider circuit needs the name changed on both sides at
+     * once, so it stays as-is until that is coordinated. The arities above
+     * are already shape-generic.
+     */
     proof2x2: {
         piA: string[];
         piB: string[][];
@@ -30,10 +37,14 @@ export interface SubmitTransactPayload {
         protocol?: string;
         curve?: string;
     };
-    /** The 20 base logical PIs (6 clue PIs are derived by the relayer from `aux`). */
+    /**
+     * The base logical PIs. The relayer derives the three clue slots per
+     * output from `aux`, so those are absent here: 20 base + 6 derived at
+     * 2×2, 27 + 9 at 3×3.
+     */
     pubInputs: TransactPubInputs;
     /** Off-circuit FMD + ciphertext payload, one per output slot. */
-    aux: [TransactAux, TransactAux];
+    aux: TransactAux[];
 }
 
 /**
@@ -46,6 +57,11 @@ export interface SubmitIntentPayload {
     chainId: bigint;
     intent: DepositIntent;
     permit2: Permit2Sig;
+    /**
+     * Exactly two: `MASP.submitIntent` takes `aux[2]` and `bytes32[2] outCm`,
+     * so the deposit path is two-output on chain regardless of the transact
+     * circuit's shape.
+     */
     aux: [AuxOutput, AuxOutput];
 }
 
@@ -64,7 +80,7 @@ export interface SubmitSwapPayload {
      */
     proof2x2: SubmitTransactPayload["proof2x2"];
     pubInputs: TransactPubInputs;
-    aux: [TransactAux, TransactAux];
+    aux: TransactAux[];
     swap: SwapBlob;
 }
 
@@ -113,13 +129,15 @@ export interface SwapBlob {
 /** @internal */
 export interface TransactPubInputs {
     merkleRoot: Field;
-    nullifier: [Field, Field];
-    outCm: [Field, Field];
+    /** One per input slot: `nIn` entries. */
+    nullifier: Field[];
+    /** One per output slot: `nOut` entries. */
+    outCm: Field[];
     publicAssetId: bigint;
     publicIn: bigint;
     publicOut: bigint;
-    inCv: [Point, Point];
-    outCv: [Point, Point];
+    inCv: Point[];
+    outCv: Point[];
     recipient: string; // 0x-hex address
     chainId: bigint;
     payer: string; // 0x-hex address
@@ -128,7 +146,7 @@ export interface TransactPubInputs {
      * Per-output Pedersen value commitment that anchors (asset, value) into
      * the Merkle leaf. Forwarded into the spend's tree_update_batch tpi.
      */
-    outCvDep: [Point, Point];
+    outCvDep: Point[];
 }
 
 /**

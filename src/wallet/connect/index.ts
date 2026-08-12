@@ -60,6 +60,7 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
             proverArtifactsCdn: opts.proverArtifactsCdn,
             useWasmProver: opts.useWasmProver,
             proverWarmup: opts.proverWarmup,
+            shape: opts.shape,
         },
         runtime,
     );
@@ -71,6 +72,7 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
     const cfg: WalletConfig = {
         chainId: preset.chainId,
         treeDepth: preset.treeDepth,
+        shape: opts.shape,
         relayerAddress: preset.relayerAddress,
         chain,
         fmdUrl: preset.fmdUrl,

@@ -3,6 +3,7 @@
 // `resolveConfig` is the single place they live, so `Wallet` can read the
 // resolved config directly instead of re-asserting it.
 
+import { DEFAULT_SHAPE } from "../../core/shape.js";
 import type { Jubjub, Poseidon } from "../../crypto/index.js";
 import { LocalScanner } from "../../sync/scanner.js";
 import type { ResolvedWalletConfig, WalletConfig } from "../config.js";
@@ -35,6 +36,7 @@ export async function resolveConfig(
     const fmd = defaultFmdClient(cfg);
     return {
         ...cfg,
+        shape: cfg.shape ?? DEFAULT_SHAPE,
         noteStore: cfg.noteStore ?? new InMemoryNoteStore(),
         noteSource: cfg.noteSource ?? defaultNoteSource(fmd, cfg, deps.J),
         treeStore: cfg.treeStore ?? (await defaultTreeStore(fmd, deps.P, cfg.treePersistence)),

@@ -20,9 +20,10 @@ const stored = (value: bigint, leafIndex: number): StoredNote => ({
     discoveredAt: "2026-01-01T00:00:00.000Z",
 });
 
-const ctx = (): InputsCtx => ({
+const ctx = (nIn = 2): InputsCtx => ({
     pk: 42n,
     nsk: 43n,
+    nIn,
     treeStore: {
         getPath: () => ({ pathElements: [[0n, 0n, 0n]], pathIndices: [0], root: 0n }),
     } as unknown as TreeStore,

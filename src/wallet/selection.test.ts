@@ -197,3 +197,55 @@ describe("selectNotes", () => {
         expect(mean).toBeLessThan(0.5);
     });
 });
+
+describe("maxInputs", () => {
+    // The default is the deployed 2×2 arity. A wider circuit lets a spend
+    // reach covers that two notes cannot, and lets consolidation merge more
+    // per round.
+    it("defaults to two notes even when a third would give a tighter cover", () => {
+        // 30+40+50 = 120 covers 115 exactly; the best 2-cover is 40+50 = 90,
+        // which does not, so at maxInputs 2 this has to consolidate.
+        const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
+        const r = selectNotes(notes, assetId(1n), circuitAmount(115n), baseOpts());
+        expect(r.plan).toBe("consolidate-first");
+    });
+
+    it("finds a three-note cover when the circuit allows three inputs", () => {
+        const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
+        const r = selectNotes(notes, assetId(1n), circuitAmount(115n), baseOpts({ maxInputs: 3 }));
+        if (r.plan !== "direct") throw new Error("expected direct");
+        expect(r.notes.map((n) => n.id).sort()).toEqual(["a", "b", "c"]);
+        expect(r.sum).toBe(120n);
+    });
+
+    it("still prefers the smallest cover, and fewer notes on a tie", () => {
+        // A single 100 covers 100; so does 40+60. Equal sums, so the single
+        // note wins.
+        const notes = [note("single", 100n), note("x", 40n), note("y", 60n)];
+        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts({ maxInputs: 3 }));
+        if (r.plan !== "direct") throw new Error("expected direct");
+        expect(r.notes).toHaveLength(1);
+        expect(r.notes[0]!.id).toBe("single");
+    });
+
+    it("prefers a tighter three-note cover over a looser one-note cover", () => {
+        // 10+20+30 = 60 beats the lone 500.
+        const notes = [note("big", 500n), note("a", 10n), note("b", 20n), note("c", 30n)];
+        const r = selectNotes(notes, assetId(1n), circuitAmount(55n), baseOpts({ maxInputs: 3 }));
+        if (r.plan !== "direct") throw new Error("expected direct");
+        expect(r.sum).toBe(60n);
+        expect(r.notes).toHaveLength(3);
+    });
+
+    it("consolidates as many notes as the arity allows", () => {
+        // Total 100 clears the target, but the best 3-note cover is
+        // 20+30+40 = 90, which does not. So the plan is to merge the three
+        // smallest rather than just two.
+        const notes = [note("a", 10n), note("b", 20n), note("c", 30n), note("d", 40n)];
+        const r = selectNotes(notes, assetId(1n), circuitAmount(95n), baseOpts({ maxInputs: 3 }));
+        expect(r.plan).toBe("consolidate-first");
+        if (r.plan !== "consolidate-first") throw new Error("unreachable");
+        expect(r.consolidate).toHaveLength(3);
+        expect(r.consolidateSum).toBe(60n);
+    });
+});

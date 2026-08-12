@@ -81,8 +81,10 @@ export interface BundleCommon {
 /** @internal */
 export interface BuiltBundle {
     payload: SubmitTransactPayload;
-    cm: [Field, Field];
-    producedNotes: [Note, Note];
+    /** One commitment per output slot: `nOut` entries. */
+    cm: Field[];
+    /** The output notes, in slot order: `nOut` entries. */
+    producedNotes: Note[];
 }
 
 /**
@@ -96,13 +98,14 @@ export interface InputSlot {
 }
 
 /**
- * Two-slot real-or-dummy input mask. `[a, b]` where each entry is either
- * an `InputSlot` (real spend) or `null` (dummy). At least one must be
- * non-null; balance equation enforced inside the builder.
+ * Real-or-dummy input mask, one entry per input slot: an `InputSlot` for a
+ * real spend or `null` for a dummy. Length must equal the shape's `nIn`, and
+ * at least one entry must be non-null. The balance equation is enforced
+ * inside the builder.
  *
  * @internal
  */
-export type InputSlots = [InputSlot | null, InputSlot | null];
+export type InputSlots = readonly (InputSlot | null)[];
 
 /**
  * Fill both input slots, substituting a dummy for `null`. Every dummy gets a
@@ -113,31 +116,24 @@ export type InputSlots = [InputSlot | null, InputSlot | null];
  */
 type SpentNoteInput = ReturnType<typeof toSpentNoteFromPath>;
 
-export function buildInputs(
-    P: Poseidon,
-    slots: InputSlots,
-    treeDepth: number,
-): [SpentNoteInput, SpentNoteInput] {
-    const build = (s: InputSlots[number]): SpentNoteInput =>
+export function buildInputs(P: Poseidon, slots: InputSlots, treeDepth: number): SpentNoteInput[] {
+    return slots.map((s) =>
         s
             ? toSpentNoteFromPath(P, s.cached, s.pathElements, s.pathIndices)
-            : dummyInputAt(P, treeDepth, randomFr());
-    return [build(slots[0]), build(slots[1])];
+            : dummyInputAt(P, treeDepth, randomFr()),
+    );
 }
 
 /**
- * Bind each output-note rho to the Orchard-style derivation the transact_2x2
+ * Bind each output-note rho to the Orchard-style derivation the transact
  * circuit enforces: rho = Poseidon(TAG_RHO, nullifier[0], out_index). Overrides
  * any caller-supplied rho so no two committed output notes can share a rho
  * (→ a future nullifier). MUST run before aux/cm are built from the notes.
  *
  * @internal
  */
-export function deriveOutputRho(P: Poseidon, nf0: Field, outputs: [Note, Note]): [Note, Note] {
-    return [
-        { ...outputs[0], rho: buildRho(P, nf0, 0) },
-        { ...outputs[1], rho: buildRho(P, nf0, 1) },
-    ];
+export function deriveOutputRho(P: Poseidon, nf0: Field, outputs: readonly Note[]): Note[] {
+    return outputs.map((note, index) => ({ ...note, rho: buildRho(P, nf0, index) }));
 }
 
 /** @internal */
@@ -170,17 +166,17 @@ export function buildAuxForReal(
 export async function finalize(
     common: BundleCommon,
     kind: SpendKind,
-    inputs: [SpentNoteInput, SpentNoteInput],
-    outputs: [Note, Note],
+    inputs: readonly SpentNoteInput[],
+    outputs: readonly Note[],
     merkleRoot: Field,
     publicIn: bigint,
     publicOut: bigint,
-    auxAndWitness: [OutputAuxWithWitness, OutputAuxWithWitness],
+    auxAndWitness: readonly OutputAuxWithWitness[],
 ): Promise<BuiltBundle> {
     if (!common.prover && !common.proverPaths) {
         throw new Error("BundleCommon: either `prover` or `proverPaths` is required");
     }
-    const aux: [OutputAux, OutputAux] = [auxAndWitness[0].aux, auxAndWitness[1].aux];
+    const aux: OutputAux[] = auxAndWitness.map((a) => a.aux);
 
     const { J, asset } = common;
 
@@ -188,8 +184,8 @@ export async function finalize(
         publicAssetId: asset,
         publicIn,
         publicOut,
-        inputs,
-        outputs,
+        inputs: [...inputs],
+        outputs: [...outputs],
         outputClues: auxAndWitness.map((a) => a.witness),
         outputAuxDigest: auxDigest(aux.map(auxOutputToWire)),
         merkleRoot,
@@ -209,10 +205,10 @@ export async function finalize(
             kind,
             proof2x2: groth16ToWire(proof),
             pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
-            aux: [aux[0], aux[1]],
+            aux: [...aux],
         },
-        cm: [buildNoteCommitment(common.P, outputs[0]), buildNoteCommitment(common.P, outputs[1])],
-        producedNotes: [outputs[0], outputs[1]],
+        cm: outputs.map((note) => buildNoteCommitment(common.P, note)),
+        producedNotes: [...outputs],
     };
 }
 
@@ -260,29 +256,32 @@ function extractPubInputs(
     // The explicit re-parse is the trust boundary between the prover witness
     // (decimal strings) and the relayer wire format (bigints/points). Typing
     // the witness as `CircomTransactInput` keeps it cast-free.
-    const pair = (v: readonly string[] | undefined): [bigint, bigint] => {
+    // A curve point is always (x, y) whatever the shape — unlike the
+    // per-slot arrays below, whose length is `nIn` or `nOut`.
+    const point = (v: readonly string[] | undefined): [bigint, bigint] => {
         if (v?.length !== 2) {
             throw new InternalError(
-                `extractPubInputs: expected a 2-element slot, got ${v?.length}`,
+                `extractPubInputs: a curve point needs 2 coordinates, got ${v?.length}`,
             );
         }
         return [BigInt(v[0] as string), BigInt(v[1] as string)];
     };
+    const scalars = (v: readonly string[]): bigint[] => v.map((x) => BigInt(x));
 
     return {
         merkleRoot: BigInt(base.merkle_root),
-        nullifier: pair(base.nullifier),
-        outCm: pair(base.out_cm),
+        nullifier: scalars(base.nullifier),
+        outCm: scalars(base.out_cm),
         publicAssetId: asset,
         publicIn,
         publicOut,
-        inCv: [pair(base.in_cv[0]), pair(base.in_cv[1])],
-        outCv: [pair(base.out_cv[0]), pair(base.out_cv[1])],
+        inCv: base.in_cv.map(point),
+        outCv: base.out_cv.map(point),
         recipient: common.recipientAddress,
         chainId: common.chainId,
         payer: common.payerAddress,
         relayer: common.relayerAddress,
-        outCvDep: [pair(base.out_cv_dep[0]), pair(base.out_cv_dep[1])],
+        outCvDep: base.out_cv_dep.map(point),
     };
 }
 

@@ -9,7 +9,7 @@ import { freshOutputAuxRandomness } from "../notes/randomness.js";
 import type { WithdrawOptions, WithdrawResult } from "./api.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./internal.js";
-import { prepareSpend, splitChangePair } from "./tx/steps.js";
+import { prepareSpend, splitChange } from "./tx/steps.js";
 
 export type WithdrawKind = "withdraw" | "withdrawNative";
 
@@ -32,7 +32,9 @@ export async function executeWithdraw(
     });
 
     const remainder = branded<CircuitAmount>(selection.sum - publicOut);
-    const [change0, change1] = splitChangePair(ctx.keys.pk, asset, remainder);
+    // All output slots are change back to self.
+    const nOut = ctx.cfg.shape.nOut;
+    const change = splitChange(ctx.keys.pk, asset, remainder, nOut);
 
     safePhase(args.onPhase, "proving");
     const built = await buildSpend({
@@ -49,9 +51,9 @@ export async function executeWithdraw(
         inputs,
         merkleRoot,
         publicOut,
-        outputs: [change0, change1],
-        outputRecipients: [ownAddr, ownAddr],
-        outputRandomness: [freshOutputAuxRandomness(), freshOutputAuxRandomness()],
+        outputs: change,
+        outputRecipients: change.map(() => ownAddr),
+        outputRandomness: change.map(() => freshOutputAuxRandomness()),
     });
 
     safePhase(args.onPhase, "submitting");
@@ -66,7 +68,7 @@ export async function executeWithdraw(
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
-        // Both outputs are change-to-self.
-        ownIndices: [0, 1],
+        // Every output slot is change-to-self.
+        ownIndices: change.map((_, i) => i),
     });
 }
