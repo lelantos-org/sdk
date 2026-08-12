@@ -90,7 +90,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     });
 
     // Leg 2: B-note deposit intent. Slot 0 = real B note, slot 1 = pad.
-    const { output0: o0, output1Pad: o1 } = freshDepositSlots();
+    const { output0: o0 } = freshDepositSlots();
     const intentBundle = buildDeposit({
         P: ctx.P,
         J: ctx.J,
@@ -106,12 +106,6 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             rcv: o0.rcv,
             rcvDep: o0.rcvDep,
             aux: o0.aux,
-        },
-        output1Pad: {
-            rho: o1.rho,
-            rcm: o1.rcm,
-            rcv: o1.rcv,
-            rcvDep: o1.rcvDep,
         },
     });
 
@@ -129,7 +123,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             adapter: quote.adapter,
             route: quote.route,
             intentD: intentBundle.intent,
-            auxD: [auxOutputFromWire(intentBundle.aux[0]), auxOutputFromWire(intentBundle.aux[1])],
+            auxD: auxOutputFromWire(intentBundle.aux),
             tokenIn: entryIn.token,
             tokenOut: entryOut.token,
             amountIn: amountInUnits,

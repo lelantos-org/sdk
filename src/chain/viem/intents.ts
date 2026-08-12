@@ -1,7 +1,9 @@
 // Deposit-intent submission and cancellation.
 //
-// The three submit paths (witness / native / authorized) share one call,
-// parameterised by function name, argument tuple, and whether ETH rides along.
+// The three submit paths (witness / native / authorized) each encode their own
+// calldata — viem infers the argument tuple from the ABI, so a struct that
+// drifts from the contract is a compile error — then share the send/receipt/
+// log-extraction tail.
 
 import { encodeFunctionData, type Hex, parseEventLogs } from "viem";
 import type { Hex32 } from "../../core/brand.js";
@@ -12,13 +14,11 @@ import type { CancelIntentInputs } from "../types.js";
 import { MASP_ABI } from "./abi.js";
 import { hex, type ViemCtx } from "./ctx.js";
 import { waitTxReceipt } from "./token.js";
-import { auxTuples, intentTuple } from "./tuples.js";
-
-type SubmitFn = "submitIntent" | "submitIntentNative" | "submitIntentAuthorized";
+import { auxTuple, intentTuple } from "./tuples.js";
 
 export interface SubmitBase {
     intent: DepositIntent;
-    aux: [AuxOutput, AuxOutput];
+    aux: AuxOutput;
     onSent?: ((txHash: Hex32) => void) | undefined;
 }
 
@@ -26,52 +26,45 @@ export function submitIntent(
     ctx: ViemCtx,
     args: SubmitBase & { permit2: Permit2Sig },
 ): Promise<{ txHash: Hex32; intentId: bigint }> {
-    return submitVia(ctx, "submitIntent", args.onSent, [
-        intentTuple(args.intent),
-        {
-            nonce: args.permit2.nonce,
-            deadline: args.permit2.deadline,
-            maxTotal: args.permit2.maxTotal,
-            signature: hex(args.permit2.signature),
-        },
-        auxTuples(args.aux),
-    ]);
+    const data = encodeFunctionData({
+        abi: MASP_ABI,
+        functionName: "submitIntent",
+        args: [
+            intentTuple(args.intent),
+            {
+                nonce: args.permit2.nonce,
+                deadline: args.permit2.deadline,
+                maxTotal: args.permit2.maxTotal,
+                signature: hex(args.permit2.signature),
+            },
+            auxTuple(args.aux),
+        ],
+    });
+    return sendAndExtractIntentId(ctx, data, args.onSent);
 }
 
 export function submitIntentNative(
     ctx: ViemCtx,
     args: SubmitBase & { value: bigint },
 ): Promise<{ txHash: Hex32; intentId: bigint }> {
-    return submitVia(
-        ctx,
-        "submitIntentNative",
-        args.onSent,
-        [intentTuple(args.intent), auxTuples(args.aux)],
-        args.value,
-    );
+    const data = encodeFunctionData({
+        abi: MASP_ABI,
+        functionName: "submitIntentNative",
+        args: [intentTuple(args.intent), auxTuple(args.aux)],
+    });
+    return sendAndExtractIntentId(ctx, data, args.onSent, args.value);
 }
 
 export function submitIntentAuthorized(
     ctx: ViemCtx,
     args: SubmitBase,
 ): Promise<{ txHash: Hex32; intentId: bigint }> {
-    return submitVia(ctx, "submitIntentAuthorized", args.onSent, [
-        intentTuple(args.intent),
-        auxTuples(args.aux),
-    ]);
-}
-
-async function submitVia(
-    ctx: ViemCtx,
-    functionName: SubmitFn,
-    onSent: ((txHash: Hex32) => void) | undefined,
-    args: unknown[],
-    value?: bigint,
-): Promise<{ txHash: Hex32; intentId: bigint }> {
-    // `as never`: viem cannot infer the tuple shape through the domain
-    // structs. The encoding is pinned by `encoding-parity.test.ts`.
-    const data = encodeFunctionData({ abi: MASP_ABI, functionName, args: args as never });
-    return sendAndExtractIntentId(ctx, data, onSent, value);
+    const data = encodeFunctionData({
+        abi: MASP_ABI,
+        functionName: "submitIntentAuthorized",
+        args: [intentTuple(args.intent), auxTuple(args.aux)],
+    });
+    return sendAndExtractIntentId(ctx, data, args.onSent);
 }
 
 async function sendAndExtractIntentId(
@@ -113,14 +106,21 @@ export async function cancelIntent(
     const data = encodeFunctionData({
         abi: MASP_ABI,
         functionName: "cancelIntent",
+        // The contract keeps only `keccak(intent)` per escrow, so the fields
+        // it used to read from storage are now supplied by the caller and
+        // checked against that digest. They come off the `IntentEscrowed` log.
         args: [
             id,
-            inputs.publicIn,
-            hex(inputs.cm0),
-            hex(inputs.cm1),
-            [inputs.cvDep0[0], inputs.cvDep0[1]],
-            [inputs.cvDep1[0], inputs.cvDep1[1]],
-        ] as never,
+            // `uint48`, so viem wants a JS number. Lossless: 2^48 is well
+            // inside the safe-integer range.
+            Number(inputs.publicIn),
+            hex(inputs.cm),
+            [inputs.cvDep[0], inputs.cvDep[1]],
+            inputs.publicAssetId,
+            inputs.feeBpsAtSubmit,
+            hex(inputs.payer),
+            inputs.submittedAt,
+        ],
     });
     const hash = await ctx.signer.sendTransaction({ to: ctx.maspAddress, data });
     await waitTxReceipt(ctx, hash);

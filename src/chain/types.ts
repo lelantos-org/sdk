@@ -34,30 +34,30 @@ export interface Permit2SignArgs {
 }
 
 /**
- * `MASP.escrowed(id)` view. `cm0/cm1/publicIn` are folded into `digest`;
- * reconstruct via the `IntentEscrowed` log.
+ * `MASP.escrowed(id)` view — now the digest and nothing else. The row used to
+ * carry `payer`, `submittedAt`, `publicAssetId` and `feeBpsAtSubmit`; those are
+ * folded into the digest and must be reconstructed from the `IntentEscrowed`
+ * log, which is also what `cancelIntent` now takes back as arguments.
  */
 export interface EscrowedIntentView {
     digest: Hex32;
-    payer: EvmAddress;
-    /** block number of submitIntent. */
-    submittedAt: number;
-    publicAssetId: AssetId;
-    feeBpsAtSubmit: number;
 }
 
 /**
- * Preimage fields for `cancelIntent`. On-chain digest check binds these
- * to what was escrowed at submit. Sourced from `IntentEscrowedRecord`.
- * `feeBpsAtSubmit` is not needed; the contract reads it from escrow
- * storage.
+ * Preimage fields for `cancelIntent`. The escrow row keeps only
+ * `keccak(intent)`, so every field the contract once read from storage is now
+ * passed back in and checked against that digest — including `publicAssetId`,
+ * `feeBpsAtSubmit`, `payer` and `submittedAt`. All of them come off the
+ * `IntentEscrowed` log; cache it, because `escrowed()` no longer returns them.
  */
 export interface CancelIntentInputs {
     publicIn: bigint;
-    cm0: Hex32;
-    cm1: Hex32;
-    cvDep0: [bigint, bigint];
-    cvDep1: [bigint, bigint];
+    cm: Hex32;
+    cvDep: [bigint, bigint];
+    publicAssetId: AssetId;
+    feeBpsAtSubmit: number;
+    payer: EvmAddress;
+    submittedAt: number;
 }
 
 /**
@@ -71,11 +71,11 @@ export interface IntentEscrowedRecord {
     publicAssetId: AssetId;
     publicIn: bigint;
     feeBpsAtSubmit: number;
-    cm0: Hex32;
-    cm1: Hex32;
-    cvDep0: [bigint, bigint];
-    cvDep1: [bigint, bigint];
-    rcvTotal: bigint;
+    cm: Hex32;
+    cvDep: [bigint, bigint];
+    rcv: bigint;
+    /** Block number of the `submitIntent` that escrowed this intent. */
+    submittedAt: number;
 }
 
 /** ERC20 display metadata. */

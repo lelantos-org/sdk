@@ -12,31 +12,35 @@ import { bytesToHex } from "../core/hex.js";
 import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositIntent } from "./deposit-intent.js";
 
 /**
- * Compute `piHash = keccak256(abi.encode(DepositIntent, AuxValidation.Output[2]))`.
+ * Component list of `PubInputs.DepositIntent`, in declaration order.
+ *
+ * The Permit2 witness is `keccak256(abi.encode(d, aux))`, so every field, its
+ * type and its position are consensus-binding: a mismatch produces a signature
+ * the contract rejects. `abi-hash.test.ts` derives the same list from the
+ * canonical ABI and asserts it matches, rather than trusting this transcription.
+ *
+ * @internal
+ */
+export const DEPOSIT_INTENT_COMPONENTS = [
+    { name: "chainId", type: "uint256" },
+    { name: "publicAssetId", type: "uint64" },
+    { name: "publicIn", type: "uint64" },
+    { name: "payer", type: "address" },
+    { name: "recipient", type: "address" },
+    { name: "outCm", type: "bytes32" },
+    { name: "cvDep", type: "uint256[2]" },
+    { name: "rcv", type: "uint256" },
+] as const;
+
+/**
+ * Compute `piHash = keccak256(abi.encode(DepositIntent, AuxValidation.Output))`.
  * Mirrors MASP.submitIntent line `keccak256(abi.encode(d, aux))`.
  */
-export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]): Hex32 {
+export function computePiHash(intent: DepositIntent, aux: AuxOutput): Hex32 {
     const encoded = encodeAbiParameters(
         [
-            {
-                type: "tuple",
-                components: [
-                    { name: "chainId", type: "uint64" },
-                    { name: "publicAssetId", type: "uint64" },
-                    { name: "publicIn", type: "uint64" },
-                    { name: "payer", type: "address" },
-                    { name: "recipient", type: "address" },
-                    { name: "outCm", type: "bytes32[2]" },
-                    { name: "cvDep0", type: "uint256[2]" },
-                    { name: "cvDep1", type: "uint256[2]" },
-                    { name: "rcvTotal", type: "uint256" },
-                    { name: "rcvDepPad", type: "uint256" },
-                ],
-            },
-            {
-                type: "tuple[2]",
-                components: [...AUX_OUTPUT_COMPONENTS],
-            },
+            { type: "tuple", components: [...DEPOSIT_INTENT_COMPONENTS] },
+            { type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
         ],
         [
             {
@@ -45,20 +49,18 @@ export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]
                 publicIn: intent.publicIn,
                 payer: intent.payer as `0x${string}`,
                 recipient: intent.recipient as `0x${string}`,
-                outCm: intent.outCm as [`0x${string}`, `0x${string}`],
-                cvDep0: intent.cvDep0,
-                cvDep1: intent.cvDep1,
-                rcvTotal: intent.rcvTotal,
-                rcvDepPad: intent.rcvDepPad,
+                outCm: intent.outCm as `0x${string}`,
+                cvDep: intent.cvDep,
+                rcv: intent.rcv,
             },
-            aux.map((a) => ({
-                clueRx: a.clueRx,
-                clueRy: a.clueRy,
-                ephPubX: a.ephPubX,
-                ephPubY: a.ephPubY,
-                ciphertext: bytesToHex(a.ciphertext) as `0x${string}`,
-            })) as never,
-        ],
+            {
+                clueRx: aux.clueRx,
+                clueRy: aux.clueRy,
+                ephPubX: aux.ephPubX,
+                ephPubY: aux.ephPubY,
+                ciphertext: bytesToHex(aux.ciphertext) as `0x${string}`,
+            },
+        ] as never,
     );
     return branded<Hex32>(keccak256(encoded));
 }

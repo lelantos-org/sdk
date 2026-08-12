@@ -62,11 +62,9 @@ const intent: DepositIntent = {
     publicIn: 250n,
     payer: "0xpayer",
     recipient: "0xrecipient",
-    outCm: ["0xcm0", "0xcm1"],
-    cvDep0: [23n, 24n],
-    cvDep1: [25n, 26n],
-    rcvTotal: 27n,
-    rcvDepPad: 28n,
+    outCm: "0xcm0",
+    cvDep: [23n, 24n],
+    rcv: 27n,
 };
 
 const proof2x2 = { piA: ["1"], piB: [["2"]], piC: ["3"] };
@@ -77,10 +75,7 @@ describe("outbound encoding (golden)", () => {
             chainId: 31337n,
             intent,
             permit2: { nonce: 1n, deadline: 2n, maxTotal: 3n, signature: "0xsig" },
-            aux: [
-                { clueRx: 1n, clueRy: 2n, ephPubX: 3n, ephPubY: 4n, ciphertext: new Uint8Array() },
-                { clueRx: 5n, clueRy: 6n, ephPubX: 7n, ephPubY: 8n, ciphertext: new Uint8Array() },
-            ],
+            aux: { clueRx: 1n, clueRy: 2n, ephPubX: 3n, ephPubY: 4n, ciphertext: new Uint8Array() },
         };
         const out = serializeSubmitIntent(payload) as {
             chainId: unknown;
@@ -104,7 +99,7 @@ describe("outbound encoding (golden)", () => {
                 adapter: "0xadapter",
                 route: "0xroute",
                 intentD: intent,
-                auxD: [aux, aux],
+                auxD: aux,
                 tokenIn: "0xin",
                 tokenOut: "0xout",
                 amountIn: 10n ** 30n,

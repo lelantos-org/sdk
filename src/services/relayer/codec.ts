@@ -111,11 +111,10 @@ function serializeSwapBlob(s: SwapBlob): unknown {
             payer: s.intentD.payer,
             recipient: s.intentD.recipient,
             outCm: s.intentD.outCm,
-            cvDep0: [decStr(s.intentD.cvDep0[0]), decStr(s.intentD.cvDep0[1])],
-            cvDep1: [decStr(s.intentD.cvDep1[0]), decStr(s.intentD.cvDep1[1])],
-            rcvTotal: decStr(s.intentD.rcvTotal),
+            cvDep: [decStr(s.intentD.cvDep[0]), decStr(s.intentD.cvDep[1])],
+            rcv: decStr(s.intentD.rcv),
         },
-        auxD: s.auxD.map(serializeAux),
+        auxD: serializeAux(s.auxD),
         tokenIn: s.tokenIn,
         tokenOut: s.tokenOut,
         // Decimal strings so U256 values >2^53 round-trip safely.
@@ -144,7 +143,7 @@ export function serializeSubmitIntent(p: SubmitIntentPayload): unknown {
             maxTotal: decStr(p.permit2.maxTotal),
             signature: p.permit2.signature,
         },
-        aux: p.aux.map(serializeAuxOutput),
+        aux: serializeAuxOutput(p.aux),
     };
 }
 

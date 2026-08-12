@@ -131,14 +131,14 @@ export class ViemChainAdapter implements ChainAdapter {
     submitIntent(args: {
         intent: DepositIntent;
         permit2: Permit2Sig;
-        aux: [AuxOutput, AuxOutput];
+        aux: AuxOutput;
         onSent?: ((txHash: Hex32) => void) | undefined;
     }): Promise<{ txHash: Hex32; intentId: bigint }> {
         return intents.submitIntent(this.ctx, args);
     }
     submitIntentNative(args: {
         intent: DepositIntent;
-        aux: [AuxOutput, AuxOutput];
+        aux: AuxOutput;
         value: bigint;
         onSent?: ((txHash: Hex32) => void) | undefined;
     }): Promise<{ txHash: Hex32; intentId: bigint }> {
@@ -146,7 +146,7 @@ export class ViemChainAdapter implements ChainAdapter {
     }
     submitIntentAuthorized(args: {
         intent: DepositIntent;
-        aux: [AuxOutput, AuxOutput];
+        aux: AuxOutput;
         onSent?: ((txHash: Hex32) => void) | undefined;
     }): Promise<{ txHash: Hex32; intentId: bigint }> {
         return intents.submitIntentAuthorized(this.ctx, args);

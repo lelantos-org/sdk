@@ -58,11 +58,11 @@ export interface SubmitIntentPayload {
     intent: DepositIntent;
     permit2: Permit2Sig;
     /**
-     * Exactly two: `MASP.submitIntent` takes `aux[2]` and `bytes32[2] outCm`,
-     * so the deposit path is two-output on chain regardless of the transact
+     * One: `MASP.submitIntent` takes a single `aux` and `bytes32 outCm`, so
+     * the deposit path is one-output on chain regardless of the transact
      * circuit's shape.
      */
-    aux: [AuxOutput, AuxOutput];
+    aux: AuxOutput;
 }
 
 /**
@@ -104,10 +104,10 @@ export interface SwapBlob {
      */
     intentD: DepositIntent;
     /**
-     * FMD + ciphertext for the B-side outputs. Same shape as the leg-1
-     * `aux` (matches the on-chain `OutputAux` struct).
+     * FMD + ciphertext for the B-side output. Matches the on-chain
+     * `AuxValidation.Output` struct, which the deposit path takes singly.
      */
-    auxD: [TransactAux, TransactAux];
+    auxD: TransactAux;
     /** 0x-hex ERC20 addresses. */
     tokenIn: string;
     tokenOut: string;

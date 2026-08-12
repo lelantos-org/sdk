@@ -71,31 +71,17 @@ describe("permit2", () => {
             publicIn: 1000n,
             payer: "0x0000000000000000000000000000000000000001",
             recipient: "0x0000000000000000000000000000000000000002",
-            outCm: [
-                "0x0000000000000000000000000000000000000000000000000000000000000003",
-                "0x0000000000000000000000000000000000000000000000000000000000000004",
-            ],
-            cvDep0: [11n, 12n],
-            cvDep1: [13n, 14n],
-            rcvTotal: 99n,
-            rcvDepPad: 41n,
+            outCm: "0x0000000000000000000000000000000000000000000000000000000000000003",
+            cvDep: [11n, 12n],
+            rcv: 99n,
         };
-        const aux: [AuxOutput, AuxOutput] = [
-            {
-                clueRx: 1n,
-                clueRy: 2n,
-                ephPubX: 3n,
-                ephPubY: 4n,
-                ciphertext: new Uint8Array([0xab, 0xcd, 0xef]),
-            },
-            {
-                clueRx: 5n,
-                clueRy: 6n,
-                ephPubX: 7n,
-                ephPubY: 8n,
-                ciphertext: new Uint8Array([0x12, 0x34]),
-            },
-        ];
+        const aux: AuxOutput = {
+            clueRx: 1n,
+            clueRy: 2n,
+            ephPubX: 3n,
+            ephPubY: 4n,
+            ciphertext: new Uint8Array([0xab, 0xcd, 0xef]),
+        };
         const h1 = computePiHash(intent, aux);
         const h2 = computePiHash(intent, aux);
         expect(h1).toBe(h2);

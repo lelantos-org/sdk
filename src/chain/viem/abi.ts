@@ -5,24 +5,29 @@
 // these anchors viem into any graph that so much as re-exports this module.
 // The root barrel does, which made `import { isWalletError }` cost ~306 KB.
 // `/* @__PURE__ */` is what lets the constants drop when unused.
+//
+// The Lelantos entries are generated from `@lelantos-org/contracts` (the
+// Foundry build) rather than hand-written, and `abi.test.ts` asserts every one
+// still matches, inputs and outputs. They are inlined instead of imported
+// because `maspAbi` is a single 30 KB constant covering the whole contract:
+// it cannot be shaken per-entry, and the subset here is ~3 KB.
 
 import { parseAbi } from "viem";
 
 export const MASP_ABI = /* @__PURE__ */ parseAbi([
-    "function asset(uint64) view returns (address token, bool disabled, uint256 scale)",
+    "function asset(uint64 id) view returns ((address token, bool disabled, uint256 scale))",
     "function feeBps() view returns (uint16)",
     "function treasury() view returns (address)",
     "function cancelDelay() view returns (uint32)",
     "function WRAPPED_NATIVE() view returns (address)",
     "function nextIntentId() view returns (uint256)",
-    "function escrowed(uint256) view returns (bytes32 digest, address payer, uint32 submittedAt, uint64 publicAssetId, uint16 feeBpsAtSubmit)",
-    "function submitIntent((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d,(uint256 nonce,uint256 deadline,uint256 maxTotal,bytes signature) sig,(uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
-    "function submitIntentNative((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d,(uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) payable returns (uint256)",
-    "function submitIntentAuthorized((uint64 chainId,uint64 publicAssetId,uint64 publicIn,address payer,address recipient,bytes32[2] outCm,uint256[2] cvDep0,uint256[2] cvDep1,uint256 rcvTotal) d,(uint256 clueRx,uint256 clueRy,uint256 ephPubX,uint256 ephPubY,bytes ciphertext)[2] aux) returns (uint256)",
-    "function cancelIntent(uint256 id,uint48 publicIn,bytes32 cm0,bytes32 cm1,uint256[2] cvDep0,uint256[2] cvDep1)",
-    "event IntentEscrowed(uint256 indexed id,address indexed payer,address indexed recipient,uint64 publicAssetId,uint64 publicIn,uint16 feeBpsAtSubmit,bytes32 cm0,bytes32 cm1,uint256 cvDep0X,uint256 cvDep0Y,uint256 cvDep1X,uint256 cvDep1Y,uint256 rcvTotal,uint256 clueRx0,uint256 clueRy0,uint256 ephPubX0,uint256 ephPubY0,bytes ciphertext0,uint256 clueRx1,uint256 clueRy1,uint256 ephPubX1,uint256 ephPubY1,bytes ciphertext1)",
-    "event NotesCreated(bytes32 indexed cm0,bytes32 indexed cm1)",
-    "event NotePayload(bytes32 indexed cm0,bytes32 indexed cm1,uint256 clueRx0,uint256 clueRy0,uint256 ephPubX0,uint256 ephPubY0,bytes ciphertext0,uint256 clueRx1,uint256 clueRy1,uint256 ephPubX1,uint256 ephPubY1,bytes ciphertext1,uint256 cvDep0X,uint256 cvDep0Y,uint256 cvDep1X,uint256 cvDep1Y)",
+    "function escrowed(uint256 id) view returns (bytes32 digest)",
+    "function submitIntent((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 nonce, uint256 deadline, uint256 maxTotal, bytes signature) sig, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) returns (uint256 id)",
+    "function submitIntentNative((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) payable returns (uint256 id)",
+    "function submitIntentAuthorized((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) returns (uint256 id)",
+    "function cancelIntent(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, address payer, uint32 submittedAt)",
+    "event IntentEscrowed(uint256 indexed id, address indexed payer, address indexed recipient, uint64 publicAssetId, uint64 publicIn, uint16 feeBpsAtSubmit, bytes32 cm, uint256 cvDepX, uint256 cvDepY, uint256 rcv, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext)",
+    "event NotePayload(bytes32 indexed cm, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext, uint256 cvDepX, uint256 cvDepY)",
 ]);
 
 export const ERC20_ABI = /* @__PURE__ */ parseAbi([

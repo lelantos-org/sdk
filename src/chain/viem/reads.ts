@@ -1,56 +1,53 @@
 // MASP contract reads.
 
-import { decodeEventLog, zeroAddress } from "viem";
+import { decodeEventLog } from "viem";
 import { type AssetId, branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { TxMiningError } from "../../core/errors.js";
 import type { AssetEntry, EscrowedIntentView, IntentEscrowedRecord } from "../types.js";
 import { MASP_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
 
+/** `bytes32(0)` — what an unset escrow row reads back as. */
+const ZERO_WORD = `0x${"0".repeat(64)}` as const;
+
 export async function fetchAsset(ctx: ViemCtx, id: AssetId): Promise<AssetEntry> {
-    const [token, disabled, scale] = (await ctx.publicClient.readContract({
+    // One struct, not three flat returns — viem decodes it to an object.
+    const { token, disabled, scale } = await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
         functionName: "asset",
         args: [id],
-    })) as [string, boolean, bigint];
+    });
     return { token: branded<EvmAddress>(token), scale, disabled };
 }
 
 export async function fetchFeeBps(ctx: ViemCtx): Promise<bigint> {
-    const bps = (await ctx.publicClient.readContract({
+    const bps = await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
         functionName: "feeBps",
-    })) as number;
+    });
     return BigInt(bps);
 }
 
 export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedIntentView | null> {
-    const r = (await ctx.publicClient.readContract({
+    const digest = await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
         functionName: "escrowed",
         args: [id],
-    })) as readonly [string, string, number, bigint, number];
-    const [digest, payer, submittedAt, publicAssetId, feeBpsAtSubmit] = r;
-    if (payer === zeroAddress) return null;
-    return {
-        digest: branded<Hex32>(digest),
-        payer: branded<EvmAddress>(payer),
-        submittedAt: Number(submittedAt),
-        publicAssetId: branded<AssetId>(publicAssetId),
-        feeBpsAtSubmit: Number(feeBpsAtSubmit),
-    };
+    });
+    // A cleared or never-written row reads back as the zero word.
+    if (digest === ZERO_WORD) return null;
+    return { digest: branded<Hex32>(digest) };
 }
 
 export async function cancelDelay(ctx: ViemCtx): Promise<number> {
-    const r = (await ctx.publicClient.readContract({
+    return await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
         functionName: "cancelDelay",
-    })) as number;
-    return Number(r);
+    });
 }
 
 export async function fetchIntentEscrowed(
@@ -81,21 +78,23 @@ export async function fetchIntentEscrowed(
     });
     if (decoded.eventName !== "IntentEscrowed") return null;
 
-    // The event emits cvDep as four flat scalars; the record carries two
-    // points. Keep this mapping explicit — it is the trust boundary between
-    // the ABI decode and the domain type.
-    const a = decoded.args as unknown as Record<string, bigint | string>;
+    // The event emits cvDep as two flat scalars; the record carries one point.
+    // Keep this mapping explicit — it is the trust boundary between the ABI
+    // decode and the domain type. `eventName` above narrows `args`, so a field
+    // that moves in the ABI fails here rather than silently reading undefined.
+    const a = decoded.args;
     return {
-        id: a.id as bigint,
-        payer: branded<EvmAddress>(a.payer as string),
-        recipient: branded<EvmAddress>(a.recipient as string),
-        publicAssetId: branded<AssetId>(a.publicAssetId as bigint),
-        publicIn: a.publicIn as bigint,
-        feeBpsAtSubmit: Number(a.feeBpsAtSubmit as bigint),
-        cm0: branded<Hex32>(a.cm0 as string),
-        cm1: branded<Hex32>(a.cm1 as string),
-        cvDep0: [a.cvDep0X as bigint, a.cvDep0Y as bigint],
-        cvDep1: [a.cvDep1X as bigint, a.cvDep1Y as bigint],
-        rcvTotal: a.rcvTotal as bigint,
+        id: a.id,
+        payer: branded<EvmAddress>(a.payer),
+        recipient: branded<EvmAddress>(a.recipient),
+        publicAssetId: branded<AssetId>(a.publicAssetId),
+        publicIn: a.publicIn,
+        feeBpsAtSubmit: a.feeBpsAtSubmit,
+        cm: branded<Hex32>(a.cm),
+        cvDep: [a.cvDepX, a.cvDepY],
+        rcv: a.rcv,
+        // Not in the event: `cancelIntent` needs it, and the log's own block is
+        // by definition the block that escrowed the intent.
+        submittedAt: Number(first.blockNumber),
     };
 }

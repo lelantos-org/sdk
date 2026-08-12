@@ -44,7 +44,7 @@ export interface ChainAdapter {
     submitIntent?(args: {
         intent: DepositIntent;
         permit2: Permit2Sig;
-        aux: [AuxOutput, AuxOutput];
+        aux: AuxOutput;
         /**
          * Fired after the wallet signs and the tx hash is known, before
          * receipt-wait.
@@ -57,7 +57,7 @@ export interface ChainAdapter {
      */
     submitIntentNative?(args: {
         intent: DepositIntent;
-        aux: [AuxOutput, AuxOutput];
+        aux: AuxOutput;
         value: bigint;
         onSent?: (txHash: Hex32) => void;
     }): Promise<{ txHash: Hex32; intentId: bigint }>;
@@ -67,7 +67,7 @@ export interface ChainAdapter {
      */
     submitIntentAuthorized?(args: {
         intent: DepositIntent;
-        aux: [AuxOutput, AuxOutput];
+        aux: AuxOutput;
         onSent?: (txHash: Hex32) => void;
     }): Promise<{ txHash: Hex32; intentId: bigint }>;
     /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */

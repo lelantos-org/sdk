@@ -16,7 +16,6 @@ import {
     freshNoteRandomness,
     freshOutput,
     type NoteOutputRandomness,
-    type NoteRandomness,
 } from "../../notes/randomness.js";
 import type { OnPhase, SpendPhase } from "../api.js";
 import type { SpendContext } from "../context.js";
@@ -95,10 +94,7 @@ export function splitChange(pk: bigint, asset: bigint, remainder: bigint, slots:
     }));
 }
 
-/** Fresh randomness for a deposit intent's real slot plus its pad slot. */
-export function freshDepositSlots(): {
-    output0: NoteOutputRandomness;
-    output1Pad: NoteRandomness;
-} {
-    return { output0: freshOutput(), output1Pad: freshNoteRandomness() };
+/** Fresh randomness for a deposit intent's single output slot. */
+export function freshDepositSlots(): { output0: NoteOutputRandomness } {
+    return { output0: freshOutput() };
 }

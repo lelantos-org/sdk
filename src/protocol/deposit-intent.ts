@@ -11,38 +11,39 @@
  */
 export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 
-/** `PubInputs.DepositIntent` mirror — wire-side bigints/hex. */
+/**
+ * `PubInputs.DepositIntent` mirror — wire-side bigints/hex.
+ *
+ * One output. The intent used to carry a second, zero-value pad leaf so the
+ * deposit produced the same two-leaf shape as a spend; the contract collapsed
+ * it, which also removed `rcvTotal` and `rcvDepPad` (both existed only to pin
+ * the pad leaf's value to zero).
+ */
 export interface DepositIntent {
+    /**
+     * Full-width, matching `Transact.chainId`. Encodes to the same ABI word as
+     * the `uint64` it replaced, so the Permit2 witness preimage is unchanged.
+     */
     chainId: bigint;
     publicAssetId: bigint;
     publicIn: bigint;
     payer: string; // 0x address
     recipient: string; // 0x address
-    /** Two output commitments. 0x-hex 32 B each. */
-    outCm: [string, string];
+    /** Output commitment. 0x-hex 32 B. */
+    outCm: string;
     /**
-     * Per-output Pedersen value commitment cv_dep_j = value_j · V^asset
-     * + rcv_dep_j · H. Anchors (asset_id, value) into the Merkle leaf via
-     * leaf_j = Poseidon(TAG_LEAF, cm_j, cv_dep_j_x, cv_dep_j_y).
+     * Pedersen value commitment cv_dep = value · V^asset + rcv_dep · H.
+     * Anchors (asset_id, value) into the Merkle leaf via
+     * leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
      */
-    cvDep0: [bigint, bigint];
-    cvDep1: [bigint, bigint];
+    cvDep: [bigint, bigint];
     /**
-     * Sum rcv_dep_0 + rcv_dep_1. Published in the IntentEscrowed event so
-     * the relayer can build the tree_update_batch witness without learning
-     * recipient pk/rho/rcm. Pedersen blinder is information-theoretically
-     * independent of value/asset/identity, so leaks nothing useful.
+     * The output's `rcv_dep`. Published in the IntentEscrowed event so the
+     * relayer can build the tree_update_batch witness without learning
+     * recipient pk/rho/rcm. A Pedersen blinder is information-theoretically
+     * independent of value/asset/identity, so it leaks nothing useful.
      */
-    rcvTotal: bigint;
-    /**
-     * rcv_dep of the pad leaf (slot 1) alone. Lets tree_update_batch prove
-     * cv_dep1 == rcvDepPad·H, i.e. the pad leaf commits to value 0, which
-     * pins cv_dep0 to exactly `publicIn` units. The sum alone fixes only
-     * Σvalue mod the subgroup order — a depositor could otherwise load leaf 0
-     * with an out-of-range value and abandon leaf 1. Same blinder-only
-     * disclosure argument as rcvTotal.
-     */
-    rcvDepPad: bigint;
+    rcv: bigint;
 }
 
 /**

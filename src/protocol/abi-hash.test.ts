@@ -1,8 +1,14 @@
+import { maspAbi } from "@lelantos-org/contracts";
+import { encodeAbiParameters, keccak256 } from "viem";
 import { describe, expect, it } from "vitest";
 import { flatten } from "../circuit/index.js";
 import { BN254_FR } from "../core/field.js";
-import { auxDigest } from "./abi-hash.js";
-import type { AuxOutput } from "./deposit-intent.js";
+import { bytesToHex } from "../core/hex.js";
+import { auxDigest, computePiHash, DEPOSIT_INTENT_COMPONENTS } from "./abi-hash.js";
+import { AUX_OUTPUT_COMPONENTS, type AuxOutput } from "./deposit-intent.js";
+
+type AbiParam = { name?: string; type: string; components?: readonly AbiParam[] };
+type AbiFn = { type: string; name?: string; inputs?: readonly AbiParam[] };
 
 // `auxDigest` is the preimage of the final PolyEval coefficient, and covers
 // the two aux fields the clue slots do not: `ephPub` and `ciphertext`. If a
@@ -97,5 +103,57 @@ describe("flatten", () => {
         expect(coeffs[30]).toBe(999n);
         expect(coeffs[0]).toBe(1n);
         expect(coeffs[29]).toBe(30n);
+    });
+});
+
+// ─── piHash vs the deployed contract ─────────────────────────────────────────
+//
+// `piHash` is the Permit2 witness: the contract recomputes
+// `keccak256(abi.encode(d, aux))` and rejects the signature if it disagrees, so
+// a wrong field order or width breaks every deposit with no local symptom.
+// These derive the encoding from the canonical Foundry ABI rather than trusting
+// the hand-written component list.
+
+describe("computePiHash vs the canonical ABI", () => {
+    // `submitIntentNative` is the shortest signature carrying both structs.
+    const submit = (maspAbi as readonly AbiFn[]).find(
+        (i) => i.type === "function" && i.name === "submitIntentNative",
+    );
+    if (!submit?.inputs) throw new Error("submitIntentNative missing from the canonical ABI");
+    const [intentParam, auxParam] = submit.inputs;
+
+    /** Names and types only; `internalType` is Foundry bookkeeping. */
+    const layout = (params: readonly AbiParam[] = []) =>
+        params.map((c) => ({ name: c.name, type: c.type }));
+
+    it("declares DepositIntent exactly as the contract does", () => {
+        expect(layout(intentParam?.components)).toEqual(layout(DEPOSIT_INTENT_COMPONENTS));
+    });
+
+    it("declares AuxValidation.Output exactly as the contract does", () => {
+        // A single struct, not an array — the second output is gone.
+        expect(auxParam?.type).toBe("tuple");
+        expect(layout(auxParam?.components)).toEqual(layout(AUX_OUTPUT_COMPONENTS));
+    });
+
+    it("matches a hash encoded straight from the canonical components", () => {
+        const intent = {
+            chainId: 31337n,
+            publicAssetId: 1n,
+            publicIn: 1_000n,
+            payer: `0x${"11".repeat(20)}`,
+            recipient: `0x${"22".repeat(20)}`,
+            outCm: `0x${"33".repeat(32)}`,
+            cvDep: [7n, 8n] as [bigint, bigint],
+            rcv: 99n,
+        };
+        const a = aux();
+        const wire = { ...a, ciphertext: bytesToHex(a.ciphertext) };
+
+        const fromCanonical = keccak256(
+            encodeAbiParameters([intentParam, auxParam] as never, [intent, wire] as never),
+        );
+
+        expect(computePiHash(intent, a)).toBe(fromCanonical);
     });
 });

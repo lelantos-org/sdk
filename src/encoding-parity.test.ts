@@ -18,12 +18,11 @@
 // Update these constants only with a contract/relayer upgrade that bumps
 // the corresponding domain version.
 //
-// The `computePiHash` vector covers a `DepositIntent` carrying `rcvDepPad`
-// (the per-leaf deposit binding in tree_update_batch — see circuits §14), and
-// is cross-checked against a hand-rolled ABI encoder built from the spec
-// rather than copied from `encodeAbiParameters` output. It requires the
-// matching `PubInputs.DepositIntent` struct on-chain; without that field,
-// `submitIntent` reverts.
+// The `computePiHash` vector covers the one-output `DepositIntent` the
+// contract takes today, and is cross-checked below against a hand-rolled ABI
+// encoder built from the spec rather than copied from `encodeAbiParameters`
+// output. `abi-hash.test.ts` additionally derives the component list from the
+// canonical Foundry ABI, so the layout rests on the contract itself.
 
 import { keccak_256 } from "@noble/hashes/sha3";
 import { describe, expect, it } from "vitest";
@@ -36,7 +35,7 @@ import type { AuxOutput, DepositIntent } from "./protocol/deposit-intent.js";
 
 const PINNED = {
     lelantosTypedDataHash: "0xaf9b4003f47701e282c9f5934e4ea6e5fe0f794e18c0e12c60bb6ba68ee3a93f",
-    computePiHash: "0x7097c977d4ea3cb1e0de444cd4e9394547ec647def7922427db2139328647c4a",
+    computePiHash: "0x2bc7b773c62bfa6c1ec49d76f64647fe74d5bb76b73df7c9f3144db43cac67d4",
     auxDigest: "0x0c1c91777a86f5850add27faced1cdd04125ab20d353f852f5ee880ecc76b9de",
     fiatShamirZ: "0x09749a91edf59dfc22cb354dc68e01ed58df7cd957ee08c5e8623f0f9374d29b",
 } as const;
@@ -53,28 +52,35 @@ const AUX: [AuxOutput, AuxOutput] = [
     { clueRx: 5n, clueRy: 6n, ephPubX: 7n, ephPubY: 8n, ciphertext: new Uint8Array([0x12, 0x34]) },
 ];
 
+const INTENT: DepositIntent = {
+    chainId: 31337n,
+    publicAssetId: 1n,
+    publicIn: 1000n,
+    payer: "0x0000000000000000000000000000000000000001",
+    recipient: "0x0000000000000000000000000000000000000002",
+    outCm: "0x0000000000000000000000000000000000000000000000000000000000000003",
+    cvDep: [11n, 12n],
+    rcv: 99n,
+};
+
 describe("encoding parity (independent implementation → viem)", () => {
     it("lelantosTypedDataHash matches the pinned ethers output", () => {
         expect(lelantosTypedDataHash()).toBe(PINNED.lelantosTypedDataHash);
     });
 
-    it("computePiHash matches the pinned ethers output for the canonical fixture", () => {
-        const intent: DepositIntent = {
-            chainId: 31337n,
-            publicAssetId: 1n,
-            publicIn: 1000n,
-            payer: "0x0000000000000000000000000000000000000001",
-            recipient: "0x0000000000000000000000000000000000000002",
-            outCm: [
-                "0x0000000000000000000000000000000000000000000000000000000000000003",
-                "0x0000000000000000000000000000000000000000000000000000000000000004",
-            ],
-            cvDep0: [11n, 12n],
-            cvDep1: [13n, 14n],
-            rcvTotal: 99n,
-            rcvDepPad: 41n,
-        };
-        expect(computePiHash(intent, AUX)).toBe(PINNED.computePiHash);
+    it("computePiHash matches the pinned output for the canonical fixture", () => {
+        expect(computePiHash(INTENT, AUX[0])).toBe(PINNED.computePiHash);
+    });
+
+    it("computePiHash agrees with the layout spelled out from the ABI spec", () => {
+        // Same argument as the `auxDigest` cross-check below: the pin alone
+        // would survive a change applied to both sides at once. `DepositIntent`
+        // is fully static (9 words — `cvDep` takes two), so the preimage is
+        // those words, then a single offset to the dynamic `aux` tuple, whose
+        // own `ciphertext` needs a further nested offset.
+        const encoded = encodePiHashFromSpec(INTENT, AUX[0]);
+        expect(encoded.length / 32).toBe(17); // 9 intent + 1 offset + 4 aux + 1 offset + 1 len+data
+        expect(bytesToHexWord(keccak_256(encoded))).toBe(PINNED.computePiHash);
     });
 
     it("auxDigest matches the pinned output for the canonical fixture", () => {
@@ -157,4 +163,39 @@ function encodeAuxArrayFromSpec(aux: readonly AuxOutput[]): Uint8Array {
     }
 
     return hexToBytes(word(32n) + word(BigInt(elements.length)) + heads + elements.join(""));
+}
+
+/**
+ * `abi.encode(DepositIntent, AuxValidation.Output)`, written out from the
+ * encoding rules rather than produced by `encodeAbiParameters`.
+ */
+function encodePiHashFromSpec(d: DepositIntent, a: AuxOutput): Uint8Array {
+    const intentWords = [
+        word(d.chainId),
+        word(d.publicAssetId),
+        word(d.publicIn),
+        word(BigInt(d.payer)),
+        word(BigInt(d.recipient)),
+        d.outCm.slice(2),
+        word(d.cvDep[0]),
+        word(d.cvDep[1]),
+        word(d.rcv),
+    ];
+    // The intent is static and occupies 9 words, so the tail begins at 10 * 32.
+    const AUX_OFFSET = 320n;
+    // Inside the aux tuple, `ciphertext` follows 4 static words + its offset.
+    const CIPHERTEXT_OFFSET = 160n;
+    const pad = (32 - (a.ciphertext.length % 32)) % 32;
+    const body =
+        [...a.ciphertext].map((b) => b.toString(16).padStart(2, "0")).join("") + "00".repeat(pad);
+    const auxWords = [
+        word(a.clueRx),
+        word(a.clueRy),
+        word(a.ephPubX),
+        word(a.ephPubY),
+        word(CIPHERTEXT_OFFSET),
+        word(BigInt(a.ciphertext.length)),
+        body,
+    ];
+    return hexToBytes(`0x${[...intentWords, word(AUX_OFFSET), ...auxWords].join("")}`);
 }

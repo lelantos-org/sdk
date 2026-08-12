@@ -44,7 +44,7 @@ export async function executeDeposit(
     const fee = applyFee(inAmt, feeBps);
     const total = branded<TokenAmount>(inAmt + fee);
 
-    const { output0: o0, output1Pad: o1 } = freshDepositSlots();
+    const { output0: o0 } = freshDepositSlots();
     const built = buildDeposit({
         P: ctx.P,
         J: ctx.J,
@@ -60,12 +60,6 @@ export async function executeDeposit(
             rcv: o0.rcv,
             rcvDep: o0.rcvDep,
             aux: o0.aux,
-        },
-        output1Pad: {
-            rho: o1.rho,
-            rcm: o1.rcm,
-            rcv: o1.rcv,
-            rcvDep: o1.rcvDep,
         },
     });
 
@@ -86,13 +80,12 @@ export async function executeDeposit(
         kind: "deposit",
         strategy,
         txHash,
-        built: { cm: built.cm, producedNotes: built.producedNotes },
+        built: { cm: [built.cm], producedNotes: built.producedNotes },
         sent: args.amount,
         intentId,
-        // Both outputs credited to the depositor's own shielded address.
-        // Always two: `MASP.submitIntent` escrows a fixed pair of leaves,
-        // whatever arity the transact circuit has.
-        ownIndices: [0, 1],
+        // `MASP.submitIntent` escrows exactly one leaf, credited to the
+        // depositor's own shielded address.
+        ownIndices: [0],
     });
 }
 
