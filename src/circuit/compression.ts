@@ -43,26 +43,29 @@ export function flatten(input: FlattenInput): Field[] {
     requireLength("out_cv_dep", input.out_cv_dep, nOut);
 
     const coeffs: Field[] = [BigInt(input.merkle_root)];
-    for (let i = 0; i < nIn; i++) coeffs.push(BigInt(input.nullifier[i]));
-    for (let j = 0; j < nOut; j++) coeffs.push(BigInt(input.out_cm[j]));
+    for (let i = 0; i < nIn; i++) coeffs.push(BigInt(input.nullifier[i]!));
+    for (let j = 0; j < nOut; j++) coeffs.push(BigInt(input.out_cm[j]!));
     coeffs.push(BigInt(input.public_asset_id));
     coeffs.push(BigInt(input.public_in));
     coeffs.push(BigInt(input.public_out));
     for (let i = 0; i < nIn; i++) {
-        coeffs.push(BigInt(input.in_cv[i][0]));
-        coeffs.push(BigInt(input.in_cv[i][1]));
+        const [x, y] = requirePoint("in_cv", input.in_cv[i]);
+        coeffs.push(BigInt(x));
+        coeffs.push(BigInt(y));
     }
     for (let j = 0; j < nOut; j++) {
-        coeffs.push(BigInt(input.out_cv[j][0]));
-        coeffs.push(BigInt(input.out_cv[j][1]));
+        const [x, y] = requirePoint("out_cv", input.out_cv[j]);
+        coeffs.push(BigInt(x));
+        coeffs.push(BigInt(y));
     }
     coeffs.push(BigInt(input.recipient_address));
     coeffs.push(BigInt(input.chain_id));
     coeffs.push(BigInt(input.payer_address));
     coeffs.push(BigInt(input.relayer_address));
     for (let j = 0; j < nOut; j++) {
-        coeffs.push(BigInt(input.out_cv_dep[j][0]));
-        coeffs.push(BigInt(input.out_cv_dep[j][1]));
+        const [x, y] = requirePoint("out_cv_dep", input.out_cv_dep[j]);
+        coeffs.push(BigInt(x));
+        coeffs.push(BigInt(y));
     }
 
     const Rx = input.out_clue_Rx ?? [];
@@ -72,12 +75,23 @@ export function flatten(input: FlattenInput): Field[] {
         throw new Error("flatten: out_clue_{Rx,Ry,bits} length mismatch");
     }
     for (let j = 0; j < Rx.length; j++) {
-        coeffs.push(BigInt(Rx[j]));
-        coeffs.push(BigInt(Ry[j]));
-        coeffs.push(BigInt(cb[j]));
+        coeffs.push(BigInt(Rx[j]!));
+        coeffs.push(BigInt(Ry[j]!));
+        coeffs.push(BigInt(cb[j]!));
     }
     coeffs.push(BigInt(input.out_aux_digest));
     return coeffs;
+}
+
+/** A curve-point slot is always `(x, y)`; the arity is part of the layout. */
+function requirePoint(
+    field: string,
+    value: readonly (string | bigint)[] | undefined,
+): [string | bigint, string | bigint] {
+    if (value?.length !== 2) {
+        throw new Error(`flatten: ${field} entry has ${value?.length} coordinates, expected 2`);
+    }
+    return [value[0] as string | bigint, value[1] as string | bigint];
 }
 
 function requireLength(field: string, value: { length: number }, want: number): void {
@@ -93,7 +107,7 @@ function requireLength(field: string, value: { length: number }, want: number): 
 export function hornerEval(coeffs: Field[], z: Field): Field {
     let acc = 0n;
     for (let i = coeffs.length - 1; i >= 0; i--) {
-        acc = (acc * z + coeffs[i]) % BN254_FR;
+        acc = (acc * z + coeffs[i]!) % BN254_FR;
         if (acc < 0n) acc += BN254_FR;
     }
     return acc;

@@ -21,14 +21,14 @@ export function rootFromPath(
     let cur: Field = leaf;
     for (let lvl = 0; lvl < pathIndices.length; lvl++) {
         const slot = pathIndices[lvl];
-        const sibs = pathElements[lvl];
+        const sibs = pathElements[lvl] ?? [];
         const children: Field[] = [];
         let s = 0;
         for (let k = 0; k < ARITY; k++) {
             if (k === slot) children.push(cur);
-            else children.push(sibs[s++]);
+            else children.push(sibs[s++] ?? 0n);
         }
-        cur = P.hash([TAG_MERKLE, children[0], children[1], children[2], children[3]]);
+        cur = P.hash([TAG_MERKLE, children[0]!, children[1]!, children[2]!, children[3]!]);
     }
     return cur;
 }

@@ -1,6 +1,8 @@
-import type { DepositStrategy } from "../core/errors.js";
 // Private helpers used by `Wallet`.
 
+import { type AssetId, branded, type CircuitAmount, type Hex32 } from "../core/brand.js";
+import type { DepositStrategy } from "../core/errors.js";
+import { fieldToBytes32 } from "../core/hex.js";
 import type { Field } from "../crypto/index.js";
 import type { Note } from "../notes/note.js";
 import type { TransactionResult, TransferResult, WalletNote } from "./api.js";
@@ -10,21 +12,24 @@ import type { StoredNote } from "./note-store.js";
 export function toWalletNote(s: StoredNote): WalletNote {
     return {
         id: s.id,
-        asset: BigInt(s.asset),
-        value: BigInt(s.value),
+        asset: branded<AssetId>(BigInt(s.asset)),
+        value: branded<CircuitAmount>(BigInt(s.value)),
         spent: s.spent,
-        firstSeenBlock: s.firstSeenBlock,
+        ...(s.firstSeenBlock !== undefined ? { firstSeenBlock: s.firstSeenBlock } : {}),
         discoveredAt: s.discoveredAt,
-        cm: s.cm,
+        cm: branded<Hex32>(s.cm),
         notePayload: () => ({
-            asset: BigInt(s.asset),
-            value: BigInt(s.value),
+            asset: branded<AssetId>(BigInt(s.asset)),
+            value: branded<CircuitAmount>(BigInt(s.value)),
             rho: BigInt(s.rho),
             rcm: BigInt(s.rcm),
             rcvDep: BigInt(s.rcvDep),
         }),
     };
 }
+
+/** The transact circuit has exactly two output slots. */
+export type OutputSlot = 0 | 1;
 
 /** Shared subset of `BuiltBundle` / `BuiltIntent`. */
 export interface BuiltLike {
@@ -44,20 +49,20 @@ export type ResultForKind<K extends TransactionKind> = Extract<TransactionResult
 
 export interface MakeTransactionResultArgs {
     kind: TransactionKind;
-    txHash: string;
+    txHash: Hex32;
     built: BuiltLike;
-    spent?: string[];
-    inputSum?: bigint;
-    sent?: bigint;
-    change?: bigint;
-    intentId?: bigint;
+    spent?: string[] | undefined;
+    inputSum?: CircuitAmount | undefined;
+    sent?: CircuitAmount | undefined;
+    change?: CircuitAmount | undefined;
+    intentId?: bigint | undefined;
     /**
-     * Indices into `built.cm` for own commitments. Deposit/withdraw: `[0,1]`;
-     * transfer: `[1]`; self-transfer: `[0,1]`.
+     * Slots of `built.cm` holding own commitments. Deposit/withdraw: `[0, 1]`;
+     * transfer: `[1]`; self-transfer: `[0, 1]`.
      */
-    ownIndices?: number[];
+    ownIndices?: OutputSlot[] | undefined;
     /** Deposit only: which adapter path was taken. */
-    strategy?: DepositStrategy;
+    strategy?: DepositStrategy | undefined;
 }
 
 export function makeTransactionResult<K extends TransactionKind>(
@@ -66,32 +71,30 @@ export function makeTransactionResult<K extends TransactionKind>(
     return buildTransactionResult(args) as ResultForKind<K>;
 }
 
+const ZERO = branded<CircuitAmount>(0n);
+
 function buildTransactionResult(args: MakeTransactionResultArgs): TransactionResult {
-    const commitments: [string, string] = [
-        `0x${args.built.cm[0].toString(16).padStart(64, "0")}`,
-        `0x${args.built.cm[1].toString(16).padStart(64, "0")}`,
+    const commitments: [Hex32, Hex32] = [
+        fieldToBytes32(args.built.cm[0]),
+        fieldToBytes32(args.built.cm[1]),
     ];
     const spent = args.spent ?? [];
-    const ownIndices = args.ownIndices ?? [];
+    const ownIndices: OutputSlot[] = args.ownIndices ?? [];
     // Drop zero-value outputs: scanner skips them as self-pad, so waiters
     // on these commitments would hang.
     const ownIndicesNonZero = ownIndices.filter(
         (i) => BigInt(args.built.producedNotes[i].value) > 0n,
     );
     const ownCommitments = ownIndicesNonZero.map((i) => commitments[i]);
-    const ownInflow = ownIndicesNonZero.reduce(
-        (acc, i) => acc + BigInt(args.built.producedNotes[i].value),
-        0n,
+    const ownInflow = branded<CircuitAmount>(
+        ownIndicesNonZero.reduce((acc, i) => acc + BigInt(args.built.producedNotes[i].value), 0n),
     );
     // Commitments any party will scan — drops zero-value pad
     // outputs. Receiver-side waiters should subset this against their own
     // address rather than waiting on the full `commitments` pair.
-    const nonZeroCommitments: string[] = [];
-    for (let i = 0; i < commitments.length; i++) {
-        if (BigInt(args.built.producedNotes[i].value) > 0n) {
-            nonZeroCommitments.push(commitments[i]);
-        }
-    }
+    const nonZeroCommitments: Hex32[] = ([0, 1] as const)
+        .filter((i) => BigInt(args.built.producedNotes[i].value) > 0n)
+        .map((i) => commitments[i]);
 
     switch (args.kind) {
         case "deposit":
@@ -103,7 +106,7 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 nonZeroCommitments,
                 ownCommitments,
                 ownInflow,
-                sent: args.sent ?? 0n,
+                sent: args.sent ?? ZERO,
                 ...(args.intentId !== undefined ? { intentId: args.intentId } : {}),
             };
         case "transfer": {
@@ -113,9 +116,9 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 commitments,
                 nonZeroCommitments,
                 spent,
-                inputSum: args.inputSum ?? 0n,
-                sent: args.sent ?? 0n,
-                change: args.change ?? 0n,
+                inputSum: args.inputSum ?? ZERO,
+                sent: args.sent ?? ZERO,
+                change: args.change ?? ZERO,
                 ownCommitments,
                 ownInflow,
             };
@@ -128,9 +131,9 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 commitments,
                 nonZeroCommitments,
                 spent,
-                inputSum: args.inputSum ?? 0n,
-                sent: args.sent ?? 0n,
-                change: args.change ?? 0n,
+                inputSum: args.inputSum ?? ZERO,
+                sent: args.sent ?? ZERO,
+                change: args.change ?? ZERO,
                 ownCommitments,
                 ownInflow,
             };
@@ -141,9 +144,9 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 commitments,
                 nonZeroCommitments,
                 spent,
-                inputSum: args.inputSum ?? 0n,
-                sent: args.sent ?? 0n,
-                change: args.change ?? 0n,
+                inputSum: args.inputSum ?? ZERO,
+                sent: args.sent ?? ZERO,
+                change: args.change ?? ZERO,
                 ownCommitments,
                 ownInflow,
                 ...(args.intentId !== undefined ? { intentId: args.intentId } : {}),

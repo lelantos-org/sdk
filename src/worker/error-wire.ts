@@ -22,7 +22,7 @@ export function toWireError(err: unknown, depth = 0): WireError {
     };
     if (isWalletError(err)) {
         out.code = err.code;
-        const ctx = (err as { context?: Record<string, unknown> }).context;
+        const ctx = (err as { context?: Record<string, unknown> | undefined }).context;
         if (ctx && Object.keys(ctx).length > 0) out.context = jsonSafe(ctx);
     }
     if (err.cause !== undefined && depth < MAX_CAUSE_DEPTH) {
@@ -36,9 +36,9 @@ export function fromWireError(w: WireError): Error {
     const e = new Error(w.message);
     e.name = w.name;
     if (w.stack) e.stack = w.stack;
-    if (w.code) (e as { code?: string }).code = w.code;
-    if (w.context) (e as { context?: unknown }).context = w.context;
-    if (w.cause) (e as { cause?: unknown }).cause = fromWireError(w.cause);
+    if (w.code) (e as { code?: string | undefined }).code = w.code;
+    if (w.context) (e as { context?: unknown | undefined }).context = w.context;
+    if (w.cause) (e as { cause?: unknown | undefined }).cause = fromWireError(w.cause);
     return e;
 }
 
@@ -50,7 +50,12 @@ export function fromWireError(w: WireError): Error {
 export function rpcError(
     code: "WORKER_TIMEOUT" | "WORKER_CRASHED" | "WORKER_FAILED",
     message: string,
-    opts: { method?: string; cause?: unknown; context?: Record<string, unknown>; site?: Error },
+    opts: {
+        method?: string | undefined;
+        cause?: unknown | undefined;
+        context?: Record<string, unknown> | undefined;
+        site?: Error | undefined;
+    },
 ): WorkerRpcError {
     const err = new WorkerRpcError(code, message, {
         method: opts.method,

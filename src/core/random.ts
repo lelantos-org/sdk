@@ -35,7 +35,7 @@ export function randomBytes(n: number): Uint8Array {
 export function randomFr(): Field {
     for (;;) {
         const b = randomBytes(32);
-        b[31] &= 0x3f;
+        b[31]! &= 0x3f;
         const v = fromLeBytes(b);
         if (v !== 0n && v < BN254_FR) return v;
     }
@@ -45,7 +45,7 @@ export function randomFr(): Field {
 export function randomJubjubScalar(): Field {
     for (;;) {
         const b = randomBytes(32);
-        b[31] &= 0x07;
+        b[31]! &= 0x07;
         const v = fromLeBytes(b);
         if (v !== 0n && v < BABYJUB_SUBGROUP_ORDER) return v;
     }

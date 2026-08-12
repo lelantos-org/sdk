@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
-import type { AssetInfo } from "../wallet/assets.js";
+import { assetId, branded, type CircuitAmount, evmAddress } from "../core/brand.js";
+import type { AssetInfoWithMeta } from "../wallet/assets.js";
 import { BudgetLedger } from "./budget.js";
 
 /** scale 10^15 → one circuit unit is 0.001 of an 18-decimal token. */
-const WETH: AssetInfo = {
-    id: 1n,
-    token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+const WETH: AssetInfoWithMeta = {
+    id: assetId(1n),
+    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
     disabled: false,
     symbol: "WETH",
     decimals: 18,
 };
 
-const USDC: AssetInfo = {
-    id: 2n,
-    token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+const USDC: AssetInfoWithMeta = {
+    id: assetId(2n),
+    token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
     scale: 10n ** 3n,
     disabled: false,
     symbol: "USDC",
@@ -22,8 +23,8 @@ const USDC: AssetInfo = {
 };
 
 /** `n` whole tokens in circuit units. */
-const whole = (n: bigint, asset: AssetInfo) =>
-    (n * 10n ** BigInt(asset.decimals ?? 0)) / asset.scale;
+const whole = (n: bigint, asset: AssetInfoWithMeta): CircuitAmount =>
+    branded<CircuitAmount>((n * 10n ** BigInt(asset.decimals)) / asset.scale);
 
 describe("BudgetLedger hosts", () => {
     it("allows any host when unset", () => {

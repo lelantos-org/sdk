@@ -107,7 +107,7 @@ export class MerkleTree {
         const N = this.leaves.length;
         const out: Field[][] = [];
         for (let lvl = 0; lvl < this.depth; lvl++) {
-            const stride = this.strides[lvl];
+            const stride = this.strides[lvl]!;
             const slot = Math.floor(N / stride) % ARITY;
             const parentIdx = Math.floor(N / (stride * ARITY));
             const slots: Field[] = [];
@@ -144,7 +144,7 @@ export class MerkleTree {
 
     private nodeAt(level: number, index: number): Field {
         if (level === 0) return this.leaves[index] ?? 0n;
-        if (index * this.strides[level] >= this.leaves.length) return this.zeros[level];
+        if (index * this.strides[level]! >= this.leaves.length) return this.zeros[level]!;
 
         const key = this.cacheKey(level, index);
         const cached = this.nodeCache.get(key);

@@ -1,3 +1,4 @@
+import type { AssetId, CircuitAmount, Hex32 } from "../core/brand.js";
 import type { DepositStrategy } from "../core/errors.js";
 
 // Wallet operation result types. Re-exported from `./api.ts` and the public barrel.
@@ -7,19 +8,19 @@ import type { DepositStrategy } from "../core/errors.js";
  * tells you which variant you have.
  */
 interface TxResultBase {
-    txHash: string;
-    /** 0x-hex commitments created by the tx. Always length 2. */
-    commitments: [string, string];
+    txHash: Hex32;
+    /** Commitments created by the tx. Always length 2. */
+    commitments: [Hex32, Hex32];
     /**
      * Subset of `commitments` with non-zero value (zero-value outputs are
      * circuit pads that no party's scanner accepts). Receiver-side
      * waiters should `filter` this against their own commitments.
      */
-    nonZeroCommitments: string[];
+    nonZeroCommitments: Hex32[];
     /** Subset of `commitments` recoverable via this wallet's FMD scan. */
-    ownCommitments: string[];
+    ownCommitments: Hex32[];
     /** Total value of own outputs; pending balance once FMD indexes them. */
-    ownInflow: bigint;
+    ownInflow: CircuitAmount;
 }
 
 /** Result of `wallet.deposit`. No spent notes (escrow pulls funds via Permit2). */
@@ -31,7 +32,7 @@ export interface DepositResult extends TxResultBase {
      */
     strategy: DepositStrategy;
     /** Gross publicIn (circuit units) the depositor sent into escrow. */
-    sent: bigint;
+    sent: CircuitAmount;
     /**
      * On-chain intent id from `MASP.submitIntent`. Absent only if the
      * submitter path didn't surface one (relayer batch flow).
@@ -46,9 +47,9 @@ export interface DepositResult extends TxResultBase {
 export interface TransferResult extends TxResultBase {
     kind: "transfer";
     spent: string[];
-    inputSum: bigint;
-    sent: bigint;
-    change: bigint;
+    inputSum: CircuitAmount;
+    sent: CircuitAmount;
+    change: CircuitAmount;
 }
 
 /**
@@ -58,10 +59,10 @@ export interface TransferResult extends TxResultBase {
 export interface WithdrawResult extends TxResultBase {
     kind: "withdraw";
     spent: string[];
-    inputSum: bigint;
+    inputSum: CircuitAmount;
     /** publicOut paid to the L1 recipient (gross, includes fee). */
-    sent: bigint;
-    change: bigint;
+    sent: CircuitAmount;
+    change: CircuitAmount;
 }
 
 /**
@@ -71,10 +72,10 @@ export interface WithdrawResult extends TxResultBase {
 export interface SwapResult extends TxResultBase {
     kind: "swap";
     spent: string[];
-    inputSum: bigint;
+    inputSum: CircuitAmount;
     /** publicOut leg-1 paid to the wrapper. */
-    sent: bigint;
-    change: bigint;
+    sent: CircuitAmount;
+    change: CircuitAmount;
     /** On-chain intent id of the leg-2 B-note deposit, if available. */
     intentId?: bigint;
 }
@@ -87,8 +88,8 @@ export type TransactionResult = DepositResult | TransferResult | WithdrawResult 
  * custom proofs against the low-level builders.
  */
 export interface WalletNotePayload {
-    asset: bigint;
-    value: bigint;
+    asset: AssetId;
+    value: CircuitAmount;
     rho: bigint;
     rcm: bigint;
     rcvDep: bigint;
@@ -97,14 +98,13 @@ export interface WalletNotePayload {
 /** Friendly note view returned by `wallet.notes()`. */
 export interface WalletNote {
     id: string;
-    asset: bigint;
-    value: bigint;
+    asset: AssetId;
+    value: CircuitAmount;
     spent: boolean;
     firstSeenBlock?: number;
     /** ISO-8601. */
     discoveredAt: string;
-    /** 0x-hex (32 bytes). */
-    cm: string;
+    cm: Hex32;
     /** Decoded payload. Recomputes on each call. */
     notePayload(): WalletNotePayload;
 }

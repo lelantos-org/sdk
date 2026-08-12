@@ -5,6 +5,7 @@
 // SDK's own selector and stays structurally assignable to the former — an
 // extra member is invisible to `client.register(...)`.
 
+import type { CircuitAmount } from "../core/brand.js";
 import type { AssetInfo } from "../wallet/assets.js";
 import type { PaymentRequirements, SchemeNetworkClient } from "./types.js";
 
@@ -18,7 +19,7 @@ import type { PaymentRequirements, SchemeNetworkClient } from "./types.js";
  */
 export interface PaymentQuote {
     /** Circuit units, rounded up. The denomination every `Wallet` method uses. */
-    amount: bigint;
+    amount: CircuitAmount;
     /** The MASP asset the payment draws on. */
     asset: AssetInfo;
 }

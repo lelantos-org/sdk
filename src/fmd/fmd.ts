@@ -36,6 +36,7 @@
 // Bumping FMD_DOMAIN signals scheme change.
 
 import { packBits, unpackBits } from "../core/bits.js";
+import { WireFormatError } from "../core/errors.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "../core/field.js";
 import { bytesToBareHex } from "../core/hex.js";
 // Leaf imports, not the barrel: keeps the worker bundle minimal.
@@ -76,7 +77,7 @@ export interface FmdClue {
 export function detectionKeyToBytes(dk: FmdDetectionKey): Uint8Array {
     const out = new Uint8Array(dk.x.length * FIELD_BYTES);
     for (let i = 0; i < dk.x.length; i++) {
-        out.set(toLeBytes(dk.x[i] % BABYJUB_SUBGROUP_ORDER, FIELD_BYTES), i * FIELD_BYTES);
+        out.set(toLeBytes(dk.x[i]! % BABYJUB_SUBGROUP_ORDER, FIELD_BYTES), i * FIELD_BYTES);
     }
     return out;
 }
@@ -141,8 +142,10 @@ export function fmdTest(J: Jubjub, P: Poseidon, dk: FmdDetectionKey, clue: FmdCl
 
     const cBits = unpackBits(clue.bits, clue.gamma);
     for (let i = 0; i < clue.gamma; i++) {
-        const shared = J.mulPointEscalar(R, dk.x[i]);
-        if ((sharedBit(P, R, i, shared) ^ cBits[i]) !== 1) return false;
+        const x = dk.x[i];
+        if (x === undefined) return false;
+        const shared = J.mulPointEscalar(R, x);
+        if ((sharedBit(P, R, i, shared) ^ (cBits[i] ?? 0)) !== 1) return false;
     }
     return true;
 }
@@ -159,6 +162,16 @@ export function encodeClue(c: FmdClue): Uint8Array {
 /** @internal */
 export function decodeClue(buf: Uint8Array): FmdClue {
     const gamma = buf[0];
+    if (gamma === undefined) {
+        throw new WireFormatError("$.clue", "clue is empty; expected at least a gamma byte");
+    }
+    const want = 1 + 32 + Math.ceil(gamma / 8);
+    if (buf.length < want) {
+        throw new WireFormatError(
+            "$.clue",
+            `clue is ${buf.length} bytes; gamma ${gamma} needs ${want}`,
+        );
+    }
     return {
         gamma,
         R: buf.slice(1, 33),

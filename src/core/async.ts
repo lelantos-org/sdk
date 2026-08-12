@@ -62,12 +62,12 @@ export interface RetryPolicy {
     /** Base backoff, doubled per attempt. */
     backoffMs: number;
     /** Fraction of the delay to randomise, in `[0, 1]`. Default 0.25. */
-    jitter?: number;
+    jitter?: number | undefined;
     /** Return false to stop retrying and rethrow immediately. */
-    shouldRetry?: (err: unknown, attempt: number) => boolean;
+    shouldRetry?: ((err: unknown, attempt: number) => boolean) | undefined;
     /** Observability hook; must not throw. */
-    onRetry?: (info: { attempt: number; delayMs: number; err: unknown }) => void;
-    signal?: AbortSignal;
+    onRetry?: ((info: { attempt: number; delayMs: number; err: unknown }) => void) | undefined;
+    signal?: AbortSignal | undefined;
 }
 
 /** Exponential backoff with jitter. `fn` receives the 0-based attempt number. */

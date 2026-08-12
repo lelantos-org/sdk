@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { randomFr, randomJubjubScalar } from "../../core/random.js";
 import { WasmJubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
@@ -105,7 +106,7 @@ describe("executeTransfer", () => {
         const { ctx, submitted, markedSpent, treeStore } = await makeCtx(notes);
         const { address: recipient } = await makeCtx([]);
 
-        const res = await executeTransfer(ctx, { to: recipient, amount: 30n });
+        const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
 
         expect(submitted).toHaveLength(1);
         expect(markedSpent).toEqual([["01"]]);
@@ -117,14 +118,14 @@ describe("executeTransfer", () => {
     it("credits only the change slot when sending to someone else", async () => {
         const { ctx } = await makeCtx([storedNote("01", 100n)]);
         const { address: recipient } = await makeCtx([]);
-        const res = await executeTransfer(ctx, { to: recipient, amount: 30n });
+        const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
         // Output 0 is the recipient's; only output 1 (change) is ours.
         expect(res.ownCommitments).toHaveLength(1);
     });
 
     it("credits both slots on a self-transfer", async () => {
         const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
-        const res = await executeTransfer(ctx, { to: address, amount: 30n });
+        const res = await executeTransfer(ctx, { to: address, amount: circuitAmount(30n) });
         expect(res.ownCommitments).toHaveLength(2);
     });
 
@@ -134,7 +135,7 @@ describe("executeTransfer", () => {
         const phases: string[] = [];
         await executeTransfer(ctx, {
             to: recipient,
-            amount: 10n,
+            amount: circuitAmount(10n),
             onPhase: (p) => phases.push(p),
         });
         expect(phases).toEqual(["preparing", "proving", "submitting"]);
@@ -145,7 +146,7 @@ describe("executeTransfer", () => {
         const { address: recipient } = await makeCtx([]);
         const res = await executeTransfer(ctx, {
             to: recipient,
-            amount: 10n,
+            amount: circuitAmount(10n),
             onPhase: () => {
                 throw new Error("listener blew up");
             },
@@ -160,7 +161,11 @@ describe("executeWithdraw", () => {
 
         const res = await executeWithdraw(
             ctx,
-            { to: "0x0000000000000000000000000000000000000002", amount: 40n, asset: 1n },
+            {
+                to: evmAddress("0x0000000000000000000000000000000000000002"),
+                amount: circuitAmount(40n),
+                asset: assetId(1n),
+            },
             "withdraw",
         );
 
@@ -177,7 +182,11 @@ describe("executeWithdraw", () => {
         const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
         await executeWithdraw(
             ctx,
-            { to: "0x0000000000000000000000000000000000000002", amount: 40n, asset: 1n },
+            {
+                to: evmAddress("0x0000000000000000000000000000000000000002"),
+                amount: circuitAmount(40n),
+                asset: assetId(1n),
+            },
             "withdrawNative",
         );
         expect((submitted[0] as { kind: string }).kind).toBe("withdrawNative");

@@ -10,7 +10,12 @@ import { mnemonicToAccountKey } from "./hd.js";
 import * as metamask from "./metamask.js";
 
 export type KeySource =
-    | { type: "mnemonic"; mnemonic: string; account?: number; passphrase?: string }
+    | {
+          type: "mnemonic";
+          mnemonic: string;
+          account?: number | undefined;
+          passphrase?: string | undefined;
+      }
     | { type: "signature"; signature: string }
     | { type: "privateKey"; hex: string }
     | { type: "nsk"; nsk: Field };

@@ -2,6 +2,7 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { buildSpend } from "../bundle/spend.js";
+import { branded, type CircuitAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { InvalidArgumentError, WalletConfigError } from "../core/errors.js";
 import { applyFee, assertPublicInFits, BPS_DENOMINATOR } from "../core/fees.js";
@@ -30,7 +31,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     const { assetIn, assetOut, quote, wrapperAddress } = args;
     const feeBps = await ctx.feeBps();
     const fee = applyFee(args.amount, feeBps);
-    const publicOut = args.amount + fee;
+    const publicOut = branded<CircuitAmount>(args.amount + fee);
 
     const { selection, ownAddr, inputs, merkleRoot } = await prepareSpend(ctx, {
         asset: assetIn,
@@ -41,7 +42,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     });
     const bRecipient = decodeAddress(ctx.J, args.bRecipient ?? ctx.address);
 
-    const remainder = selection.sum - publicOut;
+    const remainder = branded<CircuitAmount>(selection.sum - publicOut);
     const [change0, change1] = splitChangePair(ctx.keys.pk, assetIn, remainder);
 
     const [entryIn, entryOut] = await Promise.all([

@@ -1,8 +1,10 @@
 // Data shapes the chain adapter exchanges with the rest of the SDK. Declared
 // apart from the port in `./port.ts`.
 
+import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
+
 export interface AssetEntry {
-    token: string;
+    token: EvmAddress;
     /** circuit-units → ERC20-base-units multiplier. */
     scale: bigint;
     /**
@@ -14,19 +16,19 @@ export interface AssetEntry {
 
 export interface Permit2SignArgs {
     /** ERC-20 being pulled into escrow. */
-    token: string;
+    token: EvmAddress;
     /**
      * Ceiling on `inAmt + fee` in token base units. Bound into the sig
      * as `permitted.amount`.
      */
-    maxTotal: bigint;
+    maxTotal: TokenAmount;
     /** Unix-seconds expiry. */
     deadline: bigint;
     /**
      * `keccak256(abi.encode(DepositIntent, aux))`. Binds the sig to a
      * specific deposit.
      */
-    piHash: string;
+    piHash: Hex32;
     /** Fresh value; Permit2 uses an unordered bitmap. */
     nonce: bigint;
 }
@@ -36,11 +38,11 @@ export interface Permit2SignArgs {
  * reconstruct via the `IntentEscrowed` log.
  */
 export interface EscrowedIntentView {
-    digest: string;
-    payer: string;
+    digest: Hex32;
+    payer: EvmAddress;
     /** block number of submitIntent. */
     submittedAt: number;
-    publicAssetId: bigint;
+    publicAssetId: AssetId;
     feeBpsAtSubmit: number;
 }
 
@@ -52,8 +54,8 @@ export interface EscrowedIntentView {
  */
 export interface CancelIntentInputs {
     publicIn: bigint;
-    cm0: string;
-    cm1: string;
+    cm0: Hex32;
+    cm1: Hex32;
     cvDep0: [bigint, bigint];
     cvDep1: [bigint, bigint];
 }
@@ -64,13 +66,13 @@ export interface CancelIntentInputs {
  */
 export interface IntentEscrowedRecord {
     id: bigint;
-    payer: string;
-    recipient: string;
-    publicAssetId: bigint;
+    payer: EvmAddress;
+    recipient: EvmAddress;
+    publicAssetId: AssetId;
     publicIn: bigint;
     feeBpsAtSubmit: number;
-    cm0: string;
-    cm1: string;
+    cm0: Hex32;
+    cm1: Hex32;
     cvDep0: [bigint, bigint];
     cvDep1: [bigint, bigint];
     rcvTotal: bigint;

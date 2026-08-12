@@ -42,7 +42,7 @@ export interface PaymentRecord {
     /** True when the payment unshielded (the `eip155:*` mechanism). */
     unshielded: boolean;
     /** Server's settlement receipt, when it sent one. */
-    settlement?: SettleResponse;
+    settlement?: SettleResponse | undefined;
 }
 
 export interface X402Options {
@@ -55,17 +55,17 @@ export interface X402Options {
      * Also pay servers that only speak standard EVM `exact`. Unshields into a
      * throwaway address, so it is off by default.
      */
-    allowUnshielded?: boolean;
+    allowUnshielded?: boolean | undefined;
     /** Only pay these hostnames. Unset means any host. */
-    allowHosts?: string[];
+    allowHosts?: string[] | undefined;
     /** Fired after each successful payment. Errors from it are swallowed. */
-    onPayment?: (record: PaymentRecord) => void;
+    onPayment?: ((record: PaymentRecord) => void) | undefined;
     /** Passed through to the shielded mechanism. */
-    shielded?: ShieldedExactOptions;
+    shielded?: ShieldedExactOptions | undefined;
     /** Passed through to the unshielded mechanism. */
-    unshielded?: UnshieldedExactOptions;
+    unshielded?: UnshieldedExactOptions | undefined;
     /** Defaults to bound `globalThis.fetch`. */
-    fetchImpl?: typeof fetch;
+    fetchImpl?: typeof fetch | undefined;
 }
 
 /** A `fetch` that settles 402s. */

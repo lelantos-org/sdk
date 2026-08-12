@@ -2,6 +2,7 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { supportsAllowanceTransfer, supportsNativeEth } from "../chain/port.js";
+import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { DepositAdapterError, type DepositStrategy, InvalidArgumentError } from "../core/errors.js";
 import { applyFee, assertPublicInFits } from "../core/fees.js";
@@ -9,7 +10,11 @@ import { decodeAddress } from "../keys/address.js";
 import { getLogger } from "../log/logger.js";
 import { computePiHash } from "../protocol/abi-hash.js";
 import type { DepositOptions, DepositResult } from "./api.js";
-import { ALLOWANCE_BUFFER_SECS, PERMIT2_DEFAULT_DEADLINE_SECS } from "./constants.js";
+import {
+    ALLOWANCE_BUFFER_SECS,
+    DEFAULT_ASSET,
+    PERMIT2_DEFAULT_DEADLINE_SECS,
+} from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./internal.js";
 import { freshDepositSlots } from "./tx/steps.js";
@@ -20,7 +25,7 @@ export async function executeDeposit(
     ctx: SpendContext,
     args: DepositOptions,
 ): Promise<DepositResult> {
-    const asset = args.asset ?? 1n;
+    const asset = args.asset ?? DEFAULT_ASSET;
     const recipient = decodeAddress(ctx.J, args.to ?? ctx.address);
     const payer = await ctx.cfg.chain.payerAddress();
     const assetEntry = await ctx.cfg.chain.fetchAsset(asset);
@@ -37,7 +42,7 @@ export async function executeDeposit(
     });
     const inAmt = args.amount * assetEntry.scale;
     const fee = applyFee(inAmt, feeBps);
-    const total = inAmt + fee;
+    const total = branded<TokenAmount>(inAmt + fee);
 
     const { output0: o0, output1Pad: o1 } = freshDepositSlots();
     const built = buildDeposit({
@@ -98,7 +103,7 @@ async function pickDepositStrategy(
      * a second `fetchAsset` and `resolveFeeBps` round trip on every ERC-20
      * deposit that reaches the allowance branch.
      */
-    plan: { payer: string; token: string; total: bigint },
+    plan: { payer: EvmAddress; token: EvmAddress; total: TokenAmount },
 ): Promise<DepositStrategy> {
     const chain = ctx.cfg.chain;
     if (args.asEth) {
@@ -128,17 +133,17 @@ async function runDepositStrategy(
     plan: {
         built: ReturnType<typeof buildDeposit>;
         args: DepositOptions;
-        assetEntry: { token: string; scale: bigint };
-        total: bigint;
+        assetEntry: { token: EvmAddress; scale: bigint };
+        total: TokenAmount;
     },
-): Promise<{ txHash: string; intentId?: bigint }> {
+): Promise<{ txHash: Hex32; intentId?: bigint }> {
     const { built, args, assetEntry, total } = plan;
     const chain = ctx.cfg.chain;
 
     // `broadcast` fires once the wallet returns a tx hash (tx in mempool);
     // `mined` fires after `tx.wait()` resolves.
     const onSent = () => safePhase(args.onPhase, "broadcast");
-    const emitMined = (r: { txHash: string; intentId: bigint }) => {
+    const emitMined = (r: { txHash: Hex32; intentId: bigint }) => {
         safePhase(args.onPhase, "mined");
         return r;
     };

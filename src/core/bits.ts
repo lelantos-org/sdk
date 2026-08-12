@@ -6,14 +6,14 @@
 
 /** Read bit `i` (LSB-first) from a packed byte array. Returns 0 or 1. */
 export function bitAt(packed: Uint8Array, i: number): number {
-    return (packed[i >> 3] >> (i & 7)) & 1;
+    return ((packed[i >> 3] ?? 0) >> (i & 7)) & 1;
 }
 
 /** Pack `bits` (each 0 or 1) LSB-first into `ceil(bits.length / 8)` bytes. */
 export function packBits(bits: number[] | Uint8Array): Uint8Array {
     const out = new Uint8Array(Math.ceil(bits.length / 8));
     for (let i = 0; i < bits.length; i++) {
-        if (bits[i]) out[i >> 3] |= 1 << (i & 7);
+        if (bits[i]) out[i >> 3]! |= 1 << (i & 7);
     }
     return out;
 }

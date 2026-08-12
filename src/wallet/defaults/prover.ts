@@ -14,7 +14,7 @@ import type { WalletConfig } from "../config.js";
 
 async function wasmProverWithFallback(
     paths: ProverPaths,
-    opts: { force?: boolean } = {},
+    opts: { force?: boolean | undefined } = {},
 ): Promise<Prover> {
     // Without cross-origin isolation the wasm prover runs single-threaded,
     // which benches ~2x slower than snarkjs (snarkjs parallelizes
@@ -47,11 +47,11 @@ export async function defaultProver(cfg: WalletConfig): Promise<Prover> {
 /** Inputs `connect()` collects to wire the default `ViemChainAdapter`. */
 
 export interface ProverBuildInputs {
-    prover?: Prover;
-    proverArtifacts?: ProverArtifacts | ProverPaths;
-    proverArtifactsCdn?: string;
-    useWasmProver?: boolean;
-    proverWarmup?: "eager" | "lazy";
+    prover?: Prover | undefined;
+    proverArtifacts?: ProverArtifacts | ProverPaths | undefined;
+    proverArtifactsCdn?: string | undefined;
+    useWasmProver?: boolean | undefined;
+    proverWarmup?: "eager" | "lazy" | undefined;
 }
 
 /**

@@ -9,15 +9,22 @@
 // `{ total: "5" }` means five of each distinct asset paid, not five across all
 // of them. Assets are not comparable without a price oracle.
 
+import { branded, type CircuitAmount } from "../core/brand.js";
 import { X402PaymentError } from "../core/errors.js";
-import { type AssetInfo, formatAmount, parseAmount } from "../wallet/assets.js";
+import {
+    type AssetInfo,
+    formatAmount,
+    hasTokenMeta,
+    parseAmount,
+    requireTokenMeta,
+} from "../wallet/assets.js";
 
 /** Caps in human decimal units, applied per asset. */
 export interface Budget {
     /** Cumulative ceiling for the lifetime of this payer. Required. */
     total: string;
     /** Ceiling for any single payment. Defaults to `total`. */
-    perRequest?: string;
+    perRequest?: string | undefined;
 }
 
 /**
@@ -27,7 +34,7 @@ export interface Budget {
  */
 export class BudgetLedger {
     private readonly totals = new Map<bigint, bigint>();
-    private readonly hosts?: ReadonlySet<string>;
+    private readonly hosts?: ReadonlySet<string> | undefined;
 
     constructor(
         private readonly budget: Budget,
@@ -61,8 +68,9 @@ export class BudgetLedger {
      * @param amount Circuit units for this asset.
      * @throws {X402PaymentError} `per-request-limit` or `budget-exceeded`
      */
-    assertWithinLimits(amount: bigint, asset: AssetInfo, resource?: string): void {
-        const perRequest = parseAmount(this.budget.perRequest ?? this.budget.total, asset);
+    assertWithinLimits(amount: CircuitAmount, asset: AssetInfo, resource?: string): void {
+        const meta = requireTokenMeta(asset);
+        const perRequest = parseAmount(this.budget.perRequest ?? this.budget.total, meta);
         if (amount > perRequest) {
             throw new X402PaymentError(
                 "per-request-limit",
@@ -71,7 +79,7 @@ export class BudgetLedger {
                 { resource },
             );
         }
-        const total = parseAmount(this.budget.total, asset);
+        const total = parseAmount(this.budget.total, meta);
         const already = this.totals.get(asset.id) ?? 0n;
         if (already + amount > total) {
             throw new X402PaymentError(
@@ -97,13 +105,11 @@ export class BudgetLedger {
 
 /**
  * Human amount when the asset has known decimals, raw circuit units when it
- * does not — `parseAmount` already threw if a *limit* needed decimals, so
- * this only guards the message itself.
+ * does not. Only the message needs this fallback — a limit that needed
+ * decimals has already been rejected by `requireTokenMeta`.
  */
 function describe(amount: bigint, asset: AssetInfo): string {
-    try {
-        return formatAmount(amount, asset, { symbol: true });
-    } catch {
-        return `${amount} (circuit units of asset ${asset.id})`;
-    }
+    return hasTokenMeta(asset)
+        ? formatAmount(branded<CircuitAmount>(amount), asset, { symbol: true })
+        : `${amount} (circuit units of asset ${asset.id})`;
 }

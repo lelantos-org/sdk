@@ -9,6 +9,7 @@
 // key — see `../signer/`) plus a read RPC URL.
 
 import { createPublicClient, http, type PublicClient } from "viem";
+import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../../core/brand.js";
 import type { EthSigner } from "../../core/signer.js";
 import type {
     AuxOutput,
@@ -38,17 +39,17 @@ export interface ViemChainAdapterOpts {
     rpcUrl: string;
     signer: EthSigner;
     maspAddress: string;
-    permit2Address?: string;
-    chainId?: bigint;
+    permit2Address?: string | undefined;
+    chainId?: bigint | undefined;
 }
 
 export class ViemChainAdapter implements ChainAdapter {
     readonly publicClient: PublicClient;
     readonly signer: EthSigner;
     private readonly ctx: ViemCtx;
-    private readonly _maspAddress: `0x${string}`;
-    private readonly _permit2Address: `0x${string}`;
-    private readonly chainIdOverride?: bigint;
+    private readonly _maspAddress: EvmAddress;
+    private readonly _permit2Address: EvmAddress;
+    private readonly chainIdOverride?: bigint | undefined;
     private cachedChainId?: bigint;
 
     constructor(opts: ViemChainAdapterOpts) {
@@ -75,11 +76,11 @@ export class ViemChainAdapter implements ChainAdapter {
         return this.cachedChainId;
     }
 
-    payerAddress(): Promise<string> {
+    payerAddress(): Promise<EvmAddress> {
         return this.signer.getAddress();
     }
 
-    fetchAsset(id: bigint): Promise<AssetEntry> {
+    fetchAsset(id: AssetId): Promise<AssetEntry> {
         return reads.fetchAsset(this.ctx, id);
     }
     fetchFeeBps(): Promise<bigint> {
@@ -96,33 +97,33 @@ export class ViemChainAdapter implements ChainAdapter {
     }
 
     // ── tokens ───────────────────────────────────────────────────────────
-    tokenMeta(a: string): Promise<TokenMeta> {
+    tokenMeta(a: EvmAddress): Promise<TokenMeta> {
         return token.tokenMeta(this.ctx, a);
     }
-    tokenBalanceOf(a: string, account: string): Promise<bigint> {
+    tokenBalanceOf(a: EvmAddress, account: EvmAddress): Promise<TokenAmount> {
         return token.tokenBalanceOf(this.ctx, a, account);
     }
-    tokenAllowance(a: string, owner: string, spender: string): Promise<bigint> {
+    tokenAllowance(a: EvmAddress, owner: EvmAddress, spender: EvmAddress): Promise<TokenAmount> {
         return token.tokenAllowance(this.ctx, a, owner, spender);
     }
     tokenApprove(
-        a: string,
-        spender: string,
-        amount: bigint,
-        onTxHash?: (hash: string) => void,
-    ): Promise<{ txHash: string }> {
+        a: EvmAddress,
+        spender: EvmAddress,
+        amount: TokenAmount,
+        onTxHash?: (hash: Hex32) => void,
+    ): Promise<{ txHash: Hex32 }> {
         return token.tokenApprove(this.ctx, a, spender, amount, onTxHash);
     }
-    wrapNative(wethAddr: string, value: bigint): Promise<{ txHash: string }> {
+    wrapNative(wethAddr: EvmAddress, value: bigint): Promise<{ txHash: Hex32 }> {
         return token.wrapNative(this.ctx, wethAddr, value);
     }
     waitTxReceipt(
-        txHash: string,
+        txHash: Hex32,
         confirmations?: number,
     ): Promise<{ blockNumber: number; status: number }> {
         return token.waitTxReceipt(this.ctx, txHash, confirmations);
     }
-    nativeBalance(account: string): Promise<bigint> {
+    nativeBalance(account: EvmAddress): Promise<bigint> {
         return token.nativeBalance(this.ctx, account);
     }
 
@@ -131,26 +132,26 @@ export class ViemChainAdapter implements ChainAdapter {
         intent: DepositIntent;
         permit2: Permit2Sig;
         aux: [AuxOutput, AuxOutput];
-        onSent?: (txHash: string) => void;
-    }): Promise<{ txHash: string; intentId: bigint }> {
+        onSent?: ((txHash: Hex32) => void) | undefined;
+    }): Promise<{ txHash: Hex32; intentId: bigint }> {
         return intents.submitIntent(this.ctx, args);
     }
     submitIntentNative(args: {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
         value: bigint;
-        onSent?: (txHash: string) => void;
-    }): Promise<{ txHash: string; intentId: bigint }> {
+        onSent?: ((txHash: Hex32) => void) | undefined;
+    }): Promise<{ txHash: Hex32; intentId: bigint }> {
         return intents.submitIntentNative(this.ctx, args);
     }
     submitIntentAuthorized(args: {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
-        onSent?: (txHash: string) => void;
-    }): Promise<{ txHash: string; intentId: bigint }> {
+        onSent?: ((txHash: Hex32) => void) | undefined;
+    }): Promise<{ txHash: Hex32; intentId: bigint }> {
         return intents.submitIntentAuthorized(this.ctx, args);
     }
-    cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: string }> {
+    cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: Hex32 }> {
         return intents.cancelIntent(this.ctx, id, inputs);
     }
 
@@ -162,27 +163,27 @@ export class ViemChainAdapter implements ChainAdapter {
         return permit2.signAllowance(this.ctx, permit);
     }
     permit2Allowance(
-        tok: string,
-        owner: string,
-        spender: string,
-    ): Promise<{ amount: bigint; expiration: number; nonce: number }> {
+        tok: EvmAddress,
+        owner: EvmAddress,
+        spender: EvmAddress,
+    ): Promise<{ amount: TokenAmount; expiration: number; nonce: number }> {
         return permit2.permit2Allowance(this.ctx, tok, owner, spender);
     }
     permit2PermitAllowance(
-        args: { owner: string; permit: PermitSingle; signature: string },
-        onTxHash?: (hash: string) => void,
-    ): Promise<{ txHash: string }> {
+        args: { owner: EvmAddress; permit: PermitSingle; signature: string },
+        onTxHash?: (hash: Hex32) => void,
+    ): Promise<{ txHash: Hex32 }> {
         return permit2.permit2PermitAllowance(this.ctx, args, onTxHash);
     }
     permit2Nonce(): Promise<bigint> {
         return permit2.permit2Nonce();
     }
-    permit2Address(): string {
+    permit2Address(): EvmAddress {
         return this._permit2Address;
     }
 
     // ── addresses ────────────────────────────────────────────────────────
-    async maspAddress(): Promise<string> {
+    async maspAddress(): Promise<EvmAddress> {
         return this._maspAddress;
     }
 }

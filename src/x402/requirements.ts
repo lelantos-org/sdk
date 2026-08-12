@@ -5,6 +5,16 @@
 // `accepts[]` entry". They live together because a refusal thrown with any
 // other reason aborts the whole request.
 
+import {
+    type AssetId,
+    assetId,
+    branded,
+    type CircuitAmount,
+    type EvmAddress,
+    evmAddress,
+    type ShieldedAddress,
+    shieldedAddress,
+} from "../core/brand.js";
 import { InvalidArgumentError, X402PaymentError } from "../core/errors.js";
 
 /**
@@ -77,4 +87,47 @@ export function requirePositiveInteger(scope: string, value: string, field: stri
     const parsed = BigInt(value);
     if (parsed <= 0n) throw unsupported(scope, `${field} must be positive, got "${value}"`);
     return parsed;
+}
+
+/** Positive integer, branded as an amount in this network's own denomination. */
+export function requireAmount(scope: string, value: string, field: string): CircuitAmount {
+    return branded<CircuitAmount>(requirePositiveInteger(scope, value, field));
+}
+
+/**
+ * A server-quoted MASP asset id.
+ *
+ * Range failures are `unsupported-requirements` like every other malformed
+ * field, so a bad offer falls through to the next `accepts[]` entry instead of
+ * aborting the request.
+ */
+export function requireAssetId(scope: string, value: string, field: string): AssetId {
+    const raw = requirePositiveInteger(scope, value, field);
+    try {
+        return assetId(raw);
+    } catch (cause) {
+        throw unsupported(scope, `${field} is not a valid asset id: ${value}`, { cause });
+    }
+}
+
+/** A server-supplied EVM address. */
+export function requireEvmAddress(scope: string, value: string, field: string): EvmAddress {
+    try {
+        return evmAddress(value);
+    } catch (cause) {
+        throw unsupported(scope, `${field} is not an EVM address: ${value}`, { cause });
+    }
+}
+
+/** A server-supplied shielded address. */
+export function requireShieldedAddress(
+    scope: string,
+    value: string,
+    field: string,
+): ShieldedAddress {
+    try {
+        return shieldedAddress(value);
+    } catch (cause) {
+        throw unsupported(scope, `${field} is not a shielded address: ${value}`, { cause });
+    }
 }

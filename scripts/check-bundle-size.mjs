@@ -10,9 +10,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const DIST = join(ROOT, "dist");
 
-// Initial budget: current size (~331 KB) + 10% headroom. Bump deliberately
-// when growth is justified; treat unexpected jumps as a regression signal.
-const MAX_BYTES = 365_000;
+// Budget: current size (~363 KB) + 10% headroom. Bump deliberately when
+// growth is justified; treat unexpected jumps as a regression signal.
+//
+// The jump from 331 KB came with the nominal types in `core/brand.ts`: the
+// types themselves are erased, but their validating constructors and the
+// narrowing guards built on them are runtime code.
+const MAX_BYTES = 400_000;
 
 let total = 0;
 let count = 0;

@@ -22,7 +22,7 @@ async function buildWasmProver(paths: ProverPaths) {
  * `config.proverPaths` if set, else bundled artifacts (env dir / companion
  * package). `undefined` defers to `Wallet.create` → `defaultProver`.
  */
-async function resolveProverPaths(config: { proverPaths?: ProverPaths }) {
+async function resolveProverPaths(config: { proverPaths?: ProverPaths | undefined }) {
     if (config.proverPaths) return config.proverPaths;
     try {
         return resolveArtifacts(await bundledProverArtifacts()) as ProverPaths;
@@ -40,7 +40,7 @@ export interface FastWalletOpts {
      */
     config: Omit<WalletConfig, "scanner" | "prover">;
     /** Worker pool size. Default `navigator.hardwareConcurrency` clamped 2-8. */
-    workerSize?: number;
+    workerSize?: number | undefined;
     /**
      * Worker pool config. `workerUrl` required — pass from your ESM call
      * site: `new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`.
@@ -50,7 +50,7 @@ export interface FastWalletOpts {
      * Skip eager WASM warmup. Saves ~10-50ms construction time but pushes
      * first-decrypt latency onto the first `wallet.sync()`.
      */
-    skipWarmup?: boolean;
+    skipWarmup?: boolean | undefined;
 }
 
 /**
@@ -81,7 +81,7 @@ export async function fastWallet(opts: FastWalletOpts): Promise<Wallet> {
 export interface NodeWalletOpts {
     keys: KeySource;
     config: Omit<WalletConfig, "scanner" | "prover">;
-    skipWarmup?: boolean;
+    skipWarmup?: boolean | undefined;
 }
 
 /**

@@ -27,13 +27,13 @@ export interface WorkerProverOpts {
     /** Artifact URLs. Sent to the worker on first `prove()` and cached there. */
     paths: ProverPaths | ProverArtifacts;
     /** Pin rayon thread count. Default: `max(2, navigator.hardwareConcurrency)`. */
-    threads?: number;
+    threads?: number | undefined;
 }
 
 export class WorkerProver implements Prover {
     private readonly rpc: WorkerRpc<ProverMethods>;
     private readonly paths: ProverPaths;
-    private readonly threads?: number;
+    private readonly threads?: number | undefined;
 
     constructor(opts: WorkerProverOpts) {
         this.paths = resolveArtifacts(opts.paths);
@@ -67,7 +67,7 @@ export interface BrowserWorkerProverOpts {
     /** `new URL("@lelantos-org/sdk/prover-worker", import.meta.url)` */
     workerUrl: string | URL;
     paths: ProverPaths | ProverArtifacts;
-    threads?: number;
+    threads?: number | undefined;
 }
 
 /** Spawns the Worker and returns a `WorkerProver`. */

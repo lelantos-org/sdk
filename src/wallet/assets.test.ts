@@ -1,17 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { ChainAdapter } from "../chain/port.js";
-import { type AssetInfo, fetchAssetInfo, formatAmount, minAmount, parseAmount } from "./assets.js";
+import { assetId, circuitAmount, evmAddress } from "../core/brand.js";
+import {
+    type AssetInfo,
+    type AssetInfoWithMeta,
+    fetchAssetInfo,
+    formatAmount,
+    hasTokenMeta,
+    minAmount,
+    parseAmount,
+    requireTokenMeta,
+} from "./assets.js";
 
-const WETH: AssetInfo = {
-    id: 1n,
-    token: "0xC02a",
+const WETH: AssetInfoWithMeta = {
+    id: assetId(1n),
+    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
     disabled: false,
     symbol: "WETH",
     decimals: 18,
 };
 
-function stubChain(over: Partial<ChainAdapter> = {}): ChainAdapter {
+function stubChain(over: Record<string, unknown> = {}): ChainAdapter {
     return {
         fetchAsset: async () => ({ token: WETH.token, scale: WETH.scale, disabled: false }),
         tokenMeta: async () => ({ symbol: "WETH", decimals: 18 }),
@@ -19,13 +29,16 @@ function stubChain(over: Partial<ChainAdapter> = {}): ChainAdapter {
     } as unknown as ChainAdapter;
 }
 
+/** `AssetInfo` as an adapter without `tokenMeta` would resolve it. */
+const NO_META: AssetInfo = { ...WETH, symbol: undefined, decimals: undefined };
+
 describe("fetchAssetInfo", () => {
     it("merges the registry entry with ERC-20 metadata", async () => {
-        expect(await fetchAssetInfo(stubChain(), 1n)).toEqual(WETH);
+        expect(await fetchAssetInfo(stubChain(), assetId(1n))).toEqual(WETH);
     });
 
     it("omits metadata when the adapter has no `tokenMeta`", async () => {
-        const info = await fetchAssetInfo(stubChain({ tokenMeta: undefined }), 1n);
+        const info = await fetchAssetInfo(stubChain({ tokenMeta: undefined }), assetId(1n));
         expect(info.symbol).toBeUndefined();
         expect(info.decimals).toBeUndefined();
         expect(info.scale).toBe(WETH.scale);
@@ -37,7 +50,7 @@ describe("fetchAssetInfo", () => {
                 throw new Error("execution reverted");
             },
         });
-        const info = await fetchAssetInfo(chain, 1n);
+        const info = await fetchAssetInfo(chain, assetId(1n));
         expect(info.decimals).toBeUndefined();
         expect(info.token).toBe(WETH.token);
     });
@@ -55,8 +68,10 @@ describe("parseAmount / formatAmount", () => {
     });
 
     it("appends the symbol on request", () => {
-        expect(formatAmount(250n, WETH, { symbol: true })).toBe("0.25 WETH");
-        expect(formatAmount(250n, { ...WETH, symbol: undefined }, { symbol: true })).toBe("0.25");
+        expect(formatAmount(circuitAmount(250n), WETH, { symbol: true })).toBe("0.25 WETH");
+        expect(
+            formatAmount(circuitAmount(250n), { ...WETH, symbol: undefined }, { symbol: true }),
+        ).toBe("0.25");
     });
 
     it("reports the smallest representable amount", () => {
@@ -66,10 +81,24 @@ describe("parseAmount / formatAmount", () => {
     it("rejects an amount finer than one circuit unit", () => {
         expect(() => parseAmount("0.0001", WETH)).toThrow(/not a multiple of scale/);
     });
+});
 
-    it("explains itself when decimals are unknown", () => {
-        const unknown = { ...WETH, decimals: undefined };
-        expect(() => parseAmount("1", unknown)).toThrow(/does not implement `tokenMeta`/);
-        expect(() => formatAmount(1n, unknown)).toThrow(/no known decimals/);
+describe("token-metadata narrowing", () => {
+    // Human-unit conversion is defined only against `AssetInfoWithMeta`, so an
+    // asset with no `decimals` is rejected by the compiler. These guards are
+    // how a caller crosses from one to the other at runtime.
+    it("narrows an asset that carries decimals", () => {
+        const asset: AssetInfo = WETH;
+        expect(hasTokenMeta(asset)).toBe(true);
+        if (hasTokenMeta(asset)) expect(parseAmount("1", asset)).toBe(1000n);
+    });
+
+    it("rejects one that does not", () => {
+        expect(hasTokenMeta(NO_META)).toBe(false);
+        expect(() => requireTokenMeta(NO_META)).toThrow(/does not implement `tokenMeta`/);
+    });
+
+    it("passes a resolved asset straight through", () => {
+        expect(requireTokenMeta(WETH)).toBe(WETH);
     });
 });

@@ -4,6 +4,7 @@
 // chain supports. The `supports*` guards below are how callers discover
 // which path is available, since the interface alone cannot say.
 
+import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
 import type {
     AuxOutput,
     DepositIntent,
@@ -25,10 +26,10 @@ import type {
 export interface ChainAdapter {
     chainId(): Promise<bigint>;
     /** Signer's eth address (== `pi.payer` for deposit). */
-    payerAddress(): Promise<string>;
+    payerAddress(): Promise<EvmAddress>;
     /** Used as the Permit2 `spender`. */
-    maspAddress(): Promise<string>;
-    fetchAsset(id: bigint): Promise<AssetEntry>;
+    maspAddress(): Promise<EvmAddress>;
+    fetchAsset(id: AssetId): Promise<AssetEntry>;
     /** 0 disables fees. */
     fetchFeeBps(): Promise<bigint>;
     /**
@@ -48,8 +49,8 @@ export interface ChainAdapter {
          * Fired after the wallet signs and the tx hash is known, before
          * receipt-wait.
          */
-        onSent?: (txHash: string) => void;
-    }): Promise<{ txHash: string; intentId: bigint }>;
+        onSent?: (txHash: Hex32) => void;
+    }): Promise<{ txHash: Hex32; intentId: bigint }>;
     /**
      * `MASP.submitIntentNative` with `msg.value = value`. Pool wraps
      * internally; no Permit2. Asset id must be WETH-registered. Optional.
@@ -58,8 +59,8 @@ export interface ChainAdapter {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
         value: bigint;
-        onSent?: (txHash: string) => void;
-    }): Promise<{ txHash: string; intentId: bigint }>;
+        onSent?: (txHash: Hex32) => void;
+    }): Promise<{ txHash: Hex32; intentId: bigint }>;
     /**
      * `MASP.submitIntentAuthorized`. Pulls via Permit2 AllowanceTransfer
      * against a previously-signed window; no per-deposit sig. Optional.
@@ -67,33 +68,33 @@ export interface ChainAdapter {
     submitIntentAuthorized?(args: {
         intent: DepositIntent;
         aux: [AuxOutput, AuxOutput];
-        onSent?: (txHash: string) => void;
-    }): Promise<{ txHash: string; intentId: bigint }>;
+        onSent?: (txHash: Hex32) => void;
+    }): Promise<{ txHash: Hex32; intentId: bigint }>;
     /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */
     permit2Allowance?(
-        token: string,
-        owner: string,
-        spender: string,
-    ): Promise<{ amount: bigint; expiration: number; nonce: number }>;
+        token: EvmAddress,
+        owner: EvmAddress,
+        spender: EvmAddress,
+    ): Promise<{ amount: TokenAmount; expiration: number; nonce: number }>;
     /**
      * Submit pre-signed `PermitSingle` via `IAllowanceTransfer.permit`.
      * Anyone can submit; relayer-gasless variants may override. Optional.
      */
     permit2PermitAllowance?(
         args: {
-            owner: string;
+            owner: EvmAddress;
             permit: PermitSingle;
             signature: string;
         },
-        onTxHash?: (hash: string) => void,
-    ): Promise<{ txHash: string }>;
+        onTxHash?: (hash: Hex32) => void,
+    ): Promise<{ txHash: Hex32 }>;
     /** Sign `PermitSingle` for AllowanceTransfer-mode deposits. Optional. */
     signPermit2Allowance?(permit: PermitSingle): Promise<{ signature: string }>;
     /**
      * `MASP.cancelIntent`. On-chain digest check rejects tampered
      * preimages. Optional.
      */
-    cancelIntent?(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: string }>;
+    cancelIntent?(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: Hex32 }>;
     /** `MASP.escrowed(id)` — null if flushed/cancelled. Optional. */
     getEscrowed?(id: bigint): Promise<EscrowedIntentView | null>;
     /** Blocks before `cancelIntent` is allowed. Optional. */
@@ -104,24 +105,28 @@ export interface ChainAdapter {
      */
     permit2Nonce?(): Promise<bigint>;
     /** Optional. CLIs/UIs feature-check before calling. */
-    tokenMeta?(tokenAddr: string): Promise<TokenMeta>;
-    tokenBalanceOf?(tokenAddr: string, account: string): Promise<bigint>;
+    tokenMeta?(tokenAddr: EvmAddress): Promise<TokenMeta>;
+    tokenBalanceOf?(tokenAddr: EvmAddress, account: EvmAddress): Promise<TokenAmount>;
     /** Wei. Optional. */
-    nativeBalance?(account: string): Promise<bigint>;
-    tokenAllowance?(tokenAddr: string, owner: string, spender: string): Promise<bigint>;
+    nativeBalance?(account: EvmAddress): Promise<bigint>;
+    tokenAllowance?(
+        tokenAddr: EvmAddress,
+        owner: EvmAddress,
+        spender: EvmAddress,
+    ): Promise<TokenAmount>;
     tokenApprove?(
-        tokenAddr: string,
-        spender: string,
-        amount: bigint,
-        onTxHash?: (hash: string) => void,
-    ): Promise<{ txHash: string }>;
+        tokenAddr: EvmAddress,
+        spender: EvmAddress,
+        amount: TokenAmount,
+        onTxHash?: (hash: Hex32) => void,
+    ): Promise<{ txHash: Hex32 }>;
     /** Optional; adapters that don't use Permit2 omit. */
-    permit2Address?(): string;
+    permit2Address?(): EvmAddress;
     /** `WETH9.deposit{value}`. Optional. */
-    wrapNative?(wethAddr: string, value: bigint): Promise<{ txHash: string }>;
+    wrapNative?(wethAddr: EvmAddress, value: bigint): Promise<{ txHash: Hex32 }>;
     /** Returns block number + receipt status (1 = success, 0 = revert). */
     waitTxReceipt?(
-        txHash: string,
+        txHash: Hex32,
         confirmations?: number,
     ): Promise<{ blockNumber: number; status: number }>;
 }

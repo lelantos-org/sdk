@@ -54,20 +54,20 @@ const CODE_SET: ReadonlySet<string> = new Set(WALLET_ERROR_CODES);
  */
 export interface ErrorContext {
     /** Correlation id, minted once per wallet operation. */
-    opId?: string;
+    opId?: string | undefined;
     /** Operation name, e.g. `"deposit"` or `"swap:leg1"`. */
-    op?: string;
+    op?: string | undefined;
     /** Hash of a transaction already broadcast when the failure occurred. */
-    txHash?: string;
-    url?: string;
-    method?: string;
-    requestId?: number;
+    txHash?: string | undefined;
+    url?: string | undefined;
+    method?: string | undefined;
+    requestId?: number | undefined;
     [k: string]: unknown;
 }
 
 export interface WalletErrorOptions {
-    cause?: unknown;
-    context?: ErrorContext;
+    cause?: unknown | undefined;
+    context?: ErrorContext | undefined;
 }
 
 /**
@@ -104,7 +104,7 @@ export function attachContext(err: unknown, context: ErrorContext): unknown {
     if (err instanceof WalletError) return err.withContext(context);
     if (isWalletError(err)) {
         // A duplicate SDK copy in the bundle: duck-typed, so mutate defensively.
-        const bag = (err as { context?: ErrorContext }).context;
+        const bag = (err as { context?: ErrorContext | undefined }).context;
         if (bag) Object.assign(bag, context);
         return err;
     }
@@ -138,8 +138,8 @@ export class WalletConfigError extends WalletError<"WALLET_CONFIG"> {
  * {@link WalletConfigError}, which is about wiring rather than a call.
  */
 export class InvalidArgumentError extends WalletError<"INVALID_ARGUMENT"> {
-    readonly argument?: string;
-    constructor(message: string, opts?: WalletErrorOptions & { argument?: string }) {
+    readonly argument?: string | undefined;
+    constructor(message: string, opts?: WalletErrorOptions & { argument?: string | undefined }) {
         super("INVALID_ARGUMENT", message, opts);
         this.name = "InvalidArgumentError";
         this.argument = opts?.argument;
@@ -185,15 +185,15 @@ export type NetworkErrorCode = NetworkTimeoutCode | NetworkFailureCode;
  */
 export class NetworkError extends WalletError<NetworkErrorCode> {
     readonly url: string;
-    readonly status?: number;
+    readonly status?: number | undefined;
     /** Response body of the last failed attempt, truncated. */
-    readonly body?: string;
+    readonly body?: string | undefined;
 
     constructor(
         code: NetworkErrorCode,
         url: string,
         message: string,
-        opts?: WalletErrorOptions & { status?: number; body?: string },
+        opts?: WalletErrorOptions & { status?: number | undefined; body?: string | undefined },
     ) {
         super(code, `${message} (${url})`, opts);
         this.name = "NetworkError";
@@ -257,7 +257,7 @@ export class ProverArtifactsFailedError extends WalletError<"PROVER_ARTIFACTS_FA
     constructor(
         source: string,
         message: string,
-        opts?: WalletErrorOptions & { retryable?: boolean },
+        opts?: WalletErrorOptions & { retryable?: boolean | undefined },
     ) {
         super("PROVER_ARTIFACTS_FAILED", `${message} (${source})`, opts);
         this.name = "ProverArtifactsFailedError";
@@ -276,11 +276,11 @@ export type WorkerErrorCode = "WORKER_TIMEOUT" | "WORKER_CRASHED" | "WORKER_FAIL
  * the call site on the main thread.
  */
 export class WorkerRpcError extends WalletError<WorkerErrorCode> {
-    readonly method?: string;
+    readonly method?: string | undefined;
     constructor(
         code: WorkerErrorCode,
         message: string,
-        opts?: WalletErrorOptions & { method?: string },
+        opts?: WalletErrorOptions & { method?: string | undefined },
     ) {
         super(code, message, opts);
         this.name = "WorkerRpcError";
@@ -356,8 +356,8 @@ export class DepositAdapterError extends WalletError<"DEPOSIT_ADAPTER"> {
  * Use `InsufficientCoverError` for the consolidate-then-retry case.
  */
 export class SelectionError extends WalletError<"SELECTION"> {
-    readonly asset?: bigint;
-    constructor(message: string, opts?: WalletErrorOptions & { asset?: bigint }) {
+    readonly asset?: bigint | undefined;
+    constructor(message: string, opts?: WalletErrorOptions & { asset?: bigint | undefined }) {
         super("SELECTION", message, opts);
         this.name = "SelectionError";
         this.asset = opts?.asset;
@@ -391,12 +391,12 @@ export type X402RefusalReason =
 export class X402PaymentError extends WalletError<"X402_PAYMENT"> {
     readonly reason: X402RefusalReason;
     /** Resource URL the payment was for, when known. */
-    readonly resource?: string;
+    readonly resource?: string | undefined;
 
     constructor(
         reason: X402RefusalReason,
         message: string,
-        opts?: WalletErrorOptions & { resource?: string },
+        opts?: WalletErrorOptions & { resource?: string | undefined },
     ) {
         super("X402_PAYMENT", message, opts);
         this.name = "X402PaymentError";
@@ -408,8 +408,8 @@ export class X402PaymentError extends WalletError<"X402_PAYMENT"> {
 
 /** EVM tx failed to mine or returned no receipt. */
 export class TxMiningError extends WalletError<"TX_MINING"> {
-    readonly txHash?: string;
-    constructor(message: string, opts?: WalletErrorOptions & { txHash?: string }) {
+    readonly txHash?: string | undefined;
+    constructor(message: string, opts?: WalletErrorOptions & { txHash?: string | undefined }) {
         super("TX_MINING", message, opts);
         this.name = "TxMiningError";
         this.txHash = opts?.txHash;
@@ -480,7 +480,7 @@ export function isWalletError<C extends WalletErrorCode>(
 ): err is WalletErrorOf<C>;
 export function isWalletError(err: unknown, code?: WalletErrorCode): boolean {
     if (!(err instanceof Error)) return false;
-    const actual = (err as { code?: unknown }).code;
+    const actual = (err as { code?: unknown | undefined }).code;
     if (typeof actual !== "string" || !CODE_SET.has(actual)) return false;
     return code === undefined || actual === code;
 }

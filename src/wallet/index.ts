@@ -26,10 +26,13 @@ export type {
 } from "./api.js";
 export {
     type AssetInfo,
+    type AssetInfoWithMeta,
     fetchAssetInfo,
     formatAmount,
+    hasTokenMeta,
     minAmount,
     parseAmount,
+    requireTokenMeta,
 } from "./assets.js";
 export type { SyncStrategy, WalletConfig } from "./config.js";
 export {
@@ -39,6 +42,7 @@ export {
     type ConnectOptions,
     connect,
 } from "./connect/index.js";
+export { DEFAULT_ASSET } from "./constants.js";
 export { type AwaitCommitmentsOpts, awaitCommitments, NoteCache } from "./note-cache.js";
 export {
     FmdMatchesNoteSource,

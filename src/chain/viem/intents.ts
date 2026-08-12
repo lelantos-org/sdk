@@ -4,6 +4,7 @@
 // parameterised by function name, argument tuple, and whether ETH rides along.
 
 import { encodeFunctionData, type Hex, parseEventLogs } from "viem";
+import type { Hex32 } from "../../core/brand.js";
 import { safeCall } from "../../core/callbacks.js";
 import { TxMiningError } from "../../core/errors.js";
 import type { AuxOutput, DepositIntent, Permit2Sig } from "../../protocol/deposit-intent.js";
@@ -18,13 +19,13 @@ type SubmitFn = "submitIntent" | "submitIntentNative" | "submitIntentAuthorized"
 export interface SubmitBase {
     intent: DepositIntent;
     aux: [AuxOutput, AuxOutput];
-    onSent?: (txHash: string) => void;
+    onSent?: ((txHash: Hex32) => void) | undefined;
 }
 
 export function submitIntent(
     ctx: ViemCtx,
     args: SubmitBase & { permit2: Permit2Sig },
-): Promise<{ txHash: string; intentId: bigint }> {
+): Promise<{ txHash: Hex32; intentId: bigint }> {
     return submitVia(ctx, "submitIntent", args.onSent, [
         intentTuple(args.intent),
         {
@@ -40,7 +41,7 @@ export function submitIntent(
 export function submitIntentNative(
     ctx: ViemCtx,
     args: SubmitBase & { value: bigint },
-): Promise<{ txHash: string; intentId: bigint }> {
+): Promise<{ txHash: Hex32; intentId: bigint }> {
     return submitVia(
         ctx,
         "submitIntentNative",
@@ -53,7 +54,7 @@ export function submitIntentNative(
 export function submitIntentAuthorized(
     ctx: ViemCtx,
     args: SubmitBase,
-): Promise<{ txHash: string; intentId: bigint }> {
+): Promise<{ txHash: Hex32; intentId: bigint }> {
     return submitVia(ctx, "submitIntentAuthorized", args.onSent, [
         intentTuple(args.intent),
         auxTuples(args.aux),
@@ -63,10 +64,10 @@ export function submitIntentAuthorized(
 async function submitVia(
     ctx: ViemCtx,
     functionName: SubmitFn,
-    onSent: ((txHash: string) => void) | undefined,
+    onSent: ((txHash: Hex32) => void) | undefined,
     args: unknown[],
     value?: bigint,
-): Promise<{ txHash: string; intentId: bigint }> {
+): Promise<{ txHash: Hex32; intentId: bigint }> {
     // `as never`: viem cannot infer the tuple shape through the domain
     // structs. The encoding is pinned by `encoding-parity.test.ts`.
     const data = encodeFunctionData({ abi: MASP_ABI, functionName, args: args as never });
@@ -76,10 +77,14 @@ async function submitVia(
 async function sendAndExtractIntentId(
     ctx: ViemCtx,
     data: Hex,
-    onSent?: (txHash: string) => void,
+    onSent?: (txHash: Hex32) => void,
     value?: bigint,
-): Promise<{ txHash: string; intentId: bigint }> {
-    const hash = await ctx.signer.sendTransaction({ to: ctx.maspAddress, data, value });
+): Promise<{ txHash: Hex32; intentId: bigint }> {
+    const hash = await ctx.signer.sendTransaction({
+        to: ctx.maspAddress,
+        data,
+        ...(value !== undefined ? { value } : {}),
+    });
     safeCall("onSent", onSent, hash);
 
     const receipt = await ctx.publicClient.waitForTransactionReceipt({
@@ -97,14 +102,14 @@ async function sendAndExtractIntentId(
         // inspect what happened.
         throw new TxMiningError("submitIntent: IntentEscrowed log not found", { txHash: hash });
     }
-    return { txHash: hash, intentId: (events[0].args as { id: bigint }).id };
+    return { txHash: hash, intentId: (events[0]!.args as { id: bigint }).id };
 }
 
 export async function cancelIntent(
     ctx: ViemCtx,
     id: bigint,
     inputs: CancelIntentInputs,
-): Promise<{ txHash: string }> {
+): Promise<{ txHash: Hex32 }> {
     const data = encodeFunctionData({
         abi: MASP_ABI,
         functionName: "cancelIntent",

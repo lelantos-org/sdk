@@ -24,7 +24,7 @@ export interface StoredNote {
      * Block of first observation. Drives the selector spend cooldown that
      * breaks same-block change-link heuristics. Skipped when absent.
      */
-    firstSeenBlock?: number;
+    firstSeenBlock?: number | undefined;
 }
 
 /** Decoded shape with native BigInts. */
@@ -39,7 +39,7 @@ export interface NoteRecord {
     leafIndex: number;
     spent: boolean;
     discoveredAt: string;
-    firstSeenBlock?: number;
+    firstSeenBlock?: number | undefined;
 }
 
 export function decodeStoredNote(s: StoredNote): NoteRecord {

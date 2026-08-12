@@ -4,6 +4,7 @@
 // concurrent `runOne` calls on one worker stay correlated and a dead worker
 // rejects its in-flight calls rather than leaving them pending.
 
+import { InternalError } from "../../core/errors.js";
 import type { Field } from "../../crypto/index.js";
 import { getLogger } from "../../log/logger.js";
 import { createWorkerRpc, type WorkerRpc } from "../../worker/client.js";
@@ -29,10 +30,10 @@ export type WorkerFactory = () => WorkerLike;
 
 export interface WorkerPoolScannerOpts {
     factory: WorkerFactory;
-    size?: number;
-    chunkSize?: number;
+    size?: number | undefined;
+    chunkSize?: number | undefined;
     /** Forwarded to each worker on `init`. See {@link WireWasmConfig}. */
-    wasm?: WireWasmConfig;
+    wasm?: WireWasmConfig | undefined;
 }
 
 interface Slot {
@@ -42,8 +43,8 @@ interface Slot {
 
 export class WorkerPoolScanner implements Scanner {
     private readonly factory: WorkerFactory;
-    private readonly chunkSize?: number;
-    private readonly wasm?: WireWasmConfig;
+    private readonly chunkSize?: number | undefined;
+    private readonly wasm?: WireWasmConfig | undefined;
     private slots: Slot[];
 
     constructor(opts: WorkerPoolScannerOpts) {
@@ -60,7 +61,7 @@ export class WorkerPoolScanner implements Scanner {
             name: `scanner#${index}`,
             timeouts: { init: INIT_TIMEOUT_MS, scan: SCAN_TIMEOUT_MS },
         });
-        return { rpc, ready: rpc.call("init", { wasm: this.wasm }) };
+        return { rpc, ready: rpc.call("init", this.wasm ? { wasm: this.wasm } : {}) };
     }
 
     /**
@@ -70,7 +71,7 @@ export class WorkerPoolScanner implements Scanner {
      */
     private recycle(index: number): void {
         log.warn("recycling scanner worker", { index });
-        this.slots[index].rpc.dispose("recycled after failure");
+        this.slots[index]?.rpc.dispose("recycled after failure");
         this.slots[index] = this.spawn(index);
     }
 
@@ -104,6 +105,7 @@ export class WorkerPoolScanner implements Scanner {
         chunkIndex: number,
     ): Promise<ScanHit[]> {
         const slot = this.slots[slotIndex];
+        if (!slot) throw new InternalError(`scanner pool has no slot ${slotIndex}`);
         const wireInputs = chunk.map(encodeInput);
         const transfer = transferablesOf(wireInputs);
 
@@ -139,7 +141,7 @@ export class WorkerPoolScanner implements Scanner {
 
 function defaultPoolSize(): number {
     const hw =
-        (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
+        (globalThis as { navigator?: { hardwareConcurrency?: number | undefined } }).navigator
             ?.hardwareConcurrency ?? 4;
     return Math.max(2, Math.min(8, hw));
 }

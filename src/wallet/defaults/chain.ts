@@ -4,22 +4,23 @@ import { Eip1193Signer, PrivateKeySigner } from "../../chain/eth-signer.js";
 import type { DeployedNetworkPreset } from "../../chain/networks.js";
 import type { ChainAdapter } from "../../chain/port.js";
 import { ViemChainAdapter } from "../../chain/viem/index.js";
+import { evmAddress } from "../../core/brand.js";
 import { WalletConfigError } from "../../core/errors.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
 
 export interface ChainAdapterInputs {
-    chain?: ChainAdapter;
+    chain?: ChainAdapter | undefined;
     /** Pre-built signer (EIP-1193 wrapper, private key signer, etc.). */
-    signer?: EthSigner;
+    signer?: EthSigner | undefined;
     /**
      * Browser-style entry: raw EIP-1193 provider + the signing account +
      * chainId. SDK builds an `Eip1193Signer` internally.
      */
-    provider?: Eip1193ProviderLike;
-    address?: `0x${string}`;
+    provider?: Eip1193ProviderLike | undefined;
+    address?: `0x${string}` | undefined;
     /** 0x-hex private key for Node tests / CLI builds. */
-    privateKey?: `0x${string}`;
-    rpcUrl?: string;
+    privateKey?: `0x${string}` | undefined;
+    rpcUrl?: string | undefined;
 }
 
 /**
@@ -45,7 +46,7 @@ export function defaultChainAdapter(
     const signer: EthSigner =
         inputs.signer ??
         (inputs.provider && inputs.address
-            ? new Eip1193Signer(inputs.provider, inputs.address, preset.chainId)
+            ? new Eip1193Signer(inputs.provider, evmAddress(inputs.address), preset.chainId)
             : new PrivateKeySigner(
                   inputs.privateKey as `0x${string}`,
                   inputs.rpcUrl as string,

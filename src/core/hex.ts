@@ -1,5 +1,6 @@
 // Hex codecs. Sole implementation for the whole SDK.
 
+import { branded, type Hex32 } from "./brand.js";
 import type { Field } from "./field.js";
 
 /** `0x`-prefixed lowercase hex of a byte array. */
@@ -42,8 +43,8 @@ export function hexToBigint(h: string): bigint {
 }
 
 /** Format a field element as a `0x`-prefixed, zero-padded 32-byte hex word. */
-export function fieldToBytes32(x: Field): `0x${string}` {
-    return `0x${x.toString(16).padStart(64, "0")}`;
+export function fieldToBytes32(x: Field): Hex32 {
+    return branded<Hex32>(`0x${x.toString(16).padStart(64, "0")}`);
 }
 
 /** Minimal-width `0x`-prefixed hex of a bigint, padded to a whole byte. */

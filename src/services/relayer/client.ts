@@ -10,6 +10,7 @@
 // Relayer can censor but not forge: every merkle path must verify against
 // on-chain `isKnownRoot` before the wallet trusts it.
 
+import { hex32 } from "../../core/brand.js";
 import { bigintFrom, mapArr, obj, str } from "../../core/decode.js";
 import { createJsonClient, type HttpClientOptions, type JsonClient } from "../../core/http.js";
 import type { Field } from "../../crypto/index.js";
@@ -61,7 +62,7 @@ export class RelayerClient {
         const raw = await this.json.post<unknown>("/v1/intent", serializeSubmitIntent(payload));
         const r = obj(raw, "$");
         return {
-            txHash: str(r.txHash, "$.txHash"),
+            txHash: hex32(str(r.txHash, "$.txHash")),
             intentId: bigintFrom(r.intentId, "$.intentId"),
         };
     }

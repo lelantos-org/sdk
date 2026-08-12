@@ -27,43 +27,43 @@ export interface WalletConfig {
     relayerAddress: string;
     chain: ChainAdapter;
     /** Overrides `chain.fetchFeeBps()`. 1 bp = 0.01%. */
-    feeBps?: bigint;
+    feeBps?: bigint | undefined;
 
     /** Required if `noteSource` is not provided. */
-    fmdUrl?: string;
+    fmdUrl?: string | undefined;
     /** Required if `submitter` is not provided. */
-    relayerUrl?: string;
+    relayerUrl?: string | undefined;
     /** Required if `prover` is not provided. */
-    proverPaths?: ProverPaths;
+    proverPaths?: ProverPaths | undefined;
 
     /** Defaults to in-memory. */
-    noteStore?: NoteStore;
+    noteStore?: NoteStore | undefined;
     /** Defaults to fmd-webserver. */
-    noteSource?: NoteSource;
+    noteSource?: NoteSource | undefined;
     /** Defaults to a TreeStore backed by fmd-webserver commitment chunks. */
-    treeStore?: TreeStore;
+    treeStore?: TreeStore | undefined;
     /**
      * Plug in a persistence backend (e.g. IndexedDB) to resume sync across
      * page loads. Ignored when `treeStore` is provided directly.
      */
-    treePersistence?: TreePersistence;
+    treePersistence?: TreePersistence | undefined;
     /** Defaults to a NullifierStore backed by fmd-webserver nullifier chunks. */
-    nullifierStore?: NullifierStore;
+    nullifierStore?: NullifierStore | undefined;
     /** As `treePersistence`, for the spent set. Ignored when `nullifierStore` is set. */
-    nullifierPersistence?: NullifierPersistence;
+    nullifierPersistence?: NullifierPersistence | undefined;
     /** Default `{ kind: "full" }`. */
-    syncStrategy?: SyncStrategy;
+    syncStrategy?: SyncStrategy | undefined;
     /** Defaults to HTTP relayer. */
-    submitter?: Submitter;
+    submitter?: Submitter | undefined;
     /** Defaults to the WASM prover (snarkjs fallback on wasm load failure). */
-    prover?: Prover;
+    prover?: Prover | undefined;
     /** Defaults to SFRT. */
-    selector?: CoinSelector;
+    selector?: CoinSelector | undefined;
     /**
      * Defaults to `LocalScanner`. Use `WorkerPoolScanner` for parallel
      * off-main-thread scan.
      */
-    scanner?: Scanner;
+    scanner?: Scanner | undefined;
 }
 
 /**

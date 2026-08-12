@@ -40,6 +40,7 @@ describe("listNotes", () => {
         respondWith([NOTE_ROW]);
 
         const [n] = await client().listNotes();
+        if (!n) throw new Error("expected one note");
 
         expect(n.id).toBe(7);
         expect(n.clueBits).toBe(255);
@@ -51,6 +52,7 @@ describe("listNotes", () => {
         respondWith([NOTE_ROW]);
 
         const [n] = await client().listNotes();
+        if (!n) throw new Error("expected one note");
 
         // The trap: `commitmentHex` has no `0x`, and this value parses as a
         // decimal string too. Decoding it as decimal yields 1234n.
@@ -71,7 +73,7 @@ describe("listNotes", () => {
 
         await client().listNotes({ limit: 5, after: 2 });
 
-        const url = new URL(fetchMock.mock.calls[0][0] as string);
+        const url = new URL(fetchMock.mock.calls[0]![0] as string);
         expect(url.pathname).toBe("/v1/notes");
         expect(url.searchParams.get("chainId")).toBe("31337");
         expect(url.searchParams.get("limit")).toBe("5");
@@ -84,9 +86,10 @@ describe("listMatches", () => {
         const fetchMock = respondWith([{ ...rest, noteId: 42 }]);
 
         const [m] = await client().listMatches({ token: "abcd" });
+        if (!m) throw new Error("expected one match");
 
         expect(m.id).toBe(42);
-        const url = new URL(fetchMock.mock.calls[0][0] as string);
+        const url = new URL(fetchMock.mock.calls[0]![0] as string);
         expect(url.searchParams.get("token")).toBe("abcd");
         // The subscription already pins the chain; sending chainId too would
         // only widen what the request discloses.
@@ -118,7 +121,7 @@ describe("chunk feeds", () => {
         const chunk = await client().fetchNullifierChunk(2);
 
         expect(chunk.nullifiers).toEqual([10n, 11n]);
-        const url = new URL(fetchMock.mock.calls[0][0] as string);
+        const url = new URL(fetchMock.mock.calls[0]![0] as string);
         expect(url.pathname).toBe("/v1/chains/31337/nullifiers/chunks/2");
     });
 

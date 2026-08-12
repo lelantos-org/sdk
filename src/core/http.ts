@@ -29,20 +29,22 @@ const log = getLogger("lelantos:http");
 
 export interface HttpClientOptions {
     /** Per-attempt deadline. Default 15 000 for GET, 30 000 for POST. */
-    timeoutMs?: number;
+    timeoutMs?: number | undefined;
     /** Additional attempts after the first. Default 3. */
-    retries?: number;
+    retries?: number | undefined;
     /** Base backoff, doubled per attempt, ±25% jitter. Default 250. */
-    backoffMs?: number;
+    backoffMs?: number | undefined;
     /** Defaults to bound `globalThis.fetch`. */
-    fetchImpl?: typeof fetch;
+    fetchImpl?: typeof fetch | undefined;
     /**
      * Retry POST/PUT/PATCH/DELETE (which carry an `Idempotency-Key`).
      * Default true. See the module header before turning this off — or on.
      */
-    retryOnSubmit?: boolean;
+    retryOnSubmit?: boolean | undefined;
     /** Observability hook fired before each backoff. Must not throw. */
-    onRetry?: (info: { url: string; method: string; attempt: number; delayMs: number }) => void;
+    onRetry?:
+        | ((info: { url: string; method: string; attempt: number; delayMs: number }) => void)
+        | undefined;
     /**
      * Invoked when the server returns 402, before `NetworkError` is thrown.
      * Return a `Response` to replace the 402 (its ok/non-ok status is then
@@ -213,8 +215,8 @@ export type QueryParams = Record<string, string | number | boolean | undefined>;
  * history record a query string or path segment, but not a request header.
  */
 export interface JsonRequestOptions {
-    params?: QueryParams;
-    headers?: Record<string, string>;
+    params?: QueryParams | undefined;
+    headers?: Record<string, string> | undefined;
 }
 
 export interface JsonClient {
@@ -227,7 +229,7 @@ export interface JsonClient {
 
 export interface JsonClientOptions extends HttpClientOptions {
     /** Query params merged into every GET/DELETE (e.g. a pinned `chainId`). */
-    defaultParams?: QueryParams;
+    defaultParams?: QueryParams | undefined;
 }
 
 /**
@@ -262,7 +264,8 @@ export function createJsonClient(
         raw: http,
         async get<T>(path: string, o?: JsonRequestOptions): Promise<T> {
             const target = url(path, o?.params);
-            return json<T>(await http.fetch(target, { headers: o?.headers }), target);
+            const init = o?.headers ? { headers: o.headers } : undefined;
+            return json<T>(await http.fetch(target, init), target);
         },
         async post<T>(path: string, body: unknown): Promise<T> {
             const target = url(path);
@@ -274,7 +277,10 @@ export function createJsonClient(
             return json<T>(res, target);
         },
         async del(path: string, o?: JsonRequestOptions): Promise<void> {
-            await http.fetch(url(path, o?.params), { method: "DELETE", headers: o?.headers });
+            await http.fetch(url(path, o?.params), {
+                method: "DELETE",
+                ...(o?.headers ? { headers: o.headers } : {}),
+            });
         },
     };
 }

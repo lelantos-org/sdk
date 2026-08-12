@@ -2,6 +2,7 @@
 // prompts land in the wallet the user connected with.
 
 import type { TypedDataDomain, TypedDataParameter } from "viem";
+import { branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
 import { domainTypes, serialisableDomain, stringifyBigInts } from "./typed-data.js";
 
@@ -13,11 +14,11 @@ import { domainTypes, serialisableDomain, stringifyBigInts } from "./typed-data.
 export class Eip1193Signer implements EthSigner {
     constructor(
         private readonly provider: Eip1193ProviderLike,
-        private readonly address: `0x${string}`,
+        private readonly address: EvmAddress,
         readonly chainId: bigint,
     ) {}
 
-    getAddress(): Promise<string> {
+    getAddress(): Promise<EvmAddress> {
         return Promise.resolve(this.address);
     }
 
@@ -43,10 +44,10 @@ export class Eip1193Signer implements EthSigner {
     }
 
     async sendTransaction(args: {
-        to: `0x${string}`;
+        to: EvmAddress;
         data?: `0x${string}`;
         value?: bigint;
-    }): Promise<`0x${string}`> {
+    }): Promise<Hex32> {
         const params = [
             {
                 from: this.address,
@@ -58,7 +59,7 @@ export class Eip1193Signer implements EthSigner {
         const hash = (await this.provider.request({
             method: "eth_sendTransaction",
             params,
-        })) as `0x${string}`;
-        return hash;
+        })) as string;
+        return branded<Hex32>(hash);
     }
 }

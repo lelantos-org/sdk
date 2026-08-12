@@ -10,6 +10,12 @@
 //
 // `token = circuit * asset.scale`. See `./wallet/assets.ts` for the
 // asset-aware wrappers (`parseAmount` / `formatAmount`).
+//
+// The two integer spaces are branded (`CircuitAmount`, `TokenAmount`), so the
+// conversions below are the only way to move between them and passing one
+// where the other is expected is a compile error.
+
+import { branded, type CircuitAmount, type TokenAmount } from "./brand.js";
 
 const DECIMAL = /^-?(\d+)(?:\.(\d+))?$/;
 
@@ -59,8 +65,8 @@ export function formatUnits(value: bigint, decimals: number): string {
  * Circuit units → ERC-20 base units. Always exact — `scale` is a
  * multiplier, so this direction cannot lose precision.
  */
-export function toTokenUnits(circuitAmount: bigint, scale: bigint): bigint {
-    return circuitAmount * scale;
+export function toTokenUnits(circuitAmount: CircuitAmount, scale: bigint): TokenAmount {
+    return branded<TokenAmount>(circuitAmount * scale);
 }
 
 /**
@@ -71,10 +77,10 @@ export function toTokenUnits(circuitAmount: bigint, scale: bigint): bigint {
  * without notice, so use it only where dust does not matter.
  */
 export function toCircuitUnits(
-    tokenAmount: bigint,
+    tokenAmount: TokenAmount,
     scale: bigint,
     opts: { round?: "exact" | "down" } = {},
-): bigint {
+): CircuitAmount {
     if (scale <= 0n) throw new RangeError(`toCircuitUnits: scale must be positive, got ${scale}`);
     const rest = tokenAmount % scale;
     if (rest !== 0n && (opts.round ?? "exact") === "exact") {
@@ -83,7 +89,7 @@ export function toCircuitUnits(
                 `(remainder ${rest}); the smallest representable step is ${scale} base units`,
         );
     }
-    return (tokenAmount - rest) / scale;
+    return branded<CircuitAmount>((tokenAmount - rest) / scale);
 }
 
 /** Reject float artefacts (`1e-7`, `0.1 + 0.2`) before they reach `BigInt`. */

@@ -18,15 +18,28 @@
 
 import { privateKeyToAccount } from "viem/accounts";
 import { sleep } from "../core/async.js";
+import {
+    type AssetId,
+    branded,
+    type CircuitAmount,
+    type EvmAddress,
+    type TokenAmount,
+} from "../core/brand.js";
 import { bytesToHex } from "../core/hex.js";
 import { randomBytes } from "../core/random.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
 import type { AssetInfo } from "../wallet/assets.js";
+import { DEFAULT_ASSET } from "../wallet/constants.js";
 import type { OnPhase, SpendPhase } from "../wallet/options.js";
 import { deriveEphemeralKey } from "./ephemeral.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
-import { requireNetwork, requirePositiveInteger, unsupported } from "./requirements.js";
+import {
+    requireEvmAddress,
+    requireNetwork,
+    requirePositiveInteger,
+    unsupported,
+} from "./requirements.js";
 import type { PaymentPayloadResult, PaymentRequirements } from "./types.js";
 
 const log = getLogger("lelantos:x402:unshielded");
@@ -52,23 +65,23 @@ const TRANSFER_WITH_AUTHORIZATION = {
 export interface UnshieldedExactOptions {
     /**
      * MASP asset ids to consider when resolving the server's ERC-20 address.
-     * Default `[1n]`. The registry is not enumerable, so the token→id
-     * direction has to be a lookup over candidates.
+     * Defaults to the single default asset. The registry is not enumerable,
+     * so the token→id direction has to be a lookup over candidates.
      */
-    assetIds?: readonly bigint[];
+    assetIds?: readonly AssetId[] | undefined;
     /** Ephemeral payer slot. Default 0. See `./ephemeral.ts`. */
-    index?: number;
+    index?: number | undefined;
     /**
      * When a top-up is needed, withdraw this many times the payment so one
      * proving run covers several calls. Default 10.
      */
-    topUpMultiple?: bigint;
+    topUpMultiple?: bigint | undefined;
     /** Forwarded to `wallet.withdraw`. */
-    onPhase?: OnPhase<SpendPhase>;
+    onPhase?: OnPhase<SpendPhase> | undefined;
     /** Poll interval while waiting for the withdrawal to land. Default 2000ms. */
-    pollMs?: number;
+    pollMs?: number | undefined;
     /** Give up waiting after this many polls. Default 30. */
-    maxPolls?: number;
+    maxPolls?: number | undefined;
 }
 
 /** Everything an offer yields once it is known to be payable. */
@@ -76,9 +89,11 @@ interface Terms {
     /** EIP-712 domain of the token, from `extra`. */
     domain: { name: string; version: string };
     /** ERC-20 base units owed. */
-    value: bigint;
+    value: TokenAmount;
     asset: AssetInfo;
     chainId: bigint;
+    /** Server's ERC-20 recipient. */
+    payTo: EvmAddress;
 }
 
 /**
@@ -94,7 +109,7 @@ export function unshieldedExact(
     opts: UnshieldedExactOptions = {},
 ): PayableSchemeClient {
     const index = opts.index ?? 0;
-    const candidates = opts.assetIds ?? [1n];
+    const candidates = opts.assetIds ?? [DEFAULT_ASSET];
     const topUpMultiple = opts.topUpMultiple ?? 10n;
 
     let chainId: Promise<bigint> | undefined;
@@ -104,9 +119,14 @@ export function unshieldedExact(
         requireNetwork(SCOPE, req.network, { namespace: EVM_NAMESPACE, chainId: id });
         return {
             domain: requireEip712Domain(req),
-            value: requirePositiveInteger(SCOPE, req.amount, "amount"),
-            asset: await resolveAsset(wallet, req.asset, candidates),
+            value: branded<TokenAmount>(requirePositiveInteger(SCOPE, req.amount, "amount")),
+            asset: await resolveAsset(
+                wallet,
+                requireEvmAddress(SCOPE, req.asset, "asset"),
+                candidates,
+            ),
             chainId: id,
+            payTo: requireEvmAddress(SCOPE, req.payTo, "payTo"),
         };
     };
 
@@ -117,7 +137,7 @@ export function unshieldedExact(
             const { value, asset } = await read(req);
             // Base units → circuit units, rounded up, so a budget never
             // under-counts what a payment draws from the pool.
-            return { amount: ceilDiv(value, asset.scale), asset };
+            return { amount: branded<CircuitAmount>(ceilDiv(value, asset.scale)), asset };
         },
 
         async createPaymentPayload(
@@ -127,7 +147,7 @@ export function unshieldedExact(
             const { domain, value, asset, chainId: id } = await read(req);
             const account = privateKeyToAccount(deriveEphemeralKey(wallet.keys.nsk, index));
 
-            await ensureFunded(wallet, account.address, asset, value, {
+            await ensureFunded(wallet, branded<EvmAddress>(account.address), asset, value, {
                 topUpMultiple,
                 onPhase: opts.onPhase,
                 pollMs: opts.pollMs ?? 2000,
@@ -185,12 +205,12 @@ export function unshieldedExact(
  */
 async function ensureFunded(
     wallet: WalletApi,
-    payer: string,
+    payer: EvmAddress,
     asset: AssetInfo,
-    needed: bigint,
+    needed: TokenAmount,
     opts: {
         topUpMultiple: bigint;
-        onPhase?: OnPhase<SpendPhase>;
+        onPhase?: OnPhase<SpendPhase> | undefined;
         pollMs: number;
         maxPolls: number;
     },
@@ -212,7 +232,7 @@ async function ensureFunded(
     // exactly `needed` arrives short. Asking for a multiple absorbs the fee
     // and amortises the proof across later payments.
     const shortfall = needed - held;
-    const target = ceilDiv(shortfall * opts.topUpMultiple, asset.scale);
+    const target = branded<CircuitAmount>(ceilDiv(shortfall * opts.topUpMultiple, asset.scale));
 
     log.info("topping up ephemeral payer", {
         payer,
@@ -236,8 +256,8 @@ async function ensureFunded(
 /** ERC-20 address → MASP asset, by probing the candidate registry ids. */
 async function resolveAsset(
     wallet: WalletApi,
-    token: string,
-    candidates: readonly bigint[],
+    token: EvmAddress,
+    candidates: readonly AssetId[],
 ): Promise<AssetInfo> {
     const want = token.toLowerCase();
     for (const id of candidates) {

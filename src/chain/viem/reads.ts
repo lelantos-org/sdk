@@ -1,19 +1,20 @@
 // MASP contract reads.
 
 import { decodeEventLog, zeroAddress } from "viem";
+import { type AssetId, branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { TxMiningError } from "../../core/errors.js";
 import type { AssetEntry, EscrowedIntentView, IntentEscrowedRecord } from "../types.js";
 import { MASP_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
 
-export async function fetchAsset(ctx: ViemCtx, id: bigint): Promise<AssetEntry> {
+export async function fetchAsset(ctx: ViemCtx, id: AssetId): Promise<AssetEntry> {
     const [token, disabled, scale] = (await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
         functionName: "asset",
         args: [id],
     })) as [string, boolean, bigint];
-    return { token, scale, disabled };
+    return { token: branded<EvmAddress>(token), scale, disabled };
 }
 
 export async function fetchFeeBps(ctx: ViemCtx): Promise<bigint> {
@@ -35,10 +36,10 @@ export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedInt
     const [digest, payer, submittedAt, publicAssetId, feeBpsAtSubmit] = r;
     if (payer === zeroAddress) return null;
     return {
-        digest,
-        payer,
+        digest: branded<Hex32>(digest),
+        payer: branded<EvmAddress>(payer),
         submittedAt: Number(submittedAt),
-        publicAssetId,
+        publicAssetId: branded<AssetId>(publicAssetId),
         feeBpsAtSubmit: Number(feeBpsAtSubmit),
     };
 }
@@ -71,10 +72,12 @@ export async function fetchIntentEscrowed(
     });
     if (logs.length === 0) return null;
 
+    const first = logs[0];
+    if (!first) return null;
     const decoded = decodeEventLog({
         abi: MASP_ABI,
-        data: logs[0].data,
-        topics: logs[0].topics,
+        data: first.data,
+        topics: first.topics,
     });
     if (decoded.eventName !== "IntentEscrowed") return null;
 
@@ -84,13 +87,13 @@ export async function fetchIntentEscrowed(
     const a = decoded.args as unknown as Record<string, bigint | string>;
     return {
         id: a.id as bigint,
-        payer: a.payer as string,
-        recipient: a.recipient as string,
-        publicAssetId: a.publicAssetId as bigint,
+        payer: branded<EvmAddress>(a.payer as string),
+        recipient: branded<EvmAddress>(a.recipient as string),
+        publicAssetId: branded<AssetId>(a.publicAssetId as bigint),
         publicIn: a.publicIn as bigint,
         feeBpsAtSubmit: Number(a.feeBpsAtSubmit as bigint),
-        cm0: a.cm0 as string,
-        cm1: a.cm1 as string,
+        cm0: branded<Hex32>(a.cm0 as string),
+        cm1: branded<Hex32>(a.cm1 as string),
         cvDep0: [a.cvDep0X as bigint, a.cvDep0Y as bigint],
         cvDep1: [a.cvDep1X as bigint, a.cvDep1Y as bigint],
         rcvTotal: a.rcvTotal as bigint,

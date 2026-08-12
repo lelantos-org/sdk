@@ -7,6 +7,7 @@
 // pass `[0, 1]`.
 
 import type { InputSlots } from "../../bundle/common.js";
+import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { safePhase } from "../../core/callbacks.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import { decodeAddress } from "../../keys/address.js";
@@ -42,11 +43,11 @@ export interface PreparedSpend {
 export async function prepareSpend(
     ctx: SpendContext,
     args: {
-        asset: bigint;
-        target: bigint;
-        selectOpts?: SelectOpts;
-        autoConsolidate?: boolean;
-        onPhase?: OnPhase<SpendPhase>;
+        asset: AssetId;
+        target: CircuitAmount;
+        selectOpts?: SelectOpts | undefined;
+        autoConsolidate?: boolean | undefined;
+        onPhase?: OnPhase<SpendPhase> | undefined;
     },
 ): Promise<PreparedSpend> {
     safePhase(args.onPhase, "preparing");

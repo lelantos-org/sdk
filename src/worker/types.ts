@@ -20,16 +20,16 @@ export interface WorkerLike {
     // is assignable to it, but a DOM worker`s void is not assignable to a
     // union containing Promise.
     terminate(): void;
-    onmessage?: ((ev: { data: unknown }) => void) | null;
-    onerror?: ((ev: unknown) => void) | null;
-    onmessageerror?: ((ev: unknown) => void) | null;
+    onmessage?: (((ev: { data: unknown }) => void) | null) | undefined;
+    onerror?: (((ev: unknown) => void) | null) | undefined;
+    onmessageerror?: (((ev: unknown) => void) | null) | undefined;
     addEventListener?(type: string, cb: (ev: any) => void): void;
     on?(event: string, cb: (arg: any) => void): void;
 }
 
 /** The worker-side global, as seen from inside a module worker. */
 export interface WorkerScopeLike {
-    onmessage?: ((ev: { data: unknown }) => void) | null;
+    onmessage?: (((ev: { data: unknown }) => void) | null) | undefined;
     postMessage(msg: unknown, transfer?: readonly unknown[]): void;
     addEventListener?(type: string, cb: (ev: any) => void): void;
 }
@@ -45,11 +45,11 @@ export interface RpcRequest {
 export interface WireError {
     name: string;
     message: string;
-    stack?: string;
+    stack?: string | undefined;
     /** `WalletError.code` when the remote threw a typed SDK error. */
-    code?: string;
-    context?: Record<string, unknown>;
-    cause?: WireError;
+    code?: string | undefined;
+    context?: Record<string, unknown> | undefined;
+    cause?: WireError | undefined;
 }
 
 export type RpcResponse =

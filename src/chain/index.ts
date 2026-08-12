@@ -8,11 +8,13 @@ export {
     PrivateKeySigner,
 } from "./eth-signer.js";
 export {
+    type DeployedNetworkName,
     type DeployedNetworkPreset,
     isNetworkDeployed,
     NETWORKS,
     type NetworkName,
     type NetworkPreset,
+    type PlaceholderNetworkName,
     resolveNetwork,
 } from "./networks.js";
 export type {

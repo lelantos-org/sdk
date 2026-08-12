@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
 import type { AssetInfo } from "../wallet/assets.js";
 import type { TransferResult } from "../wallet/result.js";
@@ -9,8 +10,8 @@ import { HEADER_PAYMENT_REQUIRED, HEADER_PAYMENT_SIGNATURE } from "./types.js";
 const CHAIN_ID = 31337n;
 
 const WETH: AssetInfo = {
-    id: 1n,
-    token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    id: assetId(1n),
+    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
     disabled: false,
     symbol: "WETH",
@@ -22,15 +23,15 @@ function stubWallet(overrides: Partial<WalletApi> = {}): WalletApi {
     const transfer = vi.fn(
         async (): Promise<TransferResult> => ({
             kind: "transfer",
-            txHash: "0xdeadbeef",
-            commitments: [`0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`],
-            nonZeroCommitments: [`0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`],
-            ownCommitments: [`0x${"22".repeat(32)}`],
-            ownInflow: 0n,
+            txHash: hex32(`0x${"de".repeat(32)}`),
+            commitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
+            nonZeroCommitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
+            ownCommitments: [hex32(`0x${"22".repeat(32)}`)],
+            ownInflow: circuitAmount(0n),
             spent: ["n1"],
-            inputSum: 10_000n,
-            sent: 1_500n,
-            change: 8_500n,
+            inputSum: circuitAmount(10_000n),
+            sent: circuitAmount(1_500n),
+            change: circuitAmount(8_500n),
         }),
     );
     return {
@@ -114,12 +115,12 @@ describe("x402", () => {
             expect.objectContaining({ to: "sswap1qqqq", amount: 1500n, asset: 1n }),
         );
 
-        const payload = decodePaymentHeader(fetchImpl.mock.calls[1][1]);
+        const payload = decodePaymentHeader(fetchImpl.mock.calls[1]![1]);
         expect(payload.x402Version).toBe(2);
         expect(payload.accepted.network).toBe(`shielded:${CHAIN_ID}`);
         expect(payload.payload).toEqual({
             pool: "lelantos",
-            txHash: "0xdeadbeef",
+            txHash: hex32(`0x${"de".repeat(32)}`),
             commitment: `0x${"11".repeat(32)}`,
             asset: "1",
             amount: "1500",
@@ -222,7 +223,7 @@ describe("x402", () => {
         await pay("https://api.example.com/premium");
 
         // The shielded entry is second in `accepts[]` but must still win.
-        expect(decodePaymentHeader(fetchImpl.mock.calls[1][1]).accepted.network).toBe(
+        expect(decodePaymentHeader(fetchImpl.mock.calls[1]![1]).accepted.network).toBe(
             `shielded:${CHAIN_ID}`,
         );
         expect(wallet.transfer).toHaveBeenCalledTimes(1);
@@ -233,8 +234,8 @@ describe("x402", () => {
         // offers itself against MASP asset 1n would skip every offer under an
         // `assetIds` override.
         const USDC: AssetInfo = {
-            id: 7n,
-            token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            id: assetId(7n),
+            token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
             scale: 10n ** 3n,
             disabled: false,
             symbol: "USDC",
@@ -265,7 +266,7 @@ describe("x402", () => {
         const pay = x402(wallet, {
             budget: { total: "5" },
             allowUnshielded: true,
-            unshielded: { assetIds: [7n] },
+            unshielded: { assetIds: [assetId(7n)] },
             fetchImpl,
         });
 

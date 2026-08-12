@@ -10,12 +10,12 @@ export interface ProveParams {
      * Pin rayon thread count. Only honoured on the FIRST request; the pool
      * is reused across subsequent ones.
      */
-    threads?: number;
+    threads?: number | undefined;
 }
 
 export interface PreloadParams {
     paths: ProverPaths;
-    threads?: number;
+    threads?: number | undefined;
 }
 
 /** Method table for the prover worker. */

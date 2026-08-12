@@ -10,6 +10,7 @@ import {
     type WalletClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import type { EthSigner } from "../../core/signer.js";
 
 /** Local-account signer for Node (tests, scripts, relayer). */
@@ -29,8 +30,8 @@ export class PrivateKeySigner implements EthSigner {
         });
     }
 
-    async getAddress(): Promise<string> {
-        return this.account.address;
+    async getAddress(): Promise<EvmAddress> {
+        return branded<EvmAddress>(this.account.address);
     }
 
     async signTypedData(
@@ -50,10 +51,10 @@ export class PrivateKeySigner implements EthSigner {
     }
 
     async sendTransaction(args: {
-        to: `0x${string}`;
+        to: EvmAddress;
         data?: `0x${string}`;
         value?: bigint;
-    }): Promise<`0x${string}`> {
+    }): Promise<Hex32> {
         const hash = await this.wallet.sendTransaction({
             account: this.account,
             chain: null,
@@ -61,6 +62,6 @@ export class PrivateKeySigner implements EthSigner {
             data: args.data,
             value: args.value,
         });
-        return hash;
+        return branded<Hex32>(hash);
     }
 }

@@ -3,6 +3,8 @@
 // address, `scale`, symbol, decimals) is gathered here.
 
 import type { ChainAdapter } from "../chain/port.js";
+import { type AssetId, branded, type CircuitAmount, type EvmAddress } from "../core/brand.js";
+import { InvalidArgumentError } from "../core/errors.js";
 import { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "../core/units.js";
 
 /**
@@ -14,17 +16,51 @@ import { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "../core/u
  */
 export interface AssetInfo {
     /** MASP registry id — the `asset` argument on every wallet method. */
-    id: bigint;
+    id: AssetId;
     /** ERC-20 contract address backing the id. */
-    token: string;
+    token: EvmAddress;
     /** circuit-units → ERC-20-base-units multiplier. */
     scale: bigint;
     /** Owner-flipped. Disabled assets block new deposits; existing notes stay spendable. */
     disabled: boolean;
     /** From `chain.tokenMeta`; undefined when the adapter does not implement it. */
-    symbol?: string;
+    symbol?: string | undefined;
     /** ERC-20 decimals. Undefined when the adapter has no `tokenMeta`. */
-    decimals?: number;
+    decimals?: number | undefined;
+}
+
+/**
+ * An asset whose ERC-20 `decimals` is known. Human-unit conversion is only
+ * defined against this variant, so `parseAmount` / `formatAmount` reject an
+ * unresolved `AssetInfo` at compile time instead of throwing.
+ *
+ * Narrow with {@link hasTokenMeta}, or assert with {@link requireTokenMeta}.
+ */
+export interface AssetInfoWithMeta extends AssetInfo {
+    decimals: number;
+}
+
+/** Narrow an `AssetInfo` to the variant that carries ERC-20 `decimals`. */
+export function hasTokenMeta(asset: AssetInfo): asset is AssetInfoWithMeta {
+    return asset.decimals !== undefined;
+}
+
+/**
+ * Assert that `decimals` resolved.
+ *
+ * @throws {InvalidArgumentError} when the chain adapter exposed no
+ * `tokenMeta`, so no human-unit conversion is defined for this asset.
+ */
+export function requireTokenMeta(asset: AssetInfo): AssetInfoWithMeta {
+    if (!hasTokenMeta(asset)) {
+        throw new InvalidArgumentError(
+            `asset ${asset.id} (${asset.token}) has no known decimals — the chain ` +
+                `adapter does not implement \`tokenMeta\`. Set \`decimals\` on the ` +
+                `AssetInfo yourself, or work in circuit units.`,
+            { argument: "asset" },
+        );
+    }
+    return asset;
 }
 
 /**
@@ -32,7 +68,7 @@ export interface AssetInfo {
  * adapter exposes `tokenMeta`. Metadata failures are non-fatal: `symbol` and
  * `decimals` are left undefined.
  */
-export async function fetchAssetInfo(chain: ChainAdapter, id: bigint): Promise<AssetInfo> {
+export async function fetchAssetInfo(chain: ChainAdapter, id: AssetId): Promise<AssetInfo> {
     const entry = await chain.fetchAsset(id);
     const info: AssetInfo = {
         id,
@@ -56,15 +92,17 @@ export async function fetchAssetInfo(chain: ChainAdapter, id: bigint): Promise<A
  * Human decimal string → circuit units, ready to pass as `amount`.
  *
  * ```ts
- * const weth = await wallet.asset(1n);
+ * const weth = requireTokenMeta(await wallet.asset(assetId(1n)));
  * await wallet.deposit({ asset: weth.id, amount: parseAmount("0.25", weth) });
  * ```
  *
- * @throws {RangeError} when the asset has no known `decimals`, or the value
- * is finer-grained than one circuit unit.
+ * @throws {RangeError} when the value is finer-grained than one circuit unit.
  */
-export function parseAmount(value: string | number | bigint, asset: AssetInfo): bigint {
-    return toCircuitUnits(parseUnits(value, requireDecimals(asset)), asset.scale);
+export function parseAmount(
+    value: string | number | bigint,
+    asset: AssetInfoWithMeta,
+): CircuitAmount {
+    return toCircuitUnits(branded(parseUnits(value, asset.decimals)), asset.scale);
 }
 
 /**
@@ -72,30 +110,19 @@ export function parseAmount(value: string | number | bigint, asset: AssetInfo): 
  * the token symbol when one is known.
  *
  * ```ts
- * formatAmount(wallet.balance(1n), weth, { symbol: true }); // "0.25 WETH"
+ * formatAmount(wallet.balance(weth.id), weth, { symbol: true }); // "0.25 WETH"
  * ```
  */
 export function formatAmount(
-    circuitAmount: bigint,
-    asset: AssetInfo,
+    amount: CircuitAmount,
+    asset: AssetInfoWithMeta,
     opts: { symbol?: boolean } = {},
 ): string {
-    const text = formatUnits(toTokenUnits(circuitAmount, asset.scale), requireDecimals(asset));
+    const text = formatUnits(toTokenUnits(amount, asset.scale), asset.decimals);
     return opts.symbol && asset.symbol ? `${text} ${asset.symbol}` : text;
 }
 
 /** Smallest non-zero amount the asset can express, as a decimal string. */
-export function minAmount(asset: AssetInfo): string {
-    return formatAmount(1n, asset);
-}
-
-function requireDecimals(asset: AssetInfo): number {
-    if (asset.decimals === undefined) {
-        throw new RangeError(
-            `asset ${asset.id} (${asset.token}) has no known decimals — the chain ` +
-                `adapter does not implement \`tokenMeta\`. Set \`decimals\` on the ` +
-                `AssetInfo yourself, or work in circuit units.`,
-        );
-    }
-    return asset.decimals;
+export function minAmount(asset: AssetInfoWithMeta): string {
+    return formatAmount(branded(1n), asset);
 }

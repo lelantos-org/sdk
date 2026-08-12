@@ -2,6 +2,7 @@
 // the `kind` discriminator routes between the ERC-20 and native-ETH builders.
 
 import { buildSpend } from "../bundle/spend.js";
+import { branded, type CircuitAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { applyFee } from "../core/fees.js";
 import { freshOutputAuxRandomness } from "../notes/randomness.js";
@@ -20,7 +21,7 @@ export async function executeWithdraw(
     const { asset } = args;
     const feeBps = await ctx.feeBps();
     const fee = applyFee(args.amount, feeBps);
-    const publicOut = args.amount + fee;
+    const publicOut = branded<CircuitAmount>(args.amount + fee);
 
     const { selection, ownAddr, inputs, merkleRoot } = await prepareSpend(ctx, {
         asset,
@@ -30,7 +31,7 @@ export async function executeWithdraw(
         onPhase: args.onPhase,
     });
 
-    const remainder = selection.sum - publicOut;
+    const remainder = branded<CircuitAmount>(selection.sum - publicOut);
     const [change0, change1] = splitChangePair(ctx.keys.pk, asset, remainder);
 
     safePhase(args.onPhase, "proving");

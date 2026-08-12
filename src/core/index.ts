@@ -6,6 +6,22 @@
 
 export { type RetryPolicy, retry, type SleepOutcome, sleep, withTimeout } from "./async.js";
 export { bitAt, packBits, unpackBits } from "./bits.js";
+export {
+    type AssetId,
+    assetId,
+    type Brand,
+    branded,
+    type CircuitAmount,
+    circuitAmount,
+    type EvmAddress,
+    evmAddress,
+    type Hex32,
+    hex32,
+    type ShieldedAddress,
+    shieldedAddress,
+    type TokenAmount,
+    tokenAmount,
+} from "./brand.js";
 export { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
 export { safeCall, safePhase } from "./callbacks.js";
 export {

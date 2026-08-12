@@ -41,8 +41,8 @@ export type ConnectKeyOptions =
           {
               mnemonic: string;
               /** ZIP-32 account index. Default 0. */
-              account?: number;
-              passphrase?: string;
+              account?: number | undefined;
+              passphrase?: string | undefined;
           },
           KeyOptionKeys
       >
@@ -60,7 +60,7 @@ export type ConnectChainOptions =
           {
               /** Pre-built `ChainAdapter`; caller owns construction. */
               chain: ChainAdapter;
-              rpcUrl?: string;
+              rpcUrl?: string | undefined;
           },
           ChainOptionKeys
       >
@@ -104,53 +104,53 @@ export interface ConnectExtraOptions {
      * (companion is on GitHub Packages, not jsDelivr-proxiable); pass
      * explicitly or set `proverArtifactsCdn`.
      */
-    proverArtifacts?: ProverArtifacts | ProverPaths;
+    proverArtifacts?: ProverArtifacts | ProverPaths | undefined;
     /** Self-hosted CDN base serving `2x2.wasm` + `2x2_final.zkey` at root. */
-    proverArtifactsCdn?: string;
+    proverArtifactsCdn?: string | undefined;
     /** Skips `proverArtifacts` resolution. */
-    prover?: Prover;
+    prover?: Prover | undefined;
     /**
      * Default `true` (Node and browser). Set `false` to force the
      * in-process snarkjs prover. On wasm load failure the SDK falls back
      * to snarkjs automatically.
      */
-    useWasmProver?: boolean;
+    useWasmProver?: boolean | undefined;
     /**
      * `"eager"` (default) starts the zkey fetch/parse + thread-pool
      * spin-up in the background as soon as `connect()` resolves the
      * artifacts; `"lazy"` defers it to the first `prove()`.
      */
-    proverWarmup?: "eager" | "lazy";
+    proverWarmup?: "eager" | "lazy" | undefined;
 
     /**
      * Pre-resolved wasm-pack module + binary URLs. Required in browser
      * builds where bundlers rewrite `#wasm/*` subpath imports. Applied
      * via `configureWasm` before any `.build()`.
      */
-    wasm?: WasmConfig;
+    wasm?: WasmConfig | undefined;
 
-    noteStore?: NoteStore;
-    noteSource?: NoteSource;
+    noteStore?: NoteStore | undefined;
+    noteSource?: NoteSource | undefined;
     /** Pre-built tree store. Use `treePersistence` instead for the common case. */
-    treeStore?: TreeStore;
+    treeStore?: TreeStore | undefined;
     /**
      * Persistence backend for the Merkle tree (e.g. IndexedDB in the browser).
      * The SDK restores state at startup and saves after every sync.
      */
-    treePersistence?: TreePersistence;
+    treePersistence?: TreePersistence | undefined;
     /** Pre-built spent-nullifier store. Use `nullifierPersistence` instead for the common case. */
-    nullifierStore?: NullifierStore;
+    nullifierStore?: NullifierStore | undefined;
     /** As `treePersistence`, for the locally mirrored spent-nullifier set. */
-    nullifierPersistence?: NullifierPersistence;
-    submitter?: Submitter;
-    selector?: CoinSelector;
-    scanner?: Scanner;
-    syncStrategy?: SyncStrategy;
+    nullifierPersistence?: NullifierPersistence | undefined;
+    submitter?: Submitter | undefined;
+    selector?: CoinSelector | undefined;
+    scanner?: Scanner | undefined;
+    syncStrategy?: SyncStrategy | undefined;
     /** See `WalletConfig.feeBps`. */
-    feeBps?: bigint;
+    feeBps?: bigint | undefined;
 
     /** Default: auto-detect. */
-    runtime?: "node" | "browser" | "auto";
+    runtime?: "node" | "browser" | "auto" | undefined;
 }
 
 /**

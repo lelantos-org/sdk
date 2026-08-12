@@ -34,7 +34,7 @@ export interface LogRecord {
     /** Colon-delimited namespace, e.g. `lelantos:sync:pool`. */
     ns: string;
     msg: string;
-    fields?: Record<string, unknown>;
+    fields?: Record<string, unknown> | undefined;
     /** Epoch milliseconds. */
     t: number;
 }
@@ -56,14 +56,14 @@ export interface Logger {
 
 export interface LoggingConfig {
     /** Maximum level to emit. Default `"silent"`. */
-    level?: LogLevel;
+    level?: LogLevel | undefined;
     /** Where records go. Without one, nothing is emitted at any level. */
-    sink?: LogSink | null;
+    sink?: LogSink | null | undefined;
     /**
      * Namespace globs to include, e.g. `"lelantos:prover:*"` or
      * `["lelantos:http", "lelantos:sync:*"]`. Default: everything.
      */
-    namespaces?: string | string[] | null;
+    namespaces?: string | string[] | null | undefined;
 }
 
 let currentRank = 0;

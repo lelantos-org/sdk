@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assetId, circuitAmount } from "../core/brand.js";
 import type { StoredNote } from "./note-store.js";
 import { type SelectOpts, selectNotes } from "./selection.js";
 
@@ -42,43 +43,45 @@ const baseOpts = (extra: SelectOpts = {}): SelectOpts => ({
 
 describe("selectNotes", () => {
     it("throws when no candidates for asset", () => {
-        expect(() => selectNotes([], 1n, 100n, baseOpts())).toThrow(/no spendable/);
+        expect(() => selectNotes([], assetId(1n), circuitAmount(100n), baseOpts())).toThrow(
+            /no spendable/,
+        );
     });
 
     it("filters spent notes", () => {
         const notes = [note("a", 100n, { spent: true }), note("b", 200n)];
-        const r = selectNotes(notes, 1n, 50n, baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(50n), baseOpts());
         expect(r.plan).toBe("direct");
         if (r.plan === "direct") expect(r.notes.map((n) => n.id)).toEqual(["b"]);
     });
 
     it("filters by asset", () => {
         const notes = [note("a", 1000n, { asset: 2n }), note("b", 100n, { asset: 1n })];
-        const r = selectNotes(notes, 1n, 50n, baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(50n), baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
-        expect(r.notes[0].id).toBe("b");
+        expect(r.notes[0]!.id).toBe("b");
     });
 
     it("single-cover prefers smallest sufficient note (not largest)", () => {
         const notes = [note("a", 50n), note("b", 200n), note("c", 1000n), note("d", 5000n)];
-        const r = selectNotes(notes, 1n, 100n, baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.notes).toHaveLength(1);
-        expect(r.notes[0].id).toBe("b");
+        expect(r.notes[0]!.id).toBe("b");
         expect(r.sum).toBe(200n);
     });
 
     it("respects fee in cover threshold", () => {
         const notes = [note("a", 100n), note("b", 110n)];
-        const r = selectNotes(notes, 1n, 100n, baseOpts({ fee: 5n }));
+        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts({ fee: 5n }));
         if (r.plan !== "direct") throw new Error("expected direct");
-        expect(r.notes[0].id).toBe("b");
+        expect(r.notes[0]!.id).toBe("b");
     });
 
     it("two-cover picks smallest pair, not largest+gap", () => {
         const notes = [note("a", 30n), note("b", 40n), note("c", 60n), note("d", 1000n)];
         // target 80 → smallest pair (a=30, c=60)=90; large `d` kept for later.
-        const r = selectNotes(notes, 1n, 80n, baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(80n), baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
         const ids = r.notes.map((n) => n.id).sort();
         expect(ids).toEqual(["a", "c"]);
@@ -87,14 +90,19 @@ describe("selectNotes", () => {
 
     it("excludes dust below threshold", () => {
         const notes = [note("dust", 1n), note("ok", 200n)];
-        const r = selectNotes(notes, 1n, 100n, baseOpts({ dustThreshold: 10n }));
+        const r = selectNotes(
+            notes,
+            assetId(1n),
+            circuitAmount(100n),
+            baseOpts({ dustThreshold: 10n }),
+        );
         if (r.plan !== "direct") throw new Error("expected direct");
-        expect(r.notes[0].id).toBe("ok");
+        expect(r.notes[0]!.id).toBe("ok");
     });
 
     it("includes dust when dustThreshold=0", () => {
         const notes = [note("a", 50n), note("b", 50n)];
-        const r = selectNotes(notes, 1n, 100n, baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.notes).toHaveLength(2);
     });
@@ -106,36 +114,36 @@ describe("selectNotes", () => {
         ];
         const r = selectNotes(
             notes,
-            1n,
-            100n,
+            assetId(1n),
+            circuitAmount(100n),
             baseOpts({
                 cooldownBlocks: 2,
                 tipBlock: 100,
             }),
         );
         if (r.plan !== "direct") throw new Error("expected direct");
-        expect(r.notes[0].id).toBe("ripe");
+        expect(r.notes[0]!.id).toBe("ripe");
     });
 
     it("ignores cooldown when firstSeenBlock missing", () => {
         const notes = [note("a", 200n)];
         const r = selectNotes(
             notes,
-            1n,
-            100n,
+            assetId(1n),
+            circuitAmount(100n),
             baseOpts({
                 cooldownBlocks: 5,
                 tipBlock: 100,
             }),
         );
         if (r.plan !== "direct") throw new Error("expected direct");
-        expect(r.notes[0].id).toBe("a");
+        expect(r.notes[0]!.id).toBe("a");
     });
 
     it("returns consolidate-first when sum sufficient but no 2-cover", () => {
         // max pair=90, total=120, target=100 → consolidate.
         const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
-        const r = selectNotes(notes, 1n, 100n, baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts());
         expect(r.plan).toBe("consolidate-first");
         if (r.plan === "consolidate-first") {
             expect(r.consolidate.map((n) => n.id).sort()).toEqual(["a", "b"]);
@@ -146,15 +154,20 @@ describe("selectNotes", () => {
 
     it("throws when total funds < target", () => {
         const notes = [note("a", 10n), note("b", 20n)];
-        expect(() => selectNotes(notes, 1n, 1000n, baseOpts())).toThrow(/insufficient/);
+        expect(() => selectNotes(notes, assetId(1n), circuitAmount(1000n), baseOpts())).toThrow(
+            /insufficient/,
+        );
     });
 
     it("bucket shuffle: ±5% bucket randomizes among near-equal notes", () => {
         const notes = [note("a", 100n), note("b", 102n), note("c", 98n)];
         const picks = new Set<string>();
         for (let s = 1; s < 200; s++) {
-            const r = selectNotes(notes, 1n, 90n, { rng: seededRng(s), bucketPct: 0.05 });
-            if (r.plan === "direct") picks.add(r.notes[0].id);
+            const r = selectNotes(notes, assetId(1n), circuitAmount(90n), {
+                rng: seededRng(s),
+                bucketPct: 0.05,
+            });
+            if (r.plan === "direct") picks.add(r.notes[0]!.id);
         }
         expect(picks.size).toBeGreaterThan(1);
     });
@@ -169,10 +182,13 @@ describe("selectNotes", () => {
             for (let i = 0; i < n; i++) values.push(BigInt(50 + Math.floor(rng() * 500)));
             const notes = values.map((v, i) => note(i.toString(16), v));
             const target = BigInt(50 + Math.floor(rng() * 200));
-            const r = selectNotes(notes, 1n, target, { rng, bucketPct: 0.05 });
+            const r = selectNotes(notes, assetId(1n), circuitAmount(target), {
+                rng,
+                bucketPct: 0.05,
+            });
             if (r.plan !== "direct") continue;
             const ascValues = [...values].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-            const picked = BigInt(r.notes[0].value);
+            const picked = BigInt(r.notes[0]!.value);
             const rank = ascValues.indexOf(picked) / Math.max(1, n - 1);
             samples.push(rank);
         }

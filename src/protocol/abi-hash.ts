@@ -6,6 +6,7 @@
 // one (PubInputs.compress).
 
 import { encodeAbiParameters, keccak256 } from "viem";
+import { branded, type Hex32 } from "../core/brand.js";
 import { BN254_FR, type Field } from "../core/field.js";
 import { bytesToHex } from "../core/hex.js";
 import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositIntent } from "./deposit-intent.js";
@@ -14,7 +15,7 @@ import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositIntent } from "./dep
  * Compute `piHash = keccak256(abi.encode(DepositIntent, AuxValidation.Output[2]))`.
  * Mirrors MASP.submitIntent line `keccak256(abi.encode(d, aux))`.
  */
-export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]): string {
+export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]): Hex32 {
     const encoded = encodeAbiParameters(
         [
             {
@@ -59,7 +60,7 @@ export function computePiHash(intent: DepositIntent, aux: [AuxOutput, AuxOutput]
             })) as never,
         ],
     );
-    return keccak256(encoded);
+    return branded<Hex32>(keccak256(encoded));
 }
 
 /**

@@ -50,6 +50,25 @@ export {
     type X402RefusalReason,
 } from "./core/errors.js";
 
+// ── nominal types: addresses, hashes, asset ids, amount spaces ───────────
+// Erased at runtime. Values the SDK returns are already branded; the
+// constructors are for turning caller-supplied strings and bigints into them.
+export {
+    type AssetId,
+    assetId,
+    type Brand,
+    type CircuitAmount,
+    circuitAmount,
+    type EvmAddress,
+    evmAddress,
+    type Hex32,
+    hex32,
+    type ShieldedAddress,
+    shieldedAddress,
+    type TokenAmount,
+    tokenAmount,
+} from "./core/brand.js";
+
 // ── amounts + HTTP options ───────────────────────────────────────────────
 export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./core/units.js";
 export type { HttpClientOptions } from "./core/http.js";
@@ -144,8 +163,10 @@ export {
     type EscrowedIntentView,
     type EthSigner,
     type IntentEscrowedRecord,
+    type DeployedNetworkName,
     NETWORKS,
     type NetworkName,
+    type PlaceholderNetworkName,
     type NetworkPreset,
     type Permit2SignArgs,
     PrivateKeySigner,
@@ -217,6 +238,7 @@ export {
 // ── wallet: the entrypoint most callers need ─────────────────────────────
 export {
     type AssetInfo,
+    type AssetInfoWithMeta,
     type AwaitCommitmentsOpts,
     type CoinSelector,
     type ConnectChainOptions,
@@ -229,10 +251,12 @@ export {
     type DepositPhase,
     type DepositResult,
     type DirectSelection,
+    DEFAULT_ASSET,
     fetchAssetInfo,
     FmdMatchesNoteSource,
     FmdNoteSource,
     formatAmount,
+    hasTokenMeta,
     HttpRelayerSubmitter,
     InMemoryNoteStore,
     minAmount,
@@ -245,6 +269,7 @@ export {
     type NullifierStoreState,
     type OnPhase,
     parseAmount,
+    requireTokenMeta,
     type SelectionResult,
     type SelectOpts,
     SfrtCoinSelector,

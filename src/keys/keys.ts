@@ -15,6 +15,7 @@
 //     which notes the owner has spent. Cannot derive nsk from nk (Poseidon
 //     one-way) so spend authority is NOT granted.
 
+import type { ShieldedAddress } from "../core/brand.js";
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import { deriveDk, deriveIvk, deriveNk, derivePkFromIvk } from "../crypto/derive.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
@@ -70,7 +71,7 @@ export function fullViewingKeyFromSpending(sk: SpendingKey): FullViewingKey {
 }
 
 /** @internal */
-export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): string {
+export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddress {
     return encodeAddress(J, sk.pk_d, sk.dk, sk.pk);
 }
 
@@ -86,7 +87,7 @@ export interface DerivedWalletKeys {
  */
 export async function deriveKeysFromNsk(
     nsk: Field,
-    deps?: { P?: Poseidon; J?: Jubjub },
+    deps?: { P?: Poseidon | undefined; J?: Jubjub | undefined },
 ): Promise<DerivedWalletKeys> {
     const P = deps?.P ?? (await Poseidon.build());
     const J = deps?.J ?? (await WasmJubjub.build());
@@ -98,12 +99,12 @@ export async function deriveKeysFromNsk(
 export interface DeriveFromMnemonicOpts {
     mnemonic: string;
     /** ZIP-32 account index. Default 0. */
-    account?: number;
+    account?: number | undefined;
     /** BIP39 passphrase. Default empty. */
-    passphrase?: string;
+    passphrase?: string | undefined;
     /** Optional pre-built primitives (e.g. from `preloadWasm`). */
-    P?: Poseidon;
-    J?: Jubjub;
+    P?: Poseidon | undefined;
+    J?: Jubjub | undefined;
 }
 
 /**

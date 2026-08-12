@@ -1,6 +1,8 @@
 import { hashTypedData, verifyTypedData } from "viem";
+
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
+import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
 import type { AssetInfo } from "../wallet/assets.js";
 import type { WithdrawResult } from "../wallet/result.js";
@@ -14,8 +16,8 @@ const PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
 
 /** 6-decimal token, scale 10^3 → one circuit unit is 0.001 USDC. */
 const USDC: AssetInfo = {
-    id: 1n,
-    token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    id: assetId(1n),
+    token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
     scale: 10n ** 3n,
     disabled: false,
     symbol: "USDC",
@@ -30,15 +32,15 @@ function stubWallet(opts: { balances?: bigint[] } = {}) {
     const withdraw = vi.fn(
         async (): Promise<WithdrawResult> => ({
             kind: "withdraw",
-            txHash: "0xw",
-            commitments: [`0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`],
+            txHash: hex32(`0x${"ff".repeat(32)}`),
+            commitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
             nonZeroCommitments: [],
             ownCommitments: [],
-            ownInflow: 0n,
+            ownInflow: circuitAmount(0n),
             spent: [],
-            inputSum: 0n,
-            sent: 0n,
-            change: 0n,
+            inputSum: circuitAmount(0n),
+            sent: circuitAmount(0n),
+            change: circuitAmount(0n),
         }),
     );
     const wallet = {
@@ -66,9 +68,18 @@ describe("unshieldedExact", () => {
         const { wallet } = stubWallet();
         const result = await unshieldedExact(wallet).createPaymentPayload(2, requirements());
 
+        // Named rather than `Record<string, string>`: the EIP-3009
+        // authorization has a fixed field set, and the test asserts each one.
         const payload = result.payload as {
             signature: `0x${string}`;
-            authorization: Record<string, string>;
+            authorization: {
+                from: string;
+                to: string;
+                value: string;
+                validAfter: string;
+                validBefore: string;
+                nonce: string;
+            };
         };
         const account = privateKeyToAccount(deriveEphemeralKey(NSK, 0));
 
@@ -223,15 +234,20 @@ describe("unshieldedExact.quote", () => {
     it("prices a non-default asset id, which the selector must not second-guess", async () => {
         // Re-deriving the price against asset 1n in the selector would make
         // any `assetIds` override skip every offer.
-        const OTHER = { ...USDC, id: 7n };
+        const OTHER = { ...USDC, id: assetId(7n) };
         const wallet = {
             keys: { nsk: NSK },
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 0n },
-            asset: async (id: bigint) => (id === 7n ? OTHER : { ...USDC, token: "0xdead" }),
+            asset: async (id: bigint) =>
+                id === 7n
+                    ? OTHER
+                    : { ...USDC, token: evmAddress("0x000000000000000000000000000000000000dEaD") },
             withdraw: async () => undefined,
         } as unknown as WalletApi;
 
-        const quote = await unshieldedExact(wallet, { assetIds: [7n] }).quote(requirements());
+        const quote = await unshieldedExact(wallet, { assetIds: [assetId(7n)] }).quote(
+            requirements(),
+        );
         expect(quote.asset.id).toBe(7n);
     });
 

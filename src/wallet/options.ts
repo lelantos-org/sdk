@@ -1,5 +1,6 @@
 // Wallet operation options. Re-exported from `./api.ts` and the public barrel.
 
+import type { AssetId, CircuitAmount, EvmAddress, ShieldedAddress } from "../core/brand.js";
 import type { SwapQuote } from "../services/quoter/client.js";
 import type { SelectOpts } from "./selection.js";
 
@@ -12,20 +13,20 @@ export type OnPhase<P extends string> = (phase: P) => void;
 /** Shield ERC-20 into the MASP. For native ETH, set `asEth: true`. */
 export interface DepositOptions {
     /** Amount in circuit units (post-scale-down). */
-    amount: bigint;
-    /** Default 1n. */
-    asset?: bigint;
-    /** Shielded recipient (bech32m). Defaults to own address. */
-    to?: string;
+    amount: CircuitAmount;
+    /** Default asset 1. */
+    asset?: AssetId | undefined;
+    /** Shielded recipient. Defaults to own address. */
+    to?: ShieldedAddress | undefined;
     /** Unix-seconds. Default `now + 3600`. */
-    deadline?: bigint;
+    deadline?: bigint | undefined;
     /**
      * Native-ETH deposit. Requires the registered WETH asset id; SDK
      * calls `submitIntentNative` with `msg.value = total`.
      */
-    asEth?: boolean;
+    asEth?: boolean | undefined;
     /** Errors from callback are swallowed. */
-    onPhase?: OnPhase<DepositPhase>;
+    onPhase?: OnPhase<DepositPhase> | undefined;
 }
 
 /**
@@ -33,14 +34,15 @@ export interface DepositOptions {
  * be registered against the chain's WETH.
  */
 export interface WithdrawEthOptions {
-    to: string;
-    amount: bigint;
+    /** L1 recipient of the unwrapped ETH. */
+    to: EvmAddress;
+    amount: CircuitAmount;
     /** Asset id of WETH in the MASP registry. */
-    asset: bigint;
-    selectOpts?: SelectOpts;
+    asset: AssetId;
+    selectOpts?: SelectOpts | undefined;
     /** Self-spend then retry on `InsufficientCoverError`. */
-    autoConsolidate?: boolean;
-    onPhase?: OnPhase<SpendPhase>;
+    autoConsolidate?: boolean | undefined;
+    onPhase?: OnPhase<SpendPhase> | undefined;
 }
 
 /**
@@ -48,14 +50,14 @@ export interface WithdrawEthOptions {
  * cover exists, unless `autoConsolidate: true`.
  */
 export interface TransferOptions {
-    /** Recipient bech32m shielded address. */
-    to: string;
-    amount: bigint;
-    /** Default 1n. */
-    asset?: bigint;
-    selectOpts?: SelectOpts;
-    autoConsolidate?: boolean;
-    onPhase?: OnPhase<SpendPhase>;
+    /** Recipient shielded address. */
+    to: ShieldedAddress;
+    amount: CircuitAmount;
+    /** Default asset 1. */
+    asset?: AssetId | undefined;
+    selectOpts?: SelectOpts | undefined;
+    autoConsolidate?: boolean | undefined;
+    onPhase?: OnPhase<SpendPhase> | undefined;
 }
 
 /**
@@ -63,39 +65,40 @@ export interface TransferOptions {
  * `InsufficientCoverError` on no cover, unless `autoConsolidate: true`.
  */
 export interface WithdrawOptions {
-    to: string;
-    amount: bigint;
-    /** Default 1n. */
-    asset?: bigint;
-    selectOpts?: SelectOpts;
-    autoConsolidate?: boolean;
-    onPhase?: OnPhase<SpendPhase>;
+    /** L1 ERC-20 recipient. */
+    to: EvmAddress;
+    amount: CircuitAmount;
+    /** Default asset 1. */
+    asset?: AssetId | undefined;
+    selectOpts?: SelectOpts | undefined;
+    autoConsolidate?: boolean | undefined;
+    onPhase?: OnPhase<SpendPhase> | undefined;
 }
 
 /** Atomic shielded swap via SwapWrapper. */
 export interface SwapOptions {
-    assetIn: bigint;
-    assetOut: bigint;
+    assetIn: AssetId;
+    assetOut: AssetId;
     /**
      * Gross publicOut in circuit units of `assetIn`. MASP transfers
      * `amount * scaleIn` minus protocol fee to the wrapper.
      */
-    amount: bigint;
+    amount: CircuitAmount;
     /** Pre-fetched MetaQuoter quote pinning route + minOut. */
     quote: SwapQuote;
     /** SwapWrapper address; bound as leg-1 recipient+relayer and leg-2 payer. */
-    wrapperAddress: string;
+    wrapperAddress: EvmAddress;
     /** Shielded recipient for B note. Defaults to own. */
-    bRecipient?: string;
-    selectOpts?: SelectOpts;
-    autoConsolidate?: boolean;
-    onPhase?: OnPhase<SpendPhase>;
+    bRecipient?: ShieldedAddress | undefined;
+    selectOpts?: SelectOpts | undefined;
+    autoConsolidate?: boolean | undefined;
+    onPhase?: OnPhase<SpendPhase> | undefined;
 }
 
 /** Every field is optional; an empty filter returns every known note. */
 export interface NotesFilter {
     /** Omit to read across every asset. */
-    asset?: bigint;
+    asset?: AssetId | undefined;
     /** Omit to include both spent and unspent. */
-    spent?: boolean;
+    spent?: boolean | undefined;
 }

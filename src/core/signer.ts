@@ -4,6 +4,7 @@
 // depending on the chain adapter that provides one.
 
 import type { TypedDataDomain, TypedDataParameter } from "viem";
+import type { EvmAddress, Hex32 } from "./brand.js";
 
 /** Minimal signer the SDK needs from any wallet. */
 export interface EthSigner {
@@ -12,7 +13,7 @@ export interface EthSigner {
      * the RPC.
      */
     readonly chainId: bigint;
-    getAddress(): Promise<string>;
+    getAddress(): Promise<EvmAddress>;
     /** Sign EIP-712 typed-data. Returns 0x-prefixed 65-byte hex. */
     signTypedData(
         domain: TypedDataDomain,
@@ -21,13 +22,9 @@ export interface EthSigner {
         message: Record<string, unknown>,
     ): Promise<string>;
     /** Submit a raw EVM transaction. Returns the broadcast hash. */
-    sendTransaction(args: {
-        to: `0x${string}`;
-        data?: `0x${string}`;
-        value?: bigint;
-    }): Promise<`0x${string}`>;
+    sendTransaction(args: { to: EvmAddress; data?: `0x${string}`; value?: bigint }): Promise<Hex32>;
 }
 
 export interface Eip1193ProviderLike {
-    request(args: { method: string; params?: unknown[] }): Promise<unknown>;
+    request(args: { method: string; params?: unknown[] | undefined }): Promise<unknown>;
 }

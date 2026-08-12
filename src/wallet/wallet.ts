@@ -3,6 +3,13 @@
 // is injected via `cfg`. Per-tx logic lives in `./{deposit,transfer,
 // withdraw,swap}.ts`; cache + persistence in `./note-cache.ts`.
 
+import {
+    type AssetId,
+    branded,
+    type CircuitAmount,
+    type Hex32,
+    type ShieldedAddress,
+} from "../core/brand.js";
 import { DepositAdapterError } from "../core/errors.js";
 import { buildNullifierFromNsk, type Field, type Jubjub, Poseidon } from "../crypto/index.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
@@ -27,6 +34,7 @@ import type {
 import type { AssetInfo } from "./assets.js";
 import { fetchAssetInfo } from "./assets.js";
 import type { ResolvedWalletConfig, WalletConfig } from "./config.js";
+import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { resolveConfig, validateConfig } from "./defaults/index.js";
 import { executeDeposit } from "./deposit.js";
@@ -52,7 +60,7 @@ export class Wallet implements WalletApi, SpendContext {
     readonly P: Poseidon;
     readonly J: Jubjub;
     readonly keys: SpendingKey;
-    readonly address: string;
+    readonly address: ShieldedAddress;
     readonly cfg: ResolvedWalletConfig;
     /** @internal — cache + persistence. Use `wallet.file` for read access. */
     readonly cache: NoteCache;
@@ -120,7 +128,7 @@ export class Wallet implements WalletApi, SpendContext {
         P: Poseidon;
         J: Jubjub;
         keys: SpendingKey;
-        address: string;
+        address: ShieldedAddress;
         cfg: ResolvedWalletConfig;
         cache: NoteCache;
     }) {
@@ -303,18 +311,20 @@ export class Wallet implements WalletApi, SpendContext {
         return this.notes(filter);
     }
 
-    balance(asset: bigint): bigint {
-        return this.cache.notes
-            .filter((n) => !n.spent && BigInt(n.asset) === asset)
-            .reduce((s, n) => s + BigInt(n.value), 0n);
+    balance(asset: AssetId): CircuitAmount {
+        return branded<CircuitAmount>(
+            this.cache.notes
+                .filter((n) => !n.spent && BigInt(n.asset) === asset)
+                .reduce((s, n) => s + BigInt(n.value), 0n),
+        );
     }
 
-    balances(): Map<bigint, bigint> {
-        const out = new Map<bigint, bigint>();
+    balances(): Map<AssetId, CircuitAmount> {
+        const out = new Map<AssetId, CircuitAmount>();
         for (const n of this.cache.notes) {
             if (n.spent) continue;
-            const asset = BigInt(n.asset);
-            out.set(asset, (out.get(asset) ?? 0n) + BigInt(n.value));
+            const asset = branded<AssetId>(BigInt(n.asset));
+            out.set(asset, branded<CircuitAmount>((out.get(asset) ?? 0n) + BigInt(n.value)));
         }
         return out;
     }
@@ -325,7 +335,7 @@ export class Wallet implements WalletApi, SpendContext {
      * immutable apart from the `disabled` flag, so pass `{ refresh: true }`
      * if you need to re-read that.
      */
-    async asset(id: bigint, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
+    async asset(id: AssetId, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
         const hit = this.assetCache.get(id);
         if (hit && !opts.refresh) return hit;
         const info = await fetchAssetInfo(this.cfg.chain, id);
@@ -333,7 +343,7 @@ export class Wallet implements WalletApi, SpendContext {
         return info;
     }
 
-    selectNotes(asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult {
+    selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult {
         return this.selector.select(this.cache.notes, asset, target, opts);
     }
 
@@ -354,7 +364,7 @@ export class Wallet implements WalletApi, SpendContext {
     async cancelIntent(
         id: bigint,
         inputs: import("../chain/types.js").CancelIntentInputs,
-    ): Promise<{ txHash: string }> {
+    ): Promise<{ txHash: Hex32 }> {
         if (!this.cfg.chain.cancelIntent) {
             throw new DepositAdapterError("witness", ["cancelIntent"]);
         }
@@ -371,7 +381,7 @@ export class Wallet implements WalletApi, SpendContext {
 
     /** Unshield ERC20 to `args.to`. Throws `InsufficientCoverError` on no cover. */
     async withdraw(args: WithdrawOptions): Promise<WithdrawResult> {
-        return executeWithdraw(this, { ...args, asset: args.asset ?? 1n }, "withdraw");
+        return executeWithdraw(this, { ...args, asset: args.asset ?? DEFAULT_ASSET }, "withdraw");
     }
 
     /** Unshield to raw ETH via `MASP.withdrawNative`; MASP unwraps WETH. */
@@ -415,13 +425,14 @@ export class Wallet implements WalletApi, SpendContext {
      * @internal — used by per-tx helper modules for the auto-consolidate fallback.
      */
     async autoConsolidate(
-        asset: bigint,
+        asset: AssetId,
         selection: Extract<SelectionResult, { plan: "consolidate-first" }>,
     ): Promise<void> {
-        const target =
+        const target = branded<CircuitAmount>(
             selection.consolidateSum > 1n
                 ? selection.consolidateSum - 1n
-                : selection.consolidateSum;
+                : selection.consolidateSum,
+        );
         await this.transfer({
             to: this.address,
             amount: target,

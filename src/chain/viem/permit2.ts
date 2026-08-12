@@ -1,6 +1,7 @@
 // Permit2 signing, allowance reads, and the on-chain `permit` call.
 
 import { encodeFunctionData } from "viem";
+import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../../core/brand.js";
 import { safeCall } from "../../core/callbacks.js";
 import { randomU256 } from "../../core/random.js";
 import { signPermit2Allowance, signPermit2Witness } from "../../permit2/sign.js";
@@ -39,29 +40,33 @@ export async function signAllowance(
 
 export async function permit2Allowance(
     ctx: ViemCtx,
-    token: string,
-    owner: string,
-    spender: string,
-): Promise<{ amount: bigint; expiration: number; nonce: number }> {
+    token: EvmAddress,
+    owner: EvmAddress,
+    spender: EvmAddress,
+): Promise<{ amount: TokenAmount; expiration: number; nonce: number }> {
     const r = (await ctx.publicClient.readContract({
         address: ctx.permit2Address,
         abi: PERMIT2_VIEW_ABI,
         functionName: "allowance",
-        args: [addr(owner), addr(token), addr(spender)],
+        args: [owner, token, spender],
     })) as readonly [bigint, number, number];
-    return { amount: r[0], expiration: Number(r[1]), nonce: Number(r[2]) };
+    return {
+        amount: branded<TokenAmount>(r[0]),
+        expiration: Number(r[1]),
+        nonce: Number(r[2]),
+    };
 }
 
 export async function permit2PermitAllowance(
     ctx: ViemCtx,
-    args: { owner: string; permit: PermitSingle; signature: string },
-    onTxHash?: (hash: string) => void,
-): Promise<{ txHash: string }> {
+    args: { owner: EvmAddress; permit: PermitSingle; signature: string },
+    onTxHash?: (hash: Hex32) => void,
+): Promise<{ txHash: Hex32 }> {
     const data = encodeFunctionData({
         abi: PERMIT2_PERMIT_ABI,
         functionName: "permit",
         args: [
-            addr(args.owner),
+            args.owner,
             {
                 details: {
                     token: addr(args.permit.details.token),

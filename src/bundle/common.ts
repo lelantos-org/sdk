@@ -15,7 +15,7 @@ import {
     toCircomInput,
     toSpentNoteFromPath,
 } from "../circuit/index.js";
-import { WalletConfigError } from "../core/errors.js";
+import { InternalError, WalletConfigError } from "../core/errors.js";
 import { randomFr } from "../core/random.js";
 import {
     buildNoteCommitment,
@@ -111,16 +111,18 @@ export type InputSlots = [InputSlot | null, InputSlot | null];
  *
  * @internal
  */
+type SpentNoteInput = ReturnType<typeof toSpentNoteFromPath>;
+
 export function buildInputs(
     P: Poseidon,
     slots: InputSlots,
     treeDepth: number,
-): ReturnType<typeof toSpentNoteFromPath>[] {
-    return slots.map((s) =>
+): [SpentNoteInput, SpentNoteInput] {
+    const build = (s: InputSlots[number]): SpentNoteInput =>
         s
             ? toSpentNoteFromPath(P, s.cached, s.pathElements, s.pathIndices)
-            : dummyInputAt(P, treeDepth, randomFr()),
-    );
+            : dummyInputAt(P, treeDepth, randomFr());
+    return [build(slots[0]), build(slots[1])];
 }
 
 /**
@@ -168,8 +170,8 @@ export function buildAuxForReal(
 export async function finalize(
     common: BundleCommon,
     kind: SpendKind,
-    inputs: ReturnType<typeof dummyInputAt>[],
-    outputs: Note[],
+    inputs: [SpentNoteInput, SpentNoteInput],
+    outputs: [Note, Note],
     merkleRoot: Field,
     publicIn: bigint,
     publicOut: bigint,
@@ -258,7 +260,14 @@ function extractPubInputs(
     // The explicit re-parse is the trust boundary between the prover witness
     // (decimal strings) and the relayer wire format (bigints/points). Typing
     // the witness as `CircomTransactInput` keeps it cast-free.
-    const pair = (v: string[]): [bigint, bigint] => [BigInt(v[0]), BigInt(v[1])];
+    const pair = (v: readonly string[] | undefined): [bigint, bigint] => {
+        if (v?.length !== 2) {
+            throw new InternalError(
+                `extractPubInputs: expected a 2-element slot, got ${v?.length}`,
+            );
+        }
+        return [BigInt(v[0] as string), BigInt(v[1] as string)];
+    };
 
     return {
         merkleRoot: BigInt(base.merkle_root),

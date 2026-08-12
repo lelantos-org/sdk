@@ -13,21 +13,21 @@ const log = getLogger("lelantos:worker:rpc");
 
 export interface CallOptions {
     /** Buffers to transfer rather than copy. See the ownership note below. */
-    transfer?: readonly unknown[];
+    transfer?: readonly unknown[] | undefined;
     /** Overrides the per-method default. */
-    timeoutMs?: number;
-    signal?: AbortSignal;
+    timeoutMs?: number | undefined;
+    signal?: AbortSignal | undefined;
     /** Merged into the thrown error's context — chunk range, leaf ids, etc. */
-    context?: Record<string, unknown>;
+    context?: Record<string, unknown> | undefined;
 }
 
 export interface WorkerRpcOptions {
     /** Per-method deadline, ms. Methods absent here are not timed out. */
-    timeouts?: Record<string, number>;
+    timeouts?: Record<string, number> | undefined;
     /** Label used in log records. */
-    name?: string;
+    name?: string | undefined;
     /** Forwards `{kind:"log"}` records from the worker into the local sink. */
-    onLogRecord?: (record: unknown) => void;
+    onLogRecord?: ((record: unknown) => void) | undefined;
 }
 
 export interface WorkerRpc<M extends MethodMap> {
@@ -46,9 +46,9 @@ interface Pending {
     resolve: (v: unknown) => void;
     reject: (e: unknown) => void;
     method: string;
-    timer?: ReturnType<typeof setTimeout>;
-    onAbort?: () => void;
-    signal?: AbortSignal;
+    timer?: ReturnType<typeof setTimeout> | undefined;
+    onAbort?: (() => void) | undefined;
+    signal?: AbortSignal | undefined;
 }
 
 /**
@@ -98,7 +98,7 @@ export function createWorkerRpc<M extends MethodMap>(
 
     const onError = (ev: unknown): void => {
         alive = false;
-        const detail = (ev as { message?: string })?.message ?? "worker error";
+        const detail = (ev as { message?: string | undefined })?.message ?? "worker error";
         log.error("worker crashed; failing all in-flight calls", {
             name,
             detail,
@@ -198,7 +198,7 @@ export function createWorkerRpc<M extends MethodMap>(
             }).catch((err) => {
                 // Attach call context to remote failures too.
                 if (callOpts.context && err && typeof err === "object") {
-                    const bag = (err as { context?: Record<string, unknown> }).context;
+                    const bag = (err as { context?: Record<string, unknown> | undefined }).context;
                     if (bag) Object.assign(bag, callOpts.context);
                 }
                 throw err;

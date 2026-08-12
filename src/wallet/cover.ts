@@ -1,22 +1,23 @@
 // Coin-cover helper shared by `transfer` and `withdraw`: select notes,
 // consolidate-and-retry or throw on insufficient cover.
 
+import type { AssetId, CircuitAmount } from "../core/brand.js";
 import { InsufficientCoverError } from "../core/errors.js";
 import type { StoredNote } from "./note-store.js";
 import type { CoinSelector, ConsolidateFirst, DirectSelection, SelectOpts } from "./selection.js";
 
 export interface CoverArgs {
-    asset: bigint;
-    target: bigint;
-    selectOpts?: SelectOpts;
-    autoConsolidate?: boolean;
+    asset: AssetId;
+    target: CircuitAmount;
+    selectOpts?: SelectOpts | undefined;
+    autoConsolidate?: boolean | undefined;
 }
 
 export async function ensureCover(
     selector: CoinSelector,
     notes: () => readonly StoredNote[],
     args: CoverArgs,
-    consolidate: (asset: bigint, sel: ConsolidateFirst) => Promise<void>,
+    consolidate: (asset: AssetId, sel: ConsolidateFirst) => Promise<void>,
 ): Promise<DirectSelection> {
     const sel = selector.select(notes(), args.asset, args.target, args.selectOpts);
     if (sel.plan === "direct") return sel;

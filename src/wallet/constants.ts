@@ -1,5 +1,10 @@
 // Wallet-layer constants.
 
+import { type AssetId, branded } from "../core/brand.js";
+
+/** Asset used when a call omits `asset`. Registry id 1. */
+export const DEFAULT_ASSET: AssetId = branded<AssetId>(1n);
+
 /**
  * Default Permit2 signature lifetime, in seconds. Applied when the
  * caller does not pass an explicit `deadline` to `wallet.deposit`.

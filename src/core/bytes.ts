@@ -19,6 +19,6 @@ export function toLeBytes(x: Field, len = FIELD_BYTES): Uint8Array {
 
 export function fromLeBytes(b: Uint8Array): Field {
     let v = 0n;
-    for (let i = b.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(b[i]);
+    for (let i = b.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(b[i]!);
     return v;
 }

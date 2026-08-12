@@ -3,6 +3,7 @@
 
 import type { ChainAdapter } from "../chain/port.js";
 import type { CancelIntentInputs } from "../chain/types.js";
+import type { AssetId, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
 import type { SpendingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
@@ -42,7 +43,7 @@ import type { SyncProgress, SyncResult } from "./sync.js";
  * ```ts
  * const wallet = await connect({ network: "anvil", privateKey, rpcUrl });
  * await wallet.sync();                              // notes + Merkle tree
- * const weth = await wallet.asset(1n);
+ * const weth = requireTokenMeta(await wallet.asset(assetId(1n)));
  * await wallet.deposit({ asset: weth.id, amount: parseAmount("0.25", weth) });
  * await wallet.sync();
  * wallet.balance(weth.id);
@@ -50,7 +51,7 @@ import type { SyncProgress, SyncResult } from "./sync.js";
  */
 export interface WalletApi {
     /** This wallet's shielded `sswap1…` address (bech32m). */
-    readonly address: string;
+    readonly address: ShieldedAddress;
     readonly keys: SpendingKey;
     readonly noteStore: NoteStore;
     /** Cast to a concrete adapter type for adapter-specific accessors. */
@@ -81,7 +82,7 @@ export interface WalletApi {
      * Resolves with a status rather than void, so "the indexer is behind" is
      * distinguishable from "all present".
      */
-    awaitCommitments(cms: string[], opts?: AwaitCommitmentsOpts): Promise<AwaitCommitmentsResult>;
+    awaitCommitments(cms: Hex32[], opts?: AwaitCommitmentsOpts): Promise<AwaitCommitmentsResult>;
     // --- read ----------------------------------------------------------------
 
     /** Omit a field to stop filtering on it; `notes()` returns everything. */
@@ -92,15 +93,15 @@ export interface WalletApi {
      */
     allNotes(filter?: { spent?: boolean }): WalletNote[];
     /** Unspent total for one asset, in circuit units. */
-    balance(asset: bigint): bigint;
+    balance(asset: AssetId): CircuitAmount;
     /** Unspent totals keyed by asset id — one pass for a multi-asset view. */
-    balances(): Map<bigint, bigint>;
+    balances(): Map<AssetId, CircuitAmount>;
     /**
      * Registry entry for `id` plus ERC-20 symbol/decimals when the adapter
      * exposes them. Cached per wallet; pass `{ refresh: true }` to re-read.
      */
-    asset(id: bigint, opts?: { refresh?: boolean }): Promise<AssetInfo>;
-    selectNotes(asset: bigint, target: bigint, opts?: SelectOpts): SelectionResult;
+    asset(id: AssetId, opts?: { refresh?: boolean }): Promise<AssetInfo>;
+    selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult;
 
     // --- spend ---------------------------------------------------------------
 
@@ -120,7 +121,7 @@ export interface WalletApi {
      * the `IntentEscrowed` event payload — the contract re-derives the
      * digest from it.
      */
-    cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: string }>;
+    cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: Hex32 }>;
     markSpent(noteIds: string[]): Promise<void>;
     /**
      * Drop notes flagged `spent: true` from the underlying store. Returns
@@ -130,7 +131,7 @@ export interface WalletApi {
     compact(): Promise<{ removed: number }>;
 }
 
-export type { AssetInfo } from "./assets.js";
+export type { AssetInfo, AssetInfoWithMeta } from "./assets.js";
 // Re-exported for backwards compatibility with `./api.js` imports.
 export type {
     DepositOptions,

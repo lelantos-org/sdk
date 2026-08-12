@@ -15,11 +15,11 @@ import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
 const log = getLogger("lelantos:wallet:notes");
 
 export interface AwaitCommitmentsOpts {
-    signal?: AbortSignal;
-    pollMs?: number;
-    maxAttempts?: number;
+    signal?: AbortSignal | undefined;
+    pollMs?: number | undefined;
+    maxAttempts?: number | undefined;
     /** Throw on timeout instead of returning a status. Default false. */
-    throwOnTimeout?: boolean;
+    throwOnTimeout?: boolean | undefined;
 }
 
 export interface AwaitCommitmentsResult {

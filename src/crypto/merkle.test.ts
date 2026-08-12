@@ -34,7 +34,7 @@ function naiveRoot(depth: number, leaves: Field[]): Field {
         }
         level = next;
     }
-    return level[0];
+    return level[0]!;
 }
 
 function zeroAt(level: number): Field {

@@ -59,7 +59,7 @@ export function configureProver(paths: ProverPaths | ProverArtifacts): void {
  * @internal
  */
 export async function bundledProverArtifacts(
-    opts: { runtime?: "node" | "browser"; cdn?: string } = {},
+    opts: { runtime?: "node" | "browser" | undefined; cdn?: string | undefined } = {},
 ): Promise<ProverArtifacts> {
     const runtime = opts.runtime ?? detectRuntime();
     const tried: string[] = [];
@@ -131,10 +131,10 @@ export interface LoadArtifactOpts {
      * receives progress; a concurrent second caller awaits the same promise
      * and sees none.
      */
-    onProgress?: (p: { loaded: number; total?: number; url: string }) => void;
-    signal?: AbortSignal;
+    onProgress?: ((p: { loaded: number; total?: number; url: string }) => void) | undefined;
+    signal?: AbortSignal | undefined;
     /** Per-attempt deadline. Default 120s. */
-    timeoutMs?: number;
+    timeoutMs?: number | undefined;
 }
 
 export function loadArtifactBytes(path: string, opts: LoadArtifactOpts = {}): Promise<Uint8Array> {
@@ -187,7 +187,7 @@ async function fetchArtifact(
             : new Uint8Array(await res.arrayBuffer());
     } catch (err) {
         if (err instanceof ProverArtifactsFailedError) throw err;
-        const aborted = (err as { name?: string })?.name === "AbortError";
+        const aborted = (err as { name?: string | undefined })?.name === "AbortError";
         throw new ProverArtifactsFailedError(
             path,
             aborted ? `download timed out after ${timeoutMs}ms` : "network error",
@@ -217,7 +217,7 @@ async function readWithProgress(
         if (done) break;
         chunks.push(value);
         loaded += value.length;
-        onProgress({ loaded, total, url });
+        onProgress({ loaded, url, ...(total !== undefined ? { total } : {}) });
     }
     const out = new Uint8Array(loaded);
     let at = 0;

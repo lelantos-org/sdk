@@ -1,16 +1,17 @@
 // Relayer wire contract: response shapes.
 
+import type { Hex32 } from "../core/brand.js";
 import type { Field, Point } from "../crypto/index.js";
 
 /** @internal */
 export interface RelayerSubmitResponse {
     /** Tx hash once mined. Relayer awaits inclusion before responding. */
-    txHash: string;
+    txHash: Hex32;
 }
 
 /** @internal */
 export interface RelayerIntentResponse {
-    txHash: string;
+    txHash: Hex32;
     /**
      * Intent id allocated by `MASP.submitIntent` (== `nextIntentId` at
      * time of the call). Wallet uses this to track escrow lifecycle and

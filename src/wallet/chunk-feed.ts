@@ -37,8 +37,8 @@ export type PagingStop = "complete" | "maxChunks" | "aborted";
 
 export interface PagingOpts {
     /** Defaults to {@link MAX_CHUNKS} — never unbounded. */
-    maxChunks?: number;
-    signal?: AbortSignal;
+    maxChunks?: number | undefined;
+    signal?: AbortSignal | undefined;
 }
 
 export interface PagingSummary {

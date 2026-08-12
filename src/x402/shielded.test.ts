@@ -3,6 +3,7 @@
 // changing the spec, and every server implementing it.
 
 import { describe, expect, it, vi } from "vitest";
+import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
 import type { AssetInfo } from "../wallet/assets.js";
 import type { TransferResult } from "../wallet/result.js";
@@ -10,12 +11,12 @@ import { LELANTOS_POOL, SHIELDED_NAMESPACE, shieldedExact, shieldedNetwork } fro
 import type { PaymentRequirements } from "./types.js";
 
 const CHAIN_ID = 31337n;
-const RECIPIENT_CM = `0x${"11".repeat(32)}`;
-const CHANGE_CM = `0x${"22".repeat(32)}`;
+const RECIPIENT_CM = hex32(`0x${"11".repeat(32)}`);
+const CHANGE_CM = hex32(`0x${"22".repeat(32)}`);
 
 const WETH: AssetInfo = {
-    id: 1n,
-    token: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    id: assetId(1n),
+    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
     disabled: false,
     symbol: "WETH",
@@ -26,15 +27,15 @@ function stubWallet() {
     const transfer = vi.fn(
         async (): Promise<TransferResult> => ({
             kind: "transfer",
-            txHash: "0xfeed",
+            txHash: hex32(`0x${"fe".repeat(32)}`),
             commitments: [RECIPIENT_CM, CHANGE_CM],
             nonZeroCommitments: [RECIPIENT_CM, CHANGE_CM],
             ownCommitments: [CHANGE_CM],
-            ownInflow: 0n,
+            ownInflow: circuitAmount(0n),
             spent: ["n1"],
-            inputSum: 10_000n,
-            sent: 1_500n,
-            change: 8_500n,
+            inputSum: circuitAmount(10_000n),
+            sent: circuitAmount(1_500n),
+            change: circuitAmount(8_500n),
         }),
     );
     const chainId = vi.fn(async () => CHAIN_ID);
@@ -82,7 +83,7 @@ describe("shieldedExact", () => {
             x402Version: 2,
             payload: {
                 pool: LELANTOS_POOL,
-                txHash: "0xfeed",
+                txHash: hex32(`0x${"fe".repeat(32)}`),
                 // Output 0 is the recipient's note — output 1 is our change,
                 // and quoting it would make the payment unverifiable.
                 commitment: RECIPIENT_CM,

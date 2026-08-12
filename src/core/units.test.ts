@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { circuitAmount, tokenAmount } from "./brand.js";
 import { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./units.js";
 
 describe("parseUnits", () => {
@@ -48,20 +49,20 @@ describe("formatUnits", () => {
 
 describe("circuit units", () => {
     it("multiplies and divides by scale", () => {
-        expect(toTokenUnits(1500n, 10n ** 15n)).toBe(1_500_000_000_000_000_000n);
-        expect(toCircuitUnits(1_500_000_000_000_000_000n, 10n ** 15n)).toBe(1500n);
+        expect(toTokenUnits(circuitAmount(1500n), 10n ** 15n)).toBe(1_500_000_000_000_000_000n);
+        expect(toCircuitUnits(tokenAmount(1_500_000_000_000_000_000n), 10n ** 15n)).toBe(1500n);
     });
 
     it("refuses to silently drop dust", () => {
-        expect(() => toCircuitUnits(1_500_000_000_000_000_001n, 10n ** 15n)).toThrow(
+        expect(() => toCircuitUnits(tokenAmount(1_500_000_000_000_000_001n), 10n ** 15n)).toThrow(
             /not a multiple of scale/,
         );
-        expect(toCircuitUnits(1_500_000_000_000_000_001n, 10n ** 15n, { round: "down" })).toBe(
-            1500n,
-        );
+        expect(
+            toCircuitUnits(tokenAmount(1_500_000_000_000_000_001n), 10n ** 15n, { round: "down" }),
+        ).toBe(1500n);
     });
 
     it("rejects a non-positive scale", () => {
-        expect(() => toCircuitUnits(1n, 0n)).toThrow(/scale must be positive/);
+        expect(() => toCircuitUnits(tokenAmount(1n), 0n)).toThrow(/scale must be positive/);
     });
 });

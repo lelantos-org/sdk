@@ -14,6 +14,7 @@
 // does not enable forgery and does not worsen linkability beyond `pk_d`.
 
 import { bech32m } from "bech32";
+import { branded, type ShieldedAddress } from "../core/brand.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
@@ -31,12 +32,14 @@ export interface DecodedAddress {
 }
 
 /** @internal */
-export function encodeAddress(J: Jubjub, pk_d: Point, dk: Field, pk: Field): string {
+export function encodeAddress(J: Jubjub, pk_d: Point, dk: Field, pk: Field): ShieldedAddress {
     const payload = new Uint8Array(ADDRESS_PAYLOAD_LEN);
     payload.set(J.packPoint(pk_d), 0);
     payload.set(toLeBytes(dk), FIELD_BYTES);
     payload.set(toLeBytes(pk), 2 * FIELD_BYTES);
-    return bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), BECH32_LIMIT);
+    return branded<ShieldedAddress>(
+        bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), BECH32_LIMIT),
+    );
 }
 
 /** @internal */

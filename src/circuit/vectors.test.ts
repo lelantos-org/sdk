@@ -238,8 +238,16 @@ const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.ur
     devDependencies: Record<string, string>;
 };
 
-const f = (s: string): Field => BigInt(s);
-const pt = (p: PointJson): Point => [BigInt(p.x), BigInt(p.y)];
+// The vectors are the contract, so a missing slot is a broken vector file
+// rather than a soft failure: `f` says so instead of decoding `undefined`.
+const f = (s: string | undefined): Field => {
+    if (s === undefined) throw new Error("vector file: missing field element");
+    return BigInt(s);
+};
+const pt = (p: PointJson | undefined): Point => {
+    if (p === undefined) throw new Error("vector file: missing point");
+    return [BigInt(p.x), BigInt(p.y)];
+};
 
 // ── the installed vector set ─────────────────────────────────────────────
 
@@ -308,7 +316,7 @@ describe.each([
 
     it("emits 9 + 3·N_IN + 8·N_OUT coefficients", () => {
         expect(file.circuit.coeffCount).toBe(9 + 3 * nIn + 8 * nOut);
-        expect(flatten(file.vectors[0].witness)).toHaveLength(file.circuit.coeffCount);
+        expect(flatten(file.vectors[0]!.witness)).toHaveLength(file.circuit.coeffCount);
     });
 });
 
@@ -530,8 +538,10 @@ wasmDescribe("transact vectors", () => {
                             cm: f(slot.cm),
                             nf: f(slot.nf),
                             leafIndex: slot.leafIndex,
-                            pathElements: w.in_path_elements[i].map((level) => level.map(f)),
-                            pathIndices: w.in_path_indices[i].map(Number),
+                            pathElements: (w.in_path_elements[i] ?? []).map((level) =>
+                                level.map(f),
+                            ),
+                            pathIndices: (w.in_path_indices[i] ?? []).map(Number),
                             isDummy: slot.isDummy,
                         }));
                         const outputs = im.outputs.map((_, j) => ({

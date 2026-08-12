@@ -27,7 +27,7 @@ describe("rootFromPath vs MerkleTree.proof", () => {
 
             for (let i = 0; i < count; i++) {
                 const { pathElements, pathIndices } = tree.proof(i);
-                expect(rootFromPath(stubP, tree.leaves[i], pathElements, pathIndices)).toBe(root);
+                expect(rootFromPath(stubP, tree.leaves[i]!, pathElements, pathIndices)).toBe(root);
             }
         });
     }
@@ -35,8 +35,8 @@ describe("rootFromPath vs MerkleTree.proof", () => {
     it("rejects a tampered sibling", () => {
         const tree = treeOf(4, 12);
         const { pathElements, pathIndices } = tree.proof(5);
-        pathElements[0][0] = pathElements[0][0] + 1n;
-        expect(rootFromPath(stubP, tree.leaves[5], pathElements, pathIndices)).not.toBe(
+        pathElements[0]![0] = pathElements[0]![0]! + 1n;
+        expect(rootFromPath(stubP, tree.leaves[5]!, pathElements, pathIndices)).not.toBe(
             tree.root(),
         );
     });
@@ -55,7 +55,7 @@ describe("verifyPath", () => {
 
         const accepted = await verifyPath(
             stubP,
-            tree.leaves[3],
+            tree.leaves[3]!,
             pathElements,
             pathIndices,
             async (r) => r === tree.root(),
@@ -64,7 +64,7 @@ describe("verifyPath", () => {
 
         const rejected = await verifyPath(
             stubP,
-            tree.leaves[3],
+            tree.leaves[3]!,
             pathElements,
             pathIndices,
             async () => false,

@@ -1,39 +1,40 @@
 // Coin selector: SFRT — Smallest-First with Random Tiebreak.
 
+import { type AssetId, branded, type CircuitAmount } from "../core/brand.js";
 import { SelectionError } from "../core/errors.js";
 import { randomFloat01 } from "../core/random.js";
 import type { StoredNote } from "./note-store.js";
 
 export interface SelectOpts {
     /** Cover threshold becomes `target + fee`. Default 0. */
-    fee?: bigint;
+    fee?: bigint | undefined;
     /** Notes with value < dustThreshold are excluded. Recommended: `2 * marginalFee`. */
-    dustThreshold?: bigint;
+    dustThreshold?: bigint | undefined;
     /**
      * Minimum age (blocks) before spendable. Requires `tipBlock` and
      * per-note `firstSeenBlock`; otherwise no-op.
      */
-    cooldownBlocks?: number;
-    tipBlock?: number;
+    cooldownBlocks?: number | undefined;
+    tipBlock?: number | undefined;
     /** Tiebreak shuffle width: notes within `(1 ± bucketPct) * pivot`. Default 0.05. */
-    bucketPct?: number;
+    bucketPct?: number | undefined;
     /** Injectable rng for tests. Returns float in [0, 1). */
-    rng?: () => number;
+    rng?: (() => number) | undefined;
 }
 
 export interface DirectSelection {
     plan: "direct";
     notes: StoredNote[];
-    sum: bigint;
+    sum: CircuitAmount;
 }
 
 export interface ConsolidateFirst {
     plan: "consolidate-first";
     /** Two smallest spendable notes — caller self-spends them, retries after sync. */
     consolidate: StoredNote[];
-    consolidateSum: bigint;
+    consolidateSum: CircuitAmount;
     /** `target + fee`. */
-    targetWithFee: bigint;
+    targetWithFee: CircuitAmount;
 }
 
 export type SelectionResult = DirectSelection | ConsolidateFirst;
@@ -49,8 +50,8 @@ export type SelectionResult = DirectSelection | ConsolidateFirst;
  */
 export function selectNotes(
     all: readonly StoredNote[],
-    asset: bigint,
-    target: bigint,
+    asset: AssetId,
+    target: CircuitAmount,
     opts: SelectOpts = {},
 ): SelectionResult {
     const fee = opts.fee ?? 0n;
@@ -82,11 +83,11 @@ export function selectNotes(
     const asc = [...candidates].sort((a, b) => cmp(BigInt(a.value), BigInt(b.value)));
 
     const singleIdx = asc.findIndex((n) => BigInt(n.value) >= threshold);
-    const singleSum: bigint | null = singleIdx >= 0 ? BigInt(asc[singleIdx].value) : null;
+    const singleSum: bigint | null = singleIdx >= 0 ? BigInt(asc[singleIdx]!.value) : null;
 
     const pair = candidates.length >= 2 ? smallestPairCover(asc, threshold) : null;
     const pairSum: bigint | null = pair
-        ? BigInt(asc[pair[0]].value) + BigInt(asc[pair[1]].value)
+        ? BigInt(asc[pair[0]]!.value) + BigInt(asc[pair[1]]!.value)
         : null;
 
     const useSingle = singleSum !== null && (pairSum === null || singleSum <= pairSum);
@@ -95,28 +96,37 @@ export function selectNotes(
     if (useSingle) {
         const pivot = singleSum!;
         const bucket = collectBucket(asc, singleIdx, pivot, bucketPct);
-        const pick = bucket[Math.floor(rng() * bucket.length)];
-        return { plan: "direct", notes: [pick], sum: BigInt(pick.value) };
+        // `collectBucket` always contains `asc[singleIdx]`, and `rng()` is in
+        // [0, 1), so the index is in range.
+        const pick = bucket[Math.floor(rng() * bucket.length)]!;
+        return {
+            plan: "direct",
+            notes: [pick],
+            sum: branded<CircuitAmount>(BigInt(pick.value)),
+        };
     }
 
     if (usePair) {
         const tied = collectPairBucket(asc, threshold, pairSum!, bucketPct);
-        const chosen = tied[Math.floor(rng() * tied.length)];
+        const chosen = tied[Math.floor(rng() * tied.length)]!;
+        const [ia, ib] = chosen;
+        const a = asc[ia]!;
+        const b = asc[ib]!;
         return {
             plan: "direct",
-            notes: [asc[chosen[0]], asc[chosen[1]]],
-            sum: BigInt(asc[chosen[0]].value) + BigInt(asc[chosen[1]].value),
+            notes: [a, b],
+            sum: branded<CircuitAmount>(BigInt(a.value) + BigInt(b.value)),
         };
     }
 
     const total = candidates.reduce((s, n) => s + BigInt(n.value), 0n);
     if (total >= threshold && candidates.length >= 2) {
-        const consolidate = [asc[0], asc[1]];
+        const [first, second] = [asc[0]!, asc[1]!];
         return {
             plan: "consolidate-first",
-            consolidate,
-            consolidateSum: BigInt(asc[0].value) + BigInt(asc[1].value),
-            targetWithFee: threshold,
+            consolidate: [first, second],
+            consolidateSum: branded<CircuitAmount>(BigInt(first.value) + BigInt(second.value)),
+            targetWithFee: branded<CircuitAmount>(threshold),
         };
     }
 
@@ -136,8 +146,9 @@ function collectBucket(
     const hi = mulFloat(pivot, 1 + bucketPct);
     const out: StoredNote[] = [];
     for (let i = startIdx; i < asc.length; i++) {
-        const v = BigInt(asc[i].value);
-        if (v >= lo && v <= hi) out.push(asc[i]);
+        const n = asc[i]!;
+        const v = BigInt(n.value);
+        if (v >= lo && v <= hi) out.push(n);
         if (v > hi) break;
     }
     return out;
@@ -147,9 +158,9 @@ function smallestPairCover(asc: StoredNote[], threshold: bigint): [number, numbe
     let best: [number, number] | null = null;
     let bestSum: bigint | null = null;
     for (let i = 0; i < asc.length - 1; i++) {
-        const vi = BigInt(asc[i].value);
+        const vi = BigInt(asc[i]!.value);
         for (let j = i + 1; j < asc.length; j++) {
-            const sum = vi + BigInt(asc[j].value);
+            const sum = vi + BigInt(asc[j]!.value);
             if (sum >= threshold) {
                 if (bestSum === null || sum < bestSum) {
                     bestSum = sum;
@@ -172,9 +183,9 @@ function collectPairBucket(
     const hi = mulFloat(target, 1 + bucketPct);
     const out: [number, number][] = [];
     for (let i = 0; i < asc.length - 1; i++) {
-        const vi = BigInt(asc[i].value);
+        const vi = BigInt(asc[i]!.value);
         for (let j = i + 1; j < asc.length; j++) {
-            const sum = vi + BigInt(asc[j].value);
+            const sum = vi + BigInt(asc[j]!.value);
             if (sum < threshold) continue;
             if (sum >= lo && sum <= hi) out.push([i, j]);
             if (sum > hi) break;
@@ -196,8 +207,8 @@ function cmp(a: bigint, b: bigint): number {
 export interface CoinSelector {
     select(
         all: readonly StoredNote[],
-        asset: bigint,
-        target: bigint,
+        asset: AssetId,
+        target: CircuitAmount,
         opts?: SelectOpts,
     ): SelectionResult;
 }
@@ -206,8 +217,8 @@ export interface CoinSelector {
 export class SfrtCoinSelector implements CoinSelector {
     select(
         all: readonly StoredNote[],
-        asset: bigint,
-        target: bigint,
+        asset: AssetId,
+        target: CircuitAmount,
         opts?: SelectOpts,
     ): SelectionResult {
         return selectNotes(all, asset, target, opts);

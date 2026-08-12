@@ -38,7 +38,9 @@ export interface TreePersistence {
 
 export interface TreeSyncOpts extends PagingOpts {
     /** Per-chunk progress, so a stuck sync is observable. */
-    onProgress?: (p: { chunkId: number; leaves: number; syncedCount: number }) => void;
+    onProgress?:
+        | ((p: { chunkId: number; leaves: number; syncedCount: number }) => void)
+        | undefined;
 }
 
 export interface TreeSyncSummary {
@@ -98,7 +100,7 @@ export class TreeStore {
                 const fresh = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
                 if (fresh.length > 0) {
                     this.tree.bulkInsert(fresh.map((e) => this.computeLeaf(e)));
-                    this.syncedCount = fresh[fresh.length - 1].leafIndex + 1;
+                    this.syncedCount = fresh[fresh.length - 1]!.leafIndex + 1;
                 }
                 opts.onProgress?.({
                     chunkId: chunk.chunkId,

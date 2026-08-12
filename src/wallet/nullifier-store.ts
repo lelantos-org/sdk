@@ -37,7 +37,7 @@ export interface NullifierPersistence {
 
 export interface NullifierSyncOpts extends PagingOpts {
     /** Per-chunk progress, so a stuck sync is observable. */
-    onProgress?: (p: { chunkId: number; added: number; syncedCount: number }) => void;
+    onProgress?: ((p: { chunkId: number; added: number; syncedCount: number }) => void) | undefined;
 }
 
 export interface NullifierSyncSummary {

@@ -20,11 +20,18 @@
 // the payer to a server that takes payment and does not answer, which is why
 // `budget` is required rather than optional.
 
+import type { AssetId, CircuitAmount, ShieldedAddress } from "../core/brand.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
 import type { OnPhase, SpendPhase } from "../wallet/options.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
-import { requireNetwork, requirePositiveInteger, unsupported } from "./requirements.js";
+import {
+    requireAmount,
+    requireAssetId,
+    requireNetwork,
+    requireShieldedAddress,
+    unsupported,
+} from "./requirements.js";
 import type { PaymentPayloadResult, PaymentRequirements } from "./types.js";
 
 const log = getLogger("lelantos:x402:shielded");
@@ -52,17 +59,18 @@ export function shieldedNetwork(chainId: bigint): string {
 
 export interface ShieldedExactOptions {
     /** Forwarded to `wallet.transfer` — `"proving"` is the multi-second phase. */
-    onPhase?: OnPhase<SpendPhase>;
+    onPhase?: OnPhase<SpendPhase> | undefined;
     /** Reject requirements whose window is shorter than this. Default 20. */
-    minTimeoutSeconds?: number;
+    minTimeoutSeconds?: number | undefined;
     /** Self-spend to make a payable note when no 2-note cover exists. Default true. */
-    autoConsolidate?: boolean;
+    autoConsolidate?: boolean | undefined;
 }
 
 /** Everything an offer yields once it is known to be payable. */
 interface Terms {
-    asset: bigint;
-    amount: bigint;
+    asset: AssetId;
+    amount: CircuitAmount;
+    payTo: ShieldedAddress;
 }
 
 /**
@@ -95,8 +103,9 @@ export function shieldedExact(
         requirePool(req);
         requireProvableWindow(req, minTimeoutSeconds);
         return {
-            asset: requirePositiveInteger(SCOPE, req.asset, "asset"),
-            amount: requirePositiveInteger(SCOPE, req.amount, "amount"),
+            asset: requireAssetId(SCOPE, req.asset, "asset"),
+            amount: requireAmount(SCOPE, req.amount, "amount"),
+            payTo: requireShieldedAddress(SCOPE, req.payTo, "payTo"),
         };
     };
 
@@ -114,7 +123,7 @@ export function shieldedExact(
             x402Version: number,
             req: PaymentRequirements,
         ): Promise<PaymentPayloadResult> {
-            const { asset, amount } = await read(req);
+            const { asset, amount, payTo } = await read(req);
 
             log.debug("paying shielded", {
                 network: req.network,
@@ -123,7 +132,7 @@ export function shieldedExact(
             });
 
             const result = await wallet.transfer({
-                to: req.payTo,
+                to: payTo,
                 amount,
                 asset,
                 onPhase: opts.onPhase,
