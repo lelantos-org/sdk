@@ -4,6 +4,22 @@ End-to-end walkthrough of `@lelantos-org/sdk`: create wallet, deposit, sync, bal
 
 See [README.md](./README.md) for installation, layout, address format, and stability guarantees.
 
+## Contents
+
+1. [Quickstart](#quickstart)
+2. [Wallet creation](#wallet-creation)
+3. [Amounts](#amounts)
+4. [Transactions](#transactions)
+5. [Note management](#note-management)
+6. [Custom storage](#custom-storage)
+7. [Custom chain adapter](#custom-chain-adapter)
+8. [Pluggable interfaces](#pluggable-interfaces)
+9. [Networks](#networks)
+10. [Browser usage](#browser-usage)
+11. [Low-level primitives](#low-level-primitives)
+12. [Paying for APIs (x402)](#paying-for-apis-x402)
+13. [Errors](#errors)
+
 ---
 
 ## Quickstart
@@ -165,8 +181,8 @@ const tx = await wallet.deposit({
     asEth: false,             // optional; true sends native ETH via submitIntentNative
     onPhase: (p) => console.log(p),   // "signing" | "submitting" | "broadcast" | "mined"
 });
-// DepositResult: { kind: "deposit", txHash, commitments, nonZeroCommitments,
-//                  ownCommitments, ownInflow, sent, intentId? }
+// DepositResult: { kind: "deposit", txHash, strategy, commitments,
+//                  nonZeroCommitments, ownCommitments, ownInflow, sent, intentId? }
 ```
 
 Each method returns its own receipt type — `deposit()` gives you a
@@ -276,8 +292,11 @@ Related methods:
 - `wallet.markSpent(ids)` — mark notes spent manually (recovery flows).
 - `wallet.compact()` — drop spent notes from the store; returns `{ removed }`.
 - `wallet.cancelIntent(id, inputs)` — reclaim an escrowed deposit the relayer never
-  flushed, once `chain.cancelDelay()` blocks have passed. `inputs` is the
-  `IntentEscrowed` event payload (`CancelIntentInputs`).
+  flushed, once `chain.cancelDelay()` blocks have passed. The contract stores only
+  `keccak(intent)` per escrow, so `inputs` (`CancelIntentInputs`) carries back every
+  field it checks against that digest — `publicIn`, `cm`, `cvDep`, `publicAssetId`,
+  `feeBpsAtSubmit`, `payer` and `submittedAt`. All of them come off the
+  `IntentEscrowed` log, so cache it: `escrowed(id)` returns the digest alone.
 
 #### Sync strategies
 
@@ -311,7 +330,7 @@ Derive it from `ivk`, never from `dk` or the detection key — the γ detection
 scalars are a counter stream off the address's `dk`, so both are recoverable by
 senders and by the server, and a token built from either would be forgeable.
 
-### Rotating, and the one thing you must store
+#### Rotating a subscription token
 
 Pass `epoch` to rotate: the token travels in the `/v1/matches` query string,
 which proxies and browser history record, so a leak needs a recovery path.
@@ -426,16 +445,22 @@ class EthersChainAdapter implements ChainAdapter {
 
 ## Pluggable interfaces
 
-Six injection points on `WalletConfig`. Each has a default.
+Nine injection points on `WalletConfig`. `chain` is required; the rest default.
 
 | Interface | Default | Use case |
 |---|---|---|
-| `ChainAdapter` | `ViemChainAdapter` | ethers / web3.js / hardware-wallet signing |
+| `ChainAdapter` | — (required) | ethers / web3.js / hardware-wallet signing |
 | `NoteSource` | `FmdNoteSource` (over `FmdClient`) | alt indexer, P2P feed, unit-test mock |
+| `NoteStore` | `InMemoryNoteStore` | file, IndexedDB, encrypted KV |
+| `TreeStore` | built from the commitment chunk feed | pre-seeded tree, shared cache |
+| `NullifierStore` | built from the nullifier chunk feed | pre-seeded spent set, shared cache |
 | `Submitter` | `HttpRelayerSubmitter` | multi-relayer race, direct-on-chain submit, test mock |
 | `Prover` | `WasmProver` (snarkjs fallback; `useWasmProver: false` opts out) | remote prover, Web Worker prover, mock |
 | `CoinSelector` | `SfrtCoinSelector` | largest-first, Penumbra planner, deterministic test stub |
-| `NoteStore` | `InMemoryNoteStore` | file, IndexedDB, encrypted KV |
+| `Scanner` | `LocalScanner` | `WorkerPoolScanner` for off-main-thread trial decryption |
+
+`TreeStore` and `NullifierStore` are usually configured through
+`treePersistence` / `nullifierPersistence` rather than replaced outright.
 
 `WalletApi` itself is an interface — mock whole wallet in upstream tests.
 
@@ -622,11 +647,16 @@ import {
     encryptNote, decryptNote,
     fmdFlag, fmdTest, fmdGenDetectionKey,
     scanNotes,
-    buildDeposit, buildTransfer, buildWithdraw,
+    buildDeposit, buildSpend,
     RelayerClient,
-    prove, verify, configureProver,
+    prove, verify,
 } from "@lelantos-org/sdk";
 ```
+
+`buildSpend` covers transfer, withdraw and swap — they differ only in their
+public inputs, so there is one builder rather than three. Prover configuration
+(`configureProverWasm`, `configureProverThreads`) lives on
+`@lelantos-org/sdk/prover`.
 
 `e2e/runner` consumes these directly without `Wallet`.
 
@@ -805,4 +835,6 @@ the union of every class, discriminated on `code`.
 | `NetworkNotDeployedError` | `NETWORK_NOT_DEPLOYED` | Field `network: string`. Pick deployed preset or pass `NetworkPreset` literal. |
 | `X402PaymentError` | `X402_PAYMENT` | Field `reason`: `budget-exceeded`, `per-request-limit`, `host-not-allowed`, `no-acceptable-requirements`, `unsupported-requirements`, `payment-rejected`. Every reason except `payment-rejected` means no funds moved. |
 
-`HttpClientOptions` via `connect({ http: { timeoutMs, retries } })` or directly to `FmdClient` / `RelayerClient`. Defaults: timeout 30 000 ms, retries 2.
+`HttpClientOptions` (`{ timeoutMs, retries }`) is passed to `FmdClient` or
+`RelayerClient` at construction; inject the configured client through
+`noteSource` / `submitter` to change it. Defaults: timeout 30 000 ms, retries 2.
