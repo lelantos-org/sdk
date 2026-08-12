@@ -141,9 +141,10 @@ describe("selectNotes", () => {
     });
 
     it("returns consolidate-first when sum sufficient but no 2-cover", () => {
-        // max pair=90, total=120, target=100 → consolidate.
+        // max pair=90, total=120, target=100 → consolidate. Pinned to two
+        // inputs: at the default 3×3 arity, 30+40+50 covers 100 directly.
         const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
-        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts());
+        const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts({ maxInputs: 2 }));
         expect(r.plan).toBe("consolidate-first");
         if (r.plan === "consolidate-first") {
             expect(r.consolidate.map((n) => n.id).sort()).toEqual(["a", "b"]);
@@ -202,11 +203,20 @@ describe("maxInputs", () => {
     // The default is the deployed 2×2 arity. A wider circuit lets a spend
     // reach covers that two notes cannot, and lets consolidation merge more
     // per round.
-    it("defaults to two notes even when a third would give a tighter cover", () => {
-        // 30+40+50 = 120 covers 115 exactly; the best 2-cover is 40+50 = 90,
-        // which does not, so at maxInputs 2 this has to consolidate.
+    it("defaults to the default shape's arity, so a third note is reachable", () => {
+        // 30+40+50 = 120 covers 115; the best 2-cover is 40+50 = 90, which
+        // does not. With no `maxInputs` the default 3×3 arity applies, so this
+        // resolves directly instead of consolidating.
         const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
         const r = selectNotes(notes, assetId(1n), circuitAmount(115n), baseOpts());
+        if (r.plan !== "direct") throw new Error("expected direct");
+        expect(r.notes).toHaveLength(3);
+        expect(r.sum).toBe(120n);
+    });
+
+    it("consolidates instead when the arity is pinned below what a cover needs", () => {
+        const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
+        const r = selectNotes(notes, assetId(1n), circuitAmount(115n), baseOpts({ maxInputs: 2 }));
         expect(r.plan).toBe("consolidate-first");
     });
 

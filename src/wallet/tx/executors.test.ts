@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { randomFr, randomJubjubScalar } from "../../core/random.js";
-import { type CircuitShape, TRANSACT_2X2, TRANSACT_3X3 } from "../../core/shape.js";
+import { type CircuitShape, DEFAULT_SHAPE, TRANSACT_2X2, TRANSACT_3X3 } from "../../core/shape.js";
 import { WasmJubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
 import { addressFromSpendingKey, buildSpendingKey } from "../../keys/keys.js";
@@ -29,7 +29,7 @@ function storedNote(id: string, value: bigint, asset = 1n): StoredNote {
     };
 }
 
-async function makeCtx(notes: StoredNote[], shape: CircuitShape = TRANSACT_2X2) {
+async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE) {
     const P = await Poseidon.build();
     const J = await WasmJubjub.build();
     const keys = buildSpendingKey(P, J, randomJubjubScalar());
@@ -117,18 +117,19 @@ describe("executeTransfer", () => {
         expect(treeStore.sync).toHaveBeenCalledOnce();
     });
 
-    it("credits only the change slot when sending to someone else", async () => {
+    it("credits only the change slots when sending to someone else", async () => {
         const { ctx } = await makeCtx([storedNote("01", 100n)]);
         const { address: recipient } = await makeCtx([]);
         const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
-        // Output 0 is the recipient's; only output 1 (change) is ours.
-        expect(res.ownCommitments).toHaveLength(1);
+        // Slot 0 is the recipient's; every other slot is change back to us.
+        expect(res.commitments).toHaveLength(DEFAULT_SHAPE.nOut);
+        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut - 1);
     });
 
-    it("credits both slots on a self-transfer", async () => {
+    it("credits every slot on a self-transfer", async () => {
         const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
         const res = await executeTransfer(ctx, { to: address, amount: circuitAmount(30n) });
-        expect(res.ownCommitments).toHaveLength(2);
+        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
     });
 
     it("reports the phases in order", async () => {
@@ -158,7 +159,7 @@ describe("executeTransfer", () => {
 });
 
 describe("executeWithdraw", () => {
-    it("splits change across both slots and tags the kind", async () => {
+    it("splits change across every slot and tags the kind", async () => {
         const { ctx, submitted, markedSpent } = await makeCtx([storedNote("01", 100n)]);
 
         const res = await executeWithdraw(
@@ -175,8 +176,9 @@ describe("executeWithdraw", () => {
         expect(markedSpent).toEqual([["01"]]);
         expect(res.sent).toBe(40n);
         expect(res.change).toBe(60n);
-        // Both change slots are ours.
-        expect(res.ownCommitments).toHaveLength(2);
+        // Every slot is change, so all of them are ours.
+        expect(res.commitments).toHaveLength(DEFAULT_SHAPE.nOut);
+        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
         expect(res.ownInflow).toBe(60n);
     });
 
@@ -259,5 +261,40 @@ describe("shape 3x3", () => {
         const pi = (submitted[0] as { pubInputs: { nullifier: unknown[] } }).pubInputs;
         expect(pi.nullifier).toHaveLength(3);
         expect(new Set(pi.nullifier.map(String)).size).toBe(3);
+    });
+});
+
+// 2×2 is no longer the default, so it needs its own coverage: a pool whose
+// verifier predates the wider circuit passes `shape: TRANSACT_2X2` and must
+// still get exactly two slots.
+describe("shape 2x2", () => {
+    it("transfers with one change slot", async () => {
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], TRANSACT_2X2);
+        const { address: recipient } = await makeCtx([]);
+        const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
+
+        expect(res.commitments).toHaveLength(2);
+        expect(res.ownCommitments).toHaveLength(1);
+        expect(res.change).toBe(70n);
+        const pi = (submitted[0] as { pubInputs: { nullifier: unknown[]; outCm: unknown[] } })
+            .pubInputs;
+        expect(pi.nullifier).toHaveLength(2);
+        expect(pi.outCm).toHaveLength(2);
+    });
+
+    it("withdraws with two change slots", async () => {
+        const { ctx } = await makeCtx([storedNote("01", 100n)], TRANSACT_2X2);
+        const res = await executeWithdraw(
+            ctx,
+            {
+                to: evmAddress("0x0000000000000000000000000000000000000002"),
+                amount: circuitAmount(40n),
+                asset: assetId(1n),
+            },
+            "withdraw",
+        );
+        expect(res.commitments).toHaveLength(2);
+        expect(res.ownCommitments).toHaveLength(2);
+        expect(res.ownInflow).toBe(60n);
     });
 });
