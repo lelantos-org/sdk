@@ -11,11 +11,11 @@
 // keys exactly as sensitive as the shielded wallet: whoever holds nsk holds
 // them.
 
-import { keccak256 } from "viem";
 import { toLeBytes } from "../core/bytes.js";
 import { InvalidArgumentError } from "../core/errors.js";
 import type { Field } from "../core/field.js";
 import { bytesToBareHex } from "../core/hex.js";
+import { keccak256 } from "../core/keccak.js";
 
 /**
  * ASCII bytes of `"lelantos.x402.eph\0"`. Bumping this invalidates every

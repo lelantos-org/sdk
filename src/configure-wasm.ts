@@ -7,7 +7,7 @@
 // Per-crate alternatives: `configureJubjubWasm`, `configureProverWasm`.
 
 import { configureJubjubWasm, type JubjubWasmLoader } from "./crypto/jubjub-wasm/index.js";
-import { configureProverWasm, type ProverWasmLoader } from "./prover/wasm-prover.js";
+import { configureProverWasm, type ProverWasmLoader } from "./prover/wasm-loader.js";
 
 /** @internal */
 export interface WasmConfig {

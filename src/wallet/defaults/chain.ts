@@ -1,9 +1,7 @@
 // Chain-adapter construction from `connect()` inputs.
 
-import { Eip1193Signer, PrivateKeySigner } from "../../chain/eth-signer.js";
 import type { DeployedNetworkPreset } from "../../chain/networks.js";
 import type { ChainAdapter } from "../../chain/port.js";
-import { ViemChainAdapter } from "../../chain/viem/index.js";
 import { evmAddress } from "../../core/brand.js";
 import { WalletConfigError } from "../../core/errors.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
@@ -24,14 +22,19 @@ export interface ChainAdapterInputs {
 }
 
 /**
- * Build the default `ViemChainAdapter`. Used by `connect()` when the
- * caller passes `signer` / `provider` / `privateKey` rather than a
- * pre-built adapter.
+ * Build the default `ViemChainAdapter`. Used by `connect()` when the caller
+ * passes `signer` / `provider` / `privateKey` rather than a pre-built adapter.
+ *
+ * viem and the signers load dynamically: a caller who supplies their own
+ * `chain` never pays for the viem client stack (~230 KB), and one who does not
+ * pays for it off `connect()`'s critical path rather than at module load.
+ * Validation stays ahead of the import so a misconfigured call still fails
+ * without fetching anything.
  */
-export function defaultChainAdapter(
+export async function defaultChainAdapter(
     inputs: ChainAdapterInputs,
     preset: DeployedNetworkPreset,
-): ChainAdapter {
+): Promise<ChainAdapter> {
     if (inputs.chain) return inputs.chain;
 
     const errs: string[] = [];
@@ -42,6 +45,11 @@ export function defaultChainAdapter(
         errs.push("pass one of `chain`, `signer`, `{provider,address}`, or `privateKey`");
     }
     if (errs.length) throw new WalletConfigError(errs);
+
+    const [{ Eip1193Signer, PrivateKeySigner }, { ViemChainAdapter }] = await Promise.all([
+        import("../../chain/eth-signer.js"),
+        import("../../chain/viem/index.js"),
+    ]);
 
     const signer: EthSigner =
         inputs.signer ??

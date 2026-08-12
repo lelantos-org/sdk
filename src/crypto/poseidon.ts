@@ -1,13 +1,16 @@
-import {
-    poseidon1,
-    poseidon2,
-    poseidon3,
-    poseidon4,
-    poseidon5,
-    poseidon6,
-    poseidon7,
-    poseidon8,
-} from "poseidon-lite";
+// Per-arity subpaths, not the `poseidon-lite` barrel. The barrel is CommonJS
+// and re-exports all 16 arities through `Object.defineProperty` getters, which
+// no bundler can analyse statically — importing it pulls every round-constant
+// table (~604 KB minified). The subpaths pull only the arities named here
+// (~161 KB). `bundle-budget.mjs` guards the difference.
+import { poseidon1 } from "poseidon-lite/poseidon1";
+import { poseidon2 } from "poseidon-lite/poseidon2";
+import { poseidon3 } from "poseidon-lite/poseidon3";
+import { poseidon4 } from "poseidon-lite/poseidon4";
+import { poseidon5 } from "poseidon-lite/poseidon5";
+import { poseidon6 } from "poseidon-lite/poseidon6";
+import { poseidon7 } from "poseidon-lite/poseidon7";
+import { poseidon8 } from "poseidon-lite/poseidon8";
 
 export type Field = bigint;
 

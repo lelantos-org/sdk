@@ -293,22 +293,44 @@ Two strategies via `WalletConfig.syncStrategy` (selects default `NoteSource`; ig
 const wallet = await connect({ ...cfg, syncStrategy: { kind: "full" } });
 
 // Server-side FMD — register a detection key under a token you derive.
-const tokenHex = subscriptionTokenToHex(deriveSubscriptionToken(P, keys.ivk));
+// `epoch` is 0 until you rotate; see below for why you must store it after that.
+const epoch = BigInt(myAppConfig.subscriptionEpoch ?? 0);
+const tokenHex = subscriptionTokenToHex(deriveSubscriptionToken(P, keys.ivk, epoch));
 const fmd = new FmdClient(fmdUrl, chainId);
 await fmd.createSubscription({ detectionKeyHex, gamma: 8, tokenHex });
 const wallet = await connect({ ...cfg, syncStrategy: { kind: "matches", token: tokenHex } });
 ```
 
-The capability token is client-chosen, so there is nothing extra to persist:
-`deriveSubscriptionToken(P, ivk)` regenerates it from a secret the wallet
-already holds, and re-registering re-attaches to the same subscription
-(`created: false`) instead of duplicating it and re-running the backfill.
+The capability token is client-chosen, so at the default epoch there is nothing
+extra to persist: `deriveSubscriptionToken(P, ivk)` regenerates it from a secret
+the wallet already holds, and re-registering re-attaches to the same
+subscription (`created: false`) instead of duplicating it and re-running the
+backfill.
 
 Derive it from `ivk`, never from `dk` or the detection key — the γ detection
 scalars are a counter stream off the address's `dk`, so both are recoverable by
 senders and by the server, and a token built from either would be forgeable.
+
+### Rotating, and the one thing you must store
+
 Pass `epoch` to rotate: the token travels in the `/v1/matches` query string,
 which proxies and browser history record, so a leak needs a recovery path.
+
+**Once `epoch` is non-zero, your application must persist it.** It cannot be
+recovered from the server. There is no read-only subscription lookup — that
+would be an existence oracle for tokens — and `POST /v1/subscriptions` creates
+on miss, so probing for your current epoch is a *write* that fails both ways:
+it either re-attaches to the token you were rotating away from, or recreates
+one the rotation deleted, silently undoing it.
+
+Store the **epoch**, not the token. The epoch is a non-secret integer; the token
+is a bearer credential sent on every poll, and is strictly worse to leave
+sitting in application storage. Keep it as a plain number and pass `BigInt(n)` —
+`JSON.stringify` throws on bigint.
+
+Losing a non-zero epoch does not lose the wallet: register a fresh one and the
+indexer backfills. It costs a full re-backfill, and it strands the previous
+subscription, which can no longer be deleted because its token is unrecoverable.
 
 `gamma` sets the false-positive rate at `2^-gamma`. It must be in
 `GAMMA_MIN..GAMMA_MAX` (1..16), and the server caps it further against the

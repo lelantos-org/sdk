@@ -4,8 +4,9 @@
 // IMPORTANT: domain MUST NEVER be reused across versions. Bumping
 // `LELANTOS_NSK_DOMAIN.version` invalidates all derived keys.
 
-import { hashTypedData, keccak256, type TypedDataDomain, type TypedDataParameter } from "viem";
+import { hashTypedData, type TypedDataDomain, type TypedDataParameter } from "viem";
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
+import { keccak256 } from "../core/keccak.js";
 import type { EthSigner } from "../core/signer.js";
 import type { Field } from "../crypto/poseidon.js";
 

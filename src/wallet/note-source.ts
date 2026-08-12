@@ -54,9 +54,11 @@ export class FmdNoteSource implements NoteSource {
  * Trades anonymity (server learns the FP set bound by `gamma`) for bandwidth.
  *
  * `token` is the capability the caller registered with
- * `FmdClient.createSubscription`. It is the only handle to the subscription,
- * and need not be persisted: `deriveSubscriptionToken` regenerates it from
- * `ivk`.
+ * `FmdClient.createSubscription`. It is the only handle to the subscription.
+ * `deriveSubscriptionToken` regenerates it, so at the default epoch there is
+ * nothing to store — but regeneration needs `ivk` *and* the epoch, and the
+ * epoch cannot be recovered from the server. A caller that has rotated must
+ * persist it alongside its own config.
  */
 export class FmdMatchesNoteSource implements NoteSource {
     constructor(

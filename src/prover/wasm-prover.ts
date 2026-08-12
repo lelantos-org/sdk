@@ -1,94 +1,29 @@
 // WASM-backed Groth16 prover. Drop-in for `SnarkjsProver`.
 // Witness calc via `circom_runtime`; proof via rust ark-groth16 at
 // `sdk/wasm/prover/`, with rayon multi-threading on COI pages.
+//
+// The loader and its configuration hooks live in `./wasm-loader.ts`, which
+// carries no `circom_runtime` dependency — see the header there.
 
 import { WitnessCalculatorBuilder } from "circom_runtime";
 import { getLogger } from "../log/logger.js";
 import { timed, timedSync } from "../log/timed.js";
-import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
-import { nodeFileUrlToPath } from "../wasm/node-path.js";
-import {
-    initBrowserThreadPool,
-    initNodeThreadPool,
-    shutdownRayonWorkers,
-    withWorkerGlobals,
-} from "../wasm/rayon/index.js";
+import { shutdownRayonWorkers } from "../wasm/rayon/index.js";
 import { loadArtifactBytes } from "./artifacts.js";
 import type { Groth16Proof, ProveResult, Prover, ProverPaths } from "./types.js";
+import { loadProver, type ProverSession } from "./wasm-loader.js";
 
-const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
-
-interface ProverSession {
-    prove(wtnsBytes: Uint8Array): RawProofOutput;
-}
-type ProverCtor = new (zkeyBytes: Uint8Array) => ProverSession;
-
-interface ProverModule extends WasmModuleBase {
-    ProverSession: ProverCtor;
-    initThreadPool?: (n: number) => Promise<unknown>;
-}
+export {
+    configureProverThreads,
+    configureProverWasm,
+    type ProverWasmLoader,
+} from "./wasm-loader.js";
 
 interface WitnessCalculator {
     calculateWTNSBin(input: Record<string, unknown>, sanityCheck?: number): Promise<Uint8Array>;
 }
 
-interface RawProofOutput {
-    piA: [string, string, string];
-    piB: [[string, string], [string, string], [string, string]];
-    piC: [string, string, string];
-    publicSignals: string[];
-}
-
-/**
- * Browser bundlers rewrite the relative-path fallback to a runtime-missing
- * path. Inject a loader that resolves the wasm-pack module + binary via the
- * bundler's asset-URL pipeline before `WasmProver.build()`.
- */
 const log = getLogger("lelantos:prover:wasm");
-
-export type ProverWasmLoader = WasmLoaderOverride<ProverModule>;
-
-/**
- * Override rayon thread count. Pass 0 or 1 for single-threaded. Must be set
- * before the first `WasmProver.build` / `preload`; later changes are ignored.
- */
-let proverThreadCount: number | null = null;
-export function configureProverThreads(n: number): void {
-    proverThreadCount = n;
-}
-
-const PKG_JS_URL = new URL("../../wasm/prover/pkg/prover.js", import.meta.url);
-const PKG_WASM_URL = new URL("../../wasm/prover/pkg/prover_bg.wasm", import.meta.url);
-
-const proverLoader = createWasmLoader<ProverModule>({
-    name: "prover",
-    defaultImport: () => import("#wasm/prover") as Promise<ProverModule>,
-    nodeJsUrl: async () => PKG_JS_URL.href,
-    nodeWasmPath: async () => nodeFileUrlToPath(PKG_WASM_URL),
-    postInit: async (mod, ctx) => {
-        const opts = { threadCount: proverThreadCount, label: "WasmProver" };
-        if (ctx.isNode) {
-            if (!ctx.nodePkgUrl) throw new Error("nodePkgUrl not set; call after wasm init");
-            await initNodeThreadPool(mod, ctx.nodePkgUrl, opts);
-        } else {
-            await initBrowserThreadPool(mod, opts);
-        }
-    },
-});
-
-export function configureProverWasm(loader: ProverWasmLoader): void {
-    proverLoader.configure(loader);
-}
-
-async function loadProver(): Promise<ProverCtor> {
-    // The worker-shaped globals are only needed while the pkg module
-    // evaluates; `withWorkerGlobals` removes them afterwards so the host's
-    // main thread stops looking like a Web Worker to every other library.
-    const mod = IS_NODE
-        ? await withWorkerGlobals(() => proverLoader.load())
-        : await proverLoader.load();
-    return mod.ProverSession;
-}
 
 const _buildCache = new Map<string, Promise<WasmProver>>();
 

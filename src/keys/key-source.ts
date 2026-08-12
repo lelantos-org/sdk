@@ -3,11 +3,11 @@
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
-import { keccak256 } from "viem";
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
+import { keccak256 } from "../core/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
 import { mnemonicToAccountKey } from "./hd.js";
-import * as metamask from "./metamask.js";
+import { reduceSignatureToScalar } from "./metamask.js";
 
 export type KeySource =
     | {
@@ -43,7 +43,7 @@ export function resolveNsk(source: KeySource): Field {
             if (!/^0x[0-9a-fA-F]+$/.test(source.signature)) {
                 throw new Error("signature must be 0x-hex");
             }
-            return metamask.reduceSignatureToScalar(source.signature);
+            return reduceSignatureToScalar(source.signature);
         case "privateKey":
             return hexPrivateKeyToNsk(source.hex);
         case "nsk":

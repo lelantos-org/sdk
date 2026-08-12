@@ -21,12 +21,17 @@ export {
 export { type PreloadOpts, preloadWasm } from "./preload.js";
 export { prove, SnarkjsProver, verify } from "./snarkjs.js";
 export type { Groth16Proof, ProveResult, Prover, ProverPaths } from "./types.js";
+// The loader module, not `./wasm-prover.js`: the latter statically imports
+// `circom_runtime`, which arrives only as a transitive dependency of the
+// optional `snarkjs` peer. A bundler resolves static imports before it shakes
+// them, so re-exporting from there fails the build outright for a consumer
+// who installed neither. `WasmProver` itself stays at the dedicated
+// `@lelantos-org/sdk/wasm-prover` subpath.
 export {
     configureProverThreads,
     configureProverWasm,
     type ProverWasmLoader,
-    WasmProver,
-} from "./wasm-prover.js";
+} from "./wasm-loader.js";
 export {
     type BrowserWorkerProverOpts,
     browserWorkerProver,

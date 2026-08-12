@@ -42,7 +42,7 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
         throw new NetworkNotDeployedError(name);
     }
     const keySource = buildKeySource(opts);
-    const chain = defaultChainAdapter(
+    const chain = await defaultChainAdapter(
         {
             chain: opts.chain,
             signer: opts.signer,
