@@ -1,11 +1,15 @@
 {
   "name": "@lelantos-org/sdk",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
   "license": "Apache-2.0",
   "author": "Lelantos",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/prover/worker-entry.js",
+    "./dist/sync/worker/entry.js",
+    "./dist/wasm/rayon/bootstrap.mjs"
+  ],
   "packageManager": "npm@10.9.2",
   "engines": {
     "node": ">=24.0.0"
