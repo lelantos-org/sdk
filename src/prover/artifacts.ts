@@ -8,6 +8,7 @@ import { ProverArtifactsFailedError, ProverArtifactsMissingError } from "../core
 import { type CircuitShape, DEFAULT_SHAPE, shapeId } from "../core/shape.js";
 import { urlToString } from "../core/url.js";
 import { getLogger } from "../log/logger.js";
+import { type ArtifactCache, cacheApiArtifactCache } from "./artifact-cache.js";
 import type { ProverArtifacts, ProverPaths } from "./types.js";
 
 export type { ProverArtifacts } from "./types.js";
@@ -15,13 +16,21 @@ export type { ProverArtifacts } from "./types.js";
 /**
  * Companion package — published to GitHub Packages (not public npm),
  * so jsDelivr cannot proxy it and there is no built-in browser CDN default.
- * Integrators add it explicitly to avoid pulling a 44 MB zkey into installs.
+ * Integrators add it explicitly to avoid pulling ~85 MB of proving keys into
+ * every install.
  */
 const COMPANION_PKG = "@lelantos-org/circuits";
 
 const log = getLogger("lelantos:prover:artifacts");
 
-/** The zkey is ~36 MB; a stalled download needs a long leash but not none. */
+/**
+ * The zkey is ~36 MB at 2x2 and ~49 MB at 3x3, which is `DEFAULT_SHAPE`. A
+ * stalled download needs a long leash but not none.
+ *
+ * 120 s covers the default shape down to roughly 3 Mbps. Slower links fail
+ * here rather than hanging; raise it via `LoadArtifactOpts.timeoutMs` if you
+ * serve users below that.
+ */
 const ARTIFACT_TIMEOUT_MS = 120_000;
 const ARTIFACT_RETRIES = 2;
 
@@ -123,8 +132,51 @@ async function tryResolveCompanion(id: string): Promise<ProverArtifacts | null> 
 
 const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
 const NODE_FS_PROMISES = "node:fs/promises";
+const IS_HTTP = /^https?:\/\//;
 
 const _cache = new Map<string, Promise<Uint8Array>>();
+
+/**
+ * `undefined` = not yet resolved, `null` = no persistence. Resolved lazily so
+ * an integrator can call `configureArtifactCache` before the first load, and
+ * so the Cache API probe happens off module-eval.
+ */
+let _persistent: ArtifactCache | null | undefined;
+
+/**
+ * Install (or disable) persistence for downloaded artifacts.
+ *
+ * Defaults to the Cache API wherever it exists, which is what makes a reload
+ * — and the prover worker, which has its own JS realm and its own copy of the
+ * in-memory map below — skip the ~49 MB download. Pass `false` to opt out, or
+ * an {@link ArtifactCache} to store the bytes somewhere else.
+ *
+ * Module-level rather than a per-call option on purpose: the worker never sees
+ * the caller's configuration, so the useful default has to be intrinsic.
+ * State is module-local — two copies of the SDK in one bundle each need
+ * configuring.
+ */
+export function configureArtifactCache(cache: ArtifactCache | false | null): void {
+    _persistent = cache === false ? null : cache;
+}
+
+function persistentCache(): ArtifactCache | null {
+    // Not `??=`: `null` means "explicitly disabled" and must stick, but
+    // `null ?? probe()` would re-enable it on the very next load.
+    if (_persistent === undefined) _persistent = cacheApiArtifactCache();
+    return _persistent;
+}
+
+/**
+ * Drop the in-memory memo and the resolved persistence choice.
+ *
+ * @internal Test hook. Resetting the memo is also how a test simulates a
+ * fresh JS realm — a worker shares the origin's Cache API but not this map.
+ */
+export function __resetArtifactCacheForTest(): void {
+    _cache.clear();
+    _persistent = undefined;
+}
 
 /**
  * Load artifact bytes from a filesystem path, `file://` href, or
@@ -135,11 +187,12 @@ const _cache = new Map<string, Promise<Uint8Array>>();
  */
 export interface LoadArtifactOpts {
     /**
-     * Download progress for the ~36 MB zkey.
+     * Download progress for the zkey (~49 MB at `DEFAULT_SHAPE`).
      *
      * Results are cached by URL, so only the first caller for a given path
      * receives progress; a concurrent second caller awaits the same promise
-     * and sees none.
+     * and sees none. A persistent-cache hit reports a single terminal event
+     * rather than nothing, so a progress bar completes instead of hanging.
      */
     onProgress?: ((p: { loaded: number; total?: number; url: string }) => void) | undefined;
     signal?: AbortSignal | undefined;
@@ -159,18 +212,37 @@ export function loadArtifactBytes(path: string, opts: LoadArtifactOpts = {}): Pr
 }
 
 async function load(path: string, opts: LoadArtifactOpts): Promise<Uint8Array> {
-    if (IS_NODE && !/^https?:\/\//.test(path)) {
+    if (IS_NODE && !IS_HTTP.test(path)) {
         const { readFile } = await import(/* @vite-ignore */ NODE_FS_PROMISES);
         const target = path.startsWith("file://") ? new URL(path) : path;
         return new Uint8Array(await readFile(target));
     }
-    return retry((attempt) => fetchArtifact(path, opts, attempt), {
+
+    // Only http(s) is persistable; a local path is already cheap to re-read.
+    const persistent = IS_HTTP.test(path) ? persistentCache() : null;
+    if (persistent) {
+        const hit = await persistent.get(path);
+        if (hit) {
+            log.info("artifact cache hit", { path, bytes: hit.length });
+            // A progress consumer would otherwise sit at 0% forever on a hit.
+            opts.onProgress?.({ loaded: hit.length, total: hit.length, url: path });
+            return hit;
+        }
+    }
+
+    const bytes = await retry((attempt) => fetchArtifact(path, opts, attempt), {
         retries: ARTIFACT_RETRIES,
         backoffMs: 500,
         shouldRetry: (err) => err instanceof ProverArtifactsFailedError && err.retryable,
         onRetry: ({ attempt, delayMs, err }) =>
             log.warn("retrying artifact download", { path, attempt: attempt + 1, delayMs, err }),
     });
+
+    // Awaited, not fire-and-forget: a worker terminated right after its first
+    // proof would otherwise lose the write and re-download next time. `put`
+    // swallows its own failures, so this cannot fail the load.
+    if (persistent) await persistent.put(path, bytes);
+    return bytes;
 }
 
 async function fetchArtifact(
@@ -209,7 +281,7 @@ async function fetchArtifact(
 }
 
 /**
- * Stream the body so a ~36 MB zkey can report progress. `res.body` is
+ * Stream the body so a ~49 MB zkey can report progress. `res.body` is
  * absent under some fetch polyfills and test mocks, hence the guard at the
  * call site.
  */

@@ -9,7 +9,7 @@ import { WitnessCalculatorBuilder } from "circom_runtime";
 import { getLogger } from "../log/logger.js";
 import { timed, timedSync } from "../log/timed.js";
 import { shutdownRayonWorkers } from "../wasm/rayon/index.js";
-import { loadArtifactBytes } from "./artifacts.js";
+import { type LoadArtifactOpts, loadArtifactBytes } from "./artifacts.js";
 import type { Groth16Proof, ProveResult, Prover, ProverPaths } from "./types.js";
 import { loadProver, type ProverSession } from "./wasm-loader.js";
 
@@ -33,11 +33,19 @@ export class WasmProver implements Prover {
         private readonly wc: WitnessCalculator,
     ) {}
 
-    static async build(paths: ProverPaths): Promise<WasmProver> {
+    /**
+     * Build (or return the in-flight build for) a prover over `paths`.
+     *
+     * `opts` reaches the artifact fetch, so a caller can observe or abort the
+     * ~49 MB zkey download. It applies only to the call that starts the
+     * build: a second caller for the same paths joins the existing promise and
+     * sees neither its progress nor its `signal`.
+     */
+    static async build(paths: ProverPaths, opts: LoadArtifactOpts = {}): Promise<WasmProver> {
         const key = `${paths.zkeyPath}\0${paths.wasmPath}`;
         const cached = _buildCache.get(key);
         if (cached) return cached;
-        const p = WasmProver._doBuild(paths).catch((err) => {
+        const p = WasmProver._doBuild(paths, opts).catch((err) => {
             _buildCache.delete(key);
             throw err;
         });
@@ -45,11 +53,13 @@ export class WasmProver implements Prover {
         return p;
     }
 
-    private static async _doBuild(paths: ProverPaths): Promise<WasmProver> {
+    private static async _doBuild(paths: ProverPaths, opts: LoadArtifactOpts): Promise<WasmProver> {
         const [Session, zkeyBytes, circuitWasm] = await Promise.all([
             loadProver(),
-            loadArtifactBytes(paths.zkeyPath),
-            loadArtifactBytes(paths.wasmPath),
+            loadArtifactBytes(paths.zkeyPath, opts),
+            // The witness calculator is ~4 MB against the zkey's ~49; reporting
+            // both through one callback would make the bar jump backwards.
+            loadArtifactBytes(paths.wasmPath, { ...opts, onProgress: undefined }),
         ]);
         const wc = (await WitnessCalculatorBuilder(circuitWasm)) as WitnessCalculator;
         return new WasmProver(new Session(zkeyBytes), wc);
@@ -59,9 +69,9 @@ export class WasmProver implements Prover {
      * Warm the wasm module to avoid first-prove latency. With `paths`,
      * also fetches + parses the artifacts (full `build`, cached).
      */
-    static async preload(paths?: ProverPaths): Promise<void> {
+    static async preload(paths?: ProverPaths, opts: LoadArtifactOpts = {}): Promise<void> {
         if (paths) {
-            await WasmProver.build(paths);
+            await WasmProver.build(paths, opts);
             return;
         }
         await loadProver();

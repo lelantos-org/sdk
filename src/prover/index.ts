@@ -13,7 +13,16 @@
 // even with `useWasmProver: false`.
 
 export {
+    ARTIFACT_CACHE_NAME,
+    type ArtifactCache,
+    cacheApiArtifactCache,
+    clearArtifactCache,
+    persistArtifactStorage,
+} from "./artifact-cache.js";
+export {
     bundledProverArtifacts,
+    configureArtifactCache,
+    type LoadArtifactOpts,
     loadArtifactBytes,
     type ProverArtifacts,
     resolveArtifacts,

@@ -1,6 +1,7 @@
 // Prover selection: WASM by default, snarkjs on wasm-load failure.
 //
-// `LazyProver` defers the (expensive, ~36 MB) build until the first proof,
+// `LazyProver` defers the build until the first proof — ~49 MB of artifacts at
+// `DEFAULT_SHAPE`, minus whatever `configureArtifactCache` already persisted —
 // so `connect()` stays fast for apps that only read balances.
 
 import type { CircuitShape } from "../../core/shape.js";

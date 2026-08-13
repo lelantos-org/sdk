@@ -631,6 +631,32 @@ const wallet = await connect({ network: "mainnet", signer, rpcUrl, prover });
 
 - `connect()` starts the zkey fetch + parse in the background by default (`proverWarmup: "eager"`), so the first transaction skips the multi-second setup.
 
+#### Artifact caching
+
+The default shape is 3x3, whose zkey is ~49 MB. Downloaded artifacts are persisted to the **Cache API** automatically in any browser that has it — nothing to configure. Because the Cache API is origin-scoped rather than per-realm, this covers both a page reload and the prover worker, which previously re-downloaded everything the main thread had already fetched.
+
+The URL is the cache key, so **serve new proving keys under a new path**. There is no revalidation request — a round-trip on every load would defeat the point.
+
+```ts
+import {
+    clearArtifactCache,
+    configureArtifactCache,
+    persistArtifactStorage,
+} from "@lelantos-org/sdk/prover";
+
+// Recommended once at startup: WebKit evicts Cache API storage after ~7 days
+// without a visit, which silently restores the cold start.
+await persistArtifactStorage();
+
+await clearArtifactCache();        // reclaim ~85 MB, or force a re-download
+configureArtifactCache(false);     // opt out entirely
+configureArtifactCache(myCache);   // or store them in IndexedDB / OPFS / disk
+```
+
+A custom cache implements `ArtifactCache` — `get(url)` and `put(url, bytes)`, neither of which may throw. A storage failure always degrades to a network fetch, never to a failed proof.
+
+Note that `configureArtifactCache` is module-level state, and a Web Worker is a separate module realm. Call it inside the worker too if you are overriding the default there.
+
 ---
 
 ## Low-level primitives

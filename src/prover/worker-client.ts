@@ -12,9 +12,9 @@ import type { ProveResult, Prover, ProverArtifacts, ProverPaths } from "./types.
 import type { ProverMethods } from "./worker-protocol.js";
 
 /**
- * Proving is minutes-long by design and artifact fetch is ~36 MB, so these
- * are generous. Neither is retried: a retried three-minute prove is a
- * six-minute frozen UI.
+ * Proving is minutes-long by design and the artifact fetch is ~49 MB at
+ * `DEFAULT_SHAPE`, so these are generous. Neither is retried: a retried
+ * three-minute prove is a six-minute frozen UI.
  */
 const PRELOAD_TIMEOUT_MS = 180_000;
 const PROVE_TIMEOUT_MS = 180_000;

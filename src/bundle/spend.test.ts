@@ -13,7 +13,7 @@ import { buildSpend, type SpendArgs } from "./spend.js";
 // reach MASP.withdrawNative and unwrap WETH to a recipient. It is a plain
 // argument to the shared builder, so each kind is asserted here.
 
-/** Records the witness instead of proving; proving is minutes and 36 MB. */
+/** Records the witness instead of proving; proving is minutes and ~49 MB. */
 function recordingProver(): Prover & { last?: Record<string, unknown> } {
     const p: Prover & { last?: Record<string, unknown> } = {
         async prove(input) {
