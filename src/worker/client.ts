@@ -128,22 +128,13 @@ export function createWorkerRpc<M extends MethodMap>(
 
     attach(worker, onMessage, onError, onMessageError, name);
 
-    // Replicate logging config into the worker realm, which starts at
-    // `silent` and would otherwise short-circuit every `timed()` span before
-    // the forwarding sink ever saw it.
-    //
-    // Skipped when logging is off, so the common path posts nothing. Sent
-    // before any call is safe even though the worker script may not have
-    // evaluated: messages queue until its listener is installed. A later
-    // `configureLogging` here is not re-propagated — configure before
-    // spawning workers.
-    const logCfg = loggingConfig();
-    if (logCfg.level !== "silent") {
-        worker.postMessage({
-            kind: "log-config",
-            level: logCfg.level,
-            namespaces: logCfg.namespaces,
-        } satisfies RpcControl);
+    // See `RpcControl` for why the worker needs this at all. Two facts local to
+    // here: posting before the worker script has evaluated is safe because
+    // messages queue until its listener is installed, and a later
+    // `configureLogging` is not re-propagated — configure before spawning.
+    const { level, namespaces } = loggingConfig();
+    if (level !== "silent") {
+        worker.postMessage({ kind: "log-config", level, namespaces } satisfies RpcControl);
     }
 
     return {

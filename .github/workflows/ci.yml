@@ -102,6 +102,13 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
+      # The only coverage that runs the Rust prover and verifies its output
+      # against the companion's verification key, for both shapes. `npm test`
+      # excludes `*.bench.ts` to stay fast, so without this step nothing in CI
+      # would catch a wasm prover that produces invalid proofs.
+      - name: "Prover parity (wasm vs snarkjs, both shapes)"
+        run: npm run test:bench
+
       - name: WASM size budget
         run: node scripts/check-wasm-size.mjs
 

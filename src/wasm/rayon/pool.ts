@@ -149,7 +149,10 @@ async function startPool(
 async function defaultThreadCount(): Promise<number> {
     try {
         const os = await import(/* @vite-ignore */ NODE_OS);
-        return os.availableParallelism?.() ?? os.cpus().length;
+        // Same clamp as the browser path: a 128-core CI box would otherwise
+        // spawn 128 worker threads and 128 never-reclaimed wasm stacks, far
+        // past the point the MSM has work to hand out.
+        return defaultThreads(os.availableParallelism?.() ?? os.cpus().length);
     } catch {
         return 4;
     }

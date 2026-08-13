@@ -43,9 +43,7 @@ const _buildCache = new Map<string, Promise<WasmProver>>();
  * the circom 1 path would consume it.
  */
 function buildWitnessCalculator(circuitWasm: Uint8Array): Promise<WitnessCalculator> {
-    return WitnessCalculatorBuilder(circuitWasm, {
-        memorySize: 1,
-    }) as Promise<WitnessCalculator>;
+    return WitnessCalculatorBuilder(circuitWasm, { memorySize: 1 }) as Promise<WitnessCalculator>;
 }
 
 export class WasmProver implements Prover {
@@ -87,11 +85,9 @@ export class WasmProver implements Prover {
             ),
         ]);
         const session = new Session(zkeyBytes);
-        // `Session` has parsed the key into wasm linear memory and `wc` holds a
-        // compiled module, so nothing reads these bytes again — but the byte
-        // memo would hold ~53 MB of them for the life of the realm. Released
-        // here rather than globally because `SnarkjsProver` re-reads its bytes
-        // per proof; only this build knows it is finished with them.
+        // The key now lives in wasm linear memory and `wc` holds a compiled
+        // module, so nothing reads these bytes again. See `releaseArtifactBytes`
+        // for why this is the caller's call and not a global policy.
         releaseArtifactBytes(paths.zkeyPath, paths.wasmPath);
         return new WasmProver(session, wc);
     }

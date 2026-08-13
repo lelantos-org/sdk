@@ -18,6 +18,12 @@ parallel = [
     "dep:rayon",
     "dep:wasm-bindgen-rayon",
 ]
+# Measurement build — see `src/trace.rs`. Times the QAP witness map on its own
+# so the MSM block can be read off as the remainder, and logs the split to the
+# console. Computes the map twice per proof, so a trace build is slower than a
+# release build and its wall-clock numbers are not comparable. Never ship it:
+# `just prover-build` overwrites `pkg/` with a clean release build.
+trace = []
 
 [dependencies]
 ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }

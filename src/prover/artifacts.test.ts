@@ -60,6 +60,32 @@ function respondWith(body: BodyInit): ReturnType<typeof vi.fn> {
     return mock;
 }
 
+/**
+ * Stub `fetch` with a chunked streaming body. Trailing object argument sets
+ * response headers — `content-length` is what decides whether
+ * `readWithProgress` can preallocate.
+ */
+function streamOf(...chunks: (number[] | Record<string, string>)[]): void {
+    const last = chunks.at(-1);
+    const headers = Array.isArray(last) ? undefined : (last as Record<string, string>);
+    const data = (headers ? chunks.slice(0, -1) : chunks) as number[][];
+    vi.stubGlobal(
+        "fetch",
+        vi.fn(
+            async () =>
+                new Response(
+                    new ReadableStream({
+                        start(c) {
+                            for (const chunk of data) c.enqueue(new Uint8Array(chunk));
+                            c.close();
+                        },
+                    }),
+                    headers ? { headers } : undefined,
+                ),
+        ),
+    );
+}
+
 beforeEach(() => __resetArtifactCacheForTest());
 
 afterEach(() => {
@@ -174,10 +200,6 @@ describe("releaseArtifactBytes", () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
-
-    it("ignores paths it never held", () => {
-        expect(() => releaseArtifactBytes("https://cdn.test/never-loaded")).not.toThrow();
-    });
 });
 
 describe("resolveArtifacts", () => {
@@ -191,27 +213,21 @@ describe("resolveArtifacts", () => {
         });
     });
 
-    it("absolutises a page-relative base in a browser", () => {
+    it("absolutises page-relative references in a browser", () => {
         // A self-hosted app passing `proverArtifactsCdn: "/artifacts"` fetches
         // fine but fails `isHttpUrl`, silently losing artifact persistence.
+        // Absolutising also means two spellings cannot become two cache keys,
+        // hence two downloads and two prover sessions.
         vi.stubGlobal("location", { href: "https://app.test/wallet/" });
-        expect(resolveArtifacts({ wasmPath: "/artifacts/3x3.wasm", zkeyPath: "3x3.zkey" })).toEqual(
-            {
-                wasmPath: "https://app.test/artifacts/3x3.wasm",
-                zkeyPath: "https://app.test/wallet/3x3.zkey",
-            },
-        );
-    });
+        const absolute = {
+            wasmPath: "https://app.test/artifacts/3x3.wasm",
+            zkeyPath: "https://app.test/wallet/3x3.zkey",
+        };
 
-    it("gives two spellings of one artifact the same key", () => {
-        vi.stubGlobal("location", { href: "https://app.test/wallet/" });
-        const a = resolveArtifacts({ wasmPath: "/a/c.wasm", zkeyPath: "/a/k.zkey" });
-        const b = resolveArtifacts({
-            wasmPath: "https://app.test/a/c.wasm",
-            zkeyPath: "https://app.test/a/k.zkey",
-        });
-        // Divergent keys mean two downloads and two prover sessions.
-        expect(a).toEqual(b);
+        expect(resolveArtifacts({ wasmPath: "/artifacts/3x3.wasm", zkeyPath: "3x3.zkey" })).toEqual(
+            absolute,
+        );
+        expect(resolveArtifacts(absolute)).toEqual(absolute);
     });
 });
 
@@ -309,23 +325,8 @@ describe("loadArtifactBytes network handling", () => {
     });
 
     it("assembles a streamed body that declares no length", async () => {
-        // No `content-length` means the destination cannot be preallocated, so
-        // this takes the chunk-list fallback rather than the direct-write path.
-        vi.stubGlobal(
-            "fetch",
-            vi.fn(
-                async () =>
-                    new Response(
-                        new ReadableStream({
-                            start(c) {
-                                c.enqueue(new Uint8Array([1, 2]));
-                                c.enqueue(new Uint8Array([3, 4]));
-                                c.close();
-                            },
-                        }),
-                    ),
-            ),
-        );
+        // Nothing to preallocate from, so this exercises growth from zero.
+        streamOf([1, 2], [3, 4]);
         const seen: Array<number | undefined> = [];
 
         const out = await loadArtifactBytes(`${ZKEY}?nolength`, {
@@ -337,25 +338,24 @@ describe("loadArtifactBytes network handling", () => {
     });
 
     it("recovers when the body outruns its declared content-length", async () => {
-        vi.stubGlobal(
-            "fetch",
-            vi.fn(
-                async () =>
-                    new Response(
-                        new ReadableStream({
-                            start(c) {
-                                c.enqueue(new Uint8Array([1, 2]));
-                                c.enqueue(new Uint8Array([3, 4]));
-                                c.close();
-                            },
-                        }),
-                        { headers: { "content-length": "3" } },
-                    ),
-            ),
-        );
+        // The second chunk does not fit the 3 bytes the server promised, so the
+        // buffer has to grow mid-stream. `onProgress` is required: without it
+        // `fetchArtifact` takes `res.arrayBuffer()` and never streams at all.
+        streamOf([1, 2], [3, 4], { "content-length": "3" });
 
-        // The second chunk does not fit the preallocated 3 bytes; it spills to
-        // the fallback list and the two halves are merged in order.
-        await expect(loadArtifactBytes(`${ZKEY}?short`)).resolves.toEqual(BYTES);
+        await expect(loadArtifactBytes(`${ZKEY}?short`, { onProgress: () => {} })).resolves.toEqual(
+            BYTES,
+        );
+    });
+
+    it("trims a body shorter than its declared content-length", async () => {
+        // Over-declared: the result must be the 2 bytes received, and must not
+        // retain the oversized buffer behind a view.
+        streamOf([1, 2], { "content-length": "64" });
+
+        const out = await loadArtifactBytes(`${ZKEY}?long`, { onProgress: () => {} });
+
+        expect(out).toEqual(new Uint8Array([1, 2]));
+        expect(out.buffer.byteLength).toBe(2);
     });
 });

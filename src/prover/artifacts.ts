@@ -43,9 +43,10 @@ export function resolveArtifacts(input: ProverPaths | ProverArtifacts): {
     wasmPath: string;
     zkeyPath: string;
 } {
-    // `toAbsoluteUrl` canonicalises browser-relative references here, at the
-    // one funnel every backend passes through, so downstream cache keys and
-    // the `isHttpUrl` persistence check see a single stable spelling.
+    // Canonicalised here as well as in `loadArtifactBytes` — not redundantly.
+    // This output is what `WorkerProver` posts across to its worker, and inside
+    // a worker `location.href` is the *worker script* URL, so a relative path
+    // resolved on the far side would resolve against a different base.
     if ("wasmPath" in input) {
         return {
             wasmPath: toAbsoluteUrl(input.wasmPath),
@@ -226,20 +227,29 @@ export interface LoadArtifactOpts {
 
 /**
  * Load artifact bytes from a filesystem path, `file://` href, or `http(s)://`
- * URL. Results are memoised by exact string for the life of the realm; a
- * failed load is evicted so callers can retry.
+ * URL. Results are memoised for the life of the realm; a failed load is
+ * evicted so callers can retry.
  *
  * http(s) loads also consult the persistent cache — see
  * {@link configureArtifactCache}.
+ *
+ * The path is absolutised first, because that is what makes the memo key and
+ * the `isHttpUrl` persistence check agree across spellings. Doing it here
+ * rather than only in `resolveArtifacts` is deliberate: a caller-supplied
+ * `proverPaths` reaches this function without passing through there — via
+ * `WalletConfig.proverPaths`, the presets helper, `BundleCommon`, or the public
+ * `WasmProver.build` entrypoint — and a relative base on any of those routes
+ * would otherwise silently lose persistence and re-download on every load.
  */
 export function loadArtifactBytes(path: string, opts: LoadArtifactOpts = {}): Promise<Uint8Array> {
-    const cached = _cache.get(path);
+    const key = toAbsoluteUrl(path);
+    const cached = _cache.get(key);
     if (cached) return cached;
-    const p = load(path, opts).catch((err) => {
-        _cache.delete(path);
+    const p = load(key, opts).catch((err) => {
+        _cache.delete(key);
         throw err;
     });
-    _cache.set(path, p);
+    _cache.set(key, p);
     return p;
 }
 
@@ -317,11 +327,15 @@ async function fetchArtifact(
  * absent under some fetch polyfills and test mocks, hence the guard at the
  * call site.
  *
- * With a `content-length` the destination is preallocated and chunks are
- * copied straight in. Collecting chunks and concatenating afterwards would
- * hold two full copies at once — ~98 MB at the default shape, right before the
- * prover allocates a third in wasm memory. The chunk list is the fallback for
- * a chunked response that declares no length.
+ * One growable buffer, written in place. `content-length` sizes it up front, so
+ * the overwhelmingly common case — a CDN that declares the length correctly —
+ * does zero reallocations and holds exactly one copy of the ~49 MB body.
+ * Collecting chunks and concatenating at the end would hold two, right before
+ * the prover allocates a third in wasm memory.
+ *
+ * Doubling on overflow keeps a wrong or absent `content-length` merely slower
+ * rather than pathological: the earlier chunk-list-plus-merge fallback peaked
+ * at three copies when a server under-declared.
  */
 async function readWithProgress(
     res: Response,
@@ -331,38 +345,23 @@ async function readWithProgress(
     const total = Number(res.headers.get("content-length")) || undefined;
     const reader = (res.body as ReadableStream<Uint8Array>).getReader();
 
-    // Filled while the declared length holds; `spill` takes over if it doesn't.
-    let out = total !== undefined ? new Uint8Array(total) : undefined;
-    let fitted = 0;
-    const spill: Uint8Array[] = [];
+    let out = new Uint8Array(total ?? 0);
     let loaded = 0;
 
     for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        // A server that under-declared `content-length` would overflow `out`.
-        if (out && spill.length === 0 && fitted + value.length <= out.length) {
-            out.set(value, fitted);
-            fitted += value.length;
-        } else {
-            spill.push(value);
+        if (loaded + value.length > out.length) {
+            const grown = new Uint8Array(Math.max(loaded + value.length, out.length * 2));
+            grown.set(out.subarray(0, loaded));
+            out = grown;
         }
+        out.set(value, loaded);
         loaded += value.length;
         onProgress({ loaded, url, ...(total !== undefined ? { total } : {}) });
     }
 
-    // The common case: the body was exactly as long as it said it would be.
-    if (out && spill.length === 0) return fitted === out.length ? out : out.subarray(0, fitted);
-
-    const merged = new Uint8Array(loaded);
-    merged.set(out ? out.subarray(0, fitted) : EMPTY, 0);
-    let at = fitted;
-    out = undefined; // Let the partial buffer go before the copy grows the heap.
-    for (const c of spill) {
-        merged.set(c, at);
-        at += c.length;
-    }
-    return merged;
+    // `slice`, not `subarray`: a view would pin the whole oversized buffer for
+    // as long as the artifact is held.
+    return loaded === out.length ? out : out.slice(0, loaded);
 }
-
-const EMPTY = new Uint8Array(0);

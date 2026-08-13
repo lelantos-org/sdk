@@ -1,56 +1,83 @@
-// Prover parity + timing bench: SnarkjsProver vs WasmProver on the
-// canonical 2x2 circuit. Skipped when artifacts are unavailable.
+// Prover parity + timing bench: SnarkjsProver vs WasmProver, per shape.
 //
-// Artifacts resolve via `bundledProverArtifacts()` (env
-// LELANTOS_PROVER_ARTIFACTS_DIR or the @lelantos-org/circuits companion),
-// falling back to the sibling bench harness checkout. Run with
-// `npm run test:bench`.
+// Doubles as the migration safety net for the Rust prover: it is the only
+// place a proof produced by `wasm/prover` is verified against the companion's
+// verification key. Anything that changes the arkworks stack has to keep this
+// green for every shape. Wired into CI via `npm run test:bench`.
+//
+// Artifacts and witnesses come from the `@lelantos-org/circuits` devDependency,
+// so this runs anywhere `npm ci` has run. The sibling bench harness's
+// hand-made `input.<id>.json` wins when present, keeping device runs
+// comparable with the numbers already in `bench/results.json`.
 //
 // The debug sink below is load-bearing: `WasmProver.prove` splits its work
 // into `witness` and `groth16` records, and this is the only place that split
-// is observable. Without it the suite reports one opaque total.
+// is observable. Without it the suite reports one opaque total. A
+// `just prover-build-trace` build additionally prints `[prover-trace]` lines
+// splitting `groth16` into the QAP witness map and the MSM block.
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { shapeId, TRANSACT_2X2 } from "../core/shape.js";
+import { afterAll, describe, expect, it } from "vitest";
+import { type CircuitShape, shapeId, TRANSACT_2X2, TRANSACT_3X3 } from "../core/shape.js";
 import { configureLogging } from "../log/logger.js";
 import { bundledProverArtifacts, resolveArtifacts } from "./artifacts.js";
 import { SnarkjsProver, verify } from "./snarkjs.js";
 import type { ProveResult, ProverPaths } from "./types.js";
 import { WasmProver } from "./wasm-prover.js";
 
-// This suite is 2x2 specific — it is paired with `input.2x2.json`, and the
-// witness would not satisfy any other shape. `bundledProverArtifacts` defaults
-// to `DEFAULT_SHAPE` (3x3), so the shape must be named explicitly.
-const SHAPE = TRANSACT_2X2;
-const ID = shapeId(SHAPE);
+const SHAPES = [TRANSACT_2X2, TRANSACT_3X3];
+const WARM_ITERS = 3;
 
-const BENCH_BUILD_DIR = fileURLToPath(
-    new URL("../../../bench/node_modules/@lelantos-org/circuits/build", import.meta.url),
-);
-const BENCH_INPUT = fileURLToPath(
-    new URL(`../../../bench/public/input.${ID}.json`, import.meta.url),
-);
-
-async function resolvePaths(): Promise<ProverPaths | null> {
+/** Resolve a JSON file exported by the companion package. */
+function packaged<T>(spec: string): T | null {
     try {
-        return resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape: SHAPE }));
+        const resolved = (import.meta as { resolve?: (s: string) => string }).resolve?.(spec);
+        return resolved ? (JSON.parse(readFileSync(fileURLToPath(resolved), "utf8")) as T) : null;
     } catch {
-        if (existsSync(`${BENCH_BUILD_DIR}/${ID}_final.zkey`)) {
-            return {
-                wasmPath: `${BENCH_BUILD_DIR}/${ID}.wasm`,
-                zkeyPath: `${BENCH_BUILD_DIR}/${ID}_final.zkey`,
-            };
-        }
         return null;
     }
 }
 
-const paths = await resolvePaths();
-const available = paths !== null && existsSync(BENCH_INPUT);
+async function pathsFor(shape: CircuitShape): Promise<ProverPaths | null> {
+    try {
+        const paths = resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape }));
+        // `resolveArtifacts` yields `file://` hrefs for the companion package,
+        // which `existsSync` does not understand — convert before probing.
+        const onDisk = (p: string) => existsSync(p.startsWith("file:") ? fileURLToPath(p) : p);
+        return onDisk(paths.wasmPath) && onDisk(paths.zkeyPath) ? paths : null;
+    } catch {
+        return null;
+    }
+}
 
-if (available) {
+function inputFor(shape: CircuitShape): Record<string, unknown> | null {
+    const id = shapeId(shape);
+    const override = fileURLToPath(
+        new URL(`../../../bench/public/input.${id}.json`, import.meta.url),
+    );
+    if (existsSync(override)) {
+        return JSON.parse(readFileSync(override, "utf8")) as Record<string, unknown>;
+    }
+    const corpus = packaged<{ vectors?: { witness: Record<string, unknown> }[] }>(
+        `@lelantos-org/circuits/vectors/transact-${id}.json`,
+    );
+    return corpus?.vectors?.[0]?.witness ?? null;
+}
+
+const CASES = await Promise.all(
+    SHAPES.map(async (shape) => {
+        const id = shapeId(shape);
+        return {
+            id,
+            paths: await pathsFor(shape),
+            input: inputFor(shape),
+            vkey: packaged<object>(`@lelantos-org/circuits/${id}/verification_key.json`),
+        };
+    }),
+);
+
+if (CASES.some((c) => c.paths && c.input)) {
     // Straight to stdout rather than `consoleSink()`: vitest intercepts
     // `console.*` and the debug records do not survive it, which is what hid
     // this split until now.
@@ -61,7 +88,16 @@ if (available) {
     });
 }
 
-const WARM_ITERS = 3;
+// Load-bearing for measurement, not just hygiene. The rayon workers spin-wait
+// while idle, so a pool that outlives its run burns every core and silently
+// inflates whatever is timed next — early numbers in this file's history were
+// wrong for exactly that reason. `shutdown()` terminates all of them (verified
+// 16 -> 0). Note the pool can still be orphaned if a run is *killed* rather
+// than allowed to finish: prefer letting the bench complete, and check for
+// stray `node` processes before trusting a suspicious result.
+afterAll(async () => {
+    await WasmProver.shutdown();
+});
 
 function fmt(ms: number): string {
     return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms.toFixed(0)}ms`;
@@ -74,38 +110,38 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
     return out;
 }
 
-describe.skipIf(!available)("prover parity + timing (2x2)", () => {
-    // `available` guard guarantees paths is non-null inside this suite.
-    const p = paths as ProverPaths;
-    const input = available
-        ? (JSON.parse(readFileSync(BENCH_INPUT, "utf8")) as Record<string, unknown>)
-        : {};
-    const vkeyPath = `${p.zkeyPath.replace(/[^/]+$/, "")}verification_key.json`;
-    const vkey = existsSync(vkeyPath)
-        ? (JSON.parse(readFileSync(vkeyPath, "utf8")) as object)
-        : null;
+for (const { id, paths, input, vkey } of CASES) {
+    const ready = paths !== null && input !== null;
 
-    async function proveAndCheck(
-        label: string,
-        prover: { prove(i: Record<string, unknown>): Promise<ProveResult> },
-    ): Promise<ProveResult> {
-        const cold = await timed(`${label} cold prove`, () => prover.prove(input));
-        for (let i = 0; i < WARM_ITERS; i++) {
-            await timed(`${label} warm prove #${i + 1}`, () => prover.prove(input));
+    describe.skipIf(!ready)(`prover parity + timing (${id})`, () => {
+        // The `ready` guard above makes both non-null inside this suite.
+        const p = paths as ProverPaths;
+        const witness = input as Record<string, unknown>;
+
+        async function proveAndCheck(
+            label: string,
+            prover: { prove(i: Record<string, unknown>): Promise<ProveResult> },
+        ): Promise<ProveResult> {
+            const cold = await timed(`${label} cold prove`, () => prover.prove(witness));
+            for (let i = 0; i < WARM_ITERS; i++) {
+                await timed(`${label} warm prove #${i + 1}`, () => prover.prove(witness));
+            }
+            if (vkey) {
+                expect(await verify(vkey, cold.publicSignals, cold.proof)).toBe(true);
+            }
+            return cold;
         }
-        if (vkey) {
-            expect(await verify(vkey, cold.publicSignals, cold.proof)).toBe(true);
-        }
-        return cold;
-    }
 
-    it("snarkjs and wasm provers agree and verify", async () => {
-        const snark = await timed("snarkjs construct", async () => new SnarkjsProver(p));
-        const snarkRes = await proveAndCheck("snarkjs", snark);
+        it("snarkjs and wasm provers agree and verify", async () => {
+            const snark = await timed(`${id} snarkjs construct`, async () => new SnarkjsProver(p));
+            const snarkRes = await proveAndCheck(`${id} snarkjs`, snark);
 
-        const wasm = await timed("wasm build (zkey parse + pool)", () => WasmProver.build(p));
-        const wasmRes = await proveAndCheck("wasm", wasm);
+            const wasm = await timed(`${id} wasm build (zkey parse + pool)`, () =>
+                WasmProver.build(p),
+            );
+            const wasmRes = await proveAndCheck(`${id} wasm`, wasm);
 
-        expect(wasmRes.publicSignals).toEqual(snarkRes.publicSignals);
-    }, 600_000);
-});
+            expect(wasmRes.publicSignals).toEqual(snarkRes.publicSignals);
+        }, 600_000);
+    });
+}

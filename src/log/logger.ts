@@ -68,19 +68,20 @@ export interface LoggingConfig {
 
 let currentRank = 0;
 let currentSink: LogSink | null = null;
-let matchers: RegExp[] | null = null;
-// The globs as given. `matchers` holds their compiled form, whose `.source` is
-// a regex — feeding that back to `configureLogging` would escape it as a
-// literal glob and match nothing, so the round trip needs the originals.
+// `globs` is the filter of record and `matchers` is derived from it. Keeping
+// the originals is what lets `loggingConfig` round-trip: a compiled matcher's
+// `.source` is a regex, and feeding that back through `configureLogging` would
+// escape it as a literal glob and match nothing.
 let globs: string[] | null = null;
+let matchers: RegExp[] | null = null;
 
 /** Install (or clear) the logging configuration. Affects all loggers. */
 export function configureLogging(config: LoggingConfig): void {
     if (config.level !== undefined) currentRank = RANK[config.level];
     if (config.sink !== undefined) currentSink = config.sink;
     if (config.namespaces !== undefined) {
-        matchers = compile(config.namespaces);
-        globs = matchers ? normalizeGlobs(config.namespaces) : null;
+        globs = toGlobs(config.namespaces);
+        matchers = globs === null ? null : globs.map(toMatcher);
     }
 }
 
@@ -95,10 +96,15 @@ export function loggingConfig(): { level: LogLevel; namespaces: string[] | null 
     return { level, namespaces: globs };
 }
 
-function normalizeGlobs(ns: string | string[] | null): string[] | null {
+/** The one parser for the `string | string[] | null` filter input. */
+function toGlobs(ns: string | string[] | null): string[] | null {
     if (ns === null) return null;
     const list = typeof ns === "string" ? ns.split(/[\s,]+/).filter(Boolean) : [...ns];
     return list.length > 0 ? list : null;
+}
+
+function toMatcher(glob: string): RegExp {
+    return new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
 }
 
 /**
@@ -121,29 +127,15 @@ export function emitRecord(record: LogRecord): void {
     }
 }
 
-function compile(ns: string | string[] | null): RegExp[] | null {
-    if (ns === null) return null;
-    const list = typeof ns === "string" ? ns.split(/[\s,]+/).filter(Boolean) : ns;
-    if (list.length === 0) return null;
-    return list.map(
-        (g) => new RegExp(`^${g.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`),
-    );
-}
-
 function emit(
     ns: string,
     level: Exclude<LogLevel, "silent">,
     msg: string,
     fields?: Record<string, unknown>,
 ): void {
-    const sink = currentSink;
-    if (!sink) return;
+    if (!currentSink) return;
     if (matchers && !matchers.some((m) => m.test(ns))) return;
-    try {
-        sink({ level, ns, msg, fields, t: Date.now() });
-    } catch {
-        // A throwing sink must not break the operation being logged.
-    }
+    emitRecord({ level, ns, msg, fields, t: Date.now() });
 }
 
 class NsLogger implements Logger {

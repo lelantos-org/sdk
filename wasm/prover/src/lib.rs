@@ -11,6 +11,7 @@
 
 mod encode;
 mod qap;
+mod trace;
 mod wtns;
 mod zkey;
 
@@ -25,6 +26,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::encode::{public_signals, ProveOutput};
 use crate::qap::CircomReduction;
+use crate::trace::ProveTrace;
 use crate::zkey::read_zkey;
 
 #[cfg(feature = "parallel")]
@@ -69,6 +71,9 @@ impl ProverSession {
             return Err(JsValue::from_str("witness shorter than nPublic+1"));
         }
 
+        // Nothing without the `trace` feature; see the module for the cost.
+        let trace = ProveTrace::start(&self.matrices, witness.as_slice())?;
+
         let r = Fr::rand(&mut OsRng);
         let s = Fr::rand(&mut OsRng);
         let proof = Groth16::<Bn254, CircomReduction>::create_proof_with_reduction_and_matrices(
@@ -82,11 +87,13 @@ impl ProverSession {
         )
         .map_err(jserr)?;
 
+        trace.finish();
+
         let out = ProveOutput::from_proof(&proof, public_signals(&witness, n_public));
         serde_wasm_bindgen::to_value(&out).map_err(jserr)
     }
 }
 
-fn jserr<E: core::fmt::Display>(e: E) -> JsValue {
+pub(crate) fn jserr<E: core::fmt::Display>(e: E) -> JsValue {
     JsValue::from_str(&e.to_string())
 }

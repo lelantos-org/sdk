@@ -7,6 +7,8 @@
 // interface accept both a DOM `Worker` (transfer list `Transferable[]`) and a
 // `node:worker_threads` Worker (`TransferListItem[]`) without an `any`.
 
+import type { LogLevel } from "../log/logger.js";
+
 /**
  * Minimal worker surface. Satisfied by a DOM `Worker`, a
  * `node:worker_threads` Worker, and any test double.
@@ -70,7 +72,7 @@ export type RpcResponse =
  */
 export type RpcControl = {
     kind: "log-config";
-    level: string;
+    level: LogLevel;
     namespaces: string[] | null;
 };
 
