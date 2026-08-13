@@ -6,7 +6,7 @@
 import { retry } from "../core/async.js";
 import { ProverArtifactsFailedError, ProverArtifactsMissingError } from "../core/errors.js";
 import { type CircuitShape, DEFAULT_SHAPE, shapeId } from "../core/shape.js";
-import { urlToString } from "../core/url.js";
+import { isHttpUrl, urlToString } from "../core/url.js";
 import { getLogger } from "../log/logger.js";
 import { type ArtifactCache, cacheApiArtifactCache } from "./artifact-cache.js";
 import type { ProverArtifacts, ProverPaths } from "./types.js";
@@ -132,7 +132,6 @@ async function tryResolveCompanion(id: string): Promise<ProverArtifacts | null> 
 
 const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
 const NODE_FS_PROMISES = "node:fs/promises";
-const IS_HTTP = /^https?:\/\//;
 
 const _cache = new Map<string, Promise<Uint8Array>>();
 
@@ -148,15 +147,16 @@ let _persistent: ArtifactCache | null | undefined;
  *
  * Defaults to the Cache API wherever it exists, which is what makes a reload
  * — and the prover worker, which has its own JS realm and its own copy of the
- * in-memory map below — skip the ~49 MB download. Pass `false` to opt out, or
- * an {@link ArtifactCache} to store the bytes somewhere else.
+ * in-memory map below — skip the download. Pass `false` to opt out, or an
+ * {@link ArtifactCache} to store the bytes somewhere else.
  *
- * Module-level rather than a per-call option on purpose: the worker never sees
- * the caller's configuration, so the useful default has to be intrinsic.
- * State is module-local — two copies of the SDK in one bundle each need
- * configuring.
+ * State is module-local, and **a Web Worker is a separate module realm**. An
+ * `ArtifactCache` is a live object, so it cannot cross a `postMessage`
+ * boundary; call this inside the worker to override it there. The plain
+ * opt-out does cross — pass `cacheArtifacts: false` to `WorkerProver`, which
+ * forwards it the way it forwards `threads`.
  */
-export function configureArtifactCache(cache: ArtifactCache | false | null): void {
+export function configureArtifactCache(cache: ArtifactCache | false): void {
     _persistent = cache === false ? null : cache;
 }
 
@@ -178,16 +178,10 @@ export function __resetArtifactCacheForTest(): void {
     _persistent = undefined;
 }
 
-/**
- * Load artifact bytes from a filesystem path, `file://` href, or
- * `http(s)://` URL. Results are cached by exact string; a failed load
- * is evicted so callers can retry.
- *
- * @internal
- */
+/** Options for {@link loadArtifactBytes}. */
 export interface LoadArtifactOpts {
     /**
-     * Download progress for the zkey (~49 MB at `DEFAULT_SHAPE`).
+     * Download progress for the zkey.
      *
      * Results are cached by URL, so only the first caller for a given path
      * receives progress; a concurrent second caller awaits the same promise
@@ -200,6 +194,14 @@ export interface LoadArtifactOpts {
     timeoutMs?: number | undefined;
 }
 
+/**
+ * Load artifact bytes from a filesystem path, `file://` href, or `http(s)://`
+ * URL. Results are memoised by exact string for the life of the realm; a
+ * failed load is evicted so callers can retry.
+ *
+ * http(s) loads also consult the persistent cache — see
+ * {@link configureArtifactCache}.
+ */
 export function loadArtifactBytes(path: string, opts: LoadArtifactOpts = {}): Promise<Uint8Array> {
     const cached = _cache.get(path);
     if (cached) return cached;
@@ -212,14 +214,14 @@ export function loadArtifactBytes(path: string, opts: LoadArtifactOpts = {}): Pr
 }
 
 async function load(path: string, opts: LoadArtifactOpts): Promise<Uint8Array> {
-    if (IS_NODE && !IS_HTTP.test(path)) {
+    if (IS_NODE && !isHttpUrl(path)) {
         const { readFile } = await import(/* @vite-ignore */ NODE_FS_PROMISES);
         const target = path.startsWith("file://") ? new URL(path) : path;
         return new Uint8Array(await readFile(target));
     }
 
     // Only http(s) is persistable; a local path is already cheap to re-read.
-    const persistent = IS_HTTP.test(path) ? persistentCache() : null;
+    const persistent = isHttpUrl(path) ? persistentCache() : null;
     if (persistent) {
         const hit = await persistent.get(path);
         if (hit) {
@@ -281,9 +283,15 @@ async function fetchArtifact(
 }
 
 /**
- * Stream the body so a ~49 MB zkey can report progress. `res.body` is
+ * Stream the body so a large zkey can report progress. `res.body` is
  * absent under some fetch polyfills and test mocks, hence the guard at the
  * call site.
+ *
+ * With a `content-length` the destination is preallocated and chunks are
+ * copied straight in. Collecting chunks and concatenating afterwards would
+ * hold two full copies at once — ~98 MB at the default shape, right before the
+ * prover allocates a third in wasm memory. The chunk list is the fallback for
+ * a chunked response that declares no length.
  */
 async function readWithProgress(
     res: Response,
@@ -292,20 +300,39 @@ async function readWithProgress(
 ): Promise<Uint8Array> {
     const total = Number(res.headers.get("content-length")) || undefined;
     const reader = (res.body as ReadableStream<Uint8Array>).getReader();
-    const chunks: Uint8Array[] = [];
+
+    // Filled while the declared length holds; `spill` takes over if it doesn't.
+    let out = total !== undefined ? new Uint8Array(total) : undefined;
+    let fitted = 0;
+    const spill: Uint8Array[] = [];
     let loaded = 0;
+
     for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        chunks.push(value);
+        // A server that under-declared `content-length` would overflow `out`.
+        if (out && spill.length === 0 && fitted + value.length <= out.length) {
+            out.set(value, fitted);
+            fitted += value.length;
+        } else {
+            spill.push(value);
+        }
         loaded += value.length;
         onProgress({ loaded, url, ...(total !== undefined ? { total } : {}) });
     }
-    const out = new Uint8Array(loaded);
-    let at = 0;
-    for (const c of chunks) {
-        out.set(c, at);
+
+    // The common case: the body was exactly as long as it said it would be.
+    if (out && spill.length === 0) return fitted === out.length ? out : out.subarray(0, fitted);
+
+    const merged = new Uint8Array(loaded);
+    merged.set(out ? out.subarray(0, fitted) : EMPTY, 0);
+    let at = fitted;
+    out = undefined; // Let the partial buffer go before the copy grows the heap.
+    for (const c of spill) {
+        merged.set(c, at);
         at += c.length;
     }
-    return out;
+    return merged;
 }
+
+const EMPTY = new Uint8Array(0);

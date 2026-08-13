@@ -17,7 +17,6 @@ export {
     type ArtifactCache,
     cacheApiArtifactCache,
     clearArtifactCache,
-    persistArtifactStorage,
 } from "./artifact-cache.js";
 export {
     bundledProverArtifacts,
@@ -47,3 +46,5 @@ export {
     WorkerProver,
     type WorkerProverOpts,
 } from "./worker-client.js";
+// Both option types above extend it, so it has to be nameable.
+export type { WorkerSetup } from "./worker-protocol.js";

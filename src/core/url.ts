@@ -7,3 +7,15 @@ export type Url = string | URL;
 export function urlToString(u: Url): string {
     return u instanceof URL ? u.href : u;
 }
+
+/**
+ * Whether `u` is an `http(s)` URL rather than a filesystem path or `file://`
+ * href.
+ *
+ * The dividing line for three separate decisions: whether to read bytes off
+ * disk or over the network, and whether the Cache API can key on it (it stores
+ * `Request`s, which must be http(s)).
+ */
+export function isHttpUrl(u: string): boolean {
+    return /^https?:\/\//.test(u);
+}

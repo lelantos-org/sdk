@@ -115,5 +115,6 @@ export {
     TRANSACT_3X3,
 } from "./shape.js";
 export type { Eip1193ProviderLike, EthSigner } from "./signer.js";
+export { requestPersistentStorage } from "./storage.js";
 export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./units.js";
-export { type Url, urlToString } from "./url.js";
+export { isHttpUrl, type Url, urlToString } from "./url.js";

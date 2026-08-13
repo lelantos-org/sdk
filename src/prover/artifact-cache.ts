@@ -12,6 +12,7 @@
 // Nothing here may throw. A cache is an optimisation; a storage failure must
 // degrade to a network fetch, never to a failed proof.
 
+import { isHttpUrl } from "../core/url.js";
 import { getLogger } from "../log/logger.js";
 
 const log = getLogger("lelantos:prover:cache");
@@ -22,6 +23,12 @@ const log = getLogger("lelantos:prover:cache");
  * Implement this to store artifacts somewhere other than the Cache API —
  * IndexedDB, OPFS, an Electron userData directory — and install it with
  * `configureArtifactCache`.
+ *
+ * Unlike the wallet-tier ports (`NoteStore`, `TreePersistence`), **neither
+ * method may throw**: those persist state whose loss is a correctness problem,
+ * whereas a cache is an optimisation and a storage failure must degrade to a
+ * network fetch. They are also `get`/`put` rather than `load`/`save` because
+ * this port is keyed — it holds one entry per artifact URL, not one document.
  */
 export interface ArtifactCache {
     /** Cached bytes for `url`, or `null` on a miss. Must not throw. */
@@ -35,11 +42,6 @@ export interface ArtifactCache {
  * rather than misread them; `clearArtifactCache` only clears the current one.
  */
 export const ARTIFACT_CACHE_NAME = "lelantos-prover-v1";
-
-/** The Cache API stores `Request`s, which must be http(s). */
-function cacheable(url: string): boolean {
-    return /^https?:\/\//.test(url);
-}
 
 function available(): boolean {
     return typeof caches !== "undefined" && typeof caches.open === "function";
@@ -55,13 +57,15 @@ function available(): boolean {
  * revalidation. There is deliberately no conditional request here — a
  * round-trip on every load would defeat the point.
  */
-export function cacheApiArtifactCache(name: string = ARTIFACT_CACHE_NAME): ArtifactCache | null {
+export function cacheApiArtifactCache(): ArtifactCache | null {
     if (!available()) return null;
     return {
         async get(url) {
-            if (!cacheable(url)) return null;
+            // The Cache API stores `Request`s, which must be http(s). The
+            // built-in caller already filters, so this guards direct users.
+            if (!isHttpUrl(url)) return null;
             try {
-                const cache = await caches.open(name);
+                const cache = await caches.open(ARTIFACT_CACHE_NAME);
                 const hit = await cache.match(url);
                 if (!hit) return null;
                 return new Uint8Array(await hit.arrayBuffer());
@@ -72,9 +76,9 @@ export function cacheApiArtifactCache(name: string = ARTIFACT_CACHE_NAME): Artif
         },
 
         async put(url, bytes) {
-            if (!cacheable(url)) return;
+            if (!isHttpUrl(url)) return;
             try {
-                const cache = await caches.open(name);
+                const cache = await caches.open(ARTIFACT_CACHE_NAME);
                 // `BodyInit` excludes SharedArrayBuffer-backed views. These
                 // bytes always come from `fetch` or `readFile`, never from the
                 // rayon shared heap, so the narrowing holds.
@@ -103,33 +107,12 @@ export function cacheApiArtifactCache(name: string = ARTIFACT_CACHE_NAME): Artif
  * Resolves to `false` when there was nothing to delete or the Cache API is
  * unavailable.
  */
-export async function clearArtifactCache(name: string = ARTIFACT_CACHE_NAME): Promise<boolean> {
+export async function clearArtifactCache(): Promise<boolean> {
     if (!available()) return false;
     try {
-        return await caches.delete(name);
+        return await caches.delete(ARTIFACT_CACHE_NAME);
     } catch (err) {
         log.warn("artifact cache clear failed", { err });
-        return false;
-    }
-}
-
-/**
- * Ask the browser to exempt this origin's storage from eviction.
- *
- * Worth calling once at startup on any site that proves in the browser: WebKit
- * evicts Cache API storage after ~7 days without a visit, which silently
- * restores the ~49 MB cold start. Resolves `false` when unsupported or denied
- * — Chrome grants it on an engagement heuristic rather than a prompt, so a
- * `false` here is informational, not an error.
- */
-export async function persistArtifactStorage(): Promise<boolean> {
-    try {
-        const storage = (globalThis as { navigator?: { storage?: StorageManager } }).navigator
-            ?.storage;
-        if (typeof storage?.persist !== "function") return false;
-        return await storage.persist();
-    } catch (err) {
-        log.warn("storage persistence request failed", { err });
         return false;
     }
 }

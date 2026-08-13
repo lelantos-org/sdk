@@ -3,19 +3,32 @@
 
 import type { ProveResult, ProverPaths } from "./types.js";
 
-export interface ProveParams {
-    paths: ProverPaths;
-    input: Record<string, unknown>;
-    /**
-     * Pin rayon thread count. Only honoured on the FIRST request; the pool
-     * is reused across subsequent ones.
-     */
+/**
+ * Settings that must reach the worker's own module realm.
+ *
+ * The worker never sees the caller's module-level configuration, so anything
+ * serializable that a caller can set on the main thread has to travel here
+ * too. Both are honoured only on the FIRST request — the thread pool and the
+ * prover session are built once and reused.
+ */
+export interface WorkerSetup {
+    /** Pin rayon thread count. */
     threads?: number | undefined;
+    /**
+     * Set `false` to skip persisting downloaded artifacts in the worker.
+     * A custom `ArtifactCache` cannot cross `postMessage`; install that with
+     * `configureArtifactCache` inside the worker instead.
+     */
+    cacheArtifacts?: boolean | undefined;
 }
 
-export interface PreloadParams {
+export interface ProveParams extends WorkerSetup {
     paths: ProverPaths;
-    threads?: number | undefined;
+    input: Record<string, unknown>;
+}
+
+export interface PreloadParams extends WorkerSetup {
+    paths: ProverPaths;
 }
 
 /** Method table for the prover worker. */

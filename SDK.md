@@ -638,15 +638,13 @@ The default shape is 3x3, whose zkey is ~49 MB. Downloaded artifacts are persist
 The URL is the cache key, so **serve new proving keys under a new path**. There is no revalidation request — a round-trip on every load would defeat the point.
 
 ```ts
-import {
-    clearArtifactCache,
-    configureArtifactCache,
-    persistArtifactStorage,
-} from "@lelantos-org/sdk/prover";
+import { requestPersistentStorage } from "@lelantos-org/sdk";
+import { clearArtifactCache, configureArtifactCache } from "@lelantos-org/sdk/prover";
 
 // Recommended once at startup: WebKit evicts Cache API storage after ~7 days
-// without a visit, which silently restores the cold start.
-await persistArtifactStorage();
+// without a visit, which silently restores the cold start. This covers every
+// store the origin owns, so a persisted note or tree store benefits too.
+await requestPersistentStorage();
 
 await clearArtifactCache();        // reclaim ~85 MB, or force a re-download
 configureArtifactCache(false);     // opt out entirely
@@ -655,7 +653,11 @@ configureArtifactCache(myCache);   // or store them in IndexedDB / OPFS / disk
 
 A custom cache implements `ArtifactCache` — `get(url)` and `put(url, bytes)`, neither of which may throw. A storage failure always degrades to a network fetch, never to a failed proof.
 
-Note that `configureArtifactCache` is module-level state, and a Web Worker is a separate module realm. Call it inside the worker too if you are overriding the default there.
+**A Web Worker is a separate module realm**, so `configureArtifactCache` on the main thread does not reach a `WorkerProver`. The plain opt-out travels over the RPC alongside `threads`; a live `ArtifactCache` object cannot, so install a custom one inside the worker.
+
+```ts
+browserWorkerProver({ workerUrl, paths, cacheArtifacts: false });
+```
 
 ---
 

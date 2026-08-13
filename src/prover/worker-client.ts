@@ -9,7 +9,7 @@ import { spawnModuleWorker } from "../worker/spawn.js";
 import type { WorkerLike } from "../worker/types.js";
 import { resolveArtifacts } from "./artifacts.js";
 import type { ProveResult, Prover, ProverArtifacts, ProverPaths } from "./types.js";
-import type { ProverMethods } from "./worker-protocol.js";
+import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
 
 /**
  * Proving is minutes-long by design and the artifact fetch is ~49 MB at
@@ -21,23 +21,23 @@ const PROVE_TIMEOUT_MS = 180_000;
 
 export type { WorkerLike };
 
-export interface WorkerProverOpts {
+export interface WorkerProverOpts extends WorkerSetup {
     /** Worker running `@lelantos-org/sdk/prover-worker`. */
     worker: WorkerLike;
     /** Artifact URLs. Sent to the worker on first `prove()` and cached there. */
     paths: ProverPaths | ProverArtifacts;
-    /** Pin rayon thread count. Default: `max(2, navigator.hardwareConcurrency)`. */
-    threads?: number | undefined;
 }
 
 export class WorkerProver implements Prover {
     private readonly rpc: WorkerRpc<ProverMethods>;
     private readonly paths: ProverPaths;
-    private readonly threads?: number | undefined;
+    private readonly setup: WorkerSetup;
 
     constructor(opts: WorkerProverOpts) {
         this.paths = resolveArtifacts(opts.paths);
-        this.threads = opts.threads;
+        // The worker has its own module realm and cannot read the caller's
+        // module-level configuration; these ride along on every request.
+        this.setup = { threads: opts.threads, cacheArtifacts: opts.cacheArtifacts };
         this.rpc = createWorkerRpc<ProverMethods>(opts.worker, {
             name: "prover",
             timeouts: { preload: PRELOAD_TIMEOUT_MS, prove: PROVE_TIMEOUT_MS },
@@ -45,7 +45,7 @@ export class WorkerProver implements Prover {
     }
 
     prove(input: Record<string, unknown>): Promise<ProveResult> {
-        return this.rpc.call("prove", { paths: this.paths, input, threads: this.threads });
+        return this.rpc.call("prove", { paths: this.paths, input, ...this.setup });
     }
 
     /**
@@ -54,7 +54,7 @@ export class WorkerProver implements Prover {
      * latency mid-transaction.
      */
     preload(): Promise<void> {
-        return this.rpc.call("preload", { paths: this.paths, threads: this.threads });
+        return this.rpc.call("preload", { paths: this.paths, ...this.setup });
     }
 
     /** Tear down the worker; pending proofs reject. */
@@ -63,18 +63,13 @@ export class WorkerProver implements Prover {
     }
 }
 
-export interface BrowserWorkerProverOpts {
+export interface BrowserWorkerProverOpts extends WorkerSetup {
     /** `new URL("@lelantos-org/sdk/prover-worker", import.meta.url)` */
     workerUrl: string | URL;
     paths: ProverPaths | ProverArtifacts;
-    threads?: number | undefined;
 }
 
 /** Spawns the Worker and returns a `WorkerProver`. */
-export function browserWorkerProver(opts: BrowserWorkerProverOpts): WorkerProver {
-    return new WorkerProver({
-        worker: spawnModuleWorker(opts.workerUrl),
-        paths: opts.paths,
-        threads: opts.threads,
-    });
+export function browserWorkerProver({ workerUrl, ...opts }: BrowserWorkerProverOpts): WorkerProver {
+    return new WorkerProver({ worker: spawnModuleWorker(workerUrl), ...opts });
 }

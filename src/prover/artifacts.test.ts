@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-    ARTIFACT_CACHE_NAME,
-    cacheApiArtifactCache,
-    clearArtifactCache,
-} from "./artifact-cache.js";
+import { cacheApiArtifactCache, clearArtifactCache } from "./artifact-cache.js";
 import {
     __resetArtifactCacheForTest,
     configureArtifactCache,
@@ -12,8 +8,8 @@ import {
 
 // The zkey is ~49 MB at the default 3x3 shape and was re-downloaded on every
 // page load *and* every worker spawn before persistence existed. These pin the
-// two properties that makes worth having: a hit never touches the network, and
-// no storage failure can turn into a failed proof.
+// two properties that make it worth having: a hit never touches the network,
+// and no storage failure can turn into a failed proof.
 //
 // They are also the first coverage of `loadArtifactBytes` at all, so the retry
 // and status-classification paths are asserted here too.
@@ -24,37 +20,40 @@ const BYTES = new Uint8Array([1, 2, 3, 4]);
 /**
  * Minimal in-memory stand-in for the Cache API, keyed by request URL.
  *
- * `Uint8Array<ArrayBuffer>` rather than plain `Uint8Array`: `BodyInit` rejects
- * SharedArrayBuffer-backed views, and `Uint8Array` alone is generic over both.
+ * Entries are `ArrayBuffer` rather than `Uint8Array` because `BodyInit`
+ * rejects SharedArrayBuffer-backed views and plain `Uint8Array` is generic
+ * over both — storing buffers sidesteps the variance entirely. Only one cache
+ * name is ever in play, so there is no outer namespace.
  */
-function fakeCaches(): {
-    store: Map<string, Map<string, Uint8Array<ArrayBuffer>>>;
-    open: ReturnType<typeof vi.fn>;
-} {
-    const store = new Map<string, Map<string, Uint8Array<ArrayBuffer>>>();
-    const open = vi.fn(async (name: string) => {
-        let entries = store.get(name);
-        if (!entries) {
-            entries = new Map();
-            store.set(name, entries);
-        }
-        const own = entries;
-        return {
-            match: async (url: string) => {
-                const hit = own.get(url);
-                return hit ? new Response(hit) : undefined;
-            },
-            put: async (url: string, res: Response) => {
-                own.set(url, new Uint8Array(await res.arrayBuffer()) as Uint8Array<ArrayBuffer>);
-            },
-        };
+function fakeCaches(): { entries: Map<string, ArrayBuffer>; open: ReturnType<typeof vi.fn> } {
+    const entries = new Map<string, ArrayBuffer>();
+    const open = vi.fn(async () => ({
+        match: async (url: string) => {
+            const hit = entries.get(url);
+            return hit ? new Response(hit) : undefined;
+        },
+        put: async (url: string, res: Response) => {
+            entries.set(url, await res.arrayBuffer());
+        },
+    }));
+    vi.stubGlobal("caches", {
+        open,
+        delete: async () => {
+            const had = entries.size > 0;
+            entries.clear();
+            return had;
+        },
     });
-    vi.stubGlobal("caches", { open, delete: async (n: string) => store.delete(n) });
-    return { store, open };
+    return { entries, open };
 }
 
-function respondWith(bytes: Uint8Array<ArrayBuffer>): ReturnType<typeof vi.fn> {
-    const mock = vi.fn(async () => new Response(bytes, { status: 200 }));
+/** Seed a cache hit for `url`. */
+function seed(entries: Map<string, ArrayBuffer>, url: string, bytes: Uint8Array): void {
+    entries.set(url, bytes.slice().buffer);
+}
+
+function respondWith(body: BodyInit): ReturnType<typeof vi.fn> {
+    const mock = vi.fn(async () => new Response(body, { status: 200 }));
     vi.stubGlobal("fetch", mock);
     return mock;
 }
@@ -68,8 +67,8 @@ afterEach(() => {
 
 describe("loadArtifactBytes persistence", () => {
     it("serves a cached artifact without touching the network", async () => {
-        const { store } = fakeCaches();
-        store.set(ARTIFACT_CACHE_NAME, new Map([[ZKEY, BYTES]]));
+        const { entries } = fakeCaches();
+        seed(entries, ZKEY, BYTES);
         const fetchMock = respondWith(new Uint8Array([9, 9]));
 
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
@@ -91,8 +90,8 @@ describe("loadArtifactBytes persistence", () => {
     });
 
     it("reports one terminal progress event on a hit", async () => {
-        const { store } = fakeCaches();
-        store.set(ARTIFACT_CACHE_NAME, new Map([[ZKEY, BYTES]]));
+        const { entries } = fakeCaches();
+        seed(entries, ZKEY, BYTES);
         respondWith(new Uint8Array());
         const seen: Array<{ loaded: number; total?: number }> = [];
 
@@ -103,7 +102,6 @@ describe("loadArtifactBytes persistence", () => {
     });
 
     it("still resolves when the cache write fails", async () => {
-        // QuotaExceededError is the realistic one at ~49 MB per shape.
         vi.stubGlobal("caches", {
             open: async () => ({
                 match: async () => undefined,
@@ -162,9 +160,10 @@ describe("loadArtifactBytes persistence", () => {
 });
 
 describe("cacheApiArtifactCache", () => {
-    it("is null without the Cache API", () => {
+    it("degrades to nothing when the Cache API is absent", async () => {
         vi.stubGlobal("caches", undefined);
         expect(cacheApiArtifactCache()).toBeNull();
+        expect(await clearArtifactCache()).toBe(false);
     });
 
     it("refuses non-http keys", async () => {
@@ -178,24 +177,14 @@ describe("cacheApiArtifactCache", () => {
         expect(open).not.toHaveBeenCalled();
     });
 
-    it("round-trips bytes", async () => {
-        fakeCaches();
-        const cache = cacheApiArtifactCache();
-        await cache?.put(ZKEY, BYTES);
-        expect(await cache?.get(ZKEY)).toEqual(BYTES);
-    });
-
     it("clears", async () => {
         fakeCaches();
         const cache = cacheApiArtifactCache();
         await cache?.put(ZKEY, BYTES);
+        expect(await cache?.get(ZKEY)).toEqual(BYTES);
+
         expect(await clearArtifactCache()).toBe(true);
         expect(await cache?.get(ZKEY)).toBeNull();
-    });
-
-    it("reports false when clearing without the Cache API", async () => {
-        vi.stubGlobal("caches", undefined);
-        expect(await clearArtifactCache()).toBe(false);
     });
 });
 
@@ -261,5 +250,56 @@ describe("loadArtifactBytes network handling", () => {
 
         expect(seen).toEqual([2, 4]);
         expect(out).toEqual(BYTES);
+    });
+
+    it("assembles a streamed body that declares no length", async () => {
+        // No `content-length` means the destination cannot be preallocated, so
+        // this takes the chunk-list fallback rather than the direct-write path.
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(
+                async () =>
+                    new Response(
+                        new ReadableStream({
+                            start(c) {
+                                c.enqueue(new Uint8Array([1, 2]));
+                                c.enqueue(new Uint8Array([3, 4]));
+                                c.close();
+                            },
+                        }),
+                    ),
+            ),
+        );
+        const seen: Array<number | undefined> = [];
+
+        const out = await loadArtifactBytes(`${ZKEY}?nolength`, {
+            onProgress: (p) => seen.push(p.total),
+        });
+
+        expect(out).toEqual(BYTES);
+        expect(seen).toEqual([undefined, undefined]);
+    });
+
+    it("recovers when the body outruns its declared content-length", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(
+                async () =>
+                    new Response(
+                        new ReadableStream({
+                            start(c) {
+                                c.enqueue(new Uint8Array([1, 2]));
+                                c.enqueue(new Uint8Array([3, 4]));
+                                c.close();
+                            },
+                        }),
+                        { headers: { "content-length": "3" } },
+                    ),
+            ),
+        );
+
+        // The second chunk does not fit the preallocated 3 bytes; it spills to
+        // the fallback list and the two halves are merged in order.
+        await expect(loadArtifactBytes(`${ZKEY}?short`)).resolves.toEqual(BYTES);
     });
 });
