@@ -19,3 +19,28 @@ export function urlToString(u: Url): string {
 export function isHttpUrl(u: string): boolean {
     return /^https?:\/\//.test(u);
 }
+
+/**
+ * In a browser, resolve a page-relative reference to an absolute URL; anywhere
+ * else, and for anything already absolute, return it unchanged.
+ *
+ * Self-hosted apps naturally pass a relative artifact base (`"/artifacts"`).
+ * That reference fetches fine but is not an `http(s)` URL, so without this it
+ * fails {@link isHttpUrl} and silently loses artifact persistence — a ~49 MB
+ * re-download on every page load. Resolving it also gives the byte cache a
+ * single canonical key, so two spellings of one artifact cannot produce two
+ * downloads and two prover sessions.
+ *
+ * Left alone outside a browser: there, a bare string is a filesystem path, and
+ * `new URL()` would corrupt it.
+ */
+export function toAbsoluteUrl(u: string): string {
+    if (isHttpUrl(u)) return u;
+    const href = (globalThis as { location?: { href?: string } }).location?.href;
+    if (!href) return u;
+    try {
+        return new URL(u, href).href;
+    } catch {
+        return u;
+    }
+}

@@ -9,7 +9,7 @@ import { WitnessCalculatorBuilder } from "circom_runtime";
 import { getLogger } from "../log/logger.js";
 import { timed, timedSync } from "../log/timed.js";
 import { shutdownRayonWorkers } from "../wasm/rayon/index.js";
-import { type LoadArtifactOpts, loadArtifactBytes } from "./artifacts.js";
+import { type LoadArtifactOpts, loadArtifactBytes, releaseArtifactBytes } from "./artifacts.js";
 import type { Groth16Proof, ProveResult, Prover, ProverPaths } from "./types.js";
 import { loadProver, type ProverSession } from "./wasm-loader.js";
 
@@ -26,6 +26,27 @@ interface WitnessCalculator {
 const log = getLogger("lelantos:prover:wasm");
 
 const _buildCache = new Map<string, Promise<WasmProver>>();
+
+/**
+ * Build the circom witness calculator.
+ *
+ * `memorySize: 1` is load-bearing. Left to its default, `circom_runtime`
+ * allocates a **2 GiB** `WebAssembly.Memory` (32767 pages), and on failure
+ * halves and retries — 1 GiB, 512 MB, … — logging a warning each round. On a
+ * phone already holding a ~49 MB proving key that is a plausible cause of the
+ * tab being killed.
+ *
+ * The allocation is pure waste here: it is handed to the module as `env.memory`,
+ * but circom 2 modules own and export their own memory and do not import it.
+ * Verified against both shipped circuits — each exports `memory`, neither
+ * imports `env.memory`, both export `getVersion` (the circom 2 marker). Only
+ * the circom 1 path would consume it.
+ */
+function buildWitnessCalculator(circuitWasm: Uint8Array): Promise<WitnessCalculator> {
+    return WitnessCalculatorBuilder(circuitWasm, {
+        memorySize: 1,
+    }) as Promise<WitnessCalculator>;
+}
 
 export class WasmProver implements Prover {
     private constructor(
@@ -54,15 +75,25 @@ export class WasmProver implements Prover {
     }
 
     private static async _doBuild(paths: ProverPaths, opts: LoadArtifactOpts): Promise<WasmProver> {
-        const [Session, zkeyBytes, circuitWasm] = await Promise.all([
+        const [Session, zkeyBytes, wc] = await Promise.all([
             loadProver(),
             loadArtifactBytes(paths.zkeyPath, opts),
-            // The witness calculator is ~4 MB against the zkey's ~49; reporting
-            // both through one callback would make the bar jump backwards.
-            loadArtifactBytes(paths.wasmPath, { ...opts, onProgress: undefined }),
+            // The witness calculator is ~4 MB against the zkey's ~49, so it
+            // lands far earlier — compile it as soon as it arrives rather than
+            // waiting on the barrel. Its progress is suppressed because
+            // reporting both through one callback makes the bar jump backwards.
+            loadArtifactBytes(paths.wasmPath, { ...opts, onProgress: undefined }).then(
+                buildWitnessCalculator,
+            ),
         ]);
-        const wc = (await WitnessCalculatorBuilder(circuitWasm)) as WitnessCalculator;
-        return new WasmProver(new Session(zkeyBytes), wc);
+        const session = new Session(zkeyBytes);
+        // `Session` has parsed the key into wasm linear memory and `wc` holds a
+        // compiled module, so nothing reads these bytes again — but the byte
+        // memo would hold ~53 MB of them for the life of the realm. Released
+        // here rather than globally because `SnarkjsProver` re-reads its bytes
+        // per proof; only this build knows it is finished with them.
+        releaseArtifactBytes(paths.zkeyPath, paths.wasmPath);
+        return new WasmProver(session, wc);
     }
 
     /**

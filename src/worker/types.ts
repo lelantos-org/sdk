@@ -58,6 +58,22 @@ export type RpcResponse =
     /** Out-of-band log record forwarded from the worker. */
     | { kind: "log"; record: unknown };
 
+/**
+ * Client → worker control messages, distinguished from an {@link RpcRequest}
+ * by carrying `kind` instead of `id`.
+ *
+ * `log-config` replicates the client's logging level and namespace filter into
+ * the worker realm. Logging state is module-local and a worker is a separate
+ * realm, so without this the worker sits at `silent` and every `timed()` call
+ * short-circuits — the sink installed by `forwardLogs` never receives anything
+ * to forward.
+ */
+export type RpcControl = {
+    kind: "log-config";
+    level: string;
+    namespaces: string[] | null;
+};
+
 /** One entry in a {@link MethodMap}. */
 export interface MethodSpec {
     params: unknown;

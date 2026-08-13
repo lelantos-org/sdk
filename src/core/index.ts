@@ -117,4 +117,4 @@ export {
 export type { Eip1193ProviderLike, EthSigner } from "./signer.js";
 export { requestPersistentStorage } from "./storage.js";
 export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./units.js";
-export { isHttpUrl, type Url, urlToString } from "./url.js";
+export { isHttpUrl, toAbsoluteUrl, type Url, urlToString } from "./url.js";

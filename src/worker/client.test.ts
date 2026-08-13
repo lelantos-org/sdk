@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isWalletError, WalletConfigError } from "../core/errors.js";
+import { configureLogging, loggingConfig } from "../log/logger.js";
 import { createWorkerRpc } from "./client.js";
 import { toWireError } from "./error-wire.js";
 import { type Handlers, serveWorkerRpc } from "./serve.js";
@@ -234,5 +235,67 @@ describe("serveWorkerRpc", () => {
                 {},
             ),
         ).rejects.toThrow(/unknown method/);
+    });
+});
+
+// The logging handshake. A worker is a separate module realm and starts at
+// `silent`, so `timed()` spans short-circuit there and the forwarding sink
+// installed by `forwardLogs` never receives anything. These pin both halves:
+// the client announcing its config, and the worker applying it.
+//
+// Deliberately not an end-to-end round trip — in one process
+// `installLogForwarder` replaces the same module-global sink the client reads
+// from, so a forwarded record would feed straight back into the forwarder.
+describe("log config handshake", () => {
+    const saved = loggingConfig();
+    afterEach(() => configureLogging({ ...saved, sink: null }));
+
+    it("posts nothing when logging is off", () => {
+        configureLogging({ level: "silent", sink: null, namespaces: null });
+        const w = new FakeWorker();
+        createWorkerRpc<TestMethods>(w);
+        // The overwhelmingly common path: no control message at all.
+        expect(w.sent).toEqual([]);
+    });
+
+    it("announces level and namespaces as globs, not compiled regexes", () => {
+        configureLogging({
+            level: "debug",
+            sink: () => {},
+            namespaces: "lelantos:prover:*",
+        });
+        const w = new FakeWorker();
+        createWorkerRpc<TestMethods>(w);
+
+        // `.source` of the compiled matcher would be `^lelantos:prover:.*$`,
+        // which `configureLogging` would then re-escape into a literal.
+        expect(w.sent).toEqual([
+            { kind: "log-config", level: "debug", namespaces: ["lelantos:prover:*"] },
+        ]);
+    });
+
+    it("is applied by the worker side and is not treated as a call", async () => {
+        configureLogging({ level: "silent", sink: null, namespaces: null });
+        const scope: WorkerScopeLike = { onmessage: null, postMessage: () => {} };
+        const echo = vi.fn(({ v }: { v: number }) => v);
+        serveWorkerRpc<TestMethods>(
+            {
+                echo,
+                slow: async () => "ok",
+                boom: () => {
+                    throw new Error("x");
+                },
+            },
+            { scope },
+        );
+
+        scope.onmessage?.({
+            data: { kind: "log-config", level: "debug", namespaces: ["lelantos:a:*"] },
+        });
+        await Promise.resolve();
+
+        expect(loggingConfig()).toEqual({ level: "debug", namespaces: ["lelantos:a:*"] });
+        // A control message must not be mistaken for an RPC request.
+        expect(echo).not.toHaveBeenCalled();
     });
 });

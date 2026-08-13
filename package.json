@@ -152,7 +152,9 @@
   ],
   "scripts": {
     "prebuild": "node scripts/sync-version.mjs",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/wasm/rayon && cp src/wasm/rayon/bootstrap.mjs dist/wasm/rayon/bootstrap.mjs",
+    "build": "npm run build:js && npm run build:types && mkdir -p dist/wasm/rayon && cp src/wasm/rayon/bootstrap.mjs dist/wasm/rayon/bootstrap.mjs",
+    "build:js": "tsc -p tsconfig.json --removeComments --declaration false --declarationMap false",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",

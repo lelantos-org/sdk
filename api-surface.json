@@ -342,6 +342,7 @@
     "shortId",
     "sleep",
     "str",
+    "toAbsoluteUrl",
     "toCircuitUnits",
     "toLeBytes",
     "toTokenUnits",

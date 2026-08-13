@@ -4,6 +4,8 @@ import {
     __resetArtifactCacheForTest,
     configureArtifactCache,
     loadArtifactBytes,
+    releaseArtifactBytes,
+    resolveArtifacts,
 } from "./artifacts.js";
 
 // The zkey is ~49 MB at the default 3x3 shape and was re-downloaded on every
@@ -156,6 +158,60 @@ describe("loadArtifactBytes persistence", () => {
 
         await expect(loadArtifactBytes(ZKEY)).resolves.toEqual(BYTES);
         expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("releaseArtifactBytes", () => {
+    it("drops the memo but leaves the persistent entry, so a reload is a hit", async () => {
+        fakeCaches();
+        const fetchMock = respondWith(BYTES);
+
+        expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
+        // The wasm prover parses the ~49 MB zkey into linear memory and never
+        // reads the Uint8Array again; without this the realm holds it twice.
+        releaseArtifactBytes(ZKEY);
+        expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores paths it never held", () => {
+        expect(() => releaseArtifactBytes("https://cdn.test/never-loaded")).not.toThrow();
+    });
+});
+
+describe("resolveArtifacts", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("leaves filesystem paths alone when there is no document", () => {
+        // Node: a bare string is a path, and `new URL()` would corrupt it.
+        expect(resolveArtifacts({ wasmPath: "/tmp/3x3.wasm", zkeyPath: "/tmp/3x3.zkey" })).toEqual({
+            wasmPath: "/tmp/3x3.wasm",
+            zkeyPath: "/tmp/3x3.zkey",
+        });
+    });
+
+    it("absolutises a page-relative base in a browser", () => {
+        // A self-hosted app passing `proverArtifactsCdn: "/artifacts"` fetches
+        // fine but fails `isHttpUrl`, silently losing artifact persistence.
+        vi.stubGlobal("location", { href: "https://app.test/wallet/" });
+        expect(resolveArtifacts({ wasmPath: "/artifacts/3x3.wasm", zkeyPath: "3x3.zkey" })).toEqual(
+            {
+                wasmPath: "https://app.test/artifacts/3x3.wasm",
+                zkeyPath: "https://app.test/wallet/3x3.zkey",
+            },
+        );
+    });
+
+    it("gives two spellings of one artifact the same key", () => {
+        vi.stubGlobal("location", { href: "https://app.test/wallet/" });
+        const a = resolveArtifacts({ wasmPath: "/a/c.wasm", zkeyPath: "/a/k.zkey" });
+        const b = resolveArtifacts({
+            wasmPath: "https://app.test/a/c.wasm",
+            zkeyPath: "https://app.test/a/k.zkey",
+        });
+        // Divergent keys mean two downloads and two prover sessions.
+        expect(a).toEqual(b);
     });
 });
 

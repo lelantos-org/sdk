@@ -65,12 +65,35 @@ export async function initBrowserThreadPool(
     const hw =
         (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator
             ?.hardwareConcurrency ?? 4;
-    const n = opts.threadCount ?? Math.max(2, hw);
+    const n = opts.threadCount ?? defaultThreads(hw);
     if (n <= 1) {
         return singleThreaded(opts.label, "requested", `thread count ${n} was requested`);
     }
 
     return startPool(mod, n, opts.label, { hardwareConcurrency: hw });
+}
+
+/**
+ * Threads to run rayon with, given `hardwareConcurrency`.
+ *
+ * Deliberately **not** clamped to 8 the way the scanner pool is
+ * (`sync/worker/pool.ts`). Measured on a 16-core Mac, 3x3 groth16:
+ *
+ * | threads | 4      | 8     | 16    |
+ * |---------|--------|-------|-------|
+ * | groth16 | 1288ms | 774ms | 665ms |
+ *
+ * 8 → 16 is still worth 14%, so an 8-clamp would be a real regression on
+ * desktop. The scanner's clamp is right for its own workload, not this one.
+ *
+ * The 32 ceiling is a runaway guard, not a tuning knob: each worker is a JS
+ * realm plus a stack in the prover's *shared* wasm memory, which can never
+ * shrink. Above that, arkworks 0.5's MSM has nothing left to hand out — it
+ * parallelises over ~20 scalar windows at our circuit size, so the extra
+ * workers cost memory and buy nothing.
+ */
+function defaultThreads(hw: number): number {
+    return Math.max(2, Math.min(32, hw));
 }
 
 export async function initNodeThreadPool(

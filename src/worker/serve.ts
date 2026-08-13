@@ -3,9 +3,9 @@
 // Owns error normalisation for every worker entrypoint, and rejects unknown
 // methods explicitly rather than dropping the message and hanging the caller.
 
-import { configureLogging, type LogRecord } from "../log/logger.js";
+import { configureLogging, type LogLevel, type LogRecord } from "../log/logger.js";
 import { toWireError } from "./error-wire.js";
-import type { MethodMap, RpcRequest, RpcResponse, WorkerScopeLike } from "./types.js";
+import type { MethodMap, RpcControl, RpcRequest, RpcResponse, WorkerScopeLike } from "./types.js";
 
 export type Handlers<M extends MethodMap> = {
     [K in keyof M]: (params: M[K]["params"]) => Promise<M[K]["result"]> | M[K]["result"];
@@ -37,6 +37,16 @@ export function serveWorkerRpc<M extends MethodMap>(
     if (opts.forwardLogs) installLogForwarder(scope, opts.logRateLimit ?? 200);
 
     const onMessage = async (ev: { data: unknown }): Promise<void> => {
+        const ctrl = ev?.data as RpcControl | undefined;
+        if (ctrl?.kind === "log-config") {
+            // Replicate the client's level/filter; the sink is already ours.
+            configureLogging({
+                level: ctrl.level as LogLevel,
+                namespaces: ctrl.namespaces,
+            });
+            return;
+        }
+
         const req = ev?.data as RpcRequest | undefined;
         if (!req || typeof req.id !== "number" || typeof req.method !== "string") return;
 

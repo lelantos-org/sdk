@@ -5,9 +5,9 @@
 // structured error propagation, and `error`/`messageerror` handling that
 // rejects everything in flight rather than leaving it pending forever.
 
-import { getLogger } from "../log/logger.js";
+import { emitRecord, getLogger, type LogRecord, loggingConfig } from "../log/logger.js";
 import { fromWireError, rpcError } from "./error-wire.js";
-import type { MethodMap, RpcRequest, RpcResponse, WorkerLike } from "./types.js";
+import type { MethodMap, RpcControl, RpcRequest, RpcResponse, WorkerLike } from "./types.js";
 
 const log = getLogger("lelantos:worker:rpc");
 
@@ -26,7 +26,11 @@ export interface WorkerRpcOptions {
     timeouts?: Record<string, number> | undefined;
     /** Label used in log records. */
     name?: string | undefined;
-    /** Forwards `{kind:"log"}` records from the worker into the local sink. */
+    /**
+     * Handles `{kind:"log"}` records forwarded by the worker. Defaults to
+     * replaying them into the local sink, which is what makes worker output
+     * visible at all — see the handshake note on {@link RpcControl}.
+     */
     onLogRecord?: ((record: unknown) => void) | undefined;
 }
 
@@ -86,7 +90,8 @@ export function createWorkerRpc<M extends MethodMap>(
         const msg = ev?.data as RpcResponse | undefined;
         if (!msg) return;
         if ("kind" in msg && msg.kind === "log") {
-            opts.onLogRecord?.(msg.record);
+            if (opts.onLogRecord) opts.onLogRecord(msg.record);
+            else emitRecord(msg.record as LogRecord);
             return;
         }
         if (!("id" in msg)) return;
@@ -122,6 +127,24 @@ export function createWorkerRpc<M extends MethodMap>(
     };
 
     attach(worker, onMessage, onError, onMessageError, name);
+
+    // Replicate logging config into the worker realm, which starts at
+    // `silent` and would otherwise short-circuit every `timed()` span before
+    // the forwarding sink ever saw it.
+    //
+    // Skipped when logging is off, so the common path posts nothing. Sent
+    // before any call is safe even though the worker script may not have
+    // evaluated: messages queue until its listener is installed. A later
+    // `configureLogging` here is not re-propagated — configure before
+    // spawning workers.
+    const logCfg = loggingConfig();
+    if (logCfg.level !== "silent") {
+        worker.postMessage({
+            kind: "log-config",
+            level: logCfg.level,
+            namespaces: logCfg.namespaces,
+        } satisfies RpcControl);
+    }
 
     return {
         get alive() {

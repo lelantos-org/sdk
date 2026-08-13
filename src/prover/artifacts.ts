@@ -6,7 +6,7 @@
 import { retry } from "../core/async.js";
 import { ProverArtifactsFailedError, ProverArtifactsMissingError } from "../core/errors.js";
 import { type CircuitShape, DEFAULT_SHAPE, shapeId } from "../core/shape.js";
-import { isHttpUrl, urlToString } from "../core/url.js";
+import { isHttpUrl, toAbsoluteUrl, urlToString } from "../core/url.js";
 import { getLogger } from "../log/logger.js";
 import { type ArtifactCache, cacheApiArtifactCache } from "./artifact-cache.js";
 import type { ProverArtifacts, ProverPaths } from "./types.js";
@@ -43,8 +43,19 @@ export function resolveArtifacts(input: ProverPaths | ProverArtifacts): {
     wasmPath: string;
     zkeyPath: string;
 } {
-    if ("wasmPath" in input) return input;
-    return { wasmPath: urlToString(input.circuit), zkeyPath: urlToString(input.zkey) };
+    // `toAbsoluteUrl` canonicalises browser-relative references here, at the
+    // one funnel every backend passes through, so downstream cache keys and
+    // the `isHttpUrl` persistence check see a single stable spelling.
+    if ("wasmPath" in input) {
+        return {
+            wasmPath: toAbsoluteUrl(input.wasmPath),
+            zkeyPath: toAbsoluteUrl(input.zkeyPath),
+        };
+    }
+    return {
+        wasmPath: toAbsoluteUrl(urlToString(input.circuit)),
+        zkeyPath: toAbsoluteUrl(urlToString(input.zkey)),
+    };
 }
 
 let _DEFAULT_PATHS: ProverPaths | null = null;
@@ -165,6 +176,25 @@ function persistentCache(): ArtifactCache | null {
     // `null ?? probe()` would re-enable it on the very next load.
     if (_persistent === undefined) _persistent = cacheApiArtifactCache();
     return _persistent;
+}
+
+/**
+ * Drop the memoised bytes for `path`, freeing them once nothing else holds a
+ * reference. The persistent cache is untouched, so a later load is a cache
+ * hit rather than a download.
+ *
+ * For callers that copy the bytes somewhere else and will not ask again — the
+ * wasm prover parses the ~49 MB zkey into linear memory and never reads the
+ * `Uint8Array` afterwards, so without this every prover realm holds the key
+ * twice for its whole life.
+ *
+ * Not safe as a blanket policy: `SnarkjsProver` re-reads the bytes on every
+ * proof. Only the owner of a build knows it is done with them.
+ *
+ * @internal
+ */
+export function releaseArtifactBytes(...paths: string[]): void {
+    for (const p of paths) _cache.delete(p);
 }
 
 /**

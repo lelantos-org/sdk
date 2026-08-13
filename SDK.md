@@ -631,6 +631,23 @@ const wallet = await connect({ network: "mainnet", signer, rpcUrl, prover });
 
 - `connect()` starts the zkey fetch + parse in the background by default (`proverWarmup: "eager"`), so the first transaction skips the multi-second setup.
 
+#### Where the time goes
+
+`prove()` splits into witness generation and the Groth16 proof. Both are logged at `debug` on `lelantos:prover:wasm`; `npm run test:bench` prints them. Measured on a 16-core Mac (Node), warm:
+
+| shape | witness | groth16 | total |
+|---|---|---|---|
+| 2x2 | 177 ms | 560 ms | ~740 ms |
+| 3x3 | 259 ms | 665 ms | ~925 ms |
+
+Witness generation is single-threaded and unaffected by thread count. Groth16 is the part rayon parallelises — 3x3 on the same machine:
+
+| threads | 4 | 8 | 16 |
+|---|---|---|---|
+| groth16 | 1288 ms | 774 ms | 665 ms |
+
+Returns fall off sharply past 8 but have not vanished by 16, which is why the pool is not clamped low. Override with `configureProverThreads(n)`, `LELANTOS_PROVER_THREADS`, or `threads` on `WorkerProver`.
+
 #### Artifact caching
 
 The default shape is 3x3, whose zkey is ~49 MB. Downloaded artifacts are persisted to the **Cache API** automatically in any browser that has it — nothing to configure. Because the Cache API is origin-scoped rather than per-realm, this covers both a page reload and the prover worker, which previously re-downloaded everything the main thread had already fetched.

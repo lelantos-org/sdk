@@ -10,13 +10,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const DIST = join(ROOT, "dist");
 
-// Budget: current size (~363 KB) + 10% headroom. Bump deliberately when
-// growth is justified; treat unexpected jumps as a regression signal.
+// Budget: current size + ~10% headroom. Bump deliberately when growth is
+// justified; treat unexpected jumps as a regression signal.
 //
 // The jump from 331 KB came with the nominal types in `core/brand.ts`: the
 // types themselves are erased, but their validating constructors and the
 // narrowing guards built on them are runtime code.
-const MAX_BYTES = 400_000;
+//
+// 400 KB → 280 KB: `build:js` now passes `--removeComments`, so this measures
+// code rather than documentation. It was 392 KB against a 400 KB ceiling, and
+// 36% of that was comment bytes that no bundler ever ships. Declarations are
+// emitted by a second pass (`build:types`) *without* the flag, because
+// `removeComments` strips JSDoc from `.d.ts` too and consumers would lose
+// every hover doc.
+//
+// Still a coarse "did something unexpected land in dist" tripwire —
+// `bundle-budget.mjs` is the gate for what users actually download.
+const MAX_BYTES = 280_000;
 
 let total = 0;
 let count = 0;

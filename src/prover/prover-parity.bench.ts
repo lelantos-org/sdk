@@ -5,28 +5,42 @@
 // LELANTOS_PROVER_ARTIFACTS_DIR or the @lelantos-org/circuits companion),
 // falling back to the sibling bench harness checkout. Run with
 // `npm run test:bench`.
+//
+// The debug sink below is load-bearing: `WasmProver.prove` splits its work
+// into `witness` and `groth16` records, and this is the only place that split
+// is observable. Without it the suite reports one opaque total.
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { shapeId, TRANSACT_2X2 } from "../core/shape.js";
+import { configureLogging } from "../log/logger.js";
 import { bundledProverArtifacts, resolveArtifacts } from "./artifacts.js";
 import { SnarkjsProver, verify } from "./snarkjs.js";
 import type { ProveResult, ProverPaths } from "./types.js";
 import { WasmProver } from "./wasm-prover.js";
 
+// This suite is 2x2 specific — it is paired with `input.2x2.json`, and the
+// witness would not satisfy any other shape. `bundledProverArtifacts` defaults
+// to `DEFAULT_SHAPE` (3x3), so the shape must be named explicitly.
+const SHAPE = TRANSACT_2X2;
+const ID = shapeId(SHAPE);
+
 const BENCH_BUILD_DIR = fileURLToPath(
     new URL("../../../bench/node_modules/@lelantos-org/circuits/build", import.meta.url),
 );
-const BENCH_INPUT = fileURLToPath(new URL("../../../bench/public/input.json", import.meta.url));
+const BENCH_INPUT = fileURLToPath(
+    new URL(`../../../bench/public/input.${ID}.json`, import.meta.url),
+);
 
 async function resolvePaths(): Promise<ProverPaths | null> {
     try {
-        return resolveArtifacts(await bundledProverArtifacts({ runtime: "node" }));
+        return resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape: SHAPE }));
     } catch {
-        if (existsSync(`${BENCH_BUILD_DIR}/2x2_final.zkey`)) {
+        if (existsSync(`${BENCH_BUILD_DIR}/${ID}_final.zkey`)) {
             return {
-                wasmPath: `${BENCH_BUILD_DIR}/2x2.wasm`,
-                zkeyPath: `${BENCH_BUILD_DIR}/2x2_final.zkey`,
+                wasmPath: `${BENCH_BUILD_DIR}/${ID}.wasm`,
+                zkeyPath: `${BENCH_BUILD_DIR}/${ID}_final.zkey`,
             };
         }
         return null;
@@ -35,6 +49,17 @@ async function resolvePaths(): Promise<ProverPaths | null> {
 
 const paths = await resolvePaths();
 const available = paths !== null && existsSync(BENCH_INPUT);
+
+if (available) {
+    // Straight to stdout rather than `consoleSink()`: vitest intercepts
+    // `console.*` and the debug records do not survive it, which is what hid
+    // this split until now.
+    configureLogging({
+        level: "debug",
+        namespaces: "lelantos:prover:*",
+        sink: (r) => process.stdout.write(`[bench]   ${r.msg}: ${fmt(Number(r.fields?.ms))}\n`),
+    });
+}
 
 const WARM_ITERS = 3;
 

@@ -69,19 +69,56 @@ export interface LoggingConfig {
 let currentRank = 0;
 let currentSink: LogSink | null = null;
 let matchers: RegExp[] | null = null;
+// The globs as given. `matchers` holds their compiled form, whose `.source` is
+// a regex — feeding that back to `configureLogging` would escape it as a
+// literal glob and match nothing, so the round trip needs the originals.
+let globs: string[] | null = null;
 
 /** Install (or clear) the logging configuration. Affects all loggers. */
 export function configureLogging(config: LoggingConfig): void {
     if (config.level !== undefined) currentRank = RANK[config.level];
     if (config.sink !== undefined) currentSink = config.sink;
-    if (config.namespaces !== undefined) matchers = compile(config.namespaces);
+    if (config.namespaces !== undefined) {
+        matchers = compile(config.namespaces);
+        globs = matchers ? normalizeGlobs(config.namespaces) : null;
+    }
 }
 
-/** Snapshot of the active configuration — forwarded to worker contexts. */
+/**
+ * Snapshot of the active level and namespace filter, in the form
+ * `configureLogging` accepts — so it can be replayed into another realm.
+ * Used by the worker RPC client to configure the worker side.
+ */
 export function loggingConfig(): { level: LogLevel; namespaces: string[] | null } {
     const level =
         (Object.keys(RANK) as LogLevel[]).find((k) => RANK[k] === currentRank) ?? "silent";
-    return { level, namespaces: matchers ? matchers.map((m) => m.source) : null };
+    return { level, namespaces: globs };
+}
+
+function normalizeGlobs(ns: string | string[] | null): string[] | null {
+    if (ns === null) return null;
+    const list = typeof ns === "string" ? ns.split(/[\s,]+/).filter(Boolean) : [...ns];
+    return list.length > 0 ? list : null;
+}
+
+/**
+ * Push an already-formed record into the active sink.
+ *
+ * For records that crossed a realm boundary — a worker forwarding its own
+ * output — where the originating realm already applied the level and
+ * namespace filters. Re-checking them here would drop records whenever the
+ * two configurations have drifted.
+ *
+ * @internal
+ */
+export function emitRecord(record: LogRecord): void {
+    const sink = currentSink;
+    if (!sink) return;
+    try {
+        sink(record);
+    } catch {
+        // A throwing sink must not break the operation being logged.
+    }
 }
 
 function compile(ns: string | string[] | null): RegExp[] | null {
