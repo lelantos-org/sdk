@@ -10,7 +10,7 @@ import type { InputSlot } from "./common.js";
 import { buildSpend, type SpendArgs } from "./spend.js";
 
 // `kind` routes the on-chain call: a transfer tagged `withdrawNative` would
-// reach MASP.withdrawNative and unwrap WETH to a recipient. It is a plain
+// reach NativeAdapter.withdrawNative and unwrap WETH to a recipient. It is a plain
 // argument to the shared builder, so each kind is asserted here.
 
 /** Records the witness instead of proving; proving is minutes and ~49 MB. */

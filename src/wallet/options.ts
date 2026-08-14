@@ -30,8 +30,9 @@ export interface DepositOptions {
 }
 
 /**
- * Unshield WETH note to raw ETH via `MASP.withdrawEth`. Asset id MUST
- * be registered against the chain's WETH.
+ * Unshield a WETH note to raw ETH via `NativeAdapter.withdrawNative`. The
+ * pool is ERC-20 only, so the adapter drives the withdraw and unwraps the
+ * proceeds. Asset id MUST be registered against the chain's WETH.
  */
 export interface WithdrawEthOptions {
     /** L1 recipient of the unwrapped ETH. */

@@ -384,7 +384,7 @@ export class Wallet implements WalletApi, SpendContext {
         return executeWithdraw(this, { ...args, asset: args.asset ?? DEFAULT_ASSET }, "withdraw");
     }
 
-    /** Unshield to raw ETH via `MASP.withdrawNative`; MASP unwraps WETH. */
+    /** Unshield to raw ETH via `NativeAdapter.withdrawNative`, which unwraps. */
     async withdrawEth(args: WithdrawEthOptions): Promise<WithdrawResult> {
         return executeWithdraw(
             this,
