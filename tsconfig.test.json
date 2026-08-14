@@ -17,5 +17,13 @@
     "types": ["node"]
   },
   "include": ["src/**/*", "scripts/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    // Not source: `check-docs.mjs` copies it into `.docs-typecheck/` and
+    // compiles it there. It imports `@lelantos-org/sdk` by package name so the
+    // doc blocks resolve through package.json#exports to `dist/`, which does
+    // not exist when this gate runs.
+    "scripts/docs-preamble.ts"
+  ]
 }
