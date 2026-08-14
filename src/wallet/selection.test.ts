@@ -125,6 +125,38 @@ describe("selectNotes", () => {
         expect(r.notes[0]!.id).toBe("ripe");
     });
 
+    it("holds back a note first seen at the tip, by default", () => {
+        // The default cooldown breaks the same-block change-link heuristic.
+        const notes = [note("a", 200n, { firstSeenBlock: 100 })];
+
+        expect(() =>
+            selectNotes(notes, assetId(1n), circuitAmount(100n), { tipBlock: 100 }),
+        ).toThrow(/1 in spend cooldown/);
+        expect(selectNotes(notes, assetId(1n), circuitAmount(100n), { tipBlock: 101 }).plan).toBe(
+            "direct",
+        );
+        // An explicit 0 still opts out.
+        expect(
+            selectNotes(notes, assetId(1n), circuitAmount(100n), {
+                tipBlock: 100,
+                cooldownBlocks: 0,
+            }).plan,
+        ).toBe("direct");
+    });
+
+    it("names which rule emptied the candidate set", () => {
+        // "no spendable notes" alone cannot distinguish an empty wallet from a
+        // wrong-asset one, or from a cooldown holding every note back.
+        const notes = [
+            note("spent", 500n, { spent: true }),
+            note("other", 500n, { asset: 2n }),
+            note("dusty", 1n),
+        ];
+        expect(() =>
+            selectNotes(notes, assetId(1n), circuitAmount(100n), { dustThreshold: 10n }),
+        ).toThrow(/3 in store: 1 spent, 1 other asset, 1 below dust threshold/);
+    });
+
     it("ignores cooldown when firstSeenBlock missing", () => {
         const notes = [note("a", 200n)];
         const r = selectNotes(

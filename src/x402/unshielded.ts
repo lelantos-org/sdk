@@ -32,7 +32,7 @@ import type { WalletApi } from "../wallet/api.js";
 import type { AssetInfo } from "../wallet/assets.js";
 import { DEFAULT_ASSET } from "../wallet/constants.js";
 import type { OnPhase, SpendPhase } from "../wallet/options.js";
-import { deriveEphemeralKey } from "./ephemeral.js";
+import { deriveEphemeralKey, hostPayerIndex } from "./ephemeral.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
 import {
     requireEvmAddress,
@@ -40,7 +40,7 @@ import {
     requirePositiveInteger,
     unsupported,
 } from "./requirements.js";
-import type { PaymentPayloadResult, PaymentRequirements } from "./types.js";
+import type { PaymentPayloadContext, PaymentPayloadResult, PaymentRequirements } from "./types.js";
 
 const log = getLogger("lelantos:x402:unshielded");
 
@@ -69,7 +69,11 @@ export interface UnshieldedExactOptions {
      * so the token→id direction has to be a lookup over candidates.
      */
     assetIds?: readonly AssetId[] | undefined;
-    /** Ephemeral payer slot. Default 0. See `./ephemeral.ts`. */
+    /**
+     * Pin the ephemeral payer slot. Defaults to a slot derived from the
+     * resource host, giving each server a distinct payer address — see
+     * `hostPayerIndex`. Set to reuse one address across hosts.
+     */
     index?: number | undefined;
     /**
      * When a top-up is needed, withdraw this many times the payment so one
@@ -97,6 +101,28 @@ interface Terms {
 }
 
 /**
+ * Ephemeral payer slot and how it was chosen.
+ *
+ * `"shared"` means no host was available, so every such payment lands on the
+ * same slot and therefore the same publicly-funded EVM address. The
+ * provenance is carried so that case can be reported rather than pass
+ * silently.
+ */
+interface PayerSlot {
+    index: number;
+    provenance: "pinned" | "host" | "shared";
+}
+
+/** Slot used when nothing identifies the resource. See `PayerSlot`. */
+const SHARED_PAYER_INDEX = 0;
+
+function resolvePayerSlot(pinned: number | undefined, host: string | undefined): PayerSlot {
+    if (pinned !== undefined) return { index: pinned, provenance: "pinned" };
+    if (host) return { index: hostPayerIndex(host), provenance: "host" };
+    return { index: SHARED_PAYER_INDEX, provenance: "shared" };
+}
+
+/**
  * Mechanism for `scheme: "exact"` on `network: "eip155:<chainId>"`, paying
  * from a deterministic throwaway address funded by unshielding.
  *
@@ -108,7 +134,6 @@ export function unshieldedExact(
     wallet: WalletApi,
     opts: UnshieldedExactOptions = {},
 ): PayableSchemeClient {
-    const index = opts.index ?? 0;
     const candidates = opts.assetIds ?? [DEFAULT_ASSET];
     const topUpMultiple = opts.topUpMultiple ?? 10n;
 
@@ -143,9 +168,18 @@ export function unshieldedExact(
         async createPaymentPayload(
             x402Version: number,
             req: PaymentRequirements,
+            ctx?: PaymentPayloadContext,
         ): Promise<PaymentPayloadResult> {
             const { domain, value, asset, chainId: id } = await read(req);
-            const account = privateKeyToAccount(deriveEphemeralKey(wallet.keys.nsk, index));
+            const slot = resolvePayerSlot(opts.index, ctx?.host);
+            if (slot.provenance === "shared") {
+                // `x402()` always supplies a host; this path is reached only
+                // when the mechanism is driven by a client that does not.
+                log.warn("no resource host — paying from the shared payer slot", {
+                    index: slot.index,
+                });
+            }
+            const account = privateKeyToAccount(deriveEphemeralKey(wallet.keys.nsk, slot.index));
 
             await ensureFunded(wallet, branded<EvmAddress>(account.address), asset, value, {
                 topUpMultiple,

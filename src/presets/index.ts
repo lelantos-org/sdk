@@ -37,7 +37,6 @@ async function resolveProverPaths(config: {
     }
 }
 
-/** @internal */
 export interface FastWalletOpts {
     keys: KeySource;
     /**
@@ -83,7 +82,6 @@ export async function fastWallet(opts: FastWalletOpts): Promise<Wallet> {
     });
 }
 
-/** @internal */
 export interface NodeWalletOpts {
     keys: KeySource;
     config: Omit<WalletConfig, "scanner" | "prover">;

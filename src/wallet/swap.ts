@@ -2,7 +2,7 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { buildSpend } from "../bundle/spend.js";
-import { branded, type CircuitAmount } from "../core/brand.js";
+import { assetId, branded, type CircuitAmount, evmAddress } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { InvalidArgumentError, WalletConfigError } from "../core/errors.js";
 import { applyFee, assertPublicInFits, BPS_DENOMINATOR } from "../core/fees.js";
@@ -28,7 +28,11 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         });
     }
 
-    const { assetIn, assetOut, quote, wrapperAddress } = args;
+    // Brand at the boundary; the constructors validate as they brand.
+    const assetIn = assetId(args.assetIn);
+    const assetOut = assetId(args.assetOut);
+    const wrapperAddress = evmAddress(args.wrapperAddress);
+    const { quote } = args;
     const feeBps = await ctx.feeBps();
     const fee = applyFee(args.amount, feeBps);
     const publicOut = branded<CircuitAmount>(args.amount + fee);

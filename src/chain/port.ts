@@ -142,6 +142,12 @@ export interface ChainAdapter {
     permit2Address?(): EvmAddress;
     /** `WETH9.deposit{value}`. Optional. */
     wrapNative?(wethAddr: EvmAddress, value: bigint): Promise<{ txHash: Hex32 }>;
+    /**
+     * Current chain tip. Feeds `SelectOpts.tipBlock`, without which the
+     * selector's spend cooldown is inert. Names no address and no topic.
+     * Optional.
+     */
+    blockNumber?(): Promise<number>;
     /** Returns block number + receipt status (1 = success, 0 = revert). */
     waitTxReceipt?(
         txHash: Hex32,

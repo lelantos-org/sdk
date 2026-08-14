@@ -1,6 +1,7 @@
 // Defaults for the simple pluggables: FMD client, note source, tree store,
 // submitter.
 
+import { httpOptionsFor } from "../../core/http.js";
 import type { Poseidon } from "../../crypto/index.js";
 import type { Jubjub } from "../../crypto/jubjub.js";
 import { FmdClient } from "../../services/fmd-server/client.js";
@@ -11,7 +12,7 @@ import { HttpRelayerSubmitter, type Submitter } from "../submitter.js";
 import { type TreePersistence, TreeStore } from "../tree-store.js";
 
 export function defaultFmdClient(cfg: WalletConfig): FmdClient {
-    return new FmdClient(cfg.fmdUrl as string, cfg.chainId);
+    return new FmdClient(cfg.fmdUrl as string, cfg.chainId, httpOptionsFor(cfg.fetchImpl));
 }
 
 export function defaultNoteSource(fmd: FmdClient, cfg: WalletConfig, J: Jubjub): NoteSource {
@@ -37,7 +38,7 @@ export function defaultNullifierStore(
 }
 
 export function defaultSubmitter(cfg: WalletConfig): Submitter {
-    return new HttpRelayerSubmitter(cfg.relayerUrl as string);
+    return new HttpRelayerSubmitter(cfg.relayerUrl as string, httpOptionsFor(cfg.fetchImpl));
 }
 
 /**

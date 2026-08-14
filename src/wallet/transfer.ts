@@ -1,7 +1,7 @@
 // Transfer transaction logic. Backs `Wallet.transfer`.
 
 import { buildSpend } from "../bundle/spend.js";
-import { branded, type CircuitAmount } from "../core/brand.js";
+import { assetId, branded, type CircuitAmount, circuitAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { decodeAddress } from "../keys/address.js";
 import type { Note } from "../notes/note.js";
@@ -16,8 +16,10 @@ export async function executeTransfer(
     ctx: SpendContext,
     args: TransferOptions,
 ): Promise<TransferResult> {
-    const asset = args.asset ?? DEFAULT_ASSET;
-    const sendValue = args.amount;
+    // Brand at the boundary: the option type takes a plain bigint, and
+    // `assetId` is what enforces the uint64 range.
+    const asset = args.asset === undefined ? DEFAULT_ASSET : assetId(args.asset);
+    const sendValue = circuitAmount(args.amount);
 
     const { selection, ownAddr, inputs, merkleRoot } = await prepareSpend(ctx, {
         asset,

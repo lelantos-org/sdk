@@ -11,7 +11,7 @@
 // This module sits at tier 0: it imports nothing from `src/`, so every
 // layer can throw typed errors without an upward dependency.
 
-import type { StoredNote } from "./note-record.js";
+import type { ConsolidateHint } from "./note-record.js";
 import { DEFAULT_SHAPE, shapeId } from "./shape.js";
 
 /**
@@ -58,7 +58,10 @@ export interface ErrorContext {
     opId?: string | undefined;
     /** Operation name, e.g. `"deposit"` or `"swap:leg1"`. */
     op?: string | undefined;
-    /** Hash of a transaction already broadcast when the failure occurred. */
+    /**
+     * Hash of a transaction already broadcast when the failure occurred. Set
+     * only by callers that opt in; `TxMiningError` exposes it as a typed field.
+     */
     txHash?: string | undefined;
     url?: string | undefined;
     method?: string | undefined;
@@ -303,22 +306,24 @@ export class WorkerRpcError extends WalletError<WorkerErrorCode> {
 export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
     readonly target: bigint;
     readonly asset: bigint;
-    readonly consolidate: StoredNote[];
+    readonly consolidate: ConsolidateHint[];
     readonly consolidateSum: bigint;
 
     constructor(
         args: {
             target: bigint;
             asset: bigint;
-            consolidate: StoredNote[];
+            consolidate: ConsolidateHint[];
             consolidateSum: bigint;
         },
         opts?: WalletErrorOptions,
     ) {
-        const ids = args.consolidate.map((n) => n.id).join(", ");
+        // Amounts, asset ids and note ids are exposed as fields and excluded
+        // from the message, which reaches application logs verbatim.
         super(
             "INSUFFICIENT_COVER",
-            `insufficient 2-note cover for ${args.target} (asset ${args.asset}); consolidate two smallest notes first (ids: ${ids}, sum: ${args.consolidateSum}), then re-run — or pass { autoConsolidate: true }`,
+            "insufficient 2-note cover; consolidate the two smallest notes first " +
+                "(see `consolidate`), then re-run — or pass { autoConsolidate: true }",
             opts,
         );
         this.name = "InsufficientCoverError";
@@ -406,8 +411,10 @@ export class X402PaymentError extends WalletError<"X402_PAYMENT"> {
         super("X402_PAYMENT", message, opts);
         this.name = "X402PaymentError";
         this.reason = reason;
+        // Exposed as a field and excluded from `context`, which error
+        // reporters serialise in full. The resource URL identifies the paid
+        // APIs this wallet calls.
         this.resource = opts?.resource;
-        if (opts?.resource) this.context.url ??= opts.resource;
     }
 }
 
@@ -417,8 +424,9 @@ export class TxMiningError extends WalletError<"TX_MINING"> {
     constructor(message: string, opts?: WalletErrorOptions & { txHash?: string | undefined }) {
         super("TX_MINING", message, opts);
         this.name = "TxMiningError";
+        // Exposed as a field and excluded from `context`. A transaction hash
+        // links an error report to a specific on-chain operation.
         this.txHash = opts?.txHash;
-        if (opts?.txHash) this.context.txHash ??= opts.txHash;
     }
 }
 

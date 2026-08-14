@@ -77,6 +77,22 @@ export function requestUrl(input: RequestInfo | URL): string {
     return input.url;
 }
 
+/**
+ * Lowercased hostname of a resource URL, or the URL unchanged when it does not
+ * parse.
+ *
+ * The unit of x402 identity: budgets are enforced per host and the ephemeral
+ * payer is derived per host. Also the granularity used in logs, since a full
+ * URL records the request path an agent paid for.
+ */
+export function hostOf(url: string): string {
+    try {
+        return new URL(url).hostname.toLowerCase();
+    } catch {
+        return url;
+    }
+}
+
 // --- base64 JSON --------------------------------------------------------------
 // `btoa`/`atob` are byte-oriented, so JSON is UTF-8 encoded first — a
 // resource description with a non-ASCII character would otherwise throw.

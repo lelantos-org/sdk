@@ -23,7 +23,13 @@ import { X402PaymentError } from "../core/errors.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
 import { type Budget, BudgetLedger } from "./budget.js";
-import { readPaymentRequired, readSettlement, requestUrl, withPaymentHeader } from "./codec.js";
+import {
+    hostOf,
+    readPaymentRequired,
+    readSettlement,
+    requestUrl,
+    withPaymentHeader,
+} from "./codec.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
 import { parseCaip2 } from "./requirements.js";
 import { SHIELDED_NAMESPACE, type ShieldedExactOptions, shieldedExact } from "./shielded.js";
@@ -119,8 +125,10 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
         const chosen = await select(required.accepts, mechanisms, ledger, url);
         const { requirements } = chosen;
 
+        // Host only: a full URL records the request path an agent paid for,
+        // which accumulates into a browsing history at info level.
         log.info("paying for resource", {
-            url,
+            host: hostOf(url),
             scheme: requirements.scheme,
             network: requirements.network,
         });
@@ -128,6 +136,7 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
         const result = await chosen.mechanism.createPaymentPayload(
             required.x402Version || X402_VERSION,
             requirements,
+            { host: hostOf(url) },
         );
         const payload: PaymentPayload = {
             x402Version: result.x402Version,

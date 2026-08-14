@@ -7,6 +7,7 @@ export {
 export { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
 export type { NoteCommitInput } from "./commit.js";
 export { buildNoteCommitment } from "./commit.js";
+export { type CryptoContext, cryptoContext } from "./context.js";
 export {
     deriveDk,
     deriveIvk,

@@ -14,7 +14,7 @@
 import { toLeBytes } from "../core/bytes.js";
 import { InvalidArgumentError } from "../core/errors.js";
 import type { Field } from "../core/field.js";
-import { bytesToBareHex } from "../core/hex.js";
+import { bytesToBareHex, hexToBytes } from "../core/hex.js";
 import { keccak256 } from "../core/keccak.js";
 
 /**
@@ -29,6 +29,25 @@ const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0
 
 /** Exclusive upper bound for `index`, matching the ZIP-32 account bound. */
 const MAX_INDEX = 0x80000000;
+
+/**
+ * Default payer slot for a resource host: `keccak(host)` truncated to 31 bits.
+ *
+ * A single shared slot gives every server the same payer address, and each
+ * such address is publicly funded by a Lelantos withdrawal, so two servers can
+ * establish that they share a wallet by comparing `from`. Per-host slots are
+ * mutually unlinkable — see `deriveEphemeralKey`.
+ *
+ * Deterministic, so a top-up sent for one host survives a restart. Collisions
+ * between hosts are ~2^-31 and merge only the two payers involved.
+ */
+export function hostPayerIndex(host: string): number {
+    const digest = hexToBytes(keccak256(new TextEncoder().encode(host.toLowerCase())));
+    // Trailing 4 bytes with the top bit cleared. `MAX_INDEX` is 2^31, so the
+    // mask is exactly the set of valid indices.
+    const tail = new DataView(digest.buffer, digest.byteOffset + digest.length - 4).getUint32(0);
+    return tail & (MAX_INDEX - 1);
+}
 
 /**
  * `keccak256(domainTag ‖ nsk_le ‖ u32le(index))` reduced into `[1, n-1]`.

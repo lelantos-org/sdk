@@ -7,6 +7,7 @@ import { fieldToBytes32, shortId } from "../core/index.js";
 import type { ScanHit } from "../sync/scan.js";
 
 export {
+    type ConsolidateHint,
     decodeStoredNote,
     type NoteRecord,
     type StoredNote,
@@ -62,6 +63,7 @@ export function addHits(
             leafIndex: h.leafIndex,
             spent: false,
             discoveredAt: new Date().toISOString(),
+            firstSeenBlock: h.blockNumber,
         });
     }
     file.notes.push(...added);

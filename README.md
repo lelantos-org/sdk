@@ -6,11 +6,17 @@ note sync, and balances.
 The package exposes three layers:
 
 - **Wallet API** — `connect()` returns a `Wallet` implementing `WalletApi`, with
-  single-call `deposit` / `transfer` / `withdraw` / `sync` / `balance`.
+  single-call `deposit` / `transfer` / `withdraw` / `sync` / `balance`. This is
+  the root barrel, and it is all most applications import.
 - **Pluggable interfaces** — `ChainAdapter`, `NoteSource`, `Submitter`,
   `Prover`, `CoinSelector`, and `NoteStore` can each be replaced independently.
 - **Primitives** — keys, FMD, note encryption, witness builders, and the prover
-  wrapper, for custom flows.
+  wrapper, on their own subpaths (`@lelantos-org/sdk/keys`, `/crypto`, `/fmd`,
+  `/notes`, `/bundle`, `/prover`, …) so the root barrel stays small.
+
+Amounts and asset ids are branded types on the way *out* and plain `bigint` on
+the way *in*, so `wallet.asset(1n)` and `amount: 100n` need no ceremony while
+values the SDK returns stay type-distinct.
 
 Runtime requirements: Node 24+, modern browsers, or Deno. The SDK uses Web
 Crypto and `fetch`; it contains no `node:*` imports.

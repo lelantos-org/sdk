@@ -53,6 +53,7 @@ export {
 } from "./note-source.js";
 export {
     addHits,
+    type ConsolidateHint,
     decodeStoredNote,
     InMemoryNoteStore,
     type NoteRecord,

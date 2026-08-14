@@ -3,7 +3,7 @@
 
 import type { ChainAdapter } from "../chain/port.js";
 import type { CancelDepositInputs } from "../chain/types.js";
-import type { AssetId, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
+import type { AssetId, AssetIdLike, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
 import type { SpendingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
@@ -93,14 +93,14 @@ export interface WalletApi {
      */
     allNotes(filter?: { spent?: boolean }): WalletNote[];
     /** Unspent total for one asset, in circuit units. */
-    balance(asset: AssetId): CircuitAmount;
+    balance(asset: AssetIdLike): CircuitAmount;
     /** Unspent totals keyed by asset id — one pass for a multi-asset view. */
     balances(): Map<AssetId, CircuitAmount>;
     /**
      * Registry entry for `id` plus ERC-20 symbol/decimals when the adapter
      * exposes them. Cached per wallet; pass `{ refresh: true }` to re-read.
      */
-    asset(id: AssetId, opts?: { refresh?: boolean }): Promise<AssetInfo>;
+    asset(id: AssetIdLike, opts?: { refresh?: boolean }): Promise<AssetInfo>;
     selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult;
 
     // --- spend ---------------------------------------------------------------

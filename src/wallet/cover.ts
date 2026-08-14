@@ -3,6 +3,7 @@
 
 import type { AssetId, CircuitAmount } from "../core/brand.js";
 import { InsufficientCoverError } from "../core/errors.js";
+import type { ConsolidateHint } from "../core/note-record.js";
 import type { StoredNote } from "./note-store.js";
 import type { CoinSelector, ConsolidateFirst, DirectSelection, SelectOpts } from "./selection.js";
 
@@ -11,6 +12,11 @@ export interface CoverArgs {
     target: CircuitAmount;
     selectOpts?: SelectOpts | undefined;
     autoConsolidate?: boolean | undefined;
+}
+
+/** Project note records onto the fields a recovery flow needs. */
+function hints(notes: readonly StoredNote[]): ConsolidateHint[] {
+    return notes.map((n) => ({ id: n.id, value: n.value }));
 }
 
 export async function ensureCover(
@@ -26,7 +32,7 @@ export async function ensureCover(
         throw new InsufficientCoverError({
             target: args.target,
             asset: args.asset,
-            consolidate: sel.consolidate,
+            consolidate: hints(sel.consolidate),
             consolidateSum: sel.consolidateSum,
         });
     }
@@ -36,7 +42,7 @@ export async function ensureCover(
         throw new InsufficientCoverError({
             target: args.target,
             asset: args.asset,
-            consolidate: retry.consolidate,
+            consolidate: hints(retry.consolidate),
             consolidateSum: retry.consolidateSum,
         });
     }

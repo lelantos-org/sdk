@@ -29,6 +29,7 @@ import type { Jubjub, Point } from "../crypto/jubjub.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { type Field, Poseidon } from "../crypto/poseidon.js";
 import {
+    assertDetectionGamma,
     FMD_DEFAULT_GAMMA,
     type FmdDetectionKey,
     fmdClueKeyFromRoot,
@@ -100,6 +101,9 @@ export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddr
  *
  * Releasing these releases the root detection secret permanently: `h_i` is
  * public, so any single `x_i` yields `dk = x_i - h_i`.
+ *
+ * `gamma` is capped at `FMD_SENDER_GAMMA`, not `GAMMA_MAX`: a longer key tests
+ * clue bits senders never set and discards the wallet's own notes.
  */
 export function detectionKeyFor(
     J: Jubjub,
@@ -107,6 +111,7 @@ export function detectionKeyFor(
     vk: ViewingKey,
     gamma = FMD_DEFAULT_GAMMA,
 ): FmdDetectionKey {
+    assertDetectionGamma(gamma);
     return fmdExpandDetectionKey(J, P, vk.dk, gamma);
 }
 

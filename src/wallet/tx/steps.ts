@@ -50,6 +50,10 @@ export async function prepareSpend(
     },
 ): Promise<PreparedSpend> {
     safePhase(args.onPhase, "preparing");
+    // The selector's spend cooldown needs a tip; without one a note is
+    // spendable in the block it arrived in, linking a change note to the spend
+    // that produced it.
+    const tipBlock = await ctx.cfg.chain.blockNumber?.();
     const selection = await ensureCover(
         ctx.selector,
         () => ctx.storedNotes(),
@@ -58,7 +62,11 @@ export async function prepareSpend(
             target: args.target,
             // The circuit's arity is the ceiling; a caller may lower it but
             // not raise it past what the proof can consume.
-            selectOpts: { maxInputs: ctx.cfg.shape.nIn, ...args.selectOpts },
+            selectOpts: {
+                maxInputs: ctx.cfg.shape.nIn,
+                ...(tipBlock !== undefined ? { tipBlock } : {}),
+                ...args.selectOpts,
+            },
             autoConsolidate: args.autoConsolidate,
         },
         (a, sel) => ctx.autoConsolidate(a, sel),

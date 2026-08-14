@@ -3,7 +3,14 @@
 // address, `scale`, symbol, decimals) is gathered here.
 
 import type { ChainAdapter } from "../chain/port.js";
-import { type AssetId, branded, type CircuitAmount, type EvmAddress } from "../core/brand.js";
+import {
+    type AssetId,
+    branded,
+    type CircuitAmount,
+    type CircuitAmountLike,
+    circuitAmount,
+    type EvmAddress,
+} from "../core/brand.js";
 import { InvalidArgumentError } from "../core/errors.js";
 import { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "../core/units.js";
 
@@ -92,17 +99,16 @@ export async function fetchAssetInfo(chain: ChainAdapter, id: AssetId): Promise<
  * Human decimal string → circuit units, ready to pass as `amount`.
  *
  * ```ts
- * const weth = requireTokenMeta(await wallet.asset(assetId(1n)));
+ * const weth = await wallet.asset(1n);
  * await wallet.deposit({ asset: weth.id, amount: parseAmount("0.25", weth) });
  * ```
  *
  * @throws {RangeError} when the value is finer-grained than one circuit unit.
+ * @throws {InvalidArgumentError} when the chain adapter resolved no `decimals`.
  */
-export function parseAmount(
-    value: string | number | bigint,
-    asset: AssetInfoWithMeta,
-): CircuitAmount {
-    return toCircuitUnits(branded(parseUnits(value, asset.decimals)), asset.scale);
+export function parseAmount(value: string | number | bigint, asset: AssetInfo): CircuitAmount {
+    const meta = requireTokenMeta(asset);
+    return toCircuitUnits(branded(parseUnits(value, meta.decimals)), meta.scale);
 }
 
 /**
@@ -114,15 +120,16 @@ export function parseAmount(
  * ```
  */
 export function formatAmount(
-    amount: CircuitAmount,
-    asset: AssetInfoWithMeta,
+    amount: CircuitAmountLike,
+    asset: AssetInfo,
     opts: { symbol?: boolean } = {},
 ): string {
-    const text = formatUnits(toTokenUnits(amount, asset.scale), asset.decimals);
-    return opts.symbol && asset.symbol ? `${text} ${asset.symbol}` : text;
+    const meta = requireTokenMeta(asset);
+    const text = formatUnits(toTokenUnits(circuitAmount(amount), meta.scale), meta.decimals);
+    return opts.symbol && meta.symbol ? `${text} ${meta.symbol}` : text;
 }
 
 /** Smallest non-zero amount the asset can express, as a decimal string. */
-export function minAmount(asset: AssetInfoWithMeta): string {
+export function minAmount(asset: AssetInfo): string {
     return formatAmount(branded(1n), asset);
 }

@@ -9,16 +9,31 @@ import type { StoredNote } from "./note-store.js";
 
 const log = getLogger("lelantos:wallet:selection");
 
+/**
+ * Blocks a note must age before it becomes spendable.
+ *
+ * One block breaks the same-block change-link heuristic: a change note spent
+ * in the block it was created in ties the two spends together for an observer
+ * counting leaves. Higher values widen the window, at the cost of leaving a
+ * just-received note briefly unspendable.
+ */
+export const DEFAULT_COOLDOWN_BLOCKS = 1;
+
 export interface SelectOpts {
     /** Cover threshold becomes `target + fee`. Default 0. */
     fee?: bigint | undefined;
     /** Notes with value < dustThreshold are excluded. Recommended: `2 * marginalFee`. */
     dustThreshold?: bigint | undefined;
     /**
-     * Minimum age (blocks) before spendable. Requires `tipBlock` and
-     * per-note `firstSeenBlock`; otherwise no-op.
+     * Minimum age in blocks before a note is spendable. Defaults to
+     * `DEFAULT_COOLDOWN_BLOCKS`. Requires `tipBlock` and per-note
+     * `firstSeenBlock`; inert otherwise.
      */
     cooldownBlocks?: number | undefined;
+    /**
+     * Chain tip. `prepareSpend` supplies it from `ChainAdapter.blockNumber()`;
+     * an adapter without that method leaves the cooldown inert.
+     */
     tipBlock?: number | undefined;
     /** Tiebreak shuffle width: notes within `(1 ± bucketPct) * pivot`. Default 0.05. */
     bucketPct?: number | undefined;
@@ -52,6 +67,69 @@ export interface ConsolidateFirst {
 export type SelectionResult = DirectSelection | ConsolidateFirst;
 
 /**
+ * Per-rule tally of notes excluded from a selection. Reported in the
+ * `SelectionError` message, which otherwise cannot distinguish an empty wallet
+ * from an all-dust, wrong-asset or fully-cooled-down one.
+ */
+interface RejectionCounts {
+    spent: number;
+    otherAsset: number;
+    dust: number;
+    cooldown: number;
+}
+
+/** Notes that survive every spendability rule, plus a tally of what did not. */
+function partitionSpendable(
+    all: readonly StoredNote[],
+    asset: AssetId,
+    rules: { dust: bigint; cooldown: number; tip: number | undefined },
+): { candidates: StoredNote[]; rejected: RejectionCounts } {
+    const rejected: RejectionCounts = { spent: 0, otherAsset: 0, dust: 0, cooldown: 0 };
+    const candidates: StoredNote[] = [];
+
+    for (const n of all) {
+        if (n.spent) {
+            rejected.spent++;
+        } else if (BigInt(n.asset) !== asset) {
+            rejected.otherAsset++;
+        } else if (BigInt(n.value) < rules.dust) {
+            rejected.dust++;
+        } else if (inCooldown(n, rules)) {
+            rejected.cooldown++;
+        } else {
+            candidates.push(n);
+        }
+    }
+    return { candidates, rejected };
+}
+
+/**
+ * Whether a note is younger than `cooldown` blocks.
+ *
+ * Requires both a tip and a per-note `firstSeenBlock`; without either, every
+ * note is treated as spendable.
+ */
+function inCooldown(n: StoredNote, rules: { cooldown: number; tip: number | undefined }): boolean {
+    if (rules.cooldown <= 0 || rules.tip === undefined) return false;
+    if (n.firstSeenBlock === undefined) return false;
+    return rules.tip - n.firstSeenBlock < rules.cooldown;
+}
+
+/** `"8 spent, 3 below dust threshold"` — omits rules that rejected nothing. */
+function describeRejections(r: RejectionCounts): string {
+    const reasons: ReadonlyArray<readonly [count: number, label: string]> = [
+        [r.spent, "spent"],
+        [r.otherAsset, "other asset"],
+        [r.dust, "below dust threshold"],
+        [r.cooldown, "in spend cooldown"],
+    ];
+    const held = reasons
+        .filter(([count]) => count > 0)
+        .map(([count, label]) => `${count} ${label}`);
+    return held.length > 0 ? held.join(", ") : "none held";
+}
+
+/**
  * Pick up to `maxInputs` unspent notes for `asset` summing to ≥ `target + fee`
  * via SFRT.
  *
@@ -74,27 +152,19 @@ export function selectNotes(
 ): SelectionResult {
     const fee = opts.fee ?? 0n;
     const dust = opts.dustThreshold ?? 0n;
-    const cooldown = opts.cooldownBlocks ?? 0;
+    const cooldown = opts.cooldownBlocks ?? DEFAULT_COOLDOWN_BLOCKS;
     const tip = opts.tipBlock;
     const bucketPct = opts.bucketPct ?? 0.05;
     const maxInputs = opts.maxInputs ?? DEFAULT_SHAPE.nIn;
     const rng = opts.rng ?? randomFloat01;
     const threshold = target + fee;
 
-    const candidates = all.filter((n) => {
-        if (n.spent) return false;
-        if (BigInt(n.asset) !== asset) return false;
-        const v = BigInt(n.value);
-        if (v < dust) return false;
-        if (cooldown > 0 && tip !== undefined && n.firstSeenBlock !== undefined) {
-            if (tip - n.firstSeenBlock < cooldown) return false;
-        }
-        return true;
-    });
+    const { candidates, rejected } = partitionSpendable(all, asset, { dust, cooldown, tip });
 
     if (candidates.length === 0) {
         throw new SelectionError(
-            `no spendable notes for asset ${asset} (after dust/cooldown filter)`,
+            `no spendable notes for asset ${asset} ` +
+                `(${all.length} in store: ${describeRejections(rejected)})`,
             { asset },
         );
     }

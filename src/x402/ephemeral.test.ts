@@ -1,6 +1,6 @@
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
-import { deriveEphemeralKey } from "./ephemeral.js";
+import { deriveEphemeralKey, hostPayerIndex } from "./ephemeral.js";
 
 const NSK = 0x2a3f0c91b7de4415a8c6f0e2d9b7314c5f80a1263e94d7b0c18f5a627d3e0491bn % (1n << 251n);
 const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
@@ -45,5 +45,31 @@ describe("deriveEphemeralKey", () => {
         expect(() => deriveEphemeralKey(NSK, -1)).toThrow(/integer in \[0, 2\^31\)/);
         expect(() => deriveEphemeralKey(NSK, 2 ** 31)).toThrow(/integer in \[0, 2\^31\)/);
         expect(() => deriveEphemeralKey(NSK, 1.5)).toThrow(/integer in \[0, 2\^31\)/);
+    });
+});
+
+describe("hostPayerIndex", () => {
+    it("gives each host its own payer address", () => {
+        // A single shared slot gives every server the same `from`, and each
+        // such address is publicly funded by a Lelantos withdrawal, so two
+        // servers can establish that they share a wallet by comparing it.
+        const addr = (host: string) =>
+            privateKeyToAccount(deriveEphemeralKey(NSK, hostPayerIndex(host))).address;
+
+        const hosts = ["api.one.example", "api.two.example", "three.example"];
+        expect(new Set(hosts.map(addr)).size).toBe(hosts.length);
+    });
+
+    it("is stable across calls and case-insensitive, so a top-up survives a restart", () => {
+        expect(hostPayerIndex("API.Example")).toBe(hostPayerIndex("api.example"));
+    });
+
+    it("stays inside the derivation's index range", () => {
+        for (const host of ["a", "api.example", "x".repeat(200)]) {
+            const i = hostPayerIndex(host);
+            expect(Number.isInteger(i)).toBe(true);
+            expect(i).toBeGreaterThanOrEqual(0);
+            expect(i).toBeLessThan(2 ** 31);
+        }
     });
 });

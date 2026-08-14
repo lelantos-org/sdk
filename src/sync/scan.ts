@@ -19,11 +19,14 @@ export interface ScanInput {
     epk: Uint8Array;
     cm: Field;
     leafIndex: number;
+    /** Block the note landed in. Stored as `StoredNote.firstSeenBlock`. */
+    blockNumber: number;
 }
 
 export interface ScanHit extends NotePayload {
     cm: Field;
     leafIndex: number;
+    blockNumber: number;
 }
 
 /**
@@ -75,7 +78,12 @@ export function scanNotes(
                 if (stats) stats.zeroValue++;
                 continue;
             }
-            hits.push({ ...payload, cm: inp.cm, leafIndex: inp.leafIndex });
+            hits.push({
+                ...payload,
+                cm: inp.cm,
+                leafIndex: inp.leafIndex,
+                blockNumber: inp.blockNumber,
+            });
             if (stats) stats.hits++;
         } catch (err) {
             // One corrupt note must not abort a scan, but a decode failure

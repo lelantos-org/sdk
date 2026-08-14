@@ -2,7 +2,7 @@
 // the `kind` discriminator routes between the ERC-20 and native-ETH builders.
 
 import { buildSpend } from "../bundle/spend.js";
-import { branded, type CircuitAmount } from "../core/brand.js";
+import { assetId, branded, type CircuitAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { WalletConfigError } from "../core/errors.js";
 import { applyFee } from "../core/fees.js";
@@ -34,7 +34,8 @@ export async function executeWithdraw(
     args: WithdrawOptions & { asset: bigint },
     kind: WithdrawKind,
 ): Promise<WithdrawResult> {
-    const { asset } = args;
+    // Brand at the boundary; `assetId` enforces the uint64 range.
+    const asset = assetId(args.asset);
     const feeBps = await ctx.feeBps();
     const fee = applyFee(args.amount, feeBps);
     const publicOut = branded<CircuitAmount>(args.amount + fee);

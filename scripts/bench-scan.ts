@@ -158,7 +158,13 @@ function buildBatch(
         // Clue bits are a wire prefix on the ciphertext; scanNotes strips them.
         const bits = new Uint8Array([i & 0x1f]);
         const wire = withClueBitsPrefix(clueBitsToPrefix(bits, 5), enc.ciphertext);
-        inputs.push({ ciphertext: wire, epk: enc.epk, cm: BigInt(i), leafIndex: i });
+        inputs.push({
+            ciphertext: wire,
+            epk: enc.epk,
+            cm: BigInt(i),
+            leafIndex: i,
+            blockNumber: i,
+        });
     }
     return inputs;
 }

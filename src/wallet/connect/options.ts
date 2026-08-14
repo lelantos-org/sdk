@@ -30,12 +30,15 @@ type Only<T, Keys extends PropertyKey> = T & { [K in Exclude<Keys, keyof T>]?: n
 type KeyOptionKeys = "mnemonic" | "account" | "passphrase" | "signature" | "nsk";
 
 /**
- * How the shielded spending key is derived — pick exactly one shape.
+ * How the shielded spending key is derived — pick at most one shape.
  *
  * - `mnemonic` — BIP-39 phrase, ZIP-32 derived. The portable option.
  * - `signature` — hex of the canonical EIP-712 message, for wallet-derived
  *   keys where the user already signed (see `keys/metamask.ts`).
  * - `nsk` — pre-derived nullifier spending key; derivation is the caller's.
+ *
+ * Omitting all three is valid when the chain layer can derive one — see
+ * `SelfKeyingChainOptions`.
  */
 export type ConnectKeyOptions =
     | Only<
@@ -156,16 +159,37 @@ export interface ConnectExtraOptions {
     /** See `WalletConfig.feeBps`. */
     feeBps?: bigint | undefined;
 
+    /** See `WalletConfig.fetchImpl`. */
+    fetchImpl?: typeof fetch | undefined;
+
     /** Default: auto-detect. */
     runtime?: "node" | "browser" | "auto" | undefined;
 }
 
+/** No explicit key source; the chain layer supplies it. */
+type NoKeyOptions = { [K in KeyOptionKeys]?: never };
+
 /**
- * Everything `connect()` accepts: one key source, one chain layer, plus
- * the shared options. The key/chain parts are exclusive unions, so an
+ * Chain layers that carry a signing key, and can therefore derive the
+ * shielded key on their own: `privateKey` by domain-separated reduction,
+ * `signer` / `provider` by one EIP-712 signature.
+ *
+ * A pre-built `chain` adapter is absent by design — it owns its signer and
+ * exposes nothing to derive from, so it still needs an explicit key source.
+ */
+type SelfKeyingChainOptions = Exclude<ConnectChainOptions, { chain: ChainAdapter }>;
+
+/**
+ * Everything `connect()` accepts: a chain layer, optionally an explicit key
+ * source, plus the shared options. Both groups are exclusive unions, so an
  * invalid combination (`mnemonic` *and* `nsk`, `signer` *and* `privateKey`)
  * fails to compile instead of throwing at runtime.
+ *
+ * The key source may be omitted when the chain layer can derive one, which is
+ * what makes `connect({ privateKey, network, rpcUrl })` a complete call.
  */
-export type ConnectOptions = ConnectExtraOptions & ConnectKeyOptions & ConnectChainOptions;
+export type ConnectOptions =
+    | (ConnectExtraOptions & ConnectKeyOptions & ConnectChainOptions)
+    | (ConnectExtraOptions & NoKeyOptions & SelfKeyingChainOptions);
 
 /** Widened view used internally, after the union has done its job. */

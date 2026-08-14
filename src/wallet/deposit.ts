@@ -2,7 +2,14 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { supportsAllowanceTransfer, supportsNativeEth } from "../chain/port.js";
-import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../core/brand.js";
+import {
+    assetId,
+    branded,
+    circuitAmount,
+    type EvmAddress,
+    type Hex32,
+    type TokenAmount,
+} from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { DepositAdapterError, type DepositStrategy, InvalidArgumentError } from "../core/errors.js";
 import { applyFee, assertPublicInFits } from "../core/fees.js";
@@ -25,12 +32,15 @@ export async function executeDeposit(
     ctx: SpendContext,
     args: DepositOptions,
 ): Promise<DepositResult> {
-    const asset = args.asset ?? DEFAULT_ASSET;
+    // Brand at the boundary: the option type takes a plain bigint, and
+    // `assetId` is what enforces the uint64 range.
+    const asset = args.asset === undefined ? DEFAULT_ASSET : assetId(args.asset);
+    const amount = circuitAmount(args.amount);
     const recipient = decodeAddress(ctx.J, args.to ?? ctx.address);
     const payer = await ctx.cfg.chain.payerAddress();
     const assetEntry = await ctx.cfg.chain.fetchAsset(asset);
     const feeBps = await ctx.feeBps();
-    if (args.amount <= 0n) {
+    if (amount <= 0n) {
         throw new InvalidArgumentError("deposit amount must be positive (nonzero)", {
             argument: "amount",
         });
@@ -83,13 +93,15 @@ export async function executeDeposit(
         total,
     });
 
-    log.info("deposit submitted", { strategy, asset, amount: args.amount, txHash });
+    // No amount: a deposit is public on chain, but the log line collates it
+    // with the wallet's other operations in one searchable place.
+    log.info("deposit submitted", { strategy, asset, txHash });
     return makeTransactionResult({
         kind: "deposit",
         strategy,
         txHash,
         built: { cm: [built.cm], producedNotes: built.producedNotes },
-        sent: args.amount,
+        sent: amount,
         depositId,
         // A deposit escrows exactly one leaf, credited to the depositor's own
         // shielded address.

@@ -36,6 +36,13 @@ export interface WalletConfig {
     /** Overrides `chain.fetchFeeBps()`. 1 bp = 0.01%. */
     feeBps?: bigint | undefined;
 
+    /**
+     * `fetch` used by every default HTTP pluggable — the FMD client and the
+     * relayer submitter. The seam for routing SDK egress through a proxy,
+     * SOCKS agent or recording shim. Ignored for pre-built pluggables.
+     */
+    fetchImpl?: typeof fetch | undefined;
+
     /** Required if `noteSource` is not provided. */
     fmdUrl?: string | undefined;
     /** Required if `submitter` is not provided. */

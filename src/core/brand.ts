@@ -36,6 +36,30 @@ export type ShieldedAddress = Brand<`sswap21${string}`, "ShieldedAddress">;
 /** MASP registry asset id (`uint64`). */
 export type AssetId = Brand<bigint, "AssetId">;
 
+/**
+ * Accepted wherever an asset id is an *input*. Branding guards internal
+ * invariants; requiring callers to brand a literal buys nothing, so inputs
+ * take a plain `bigint` and are branded on the way in. Outputs stay `AssetId`.
+ */
+export type AssetIdLike = AssetId | bigint;
+
+/**
+ * Accepted wherever a shielded address is an *input*. `decodeAddress`
+ * validates the string regardless, so demanding a branded value only moves
+ * the failure earlier for callers who already hold a `string`.
+ */
+export type ShieldedAddressLike = ShieldedAddress | string;
+
+/** Accepted wherever an EVM address is an *input*. */
+export type EvmAddressLike = EvmAddress | `0x${string}`;
+
+/**
+ * Accepted wherever a circuit-unit amount is an *input*. `parseAmount` is
+ * still the way to reach circuit units from a human string; this only spares
+ * callers a brand call on a literal they already have.
+ */
+export type CircuitAmountLike = CircuitAmount | bigint;
+
 /** Amount in circuit units — the denomination every `Wallet` method takes. */
 export type CircuitAmount = Brand<bigint, "CircuitAmount">;
 

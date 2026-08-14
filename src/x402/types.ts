@@ -78,6 +78,11 @@ export interface PaymentPayloadResult {
 
 export interface PaymentPayloadContext {
     extensions?: Record<string, unknown>;
+    /**
+     * Hostname of the resource being paid for. The unshielded mechanism derives
+     * its ephemeral payer slot from it, giving each server a distinct `from`.
+     */
+    host?: string | undefined;
 }
 
 /**

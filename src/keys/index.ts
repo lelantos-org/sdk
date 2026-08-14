@@ -2,6 +2,7 @@
 // derivation, bech32m addresses, and nsk resolution from any source.
 
 export { ADDRESS_HRP, type DecodedAddress, decodeAddress, encodeAddress } from "./address.js";
+export { detectionKey, parseAddress } from "./convenience.js";
 export {
     accountPath,
     deriveAccount,

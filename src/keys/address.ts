@@ -34,14 +34,12 @@ export const ADDRESS_HRP = "sswap2";
 export const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
 const BECH32_LIMIT = 256;
 
-/** @internal */
 export interface DecodedAddress {
     pk_d: Point;
     pk: Field;
     ck: Point;
 }
 
-/** @internal */
 export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): ShieldedAddress {
     const payload = new Uint8Array(ADDRESS_PAYLOAD_LEN);
     payload.set(J.packPoint(pk_d), 0);
@@ -52,7 +50,6 @@ export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): Shi
     );
 }
 
-/** @internal */
 export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
     const { prefix, words } = bech32m.decode(addr, BECH32_LIMIT);
     if (prefix !== ADDRESS_HRP) throw new Error(`bad HRP: ${prefix}`);

@@ -3,10 +3,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { bytesToHex, hexToBytes } from "../core/hex.js";
 import { BABYJUB_SUBGROUP_ORDER, Jubjub, Poseidon } from "../crypto/index.js";
 import {
+    assertDetectionGamma,
     decodeClue,
     encodeClue,
     FMD_DEFAULT_GAMMA,
     FMD_DOMAIN,
+    FMD_SENDER_GAMMA,
     fmdClueKeyFromRoot,
     fmdExpandDetectionKey,
     fmdExpandFlagKey,
@@ -14,6 +16,47 @@ import {
     fmdFlagKeyFromDetection,
     fmdTest,
 } from "./fmd.js";
+
+describe("detection gamma ceiling", () => {
+    let J: Jubjub;
+    let P: Poseidon;
+    beforeAll(async () => {
+        J = await Jubjub.build();
+        P = await Poseidon.build();
+    });
+
+    it("a key longer than the sender gamma loses the recipient's own notes", () => {
+        // Senders pack FMD_SENDER_GAMMA bits and zero-pad the rest, while
+        // detection tests every bit of the key, so each padding bit rejects a
+        // genuine note with probability 1/2.
+        const root = 0x1234_5678n;
+        const ck = fmdClueKeyFromRoot(J, root);
+        const flag = fmdExpandFlagKey(J, P, ck, FMD_SENDER_GAMMA);
+
+        const overlong = fmdExpandDetectionKey(J, P, root, FMD_SENDER_GAMMA + 3);
+        const matched = Array.from({ length: 64 }, (_, i) => {
+            const clue = fmdFlag(J, P, flag, BigInt(i) + 1n);
+            // The wire prefix is 16 bits wide with the unused bits zero; a
+            // longer clue is reconstructed from it server-side.
+            const padded = { ...clue, gamma: overlong.x.length };
+            return fmdTest(J, P, overlong, padded);
+        }).filter(Boolean).length;
+
+        // 64 at a matching gamma; ~1/8 of that at three extra bits.
+        expect(matched).toBeLessThan(30);
+
+        const exact = fmdExpandDetectionKey(J, P, root, FMD_SENDER_GAMMA);
+        for (let i = 0; i < 64; i++) {
+            expect(fmdTest(J, P, exact, fmdFlag(J, P, flag, BigInt(i) + 1n))).toBe(true);
+        }
+    });
+
+    it("rejects a gamma above the sender gamma", () => {
+        expect(() => assertDetectionGamma(FMD_SENDER_GAMMA + 1)).toThrow(/exceeds the sender/);
+        expect(() => assertDetectionGamma(0)).toThrow(/positive integer/);
+        expect(() => assertDetectionGamma(FMD_SENDER_GAMMA)).not.toThrow();
+    });
+});
 
 describe("FMD (Niwl)", () => {
     let J: Jubjub;

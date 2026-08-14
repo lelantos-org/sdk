@@ -27,6 +27,19 @@ export interface StoredNote {
     firstSeenBlock?: number | undefined;
 }
 
+/**
+ * Fields required by the consolidation recovery flow.
+ *
+ * `InsufficientCoverError` carries this rather than `StoredNote`: it is thrown
+ * on the ordinary cover-failure path and so reaches application error
+ * reporting, where `rho`, `rcm` and `rcvDep` are note secrets and `cm`
+ * identifies a pool leaf.
+ */
+export interface ConsolidateHint {
+    id: string;
+    value: string;
+}
+
 /** Decoded shape with native BigInts. */
 export interface NoteRecord {
     id: string;

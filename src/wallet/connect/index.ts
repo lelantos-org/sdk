@@ -5,6 +5,7 @@
 import { isNetworkDeployed, resolveNetwork } from "../../chain/networks.js";
 import { configureWasm } from "../../configure-wasm.js";
 import { NetworkNotDeployedError } from "../../core/errors.js";
+import { httpOptionsFor } from "../../core/http.js";
 import { resolveArtifacts } from "../../prover/artifacts.js";
 import type { WalletConfig } from "../config.js";
 import { buildConnectProver, defaultChainAdapter } from "../defaults/index.js";
@@ -41,7 +42,7 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
         const name = typeof opts.network === "string" ? opts.network : "<custom>";
         throw new NetworkNotDeployedError(name);
     }
-    const keySource = buildKeySource(opts);
+    const keySource = await buildKeySource(opts, preset.chainId);
     const chain = await defaultChainAdapter(
         {
             chain: opts.chain,
@@ -67,7 +68,9 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
 
     const submitter =
         opts.submitter ??
-        (preset.relayerUrl ? new HttpRelayerSubmitter(preset.relayerUrl) : undefined);
+        (preset.relayerUrl
+            ? new HttpRelayerSubmitter(preset.relayerUrl, httpOptionsFor(opts.fetchImpl))
+            : undefined);
 
     const cfg: WalletConfig = {
         chainId: preset.chainId,
@@ -75,6 +78,7 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
         shape: opts.shape,
         relayerAddress: preset.relayerAddress,
         chain,
+        fetchImpl: opts.fetchImpl,
         fmdUrl: preset.fmdUrl,
         relayerUrl: preset.relayerUrl,
         proverPaths:

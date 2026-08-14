@@ -91,6 +91,10 @@ export class ViemChainAdapter implements ChainAdapter {
         return this.signer.getAddress();
     }
 
+    async blockNumber(): Promise<number> {
+        return Number(await this.publicClient.getBlockNumber());
+    }
+
     fetchAsset(id: AssetId): Promise<AssetEntry> {
         return reads.fetchAsset(this.ctx, id);
     }

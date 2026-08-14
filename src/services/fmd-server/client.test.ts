@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FMD_SENDER_GAMMA } from "../../fmd/fmd.js";
 import { FmdClient } from "./client.js";
 
 // The client is the only place fmd-webserver's wire encoding is understood, so
@@ -89,11 +90,33 @@ describe("listMatches", () => {
         if (!m) throw new Error("expected one match");
 
         expect(m.id).toBe(42);
-        const url = new URL(fetchMock.mock.calls[0]![0] as string);
-        expect(url.searchParams.get("token")).toBe("abcd");
+        const [target, init] = fetchMock.mock.calls[0]!;
+        const url = new URL(target as string);
+        // The token is a stable pseudonymous identifier sent on every poll. In
+        // a URL it is copied into every proxy and access log on the path, so it
+        // must travel in a header and nowhere else.
+        expect(url.search).not.toContain("abcd");
+        expect(url.searchParams.has("token")).toBe(false);
+        expect((init as RequestInit).headers).toMatchObject({
+            Authorization: "Bearer abcd",
+        });
         // The subscription already pins the chain; sending chainId too would
         // only widen what the request discloses.
         expect(url.searchParams.has("chainId")).toBe(false);
+    });
+});
+
+describe("deleteSubscription", () => {
+    it("puts the token in a header, not the path", async () => {
+        const fetchMock = respondWith({});
+
+        await client().deleteSubscription("abcd");
+
+        const [target, init] = fetchMock.mock.calls[0]!;
+        expect(new URL(target as string).pathname).toBe("/v1/subscriptions");
+        expect((init as RequestInit).headers).toMatchObject({
+            Authorization: "Bearer abcd",
+        });
     });
 });
 
@@ -138,10 +161,29 @@ describe("chunk feeds", () => {
 
 describe("createSubscription", () => {
     it("decodes the re-attach signal", async () => {
-        respondWith({ gamma: 8, active: true, created: false });
+        respondWith({ gamma: FMD_SENDER_GAMMA, active: true, created: false });
 
         await expect(
-            client().createSubscription({ detectionKeyHex: "ab", gamma: 8, tokenHex: "cd" }),
-        ).resolves.toEqual({ gamma: 8, active: true, created: false });
+            client().createSubscription({
+                detectionKeyHex: "ab",
+                gamma: FMD_SENDER_GAMMA,
+                tokenHex: "cd",
+            }),
+        ).resolves.toEqual({ gamma: FMD_SENDER_GAMMA, active: true, created: false });
+    });
+
+    it("rejects a gamma above the sender gamma before it reaches the wire", async () => {
+        // Senders zero-pad clue bits past FMD_SENDER_GAMMA, so a longer
+        // detection key discards the caller's own notes.
+        const fetchMock = respondWith({ gamma: 8, active: true, created: false });
+
+        await expect(
+            client().createSubscription({
+                detectionKeyHex: "ab",
+                gamma: FMD_SENDER_GAMMA + 1,
+                tokenHex: "cd",
+            }),
+        ).rejects.toMatchObject({ argument: "gamma" });
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 });

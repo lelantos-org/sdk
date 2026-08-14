@@ -50,7 +50,7 @@
 //   encoded clue = γ (1B) || R_packed (32B) || c_bits (⌈γ/8⌉ B, LSB-first)
 
 import { packBits, unpackBits } from "../core/bits.js";
-import { WireFormatError } from "../core/errors.js";
+import { InvalidArgumentError, WireFormatError } from "../core/errors.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "../core/field.js";
 import { bytesToBareHex } from "../core/hex.js";
 // Leaf imports, not the barrel: keeps the worker bundle minimal.
@@ -61,6 +61,52 @@ import { legendreSymbol } from "../crypto/sqrt.js";
 import { TAG_FMD_BIT, TAG_FMD_EXPAND } from "../crypto/tags.js";
 
 export const FMD_DEFAULT_GAMMA = 5;
+
+/**
+ * γ every sender emits, and the ceiling on any detection γ.
+ *
+ * Circuit-pinned: `out_clue_bits` is a public input constrained by
+ * `ClueCheck`, so raising it is a `@lelantos-org/circuits` change.
+ *
+ * A clue packs `c_1..c_γ` into a 16-bit prefix with the unused bits zero
+ * (`clueBitsToPrefix`), while `fmdTest` requires `bit_i ⊕ c_i = 1` for every
+ * `i` in the detection key. A longer detection key therefore tests trailing
+ * bits against zero padding, each passing only when the recipient's own shared
+ * bit is 1, so a genuine note survives with probability
+ * `2^-(γ_detect - γ_sender)`.
+ */
+export const FMD_SENDER_GAMMA = FMD_DEFAULT_GAMMA;
+
+/**
+ * Reject a detection γ above `FMD_SENDER_GAMMA`. A higher γ does not lower the
+ * false-positive rate; it discards the recipient's own notes.
+ */
+export function assertDetectionGamma(gamma: number): void {
+    if (!Number.isInteger(gamma) || gamma < 1) {
+        throw new InvalidArgumentError(`FMD gamma must be a positive integer; got ${gamma}`, {
+            argument: "gamma",
+        });
+    }
+    if (gamma > FMD_SENDER_GAMMA) {
+        throw new InvalidArgumentError(
+            `FMD gamma ${gamma} exceeds the sender gamma ${FMD_SENDER_GAMMA}: senders pack ` +
+                `${FMD_SENDER_GAMMA} clue bits and zero-pad the rest, so detecting at ${gamma} ` +
+                `would miss ~${missedOwnNotesPct(gamma)}% of your own notes rather than ` +
+                "admitting more decoys",
+            { argument: "gamma" },
+        );
+    }
+}
+
+/**
+ * Percentage of the recipient's own notes a detection key of `gamma` rejects.
+ * Detection survives with probability `2^-(gamma - FMD_SENDER_GAMMA)`.
+ */
+function missedOwnNotesPct(gamma: number): number {
+    const detected = 2 ** -(gamma - FMD_SENDER_GAMMA);
+    return Math.round((1 - detected) * 100);
+}
+
 /** @internal */
 export const FMD_DOMAIN = "lelantos.fmd.v4";
 // `TAG_FMD_BIT` is single-sourced in `crypto/tags.ts` alongside the rest of
@@ -180,6 +226,10 @@ export function fmdExpandDetectionKey(
     dkRoot: Field,
     gamma = FMD_DEFAULT_GAMMA,
 ): FmdDetectionKey {
+    // Unguarded by design: the raw expansion primitive is pinned against the
+    // Rust indexer by cross-language vectors at several γ. `FMD_SENDER_GAMMA`
+    // is enforced at the policy boundary instead — `detectionKeyFor`,
+    // `detectionKey` and `FmdClient.createSubscription`.
     const root = dkRoot % BABYJUB_SUBGROUP_ORDER;
     const ck = fmdClueKeyFromRoot(J, root);
     return {

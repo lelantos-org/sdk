@@ -31,6 +31,7 @@ function toScanInput(J: JubjubPacker, n: FmdNoteOut): ScanInput {
         epk: J.packPoint(n.ephPub),
         cm: n.cm,
         leafIndex: n.leafIndex,
+        blockNumber: n.blockNumber,
     };
 }
 

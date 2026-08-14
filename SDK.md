@@ -96,6 +96,7 @@ const wallet = await connect({
 
 One EIP-712 prompt at boot; subsequent on-chain txs reuse the signer.
 
+<!-- typecheck: skip -->
 ```ts
 import { BrowserProvider } from "ethers";
 
@@ -126,6 +127,7 @@ const wallet = await Wallet.create(
 (`chain` | `signer` | `{ provider, address }` | `privateKey`), so invalid
 combinations fail to compile instead of throwing at runtime:
 
+<!-- typecheck: skip -->
 ```ts
 await connect({ network: "anvil", mnemonic, nsk, rpcUrl });
 //                                       ^^^^^^^^^^^^^ two key sources — type error
@@ -151,7 +153,7 @@ integration bug, so the SDK names them explicitly:
 when the chain adapter implements `tokenMeta`), and caches the result:
 
 ```ts
-import { formatAmount, formatUnits, parseAmount, parseUnits } from "@lelantos-org/sdk";
+import { formatAmount, formatUnits, minAmount, parseAmount, parseUnits } from "@lelantos-org/sdk";
 
 const weth = await wallet.asset(1n);
 // → { id: 1n, token: "0xC02a…", scale: 1000000000000000n, symbol: "WETH", decimals: 18 }
@@ -237,7 +239,7 @@ Change splits into two new self-notes. MASP sends `outAmt - fee` to recipient; t
 ### Withdraw ETH (shielded → native)
 
 ```ts
-await wallet.withdrawEth({ to: "0xf39…", amount: 200n });
+await wallet.withdrawEth({ to: "0xf39…", amount: 200n, asset: 1n });
 ```
 
 Unwraps WETH-shielded asset to native ETH in one tx.
@@ -245,9 +247,15 @@ Unwraps WETH-shielded asset to native ETH in one tx.
 ### Swap
 
 ```ts
-import { fetchSwapQuote } from "@lelantos-org/sdk";
+import { fetchSwapQuote } from "@lelantos-org/sdk/quoter";
 
-const quote = await fetchSwapQuote(quoterUrl, { tokenIn, tokenOut, amountIn, slippageBps: 50 });
+const quote = await fetchSwapQuote(quoterUrl, {
+    chainId,
+    tokenIn,
+    tokenOut,
+    amountIn,
+    slippageBps: 50,
+});
 
 await wallet.swap({
     assetIn: 1n,
@@ -307,20 +315,33 @@ Two strategies via `WalletConfig.syncStrategy` (selects default `NoteSource`; ig
 | Strategy | Endpoint | FMD runs | Anonymity | Bandwidth |
 |---|---|---|---|---|
 | `{ kind: "full" }` (default) | `/v1/notes` (firehose) | skipped | max — no detection key leaves the wallet | every encrypted note |
-| `{ kind: "matches", token }` | `/v1/matches?token=…` | server-side via registered subscription | reduced — server learns the FMD-positive subset, and holds your detection capability permanently | only false-positive subset |
+| `{ kind: "matches", token }` | `/v1/matches` (token in `Authorization`) | server-side via registered subscription | reduced — server learns the FMD-positive subset, and holds your detection capability permanently | only false-positive subset |
 
 ```ts
-// Full firehose — no FMD on server, max anonymity.
-const wallet = await connect({ ...cfg, syncStrategy: { kind: "full" } });
+import { detectionKey } from "@lelantos-org/sdk";
+import { cryptoContext, deriveSubscriptionToken } from "@lelantos-org/sdk/crypto";
+import { FMD_SENDER_GAMMA, detectionKeyToHex, subscriptionTokenToHex } from "@lelantos-org/sdk/fmd";
+import { FmdClient } from "@lelantos-org/sdk/fmd-server";
+
+// Full firehose — no FMD on the server, maximum anonymity.
+const full = await connect({ privateKey: pk, network: "anvil", rpcUrl });
 
 // Server-side FMD — register a detection key under a token you derive.
-// `epoch` is 0 until you rotate; see below for why you must store it after that.
+// `epoch` is 0 until you rotate; see below for why it must be stored after that.
+const { P } = await cryptoContext();
 const epoch = BigInt(myAppConfig.subscriptionEpoch ?? 0);
 const tokenHex = subscriptionTokenToHex(deriveSubscriptionToken(P, keys.ivk, epoch));
-const detectionKeyHex = detectionKeyToHex(detectionKeyFor(J, P, viewingKey, 8));
+const detectionKeyHex = detectionKeyToHex(await detectionKey(viewingKey, FMD_SENDER_GAMMA));
+
 const fmd = new FmdClient(fmdUrl, chainId);
-await fmd.createSubscription({ detectionKeyHex, gamma: 8, tokenHex });
-const wallet = await connect({ ...cfg, syncStrategy: { kind: "matches", token: tokenHex } });
+await fmd.createSubscription({ detectionKeyHex, gamma: FMD_SENDER_GAMMA, tokenHex });
+
+const matches = await connect({
+    privateKey: pk,
+    network: "anvil",
+    rpcUrl,
+    syncStrategy: { kind: "matches", token: tokenHex },
+});
 ```
 
 Delegating detection is one-way. The scalars you POST are `x_i = dk + h_i` over
@@ -342,8 +363,11 @@ from either would be forgeable by that server.
 
 #### Rotating a subscription token
 
-Pass `epoch` to rotate: the token travels in the `/v1/matches` query string,
-which proxies and browser history record, so a leak needs a recovery path.
+Pass `epoch` to rotate. The token is a bearer credential sent on every poll,
+derived from `ivk` and therefore stable across sessions, machines and IPs — a
+pseudonymous identifier for the wallet. It travels in an `Authorization`
+header, which keeps it out of proxy and browser-history logs, but a credential
+with no rotation path has no recovery from a leak by any other route.
 
 **Once `epoch` is non-zero, your application must persist it.** It cannot be
 recovered from the server. There is no read-only subscription lookup — that
@@ -361,11 +385,19 @@ Losing a non-zero epoch does not lose the wallet: register a fresh one and the
 indexer backfills. It costs a full re-backfill, and it strands the previous
 subscription, which can no longer be deleted because its token is unrecoverable.
 
-`gamma` sets the false-positive rate at `2^-gamma`. It must be in
-`GAMMA_MIN..GAMMA_MAX` (1..16), and the server caps it further against the
-current note count so a match set always keeps enough decoys — a `gamma` that
-is too high is rejected with the applicable ceiling. `detectionKeyHex` must be
-exactly `gamma * 32` bytes, and `tokenHex` exactly 32 bytes.
+`gamma` sets the false-positive rate at `2^-gamma`, and **`FMD_SENDER_GAMMA`
+is its ceiling** — not `GAMMA_MAX`. Senders pack exactly `FMD_SENDER_GAMMA`
+clue bits into the 16-bit on-chain field and leave the rest zero, while
+detection tests every bit of the key. A key longer than that tests trailing
+bits against zero padding, each passing only when your own shared bit happens
+to be 1, so it drops roughly `1 - 2^-(gamma - FMD_SENDER_GAMMA)` of *your own*
+notes instead of admitting more decoys. `detectionKey` and `createSubscription`
+both reject it. Raising the sender γ is a circuits change, not an SDK one.
+
+The server caps `gamma` further against the current note count so a match set
+always keeps enough decoys — a `gamma` that is too high is rejected with the
+applicable ceiling. `detectionKeyHex` must be exactly `gamma * 32` bytes, and
+`tokenHex` exactly 32 bytes.
 
 - No detection key (`full`, the default): `scanNotes` trial-decrypts every note. Highest CPU, zero FMD leak.
 - Server-side FMD (`matches`): server holds the detection key, returns the false-positive subset. Lowest bandwidth, server learns your approximate recipient set — and, because `x_i = dk + h_i` inverts, your root detection secret for good.
@@ -418,7 +450,7 @@ import { type NoteStore, type NotesFile } from "@lelantos-org/sdk";
 
 class IndexedDbNoteStore implements NoteStore {
     async load(): Promise<NotesFile> {
-        const json = await idbGet("lelantos-notes") ?? '{"version":2,"notes":[]}';
+        const json = ((await idbGet("lelantos-notes")) as string | undefined) ?? '{"version":2,"notes":[]}';
         return JSON.parse(json);
     }
     async save(file: NotesFile): Promise<void> {
@@ -437,6 +469,7 @@ The CLI's [`FileNoteStore`](../cli/src/notes-store.ts) is a working node-side re
 
 `ViemChainAdapter` ships in the SDK. To use ethers / web3.js / a hardware wallet, implement `ChainAdapter`:
 
+<!-- typecheck: skip -->
 ```ts
 import { type ChainAdapter, type AssetEntry } from "@lelantos-org/sdk";
 
@@ -467,7 +500,7 @@ Nine injection points on `WalletConfig`. `chain` is required; the rest default.
 | `TreeStore` | built from the commitment chunk feed | pre-seeded tree, shared cache |
 | `NullifierStore` | built from the nullifier chunk feed | pre-seeded spent set, shared cache |
 | `Submitter` | `HttpRelayerSubmitter` | multi-relayer race, direct-on-chain submit, test mock |
-| `Prover` | `WasmProver` (snarkjs fallback; `useWasmProver: false` opts out) | remote prover, Web Worker prover, mock |
+| `Prover` | `WasmProver` (snarkjs fallback; `useWasmProver: false` opts out) | Web Worker prover, mock |
 | `CoinSelector` | `SfrtCoinSelector` | largest-first, Penumbra planner, deterministic test stub |
 | `Scanner` | `LocalScanner` | `WorkerPoolScanner` for off-main-thread trial decryption |
 
@@ -479,55 +512,39 @@ Nine injection points on `WalletConfig`. `chain` is required; the rest default.
 ### Mock submitter for tests
 
 ```ts
-import { type Submitter, type SubmitTransactPayload } from "@lelantos-org/sdk";
+import { circuitAmount, hex32, type Submitter } from "@lelantos-org/sdk";
+import type { SubmitTransactPayload } from "@lelantos-org/sdk/protocol";
 
 class MockSubmitter implements Submitter {
     public lastPayload?: SubmitTransactPayload;
     async submit(p: SubmitTransactPayload) {
         this.lastPayload = p;
-        return { txHash: "0xdeadbeef" };
+        // Implementing an SDK interface means producing its branded values;
+        // the constructors validate as they brand.
+        return { txHash: hex32(`0x${"de".repeat(32)}`) };
     }
 }
 
 const submitter = new MockSubmitter();
 const wallet = await Wallet.create(keySource, { ...cfg, submitter });
-await wallet.deposit({ amount: 100n });
-expect(submitter.lastPayload?.permit).toBeDefined();
-```
-
-### Custom prover (e.g. remote service)
-
-```ts
-import { type Prover } from "@lelantos-org/sdk";
-
-class RemoteProver implements Prover {
-    constructor(private url: string) {}
-    async prove(input: Record<string, unknown>) {
-        const r = await fetch(this.url, { method: "POST", body: JSON.stringify(input) });
-        return r.json();
-    }
-}
-
-const wallet = await Wallet.create(keySource, {
-    ...cfg,
-    prover: new RemoteProver("https://prover.example.com/prove"),
-});
+await wallet.deposit({ amount: circuitAmount(100n) });
+expect(submitter.lastPayload?.kind).toBe("deposit");
 ```
 
 ### Custom coin selector
 
 ```ts
-import { type CoinSelector, type StoredNote } from "@lelantos-org/sdk";
+import { circuitAmount, type CoinSelector, type SelectionResult, type StoredNote } from "@lelantos-org/sdk";
 
 class LargestFirstSelector implements CoinSelector {
-    select(notes: StoredNote[], asset: bigint, target: bigint) {
-        const desc = notes
+    select(all: readonly StoredNote[], asset: bigint, target: bigint): SelectionResult {
+        const desc = all
             .filter((n) => !n.spent && BigInt(n.asset) === asset)
             .sort((a, b) => Number(BigInt(b.value) - BigInt(a.value)));
-        const picked = desc.slice(0, 2);
-        const sum = picked.reduce((s, n) => s + BigInt(n.value), 0n);
+        const notes = desc.slice(0, 2);
+        const sum = notes.reduce((s, n) => s + BigInt(n.value), 0n);
         if (sum < target) throw new Error("insufficient");
-        return { plan: "direct", notes: picked, sum };
+        return { plan: "direct", notes, sum: circuitAmount(sum) };
     }
 }
 
@@ -542,10 +559,13 @@ chunk feeds — neither is a per-item server query, because asking for one path
 or one nullifier names the note you are about to spend.
 
 ```ts
-import { type NoteSource, type ScanInput } from "@lelantos-org/sdk";
+import type { NoteSource } from "@lelantos-org/sdk";
+import type { ScanInput } from "@lelantos-org/sdk/sync";
 
 class IndexerNoteSource implements NoteSource {
-    async listNotes(opts): Promise<ScanInput[]> { /* fetch from your indexer */ }
+    async listNotes(opts?: { limit?: number }): Promise<ScanInput[]> {
+        return []; // fetch from your indexer
+    }
 }
 ```
 
@@ -593,7 +613,7 @@ import { Wallet, ViemChainAdapter, Eip1193Signer, InMemoryNoteStore } from "@lel
 
 // Wrap the EIP-1193 provider exposed by MetaMask (or any injected wallet).
 await window.ethereum.request({ method: "eth_requestAccounts" });
-const signer = new Eip1193Signer(window.ethereum);
+const signer = new Eip1193Signer(window.ethereum, evmAddress(account), chainId);
 
 const wallet = await Wallet.create(
     { type: "mnemonic", mnemonic },
@@ -632,7 +652,7 @@ Self-hosted CDN: pass base URL via `proverArtifactsCdn` instead of per-file URLs
 - `prove()` blocks its calling thread even with rayon workers. For a responsive UI, run proving in a dedicated Web Worker via `browserWorkerProver`:
 
 ```ts
-import { browserWorkerProver } from "@lelantos-org/sdk";
+import { browserWorkerProver } from "@lelantos-org/sdk/prover";
 
 const prover = browserWorkerProver({
     workerUrl: new URL("@lelantos-org/sdk/prover-worker", import.meta.url),
@@ -667,7 +687,7 @@ The default shape is 3x3, whose zkey is ~49 MB. Downloaded artifacts are persist
 The URL is the cache key, so **serve new proving keys under a new path**. There is no revalidation request — a round-trip on every load would defeat the point.
 
 ```ts
-import { requestPersistentStorage } from "@lelantos-org/sdk";
+import { requestPersistentStorage } from "@lelantos-org/sdk/core";
 import { clearArtifactCache, configureArtifactCache } from "@lelantos-org/sdk/prover";
 
 // Recommended once at startup: WebKit evicts Cache API storage after ~7 days
@@ -695,19 +715,14 @@ browserWorkerProver({ workerUrl, paths, cacheArtifacts: false });
 Everything `Wallet` uses internally is exported:
 
 ```ts
-import {
-    Poseidon, Jubjub,
-    buildSpendingKey, addressFromSpendingKey,
-    encodeAddress, decodeAddress,
-    buildNoteCommitment, buildNullifier,
-    MerkleTree,
-    encryptNote, decryptNote,
-    fmdFlag, fmdTest, fmdGenDetectionKey,
-    scanNotes,
-    buildDeposit, buildSpend,
-    RelayerClient,
-    prove, verify,
-} from "@lelantos-org/sdk";
+import { encodeAddress, decodeAddress, buildSpendingKey } from "@lelantos-org/sdk/keys";
+import { Poseidon, Jubjub, buildNoteCommitment, buildNullifier, MerkleTree } from "@lelantos-org/sdk/crypto";
+import { encryptNote, decryptNote } from "@lelantos-org/sdk/notes";
+import { fmdFlag, fmdTest, fmdGenDetectionKey } from "@lelantos-org/sdk/fmd";
+import { scanNotes } from "@lelantos-org/sdk/sync";
+import { buildDeposit, buildSpend } from "@lelantos-org/sdk/bundle";
+import { RelayerClient } from "@lelantos-org/sdk/relayer";
+import { prove, verify } from "@lelantos-org/sdk/prover";
 ```
 
 `buildSpend` covers transfer, withdraw and swap — they differ only in their
@@ -753,7 +768,7 @@ payer, so an agent can buy API calls without a human in the loop.
 import { connect } from "@lelantos-org/sdk";
 import { x402 }    from "@lelantos-org/sdk/x402";
 
-const wallet = await connect({ mnemonic, network: "anvil" });
+const wallet = await connect({ mnemonic, network: "anvil", privateKey: privKeyHex, rpcUrl });
 await wallet.sync();
 
 const pay  = x402(wallet, { budget: { total: "5" } });
@@ -763,6 +778,7 @@ const data = await pay("https://api.example.com/premium").then((r) => r.json());
 `pay` is an ordinary `fetch`, which is the whole integration story — every
 agent framework already takes one:
 
+<!-- typecheck: skip -->
 ```ts
 createOpenAI({ fetch: pay });                             // Vercel AI SDK
 new StreamableHTTPClientTransport(url, { fetch: pay });    // MCP
@@ -855,6 +871,7 @@ concrete class, so the variant's context fields are typed without an
 `instanceof` chain. It is duck-typed, so it keeps working when two copies
 of the SDK end up in one bundle.
 
+<!-- typecheck: skip -->
 ```ts
 import { isWalletError } from "@lelantos-org/sdk";
 

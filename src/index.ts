@@ -91,80 +91,23 @@ export {
     type LogSink,
 } from "./log/index.js";
 
-// ── crypto primitives ────────────────────────────────────────────────────
-export {
-    BABYJUB_SUBGROUP_ORDER,
-    buildNoteCommitment,
-    buildNullifier,
-    buildNullifierFromNsk,
-    deriveSubscriptionToken,
-    type Field,
-    fromLeBytes,
-    Jubjub,
-    type MerkleProof,
-    MerkleTree,
-    type Point,
-    Poseidon,
-    toLeBytes,
-} from "./crypto/index.js";
-export { configureJubjubWasm } from "./crypto/jubjub-wasm/index.js";
-export { type PathCheck, rootFromPath, verifyPath } from "./crypto/path.js";
-
 // ── keys / addresses ─────────────────────────────────────────────────────
 export {
     ADDRESS_HRP,
-    addressFromSpendingKey,
-    buildSpendingKey,
     type DecodedAddress,
     decodeAddress,
     deriveKeysFromMnemonic,
     deriveKeysFromNsk,
     deriveNskFromSigner,
-    detectionKeyFor,
+    detectionKey,
     encodeAddress,
-    type FullViewingKey,
-    fullViewingKeyFromSpending,
     generateMnemonic,
     isValidMnemonic,
     type KeySource,
+    parseAddress,
     resolveNsk,
     type SpendingKey,
-    type ViewingKey,
-    viewingKeyFromSpending,
 } from "./keys/index.js";
-
-// ── FMD ──────────────────────────────────────────────────────────────────
-export {
-    detectionKeyToHex,
-    FMD_DEFAULT_GAMMA,
-    type FmdDetectionKey,
-    type FmdFlagKey,
-    fmdClueKeyFromRoot,
-    fmdExpandDetectionKey,
-    fmdExpandFlagKey,
-    fmdFlag,
-    fmdFlagKeyFromDetection,
-    fmdGenDetectionKey,
-    fmdTest,
-    subscriptionTokenToHex,
-} from "./fmd/index.js";
-
-// ── notes ────────────────────────────────────────────────────────────────
-export { decryptNote, encryptNote } from "./notes/index.js";
-export type { EncryptedNote, Note, SpentNote } from "./notes/index.js";
-
-// ── protocol wire contract ───────────────────────────────────────────────
-export {
-    type AuxOutput,
-    computePiHash,
-    type DepositRequest,
-    type SpendKind,
-    type SubmitSwapPayload,
-    type SubmitTransactPayload,
-} from "./protocol/index.js";
-
-// ── permit2 ──────────────────────────────────────────────────────────────
-export { signPermit2Witness } from "./permit2/index.js";
 
 // ── chain adapters ───────────────────────────────────────────────────────
 export {
@@ -191,62 +134,9 @@ export {
     type ViemChainAdapterOpts,
 } from "./chain/index.js";
 
-// ── prover backends ──────────────────────────────────────────────────────
-// `WasmProver` lives at `@lelantos-org/sdk/wasm-prover` so the main barrel
-// does not pull in `wasm-bindgen-rayon` worker glue. Browser apps that opt
-// out via `useWasmProver: false` pay zero bundle cost.
-export {
-    browserWorkerProver,
-    prove,
-    type Prover,
-    type ProverArtifacts,
-    type ProverPaths,
-    SnarkjsProver,
-    verify,
-    WorkerProver,
-} from "./prover/index.js";
-
-// ── services ─────────────────────────────────────────────────────────────
-export { RelayerClient } from "./services/relayer/index.js";
-export {
-    type CommitmentChunkEntry,
-    type CommitmentChunkOut,
-    type CreateSubscriptionInput,
-    FmdClient,
-    type FmdMatchOut,
-    type FmdNoteOut,
-    type FmdTreeState,
-    GAMMA_MAX,
-    GAMMA_MIN,
-    type NullifierChunkOut,
-    type SubscriptionOut,
-} from "./services/fmd-server/index.js";
-export {
-    fetchSwapQuote,
-    quoteAgeSecs,
-    type SwapQuote,
-    type SwapQuoteRequest,
-} from "./services/quoter/index.js";
-
-// ── scanning ─────────────────────────────────────────────────────────────
-export {
-    LocalScanner,
-    type ScanHit,
-    type ScanInput,
-    type Scanner,
-    scanNotes,
-    type ScanStats,
-    WorkerPoolScanner,
-} from "./sync/index.js";
-
-// ── bundle builders (custom spend flows) ─────────────────────────────────
-export {
-    buildDeposit,
-    buildSpend,
-    type InputSlot,
-    type OutputRecipient,
-    type SpendArgs,
-} from "./bundle/index.js";
+// ── prover: the types `connect()` options mention. Backends live at
+// ./prover and ./wasm-prover so this barrel pulls no worker glue.
+export type { Prover, ProverArtifacts, ProverPaths } from "./prover/index.js";
 
 // ── wallet: the entrypoint most callers need ─────────────────────────────
 export {
@@ -287,6 +177,7 @@ export {
     type SelectOpts,
     SfrtCoinSelector,
     type SpendPhase,
+    type ConsolidateHint,
     type StoredNote,
     type Submitter,
     type SwapOptions,

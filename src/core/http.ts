@@ -73,6 +73,40 @@ const DEFAULTS = {
 const IDEMPOTENT = new Set(["GET", "HEAD", "OPTIONS"]);
 const RETRY_STATUS = new Set([408, 429]);
 
+/**
+ * Request defaults applied to every SDK-originated request.
+ *
+ * Browser `fetch` otherwise sends the page origin as `Referer` and attaches
+ * same-origin cookies. No Lelantos service reads either, and both are recorded
+ * by intermediate proxies and access logs. Caller `init` overrides these.
+ */
+export const PRIVACY_REQUEST_DEFAULTS: Readonly<RequestInit> = Object.freeze({
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    cache: "no-store",
+    redirect: "follow",
+});
+
+/**
+ * Bearer credential as request headers, for `JsonRequestOptions.headers`.
+ *
+ * Query params and path segments are recorded by proxies, CDNs and browser
+ * history; request headers are not.
+ */
+export function bearerAuth(token: string): Record<string, string> {
+    return { Authorization: `Bearer ${token}` };
+}
+
+/**
+ * Build `HttpClientOptions` from an optional `fetch`.
+ *
+ * The property is omitted rather than set to `undefined`, which
+ * `exactOptionalPropertyTypes` rejects on an optional field.
+ */
+export function httpOptionsFor(fetchImpl?: typeof fetch | undefined): HttpClientOptions {
+    return fetchImpl ? { fetchImpl } : {};
+}
+
 /** Failures surface as `NetworkError` with the caller-supplied code. */
 export function createHttpClient(
     timeoutCode: NetworkTimeoutCode,
@@ -97,11 +131,15 @@ export function createHttpClient(
                 opts.timeoutMs ?? (idempotent ? DEFAULTS.timeoutMs : DEFAULTS.submitTimeoutMs);
             const allowRetry = idempotent || retryOnSubmit;
 
+            const request: RequestInit = { ...PRIVACY_REQUEST_DEFAULTS, ...init };
             // One key for every attempt of a logical request, so the server
             // can recognise the repeat.
-            const request: RequestInit | undefined = idempotent
-                ? init
-                : { ...init, headers: { ...headersOf(init), "Idempotency-Key": idempotencyKey() } };
+            if (!idempotent) {
+                request.headers = {
+                    ...headersOf(init),
+                    "Idempotency-Key": idempotencyKey(),
+                };
+            }
 
             /** Last non-ok body, kept across attempts so the final error has it. */
             let lastBody: string | undefined;
@@ -136,12 +174,14 @@ export function createHttpClient(
 
                 lastStatus = res.status;
                 lastBody = await res.text().catch(() => undefined);
-                throw new NetworkError(
-                    failureCode,
-                    safeUrl,
-                    `HTTP ${res.status}${lastBody ? `: ${lastBody.slice(0, 200)}` : ""}`,
-                    { status: res.status, body: lastBody, context: { method } },
-                );
+                // The body is exposed on `.body` and excluded from the
+                // message, which reaches application logs verbatim; a relayer
+                // or FMD 4xx may echo part of the submitted payload.
+                throw new NetworkError(failureCode, safeUrl, `HTTP ${res.status}`, {
+                    status: res.status,
+                    body: lastBody,
+                    context: { method },
+                });
             };
 
             try {
@@ -259,7 +299,7 @@ export interface JsonRequestOptions {
 
 export interface JsonClient {
     get<T>(path: string, opts?: JsonRequestOptions): Promise<T>;
-    post<T>(path: string, body: unknown): Promise<T>;
+    post<T>(path: string, body: unknown, opts?: JsonRequestOptions): Promise<T>;
     del(path: string, opts?: JsonRequestOptions): Promise<void>;
     /** Escape hatch for non-JSON responses. */
     readonly raw: HttpClient;
@@ -305,11 +345,11 @@ export function createJsonClient(
             const init = o?.headers ? { headers: o.headers } : undefined;
             return json<T>(await http.fetch(target, init), target);
         },
-        async post<T>(path: string, body: unknown): Promise<T> {
-            const target = url(path);
+        async post<T>(path: string, body: unknown, o?: JsonRequestOptions): Promise<T> {
+            const target = url(path, o?.params);
             const res = await http.fetch(target, {
                 method: "POST",
-                headers: { "content-type": "application/json" },
+                headers: { "content-type": "application/json", ...o?.headers },
                 body: JSON.stringify(body),
             });
             return json<T>(res, target);

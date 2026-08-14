@@ -103,6 +103,9 @@ jobs:
       - name: "Public API surface (diff against api-surface.json)"
         run: npm run check:api
 
+      - name: "Docs type-check (README + SDK.md code blocks)"
+        run: npm run check:docs
+
       - name: Test (with coverage)
         run: npm run test:coverage
 

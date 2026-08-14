@@ -28,6 +28,7 @@ export interface WireScanInput {
     epk: Uint8Array;
     cm: string;
     leafIndex: number;
+    blockNumber: number;
 }
 
 export interface WireScanHit {
@@ -38,6 +39,7 @@ export interface WireScanHit {
     rcvDep: string;
     cm: string;
     leafIndex: number;
+    blockNumber: number;
 }
 
 export interface ScanParams {
@@ -57,6 +59,7 @@ export function encodeInput(i: ScanInput): WireScanInput {
         epk: i.epk,
         cm: i.cm.toString(),
         leafIndex: i.leafIndex,
+        blockNumber: i.blockNumber,
     };
 }
 
@@ -66,6 +69,7 @@ export function decodeInput(w: WireScanInput): ScanInput {
         epk: w.epk,
         cm: BigInt(w.cm),
         leafIndex: w.leafIndex,
+        blockNumber: w.blockNumber,
     };
 }
 
@@ -78,6 +82,7 @@ export function encodeHit(h: ScanHit): WireScanHit {
         rcvDep: h.rcvDep.toString(),
         cm: h.cm.toString(),
         leafIndex: h.leafIndex,
+        blockNumber: h.blockNumber,
     };
 }
 
@@ -90,6 +95,7 @@ export function decodeHit(w: WireScanHit): ScanHit {
         rcvDep: BigInt(w.rcvDep),
         cm: BigInt(w.cm),
         leafIndex: w.leafIndex,
+        blockNumber: w.blockNumber,
     };
 }
 

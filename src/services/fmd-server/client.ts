@@ -20,8 +20,14 @@
 // as decimal.
 
 import { bigintFrom, bool, hexBytes, hexInt, int, mapArr, obj } from "../../core/decode.js";
-import { createJsonClient, type HttpClientOptions, type JsonClient } from "../../core/http.js";
+import {
+    bearerAuth,
+    createJsonClient,
+    type HttpClientOptions,
+    type JsonClient,
+} from "../../core/http.js";
 import type { Field, Point } from "../../crypto/index.js";
+import { assertDetectionGamma } from "../../fmd/fmd.js";
 
 export interface FmdTreeState {
     chainId: number;
@@ -89,9 +95,10 @@ export interface NullifierChunkOut {
  * `gamma * 32` bytes.
  */
 export const GAMMA_MIN = 1;
-// Mirrors the server's declared range. `AuxValidation.sol` masks the on-chain
-// clue-bits field to 0x3FFF, so bits 14-15 are never set and γ > 14 is
-// unreachable.
+// Mirrors the server's declared range. Two lower limits bind first:
+// `AuxValidation.sol` masks the on-chain clue-bits field to 0x3FFF, so bits
+// 14-15 are never set, and senders pack only `FMD_SENDER_GAMMA` bits. The
+// effective limit is `assertDetectionGamma`.
 export const GAMMA_MAX = 16;
 
 export interface CreateSubscriptionInput {
@@ -226,8 +233,14 @@ export class FmdClient {
     }): Promise<FmdMatchOut[]> {
         // The token is the whole authorisation, so nothing else — not even
         // chainId — rides along; the subscription already pins the chain.
+        //
+        // It travels as a header rather than a query param: derived from `ivk`
+        // and stable across sessions, machines and IPs, a copy in a URL is a
+        // long-lived pseudonymous identifier recorded by every proxy, CDN and
+        // access log on the path, on every poll.
         const raw = await this.json.get<unknown>("/v1/matches", {
-            params: { token: opts.token, limit: opts.limit, after: opts.after },
+            params: { limit: opts.limit, after: opts.after },
+            headers: bearerAuth(opts.token),
         });
         return mapArr(raw, "$", (row, p) => note(row, "noteId", p));
     }
@@ -260,10 +273,14 @@ export class FmdClient {
      * whoever registered the token first.
      */
     async createSubscription(input: CreateSubscriptionInput): Promise<SubscriptionOut> {
+        // Also guarded in `detectionKeyFor`; enforced here so a hand-built
+        // subscription cannot register a γ senders never emit.
+        assertDetectionGamma(input.gamma);
         return subscription(await this.json.post<unknown>("/v1/subscriptions", input));
     }
 
+    /** Token travels in the `Authorization` header, not the path — see `listMatches`. */
     async deleteSubscription(token: string): Promise<void> {
-        await this.json.del(`/v1/subscriptions/${encodeURIComponent(token)}`);
+        await this.json.del("/v1/subscriptions", { headers: bearerAuth(token) });
     }
 }

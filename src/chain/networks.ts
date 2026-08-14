@@ -1,18 +1,18 @@
 // Network presets resolve chainId/MASP/relayer/fmd/treeDepth in one keyword.
 
-import type { EvmAddress } from "../core/brand.js";
+import type { EvmAddress, EvmAddressLike } from "../core/brand.js";
 
 export interface NetworkPreset {
     chainId: bigint;
     /** `null` marks a placeholder; `connect()` throws `NetworkNotDeployedError`. */
-    maspAddress: EvmAddress | null;
+    maspAddress: EvmAddressLike | null;
     /** SNARK-bound. Same `null` semantics as `maspAddress`. */
-    relayerAddress: EvmAddress | null;
+    relayerAddress: EvmAddressLike | null;
     relayerUrl: string;
     fmdUrl: string;
     treeDepth: number;
     /** Defaults to canonical CREATE2 deployment. */
-    permit2Address?: EvmAddress;
+    permit2Address?: EvmAddressLike;
     /** Surfaced in `NetworkNotDeployedError`. */
     deploymentStatusUrl?: string;
 }

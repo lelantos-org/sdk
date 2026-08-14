@@ -5,6 +5,8 @@
 
 import {
     type AssetId,
+    type AssetIdLike,
+    assetId,
     branded,
     type CircuitAmount,
     type Hex32,
@@ -311,7 +313,7 @@ export class Wallet implements WalletApi, SpendContext {
         return this.notes(filter);
     }
 
-    balance(asset: AssetId): CircuitAmount {
+    balance(asset: AssetIdLike): CircuitAmount {
         return branded<CircuitAmount>(
             this.cache.notes
                 .filter((n) => !n.spent && BigInt(n.asset) === asset)
@@ -335,11 +337,12 @@ export class Wallet implements WalletApi, SpendContext {
      * immutable apart from the `disabled` flag; `{ refresh: true }` re-reads
      * it.
      */
-    async asset(id: AssetId, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
-        const hit = this.assetCache.get(id);
+    async asset(id: AssetIdLike, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
+        const key = assetId(id);
+        const hit = this.assetCache.get(key);
         if (hit && !opts.refresh) return hit;
-        const info = await fetchAssetInfo(this.cfg.chain, id);
-        this.assetCache.set(id, info);
+        const info = await fetchAssetInfo(this.cfg.chain, key);
+        this.assetCache.set(key, info);
         return info;
     }
 

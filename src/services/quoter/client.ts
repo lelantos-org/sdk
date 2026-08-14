@@ -4,6 +4,8 @@
 // reuses `buildWithdraw` + `buildDeposit` from `bundle/`; caller assembles
 // `SwapWrapper.swap(SwapArgs)` calldata against their own signer/relayer.
 
+import { PRIVACY_REQUEST_DEFAULTS } from "../../core/http.js";
+
 /**
  * Venue tag returned by MetaQuoter.
  *
@@ -42,7 +44,8 @@ export interface SwapQuote {
 }
 
 export interface SwapQuoteRequest {
-    chainId: number;
+    /** `bigint` to match `WalletConfig.chainId` and `ChainAdapter.chainId()`. */
+    chainId: bigint;
     tokenIn: `0x${string}`;
     tokenOut: `0x${string}`;
     amountIn: bigint;
@@ -98,10 +101,11 @@ export async function fetchSwapQuote(
 
     try {
         const res = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/v1/quotes`, {
+            ...PRIVACY_REQUEST_DEFAULTS,
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-                chain_id: req.chainId,
+                chain_id: Number(req.chainId),
                 token_in: req.tokenIn,
                 token_out: req.tokenOut,
                 amount_in: req.amountIn.toString(),
