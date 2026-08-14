@@ -29,6 +29,9 @@ function storedNote(id: string, value: bigint, asset = 1n): StoredNote {
     };
 }
 
+const RELAYER_ADDR = "0x0000000000000000000000000000000000000001";
+const NATIVE_ADAPTER_ADDR = "0x00000000000000000000000000000000000ada9e";
+
 async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE) {
     const P = await Poseidon.build();
     const J = await WasmJubjub.build();
@@ -71,9 +74,10 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
         cfg: {
             chainId: 31337n,
             treeDepth: 4,
-            relayerAddress: "0x0000000000000000000000000000000000000001",
+            relayerAddress: RELAYER_ADDR,
             feeBps: 0n,
             shape,
+            chain: { nativeAdapterAddress: () => NATIVE_ADAPTER_ADDR },
         },
         prover,
         submitter: {
@@ -194,6 +198,41 @@ describe("executeWithdraw", () => {
             "withdrawNative",
         );
         expect((submitted[0] as { kind: string }).kind).toBe("withdrawNative");
+    });
+
+    /// `NativeAdapter` calls the pool itself, so it is the caller the pool
+    /// checks (`pi.relayer == msg.sender`) and the address the WETH must land
+    /// on before it can be unwrapped. The ETH then goes to `pi.payer`.
+    it("binds a native withdraw to the adapter, not the relayer", async () => {
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const to = evmAddress("0x0000000000000000000000000000000000000002");
+        await executeWithdraw(
+            ctx,
+            { to, amount: circuitAmount(40n), asset: assetId(1n) },
+            "withdrawNative",
+        );
+
+        const pi = (submitted[0] as { pubInputs: Record<string, string> }).pubInputs;
+        expect(pi.relayer).toBe(NATIVE_ADAPTER_ADDR);
+        expect(pi.recipient).toBe(NATIVE_ADAPTER_ADDR);
+        expect(pi.payer).toBe(to);
+    });
+
+    /// The ERC-20 path is unchanged: the relayer submits and the pool pushes
+    /// the token straight to the recipient.
+    it("keeps an ERC-20 withdraw bound to the relayer", async () => {
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const to = evmAddress("0x0000000000000000000000000000000000000002");
+        await executeWithdraw(
+            ctx,
+            { to, amount: circuitAmount(40n), asset: assetId(1n) },
+            "withdraw",
+        );
+
+        const pi = (submitted[0] as { pubInputs: Record<string, string> }).pubInputs;
+        expect(pi.relayer).toBe(RELAYER_ADDR);
+        expect(pi.recipient).toBe(to);
+        expect(pi.payer).toBe(RELAYER_ADDR);
     });
 });
 
