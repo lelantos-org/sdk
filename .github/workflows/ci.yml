@@ -6,6 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+# `npm ci` pulls `@lelantos-org/circuits` and `@lelantos-org/contracts` from
+# GitHub Packages. Without this block the fallback `GITHUB_TOKEN` inherits the
+# org's default workflow permissions, which may omit `packages` and 401.
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
