@@ -1,7 +1,7 @@
-import { maspAbi } from "@lelantos-org/contracts";
+import { maspAbi, nativeAdapterAbi } from "@lelantos-org/contracts";
 import { toEventSignature, toFunctionSignature } from "viem";
 import { describe, expect, it } from "vitest";
-import { MASP_ABI } from "./abi.js";
+import { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
 
 // `abi.ts` is hand-maintained, so it can drift from the deployed contracts
 // silently — a wrong tuple shape encodes a call that reverts, or worse, one
@@ -38,50 +38,66 @@ const outputsOf = (i: AbiItem): string => {
     return `(${(i.outputs ?? []).map(render).join(",")})`;
 };
 
-const canonical = new Map(
-    (maspAbi as readonly AbiItem[])
-        .filter((i) => i.type === "function" || i.type === "event")
-        .map((i) => [`${i.type}:${i.name}`, i]),
-);
+const indexBy = (abi: readonly AbiItem[]) =>
+    new Map(
+        abi
+            .filter((i) => i.type === "function" || i.type === "event")
+            .map((i) => [`${i.type}:${i.name}`, i]),
+    );
 
 /** Inputs and outputs together — the whole calling contract for one entry. */
 const fingerprint = (i: AbiItem): string => `${sigOf(i)} -> ${outputsOf(i)}`;
 
 /**
  * Entries that do not match the deployed contract, enumerated rather than
- * skipped wholesale. Empty: the SDK now speaks the one-output deposit intent.
+ * skipped wholesale. Empty: the SDK speaks the single-leaf deposit flow, and
+ * the native paths live on `NativeAdapter` where the pool moved them.
  * Anything added here is a live incompatibility, not a style difference.
  */
 const PENDING_MIGRATION = new Set<string>([]);
 
-const items = MASP_ABI as readonly AbiItem[];
+/**
+ * The pool and the native bridge are separate deployments, so each
+ * hand-written subset is checked against its own canonical ABI. A native
+ * entry compared against `maspAbi` would report as merely absent, which
+ * reads like a rename rather than the address change it is.
+ */
+const SUBSETS = [
+    { name: "MASP_ABI", items: MASP_ABI as readonly AbiItem[], canonical: maspAbi },
+    {
+        name: "NATIVE_ADAPTER_ABI",
+        items: NATIVE_ADAPTER_ABI as readonly AbiItem[],
+        canonical: nativeAdapterAbi,
+    },
+] as const;
 
-describe("MASP_ABI vs the canonical contracts ABI", () => {
+describe.each(SUBSETS)("$name vs the canonical contracts ABI", ({ items, canonical: ref }) => {
+    const canonical = indexBy(ref as readonly AbiItem[]);
     const checked = items.filter((i) => !PENDING_MIGRATION.has(`${i.type}:${i.name}`));
 
     it.each(
         checked.map((i) => [`${i.type}:${i.name}`, i] as const),
     )("%s matches the deployed contract", (key, item) => {
-        const ref = canonical.get(key);
-        expect(ref, `${key} is absent from the canonical ABI`).toBeDefined();
-        expect(fingerprint(item)).toBe(fingerprint(ref as AbiItem));
+        const found = canonical.get(key);
+        expect(found, `${key} is absent from the canonical ABI`).toBeDefined();
+        expect(fingerprint(item)).toBe(fingerprint(found as AbiItem));
     });
 
     it("covers every entry that is not explicitly pending migration", () => {
         // Guards the guard: a new hand-written entry must be compared, not
         // silently uncovered, and a stale exemption must be removed once the
         // entry agrees again.
-        expect(checked.length + PENDING_MIGRATION.size).toBe(items.length);
+        const exempted = items.filter((i) => PENDING_MIGRATION.has(`${i.type}:${i.name}`));
+        expect(checked.length + exempted.length).toBe(items.length);
 
-        for (const key of PENDING_MIGRATION) {
-            const item = items.find((i) => `${i.type}:${i.name}` === key);
-            expect(item, `${key} is exempted but no longer present in MASP_ABI`).toBeDefined();
-            const ref = canonical.get(key);
-            if (ref) {
+        for (const item of exempted) {
+            const key = `${item.type}:${item.name}`;
+            const found = canonical.get(key);
+            if (found) {
                 expect(
-                    fingerprint(item as AbiItem),
+                    fingerprint(item),
                     `${key} now matches the canonical ABI — drop it from PENDING_MIGRATION`,
-                ).not.toBe(fingerprint(ref));
+                ).not.toBe(fingerprint(found));
             }
         }
     });

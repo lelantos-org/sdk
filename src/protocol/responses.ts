@@ -10,14 +10,14 @@ export interface RelayerSubmitResponse {
 }
 
 /** @internal */
-export interface RelayerIntentResponse {
+export interface RelayerDepositResponse {
     txHash: Hex32;
     /**
-     * Intent id allocated by `MASP.submitIntent` (== `nextIntentId` at
+     * Deposit id allocated by `MASP.deposit` (== `nextDepositId` at
      * time of the call). Wallet uses this to track escrow lifecycle and
-     * for `MASP.cancelIntent` if the relayer never flushes.
+     * for `MASP.cancelDeposit` if the relayer never flushes.
      */
-    intentId: bigint;
+    depositId: bigint;
 }
 
 /** @internal */

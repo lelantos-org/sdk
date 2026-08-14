@@ -4,9 +4,9 @@
 // relayer's Rust DTOs declare the same three fields of the same struct
 // differently.
 //
-//   POST /v1/intent   DepositIntent.{chainId,publicAssetId,publicIn}
+//   POST /v1/deposit   DepositRequest.{chainId,publicAssetId,publicIn}
 //                     -> decimal strings (the DTO declares them String)
-//   POST /v1/swap     swap.intentD, same three fields
+//   POST /v1/swap     swap.depositD, same three fields
 //                     -> JSON numbers   (the DTO declares them u64, and
 //                        serde's u64 deserializer rejects strings)
 //
@@ -19,10 +19,10 @@ import { bigintFrom, hexBytes, int, mapArr, obj, tuple2 } from "../../core/decod
 import { WireFormatError } from "../../core/errors.js";
 import { bytesToHex } from "../../core/hex.js";
 import type { Field, Point } from "../../crypto/index.js";
-import type { AuxOutput } from "../../protocol/deposit-intent.js";
+import type { AuxOutput } from "../../protocol/deposit-request.js";
 import type { ScannedNote } from "../../protocol/responses.js";
 import type {
-    SubmitIntentPayload,
+    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     SwapBlob,
@@ -81,7 +81,7 @@ export function serializeSubmitTransact(p: SubmitTransactPayload): unknown {
     return {
         chainId: u64Num(p.chainId, "$.chainId"),
         kind: p.kind,
-        proof2x2: p.proof2x2,
+        proof: p.proof,
         pubInputs: serializePubInputs(p.pubInputs),
         aux: p.aux.map(serializeAux),
     };
@@ -91,7 +91,7 @@ export function serializeSubmitTransact(p: SubmitTransactPayload): unknown {
 export function serializeSubmitSwap(p: SubmitSwapPayload): unknown {
     return {
         chainId: u64Num(p.chainId, "$.chainId"),
-        proof2x2: p.proof2x2,
+        proof: p.proof,
         pubInputs: serializePubInputs(p.pubInputs),
         aux: p.aux.map(serializeAux),
         swap: serializeSwapBlob(p.swap),
@@ -102,17 +102,17 @@ function serializeSwapBlob(s: SwapBlob): unknown {
     return {
         adapter: s.adapter,
         route: s.route,
-        intentD: {
+        depositD: {
             // Rust DTO declares these as u64 (serde rejects strings); JS
             // Number is safe up to 2^53.
-            chainId: u64Num(s.intentD.chainId, "$.swap.intentD.chainId"),
-            publicAssetId: u64Num(s.intentD.publicAssetId, "$.swap.intentD.publicAssetId"),
-            publicIn: u64Num(s.intentD.publicIn, "$.swap.intentD.publicIn"),
-            payer: s.intentD.payer,
-            recipient: s.intentD.recipient,
-            outCm: s.intentD.outCm,
-            cvDep: [decStr(s.intentD.cvDep[0]), decStr(s.intentD.cvDep[1])],
-            rcv: decStr(s.intentD.rcv),
+            chainId: u64Num(s.depositD.chainId, "$.swap.depositD.chainId"),
+            publicAssetId: u64Num(s.depositD.publicAssetId, "$.swap.depositD.publicAssetId"),
+            publicIn: u64Num(s.depositD.publicIn, "$.swap.depositD.publicIn"),
+            payer: s.depositD.payer,
+            recipient: s.depositD.recipient,
+            outCm: s.depositD.outCm,
+            cvDep: [decStr(s.depositD.cvDep[0]), decStr(s.depositD.cvDep[1])],
+            rcv: decStr(s.depositD.rcv),
         },
         auxD: serializeAux(s.auxD),
         tokenIn: s.tokenIn,
@@ -125,17 +125,23 @@ function serializeSwapBlob(s: SwapBlob): unknown {
 }
 
 /** @internal */
-export function serializeSubmitIntent(p: SubmitIntentPayload): unknown {
+export function serializeSubmitDeposit(p: SubmitDepositPayload): unknown {
     return {
         chainId: u64Num(p.chainId, "$.chainId"),
-        intent: {
-            // Decimal strings here — /v1/intent's DTO declares them String.
-            chainId: decStr(p.intent.chainId),
-            publicAssetId: decStr(p.intent.publicAssetId),
-            publicIn: decStr(p.intent.publicIn),
-            payer: p.intent.payer,
-            recipient: p.intent.recipient,
-            outCm: p.intent.outCm,
+        deposit: {
+            // Decimal strings here — /v1/deposit's DTO declares them String.
+            chainId: decStr(p.deposit.chainId),
+            publicAssetId: decStr(p.deposit.publicAssetId),
+            publicIn: decStr(p.deposit.publicIn),
+            payer: p.deposit.payer,
+            recipient: p.deposit.recipient,
+            outCm: p.deposit.outCm,
+            // The leaf's value commitment and its blinder. Both are fields of
+            // `PubInputs.DepositRequest`, so a relayer cannot rebuild the
+            // struct without them — `rcv` in particular is a private witness
+            // it has no other way to learn.
+            cvDep: [decStr(p.deposit.cvDep[0]), decStr(p.deposit.cvDep[1])],
+            rcv: decStr(p.deposit.rcv),
         },
         permit2: {
             nonce: decStr(p.permit2.nonce),

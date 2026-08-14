@@ -3,7 +3,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 import { PrivateKeySigner } from "../chain/eth-signer.js";
 import { computePiHash } from "../protocol/abi-hash.js";
-import { type AuxOutput, type DepositIntent, PERMIT2_ADDRESS, signPermit2Witness } from "./sign.js";
+import {
+    type AuxOutput,
+    type DepositRequest,
+    PERMIT2_ADDRESS,
+    signPermit2Witness,
+} from "./sign.js";
 
 const PERMIT2_TYPES = {
     PermitWitnessTransferFrom: [
@@ -65,7 +70,7 @@ describe("permit2", () => {
     });
 
     it("computePiHash is deterministic + distinguishes inputs", () => {
-        const intent: DepositIntent = {
+        const deposit: DepositRequest = {
             chainId: 31337n,
             publicAssetId: 1n,
             publicIn: 1000n,
@@ -82,12 +87,12 @@ describe("permit2", () => {
             ephPubY: 4n,
             ciphertext: new Uint8Array([0xab, 0xcd, 0xef]),
         };
-        const h1 = computePiHash(intent, aux);
-        const h2 = computePiHash(intent, aux);
+        const h1 = computePiHash(deposit, aux);
+        const h2 = computePiHash(deposit, aux);
         expect(h1).toBe(h2);
         expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
-        const intent2 = { ...intent, publicIn: 1001n };
-        expect(computePiHash(intent2, aux)).not.toBe(h1);
+        const other = { ...deposit, publicIn: 1001n };
+        expect(computePiHash(other, aux)).not.toBe(h1);
     });
 });

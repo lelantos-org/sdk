@@ -1,9 +1,9 @@
 // Pluggable transact-bundle submitter.
 
 import type { HttpClientOptions } from "../core/http.js";
-import type { RelayerIntentResponse, RelayerSubmitResponse } from "../protocol/responses.js";
+import type { RelayerDepositResponse, RelayerSubmitResponse } from "../protocol/responses.js";
 import type {
-    SubmitIntentPayload,
+    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
 } from "../protocol/transact.js";
@@ -12,8 +12,8 @@ import { RelayerClient } from "../services/relayer/client.js";
 export interface Submitter {
     /** Spend op. Relayer attaches the matching tree_update_batch SNARK + tpi. */
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse>;
-    /** Deposit escrow. Falls back to `chain.submitIntent` when absent. */
-    submitIntent?(payload: SubmitIntentPayload): Promise<RelayerIntentResponse>;
+    /** Deposit escrow. Falls back to `chain.submitDeposit` when absent. */
+    submitDeposit?(payload: SubmitDepositPayload): Promise<RelayerDepositResponse>;
     /** Atomic shielded swap. Required for `Wallet.swap`. */
     submitSwap?(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse>;
 }

@@ -37,9 +37,9 @@ export function toWalletNote(s: StoredNote): WalletNote {
  */
 export type OutputSlot = number;
 
-/** Shared subset of `BuiltBundle` / `BuiltIntent`. */
+/** Shared subset of `BuiltBundle` / `BuiltDeposit`. */
 export interface BuiltLike {
-    /** One per output slot: `nOut` at spend, always 2 for a deposit intent. */
+    /** One per output slot: `nOut` at spend, always 1 for a deposit. */
     cm: Field[];
     producedNotes: Note[];
 }
@@ -62,7 +62,7 @@ export interface MakeTransactionResultArgs {
     inputSum?: CircuitAmount | undefined;
     sent?: CircuitAmount | undefined;
     change?: CircuitAmount | undefined;
-    intentId?: bigint | undefined;
+    depositId?: bigint | undefined;
     /**
      * Slots of `built.cm` holding own commitments. Deposit/withdraw: `[0, 1]`;
      * transfer: `[1]`; self-transfer: `[0, 1]`.
@@ -116,7 +116,7 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 ownCommitments,
                 ownInflow,
                 sent: args.sent ?? ZERO,
-                ...(args.intentId !== undefined ? { intentId: args.intentId } : {}),
+                ...(args.depositId !== undefined ? { depositId: args.depositId } : {}),
             };
         case "transfer": {
             const r: TransferResult = {
@@ -158,7 +158,7 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 change: args.change ?? ZERO,
                 ownCommitments,
                 ownInflow,
-                ...(args.intentId !== undefined ? { intentId: args.intentId } : {}),
+                ...(args.depositId !== undefined ? { depositId: args.depositId } : {}),
             };
     }
 }

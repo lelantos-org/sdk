@@ -22,7 +22,7 @@ export interface DepositOptions {
     deadline?: bigint | undefined;
     /**
      * Native-ETH deposit. Requires the registered WETH asset id; SDK
-     * calls `submitIntentNative` with `msg.value = total`.
+     * calls `NativeAdapter.depositNative` with `msg.value = total`.
      */
     asEth?: boolean | undefined;
     /** Errors from callback are swallowed. */

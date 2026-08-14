@@ -12,14 +12,14 @@
 export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 
 /**
- * `PubInputs.DepositIntent` mirror — wire-side bigints/hex.
+ * `PubInputs.DepositRequest` mirror — wire-side bigints/hex.
  *
- * One output. The intent used to carry a second, zero-value pad leaf so the
+ * One output. The request used to carry a second, zero-value pad leaf so the
  * deposit produced the same two-leaf shape as a spend; the contract collapsed
  * it, which also removed `rcvTotal` and `rcvDepPad` (both existed only to pin
  * the pad leaf's value to zero).
  */
-export interface DepositIntent {
+export interface DepositRequest {
     /**
      * Full-width, matching `Transact.chainId`. Encodes to the same ABI word as
      * the `uint64` it replaced, so the Permit2 witness preimage is unchanged.
@@ -38,7 +38,7 @@ export interface DepositIntent {
      */
     cvDep: [bigint, bigint];
     /**
-     * The output's `rcv_dep`. Published in the IntentEscrowed event so the
+     * The output's `rcv_dep`. Published in the DepositEscrowed event so the
      * relayer can build the tree_update_batch witness without learning
      * recipient pk/rho/rcm. A Pedersen blinder is information-theoretically
      * independent of value/asset/identity, so it leaks nothing useful.

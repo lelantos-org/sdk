@@ -1,18 +1,18 @@
 // Domain structs -> viem ABI tuples.
 
 import { bytesToHex } from "../../core/hex.js";
-import type { AuxOutput, DepositIntent } from "../../protocol/deposit-intent.js";
+import type { AuxOutput, DepositRequest } from "../../protocol/deposit-request.js";
 
-export function intentTuple(intent: DepositIntent) {
+export function depositTuple(deposit: DepositRequest) {
     return {
-        chainId: intent.chainId,
-        publicAssetId: intent.publicAssetId,
-        publicIn: intent.publicIn,
-        payer: intent.payer as `0x${string}`,
-        recipient: intent.recipient as `0x${string}`,
-        outCm: intent.outCm as `0x${string}`,
-        cvDep: intent.cvDep,
-        rcv: intent.rcv,
+        chainId: deposit.chainId,
+        publicAssetId: deposit.publicAssetId,
+        publicIn: deposit.publicIn,
+        payer: deposit.payer as `0x${string}`,
+        recipient: deposit.recipient as `0x${string}`,
+        outCm: deposit.outCm as `0x${string}`,
+        cvDep: deposit.cvDep,
+        rcv: deposit.rcv,
     };
 }
 

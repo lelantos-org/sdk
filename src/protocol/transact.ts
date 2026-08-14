@@ -7,7 +7,7 @@
 
 import type { Field, Point } from "../crypto/index.js";
 import type { OutputAux } from "../notes/aux.js";
-import type { AuxOutput, DepositIntent, Permit2Sig } from "./deposit-intent.js";
+import type { AuxOutput, DepositRequest, Permit2Sig } from "./deposit-request.js";
 
 /**
  * Spend op the relayer routes on-chain; maps 1:1 to the MASP entry point.
@@ -30,7 +30,7 @@ export interface SubmitTransactPayload {
      * once, so it stays as-is until that is coordinated. The arities above
      * are already shape-generic.
      */
-    proof2x2: {
+    proof: {
         piA: string[];
         piB: string[][];
         piC: string[];
@@ -48,17 +48,17 @@ export interface SubmitTransactPayload {
 }
 
 /**
- * Deposit-side payload: wallet pre-built DepositIntent + Permit2 signature
- * + per-output FMD/ciphertext. Relayer broadcasts `MASP.submitIntent`.
+ * Deposit-side payload: wallet pre-built DepositRequest + Permit2 signature
+ * + per-output FMD/ciphertext. Relayer broadcasts `MASP.deposit`.
  *
  * @internal
  */
-export interface SubmitIntentPayload {
+export interface SubmitDepositPayload {
     chainId: bigint;
-    intent: DepositIntent;
+    deposit: DepositRequest;
     permit2: Permit2Sig;
     /**
-     * One: `MASP.submitIntent` takes a single `aux` and `bytes32 outCm`, so
+     * One: `MASP.deposit` takes a single `aux` and `bytes32 outCm`, so
      * the deposit path is one-output on chain regardless of the transact
      * circuit's shape.
      */
@@ -68,7 +68,7 @@ export interface SubmitIntentPayload {
 /**
  * Atomic shielded-swap payload. Carries the leg-1 transact_2x2 SNARK
  * (same shape as a `withdraw` whose recipient is the SwapWrapper) plus
- * the leg-2 escrow blob the wrapper forwards to `submitIntentAuthorized`
+ * the leg-2 escrow blob the wrapper forwards to `submitDepositAuthorized`
  * in the same tx. Relayer adds the matching tree_update_batch proof and
  * submits to `SwapWrapper.swap`.
  */
@@ -78,7 +78,7 @@ export interface SubmitSwapPayload {
      * Identical layout to `SubmitTransactPayload` — the relayer reuses
      * the same shape validators on the leg-1 SNARK.
      */
-    proof2x2: SubmitTransactPayload["proof2x2"];
+    proof: SubmitTransactPayload["proof"];
     pubInputs: TransactPubInputs;
     aux: TransactAux[];
     swap: SwapBlob;
@@ -99,10 +99,10 @@ export interface SwapBlob {
      */
     route: string;
     /**
-     * Slim deposit intent for the B note. `payer` MUST equal the
+     * Slim deposit request for the B note. `payer` MUST equal the
      * `swap_wrapper_address` configured on the relayer.
      */
-    intentD: DepositIntent;
+    depositD: DepositRequest;
     /**
      * FMD + ciphertext for the B-side output. Matches the on-chain
      * `AuxValidation.Output` struct, which the deposit path takes singly.

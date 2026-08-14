@@ -16,6 +16,12 @@ export interface ViemCtx {
     readonly signer: EthSigner;
     readonly maspAddress: EvmAddress;
     readonly permit2Address: EvmAddress;
+    /**
+     * `NativeAdapter`, when one is deployed for this pool. Undefined on a
+     * chain without it, which is what makes the native-coin paths optional:
+     * the pool is ERC-20 only, so there is no fallback entry point to try.
+     */
+    readonly nativeAdapterAddress?: EvmAddress | undefined;
     /** Resolves the chain id, caching after the first RPC round trip. */
     chainId(): Promise<bigint>;
 }

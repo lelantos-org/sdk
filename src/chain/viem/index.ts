@@ -1,7 +1,7 @@
 // viem-based `ChainAdapter`.
 //
 // The class is a thin composition over the call modules in this directory:
-// reads, token, intents, permit2. It owns exactly the shared state — the
+// reads, token, deposits, permit2. It owns exactly the shared state — the
 // clients, the two addresses, and the chain-id cache — and delegates
 // everything else.
 //
@@ -13,33 +13,39 @@ import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../../core/brand.j
 import type { EthSigner } from "../../core/signer.js";
 import type {
     AuxOutput,
-    DepositIntent,
+    DepositRequest,
     Permit2Sig,
     PermitSingle,
-} from "../../protocol/deposit-intent.js";
-import { PERMIT2_ADDRESS } from "../../protocol/deposit-intent.js";
+} from "../../protocol/deposit-request.js";
+import { PERMIT2_ADDRESS } from "../../protocol/deposit-request.js";
 import type { ChainAdapter } from "../port.js";
 import type {
     AssetEntry,
-    CancelIntentInputs,
-    EscrowedIntentView,
-    IntentEscrowedRecord,
+    CancelDepositInputs,
+    DepositEscrowedRecord,
+    EscrowedDepositView,
     Permit2SignArgs,
     TokenMeta,
 } from "../types.js";
 import { addr, type ViemCtx } from "./ctx.js";
-import * as intents from "./intents.js";
+import * as deposits from "./deposits.js";
 import * as permit2 from "./permit2.js";
 import * as reads from "./reads.js";
 import * as token from "./token.js";
 
-export { MASP_ABI } from "./abi.js";
+export { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
 
 export interface ViemChainAdapterOpts {
     rpcUrl: string;
     signer: EthSigner;
     maspAddress: string;
     permit2Address?: string | undefined;
+    /**
+     * `NativeAdapter` deployed alongside the pool. Required for native-coin
+     * deposits and unshields: MASP is ERC-20 only, so without it those paths
+     * have no entry point and the adapter reports them as unsupported.
+     */
+    nativeAdapterAddress?: string | undefined;
     chainId?: bigint | undefined;
 }
 
@@ -49,6 +55,7 @@ export class ViemChainAdapter implements ChainAdapter {
     private readonly ctx: ViemCtx;
     private readonly _maspAddress: EvmAddress;
     private readonly _permit2Address: EvmAddress;
+    private readonly _nativeAdapterAddress?: EvmAddress | undefined;
     private readonly chainIdOverride?: bigint | undefined;
     private cachedChainId?: bigint;
 
@@ -57,6 +64,9 @@ export class ViemChainAdapter implements ChainAdapter {
         this.signer = opts.signer;
         this._maspAddress = addr(opts.maspAddress);
         this._permit2Address = addr(opts.permit2Address ?? PERMIT2_ADDRESS);
+        this._nativeAdapterAddress = opts.nativeAdapterAddress
+            ? addr(opts.nativeAdapterAddress)
+            : undefined;
         this.chainIdOverride = opts.chainId;
 
         this.ctx = {
@@ -64,6 +74,7 @@ export class ViemChainAdapter implements ChainAdapter {
             signer: this.signer,
             maspAddress: this._maspAddress,
             permit2Address: this._permit2Address,
+            nativeAdapterAddress: this._nativeAdapterAddress,
             chainId: () => this.chainId(),
         };
     }
@@ -86,11 +97,11 @@ export class ViemChainAdapter implements ChainAdapter {
     fetchFeeBps(): Promise<bigint> {
         return reads.fetchFeeBps(this.ctx);
     }
-    getEscrowed(id: bigint): Promise<EscrowedIntentView | null> {
+    getEscrowed(id: bigint): Promise<EscrowedDepositView | null> {
         return reads.getEscrowed(this.ctx, id);
     }
-    fetchIntentEscrowed(id: bigint, fromBlock?: bigint): Promise<IntentEscrowedRecord | null> {
-        return reads.fetchIntentEscrowed(this.ctx, id, fromBlock);
+    fetchDepositEscrowed(id: bigint, fromBlock?: bigint): Promise<DepositEscrowedRecord | null> {
+        return reads.fetchDepositEscrowed(this.ctx, id, fromBlock);
     }
     cancelDelay(): Promise<number> {
         return reads.cancelDelay(this.ctx);
@@ -128,31 +139,37 @@ export class ViemChainAdapter implements ChainAdapter {
     }
 
     // ── deposit ──────────────────────────────────────────────────────────
-    submitIntent(args: {
-        intent: DepositIntent;
+    submitDeposit(args: {
+        deposit: DepositRequest;
         permit2: Permit2Sig;
         aux: AuxOutput;
         onSent?: ((txHash: Hex32) => void) | undefined;
-    }): Promise<{ txHash: Hex32; intentId: bigint }> {
-        return intents.submitIntent(this.ctx, args);
+    }): Promise<{ txHash: Hex32; depositId: bigint }> {
+        return deposits.submitDeposit(this.ctx, args);
     }
-    submitIntentNative(args: {
-        intent: DepositIntent;
+    submitDepositNative(args: {
+        deposit: DepositRequest;
         aux: AuxOutput;
         value: bigint;
         onSent?: ((txHash: Hex32) => void) | undefined;
-    }): Promise<{ txHash: Hex32; intentId: bigint }> {
-        return intents.submitIntentNative(this.ctx, args);
+    }): Promise<{ txHash: Hex32; depositId: bigint }> {
+        return deposits.submitDepositNative(this.ctx, args);
     }
-    submitIntentAuthorized(args: {
-        intent: DepositIntent;
+    submitDepositAuthorized(args: {
+        deposit: DepositRequest;
         aux: AuxOutput;
         onSent?: ((txHash: Hex32) => void) | undefined;
-    }): Promise<{ txHash: Hex32; intentId: bigint }> {
-        return intents.submitIntentAuthorized(this.ctx, args);
+    }): Promise<{ txHash: Hex32; depositId: bigint }> {
+        return deposits.submitDepositAuthorized(this.ctx, args);
     }
-    cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: Hex32 }> {
-        return intents.cancelIntent(this.ctx, id, inputs);
+    cancelDeposit(id: bigint, inputs: CancelDepositInputs): Promise<{ txHash: Hex32 }> {
+        return deposits.cancelDeposit(this.ctx, id, inputs);
+    }
+    cancelDepositNative(
+        id: bigint,
+        inputs: Omit<CancelDepositInputs, "payer">,
+    ): Promise<{ txHash: Hex32 }> {
+        return deposits.cancelDepositNative(this.ctx, id, inputs);
     }
 
     // ── permit2 ──────────────────────────────────────────────────────────
@@ -185,5 +202,9 @@ export class ViemChainAdapter implements ChainAdapter {
     // ── addresses ────────────────────────────────────────────────────────
     async maspAddress(): Promise<EvmAddress> {
         return this._maspAddress;
+    }
+    /** `undefined` when no `NativeAdapter` is configured for this chain. */
+    nativeAdapterAddress(): EvmAddress | undefined {
+        return this._nativeAdapterAddress;
     }
 }

@@ -1,11 +1,17 @@
 // Wallet-side HTTP client for the off-chain MASP relayer service.
 //
-// Deposits: wallet POSTs `SubmitIntentPayload` to `/v1/intent`; relayer
-// broadcasts `MASP.submitIntent` and later batches up to MAX_N=8 escrowed
-// intents under one `flushBatch` SNARK.
-// Spends (transfer/withdraw/withdrawNative): wallet builds the transact_2x2
+// Spends (transfer/withdraw/withdrawNative): wallet builds the transact
 // SNARK + pubInputs + per-output aux. Relayer assembles the matching
-// tree_update_batch SNARK (owns the 249 MB zkey + tree state).
+// tree_update_batch SNARK (owns the multi-hundred-MB zkey + tree state) and
+// batches escrowed deposits, up to `MAX_L_BATCH = 8` leaves, under it.
+//
+// Deposits do NOT go through here in the default wiring: `Wallet.deposit`
+// broadcasts `MASP.deposit` / `depositAuthorized` /
+// `NativeAdapter.depositNative` itself, and the relayer picks the escrow up
+// from its `DepositEscrowed` event. `submitDeposit` below is the wire format
+// for a relayer that chooses to broadcast on the wallet's behalf; the
+// reference relayer serves no `/v1/deposit` route today, so calling it
+// against that deployment 404s.
 //
 // Relayer can censor but not forge: every merkle path must verify against
 // on-chain `isKnownRoot` before the wallet trusts it.
@@ -16,13 +22,13 @@ import { createJsonClient, type HttpClientOptions, type JsonClient } from "../..
 import type { Field } from "../../crypto/index.js";
 import type {
     MerkleProofResponse,
-    RelayerIntentResponse,
+    RelayerDepositResponse,
     RelayerSubmitResponse,
     ScannedNote,
     TreeStateResponse,
 } from "../../protocol/responses.js";
 import type {
-    SubmitIntentPayload,
+    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
 } from "../../protocol/transact.js";
@@ -30,7 +36,7 @@ import {
     deserializeMerkleProof,
     deserializeScannedNote,
     deserializeTreeState,
-    serializeSubmitIntent,
+    serializeSubmitDeposit,
     serializeSubmitSwap,
     serializeSubmitTransact,
 } from "./codec.js";
@@ -58,12 +64,19 @@ export class RelayerClient {
         return this.json.post("/v1/swap", serializeSubmitSwap(payload));
     }
 
-    async submitIntent(payload: SubmitIntentPayload): Promise<RelayerIntentResponse> {
-        const raw = await this.json.post<unknown>("/v1/intent", serializeSubmitIntent(payload));
+    /**
+     * POST the full `PubInputs.DepositRequest` — `cvDep` and `rcv` included,
+     * since the relayer rebuilds the on-chain struct from it — plus the
+     * Permit2 witness signature.
+     *
+     * Optional relayer capability: see the note at the top of this file.
+     */
+    async submitDeposit(payload: SubmitDepositPayload): Promise<RelayerDepositResponse> {
+        const raw = await this.json.post<unknown>("/v1/deposit", serializeSubmitDeposit(payload));
         const r = obj(raw, "$");
         return {
             txHash: hex32(str(r.txHash, "$.txHash")),
-            intentId: bigintFrom(r.intentId, "$.intentId"),
+            depositId: bigintFrom(r.depositId, "$.depositId"),
         };
     }
 

@@ -25,10 +25,15 @@ export type {
 export { supportsAllowanceTransfer, supportsNativeEth } from "./port.js";
 export type {
     AssetEntry,
-    CancelIntentInputs,
-    EscrowedIntentView,
-    IntentEscrowedRecord,
+    CancelDepositInputs,
+    DepositEscrowedRecord,
+    EscrowedDepositView,
     Permit2SignArgs,
     TokenMeta,
 } from "./types.js";
-export { MASP_ABI, ViemChainAdapter, type ViemChainAdapterOpts } from "./viem/index.js";
+export {
+    MASP_ABI,
+    NATIVE_ADAPTER_ABI,
+    ViemChainAdapter,
+    type ViemChainAdapterOpts,
+} from "./viem/index.js";

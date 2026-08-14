@@ -22,7 +22,7 @@ export function applyFee(amount: bigint, feeBps: bigint): bigint {
 }
 
 /**
- * Guard a value destined for `DepositIntent.publicIn` against the uint48
+ * Guard a value destined for `DepositRequest.publicIn` against the uint48
  * bound the pool enforces.
  *
  * @throws {InvalidArgumentError} naming the asset and the representable max.

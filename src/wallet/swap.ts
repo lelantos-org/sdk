@@ -89,9 +89,9 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         outputRandomness: change.map(() => freshOutputAuxRandomness()),
     });
 
-    // Leg 2: B-note deposit intent. Slot 0 = real B note, slot 1 = pad.
+    // Leg 2: B-note deposit. One leaf, so there is no pad slot.
     const { output0: o0 } = freshDepositSlots();
-    const intentBundle = buildDeposit({
+    const depositBundle = buildDeposit({
         P: ctx.P,
         J: ctx.J,
         chainId: ctx.cfg.chainId,
@@ -116,14 +116,14 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
 
     const payload: SubmitSwapPayload = {
         chainId: ctx.cfg.chainId,
-        proof2x2: built.payload.proof2x2,
+        proof: built.payload.proof,
         pubInputs: built.payload.pubInputs,
         aux: built.payload.aux,
         swap: {
             adapter: quote.adapter,
             route: quote.route,
-            intentD: intentBundle.intent,
-            auxD: auxOutputFromWire(intentBundle.aux),
+            depositD: depositBundle.deposit,
+            auxD: auxOutputFromWire(depositBundle.aux),
             tokenIn: entryIn.token,
             tokenOut: entryOut.token,
             amountIn: amountInUnits,

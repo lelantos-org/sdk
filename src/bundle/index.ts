@@ -2,7 +2,7 @@
 //
 // `buildSpend` covers transfer / withdraw / withdrawNative (they differ by
 // `kind` and `publicOut`). `buildDeposit` does NOT prove — deposits go
-// through `MASP.submitIntent` with a Permit2 witness.
+// through `MASP.deposit` with a Permit2 witness.
 
 export {
     type BuiltBundle,
@@ -16,5 +16,5 @@ export {
     type OutputRandomness,
     type OutputRecipient,
 } from "./common.js";
-export { type BuiltIntent, buildDeposit, type DepositArgs } from "./deposit.js";
+export { type BuiltDeposit, buildDeposit, type DepositArgs } from "./deposit.js";
 export { buildSpend, type SpendArgs } from "./spend.js";

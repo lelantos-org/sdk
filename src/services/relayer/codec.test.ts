@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { isWalletError } from "../../core/errors.js";
-import type { DepositIntent } from "../../protocol/deposit-intent.js";
+import type { DepositRequest } from "../../protocol/deposit-request.js";
 import type {
-    SubmitIntentPayload,
+    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     TransactAux,
@@ -12,14 +12,14 @@ import {
     deserializeMerkleProof,
     deserializeScannedNote,
     deserializeTreeState,
-    serializeSubmitIntent,
+    serializeSubmitDeposit,
     serializeSubmitSwap,
     serializeSubmitTransact,
 } from "./codec.js";
 
 // Golden fixtures.
 //
-// The same three DepositIntent fields go out as decimal strings to /v1/intent
+// The same three DepositRequest fields go out as decimal strings to /v1/deposit
 // and as JSON numbers inside /v1/swap, because the relayer's Rust DTOs declare
 // them differently (String vs u64, and serde's u64 rejects strings). Unifying
 // the two encodings breaks one endpoint; these fixtures make that change fail
@@ -56,7 +56,7 @@ const pubInputs: TransactPubInputs = {
     ],
 };
 
-const intent: DepositIntent = {
+const deposit: DepositRequest = {
     chainId: 31337n,
     publicAssetId: 1n,
     publicIn: 250n,
@@ -67,38 +67,66 @@ const intent: DepositIntent = {
     rcv: 27n,
 };
 
-const proof2x2 = { piA: ["1"], piB: [["2"]], piC: ["3"] };
+const proof = { piA: ["1"], piB: [["2"]], piC: ["3"] };
 
 describe("outbound encoding (golden)", () => {
-    it("/v1/intent sends the intent's u64 fields as DECIMAL STRINGS", () => {
-        const payload: SubmitIntentPayload = {
+    it("/v1/deposit sends the request's u64 fields as DECIMAL STRINGS", () => {
+        const payload: SubmitDepositPayload = {
             chainId: 31337n,
-            intent,
+            deposit,
             permit2: { nonce: 1n, deadline: 2n, maxTotal: 3n, signature: "0xsig" },
             aux: { clueRx: 1n, clueRy: 2n, ephPubX: 3n, ephPubY: 4n, ciphertext: new Uint8Array() },
         };
-        const out = serializeSubmitIntent(payload) as {
+        const out = serializeSubmitDeposit(payload) as {
             chainId: unknown;
-            intent: Record<string, unknown>;
+            deposit: Record<string, unknown>;
         };
 
-        // Envelope chainId is a number; the intent's three are strings.
+        // Envelope chainId is a number; the request's three are strings.
         expect(out.chainId).toBe(31337);
-        expect(out.intent.chainId).toBe("31337");
-        expect(out.intent.publicAssetId).toBe("1");
-        expect(out.intent.publicIn).toBe("250");
+        expect(out.deposit.chainId).toBe("31337");
+        expect(out.deposit.publicAssetId).toBe("1");
+        expect(out.deposit.publicIn).toBe("250");
     });
 
-    it("/v1/swap sends the SAME three intent fields as JSON NUMBERS", () => {
+    it("/v1/deposit carries the whole DepositRequest, cvDep and rcv included", () => {
+        // A relayer rebuilds `PubInputs.DepositRequest` from this payload and
+        // broadcasts it; dropping either field leaves it unable to, and `rcv`
+        // is a private witness it can learn no other way.
+        const payload: SubmitDepositPayload = {
+            chainId: 31337n,
+            deposit,
+            permit2: { nonce: 1n, deadline: 2n, maxTotal: 3n, signature: "0xsig" },
+            aux: { clueRx: 1n, clueRy: 2n, ephPubX: 3n, ephPubY: 4n, ciphertext: new Uint8Array() },
+        };
+        const out = serializeSubmitDeposit(payload) as { deposit: Record<string, unknown> };
+
+        expect(Object.keys(out.deposit).sort()).toEqual(
+            [
+                "chainId",
+                "cvDep",
+                "outCm",
+                "payer",
+                "publicAssetId",
+                "publicIn",
+                "recipient",
+                "rcv",
+            ].sort(),
+        );
+        expect(out.deposit.cvDep).toEqual(["23", "24"]);
+        expect(out.deposit.rcv).toBe("27");
+    });
+
+    it("/v1/swap sends the SAME three deposit fields as JSON NUMBERS", () => {
         const payload: SubmitSwapPayload = {
             chainId: 31337n,
-            proof2x2,
+            proof,
             pubInputs,
             aux: [aux, aux],
             swap: {
                 adapter: "0xadapter",
                 route: "0xroute",
-                intentD: intent,
+                depositD: deposit,
                 auxD: aux,
                 tokenIn: "0xin",
                 tokenOut: "0xout",
@@ -107,12 +135,12 @@ describe("outbound encoding (golden)", () => {
             },
         };
         const out = serializeSubmitSwap(payload) as {
-            swap: { intentD: Record<string, unknown>; amountIn: unknown; deadline: unknown };
+            swap: { depositD: Record<string, unknown>; amountIn: unknown; deadline: unknown };
         };
 
-        expect(out.swap.intentD.chainId).toBe(31337);
-        expect(out.swap.intentD.publicAssetId).toBe(1);
-        expect(out.swap.intentD.publicIn).toBe(250);
+        expect(out.swap.depositD.chainId).toBe(31337);
+        expect(out.swap.depositD.publicAssetId).toBe(1);
+        expect(out.swap.depositD.publicIn).toBe(250);
         // U256 amounts stay strings — they exceed 2^53 routinely.
         expect(out.swap.amountIn).toBe((10n ** 30n).toString());
         expect(out.swap.deadline).toBeNull();
@@ -122,7 +150,7 @@ describe("outbound encoding (golden)", () => {
         const payload: SubmitTransactPayload = {
             chainId: 31337n,
             kind: "withdraw",
-            proof2x2,
+            proof,
             pubInputs,
             aux: [aux, aux],
         };
@@ -146,7 +174,7 @@ describe("outbound encoding (golden)", () => {
         const payload: SubmitTransactPayload = {
             chainId: 31337n,
             kind: "transfer",
-            proof2x2,
+            proof,
             pubInputs: { ...pubInputs, publicAssetId: big },
             aux: [aux, aux],
         };

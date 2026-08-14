@@ -349,7 +349,7 @@ export class Wallet implements WalletApi, SpendContext {
 
     /**
      * Shield ERC-20 into the MASP via Permit2 escrow. Funds sit in
-     * escrow until the relayer flushes a batch (or `cancelIntent` after
+     * escrow until the relayer flushes a batch (or `cancelDeposit` after
      * `cancelDelay` blocks). For native ETH set `asEth: true`.
      */
     async deposit(args: DepositOptions): Promise<DepositResult> {
@@ -358,17 +358,17 @@ export class Wallet implements WalletApi, SpendContext {
 
     /**
      * Cancel an escrowed deposit. Permissionless after `cancelDelay`
-     * blocks. Caller supplies the `IntentEscrowed` event payload for the
+     * blocks. Caller supplies the `DepositEscrowed` event payload for the
      * on-chain digest check.
      */
-    async cancelIntent(
+    async cancelDeposit(
         id: bigint,
-        inputs: import("../chain/types.js").CancelIntentInputs,
+        inputs: import("../chain/types.js").CancelDepositInputs,
     ): Promise<{ txHash: Hex32 }> {
-        if (!this.cfg.chain.cancelIntent) {
-            throw new DepositAdapterError("witness", ["cancelIntent"]);
+        if (!this.cfg.chain.cancelDeposit) {
+            throw new DepositAdapterError("witness", ["cancelDeposit"]);
         }
-        return this.cfg.chain.cancelIntent(id, inputs);
+        return this.cfg.chain.cancelDeposit(id, inputs);
     }
 
     /**
@@ -402,7 +402,7 @@ export class Wallet implements WalletApi, SpendContext {
 
     /**
      * Atomic shielded swap. Leg-1 transact_2x2 unshields to SwapWrapper;
-     * leg-2 deposit intent re-shields the B note. Bundled via
+     * leg-2 deposit request re-shields the B note. Bundled via
      * `submitter.submitSwap`. `args.amount` is gross publicOut in circuit
      * units of `assetIn`; MASP skims `feeBps` before transferring.
      */

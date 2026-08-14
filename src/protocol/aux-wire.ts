@@ -4,7 +4,7 @@
 // Both directions live here so a field added to one cannot miss the other.
 
 import type { OutputAux } from "../notes/aux.js";
-import type { AuxOutput } from "./deposit-intent.js";
+import type { AuxOutput } from "./deposit-request.js";
 
 /**
  * Convert internal `OutputAux` to the wire `AuxOutput`, splitting Baby-Jubjub

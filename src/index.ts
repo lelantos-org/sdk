@@ -153,7 +153,7 @@ export type { EncryptedNote, Note, SpentNote } from "./notes/index.js";
 export {
     type AuxOutput,
     computePiHash,
-    type DepositIntent,
+    type DepositRequest,
     type SpendKind,
     type SubmitSwapPayload,
     type SubmitTransactPayload,
@@ -165,13 +165,13 @@ export { signPermit2Witness } from "./permit2/index.js";
 // ── chain adapters ───────────────────────────────────────────────────────
 export {
     type AssetEntry,
-    type CancelIntentInputs,
+    type CancelDepositInputs,
     type ChainAdapter,
     type Eip1193ProviderLike,
     Eip1193Signer,
-    type EscrowedIntentView,
+    type EscrowedDepositView,
     type EthSigner,
-    type IntentEscrowedRecord,
+    type DepositEscrowedRecord,
     type DeployedNetworkName,
     NETWORKS,
     type NetworkName,

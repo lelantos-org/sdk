@@ -19,15 +19,38 @@ export const MASP_ABI = /* @__PURE__ */ parseAbi([
     "function feeBps() view returns (uint16)",
     "function treasury() view returns (address)",
     "function cancelDelay() view returns (uint32)",
-    "function WRAPPED_NATIVE() view returns (address)",
-    "function nextIntentId() view returns (uint256)",
+    "function nextDepositId() view returns (uint256)",
     "function escrowed(uint256 id) view returns (bytes32 digest)",
-    "function submitIntent((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 nonce, uint256 deadline, uint256 maxTotal, bytes signature) sig, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) returns (uint256 id)",
-    "function submitIntentNative((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) payable returns (uint256 id)",
-    "function submitIntentAuthorized((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) returns (uint256 id)",
-    "function cancelIntent(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, address payer, uint32 submittedAt)",
-    "event IntentEscrowed(uint256 indexed id, address indexed payer, address indexed recipient, uint64 publicAssetId, uint64 publicIn, uint16 feeBpsAtSubmit, bytes32 cm, uint256 cvDepX, uint256 cvDepY, uint256 rcv, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext)",
+    "function deposit((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 nonce, uint256 deadline, uint256 maxTotal, bytes signature) sig, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) returns (uint256 id)",
+    "function depositAuthorized((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) returns (uint256 id)",
+    "function cancelDeposit(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, address payer, uint32 submittedAt)",
+    "event DepositEscrowed(uint256 indexed id, address indexed payer, address indexed recipient, uint64 publicAssetId, uint64 publicIn, uint16 feeBpsAtSubmit, bytes32 cm, uint256 cvDepX, uint256 cvDepY, uint256 rcv, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext)",
     "event NotePayload(bytes32 indexed cm, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext, uint256 cvDepX, uint256 cvDepY)",
+]);
+
+/**
+ * `NativeAdapter` — the native-coin bridge for an ERC-20-only MASP.
+ *
+ * The pool never sees native coin: the adapter wraps on the way in and
+ * unwraps on the way out. That makes it a second contract address, not a
+ * second entry point, so a native deposit is sent *here* rather than to the
+ * pool, and `d.payer` must be the adapter — it is the party the pool pulls
+ * from and refunds.
+ *
+ * `cancelNative` exists because of that ownership: `MASP.cancelDeposit`
+ * refunds the digest-bound payer, which for these escrows is the adapter,
+ * and the pool restricts contract payers to cancelling their own deposits.
+ * The adapter's own `escrows` mapping is the only record of who funded the
+ * escrow, so it is the only path that can return the coin.
+ */
+export const NATIVE_ADAPTER_ABI = /* @__PURE__ */ parseAbi([
+    "function POOL() view returns (address)",
+    "function WRAPPED_NATIVE() view returns (address)",
+    "function escrows(uint256 id) view returns (address refundTo, uint256 amount)",
+    "function depositNative((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux) payable returns (uint256 id)",
+    "function cancelNative(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, uint32 submittedAt)",
+    "event NativeDeposited(uint256 indexed id, address indexed refundTo, uint256 escrowed, uint256 returned)",
+    "event NativeRefunded(uint256 indexed id, address indexed refundTo, uint256 amount)",
 ]);
 
 export const ERC20_ABI = /* @__PURE__ */ parseAbi([

@@ -25,7 +25,7 @@ export interface Permit2SignArgs {
     /** Unix-seconds expiry. */
     deadline: bigint;
     /**
-     * `keccak256(abi.encode(DepositIntent, aux))`. Binds the sig to a
+     * `keccak256(abi.encode(DepositRequest, aux))`. Binds the sig to a
      * specific deposit.
      */
     piHash: Hex32;
@@ -36,21 +36,21 @@ export interface Permit2SignArgs {
 /**
  * `MASP.escrowed(id)` view — now the digest and nothing else. The row used to
  * carry `payer`, `submittedAt`, `publicAssetId` and `feeBpsAtSubmit`; those are
- * folded into the digest and must be reconstructed from the `IntentEscrowed`
- * log, which is also what `cancelIntent` now takes back as arguments.
+ * folded into the digest and must be reconstructed from the `DepositEscrowed`
+ * log, which is also what `cancelDeposit` now takes back as arguments.
  */
-export interface EscrowedIntentView {
+export interface EscrowedDepositView {
     digest: Hex32;
 }
 
 /**
- * Preimage fields for `cancelIntent`. The escrow row keeps only
- * `keccak(intent)`, so every field the contract once read from storage is now
+ * Preimage fields for `cancelDeposit`. The escrow row keeps only
+ * `keccak(request)`, so every field the contract once read from storage is now
  * passed back in and checked against that digest — including `publicAssetId`,
  * `feeBpsAtSubmit`, `payer` and `submittedAt`. All of them come off the
- * `IntentEscrowed` log; cache it, because `escrowed()` no longer returns them.
+ * `DepositEscrowed` log; cache it, because `escrowed()` no longer returns them.
  */
-export interface CancelIntentInputs {
+export interface CancelDepositInputs {
     publicIn: bigint;
     cm: Hex32;
     cvDep: [bigint, bigint];
@@ -61,10 +61,10 @@ export interface CancelIntentInputs {
 }
 
 /**
- * Decoded `IntentEscrowed` event. Cache to feed `cancelIntent` and
+ * Decoded `DepositEscrowed` event. Cache to feed `cancelDeposit` and
  * reconstruct fields absent from `escrowed()` storage.
  */
-export interface IntentEscrowedRecord {
+export interface DepositEscrowedRecord {
     id: bigint;
     payer: EvmAddress;
     recipient: EvmAddress;
@@ -74,7 +74,7 @@ export interface IntentEscrowedRecord {
     cm: Hex32;
     cvDep: [bigint, bigint];
     rcv: bigint;
-    /** Block number of the `submitIntent` that escrowed this intent. */
+    /** Block number of the deposit that created this escrow. */
     submittedAt: number;
 }
 

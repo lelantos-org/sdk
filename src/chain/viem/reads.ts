@@ -3,7 +3,7 @@
 import { decodeEventLog } from "viem";
 import { type AssetId, branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { TxMiningError } from "../../core/errors.js";
-import type { AssetEntry, EscrowedIntentView, IntentEscrowedRecord } from "../types.js";
+import type { AssetEntry, DepositEscrowedRecord, EscrowedDepositView } from "../types.js";
 import { MASP_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
 
@@ -30,7 +30,7 @@ export async function fetchFeeBps(ctx: ViemCtx): Promise<bigint> {
     return BigInt(bps);
 }
 
-export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedIntentView | null> {
+export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedDepositView | null> {
     const digest = await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
@@ -50,16 +50,19 @@ export async function cancelDelay(ctx: ViemCtx): Promise<number> {
     });
 }
 
-export async function fetchIntentEscrowed(
+export async function fetchDepositEscrowed(
     ctx: ViemCtx,
     id: bigint,
     fromBlock: bigint = 0n,
-): Promise<IntentEscrowedRecord | null> {
-    const event = MASP_ABI.find((a) => a.type === "event" && a.name === "IntentEscrowed") as
+): Promise<DepositEscrowedRecord | null> {
+    const event = MASP_ABI.find((a) => a.type === "event" && a.name === "DepositEscrowed") as
         | Extract<(typeof MASP_ABI)[number], { type: "event" }>
         | undefined;
-    if (!event) throw new TxMiningError("fetchIntentEscrowed: ABI missing IntentEscrowed");
+    if (!event) throw new TxMiningError("fetchDepositEscrowed: ABI missing DepositEscrowed");
 
+    // Always the pool's log, including for a native deposit: the adapter
+    // escrows through `MASP.depositAuthorized`, so the event and the id are
+    // the pool's.
     const logs = await ctx.publicClient.getLogs({
         address: ctx.maspAddress,
         event,
@@ -76,7 +79,7 @@ export async function fetchIntentEscrowed(
         data: first.data,
         topics: first.topics,
     });
-    if (decoded.eventName !== "IntentEscrowed") return null;
+    if (decoded.eventName !== "DepositEscrowed") return null;
 
     // The event emits cvDep as two flat scalars; the record carries one point.
     // Keep this mapping explicit — it is the trust boundary between the ABI
@@ -93,8 +96,8 @@ export async function fetchIntentEscrowed(
         cm: branded<Hex32>(a.cm),
         cvDep: [a.cvDepX, a.cvDepY],
         rcv: a.rcv,
-        // Not in the event: `cancelIntent` needs it, and the log's own block is
-        // by definition the block that escrowed the intent.
+        // Not in the event: `cancelDeposit` needs it, and the log's own block
+        // is by definition the block that escrowed the deposit.
         submittedAt: Number(first.blockNumber),
     };
 }

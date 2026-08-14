@@ -201,7 +201,7 @@
     "@arethetypeswrong/cli": "^0.17.0",
     "@biomejs/biome": "^2.4.13",
     "@lelantos-org/circuits": "0.8.0",
-    "@lelantos-org/contracts": "0.1.4",
+    "@lelantos-org/contracts": "0.2.0",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.5",
     "esbuild": "^0.28.2",

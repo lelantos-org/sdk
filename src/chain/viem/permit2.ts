@@ -5,7 +5,7 @@ import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../../co
 import { safeCall } from "../../core/callbacks.js";
 import { randomU256 } from "../../core/random.js";
 import { signPermit2Allowance, signPermit2Witness } from "../../permit2/sign.js";
-import type { Permit2Sig, PermitSingle } from "../../protocol/deposit-intent.js";
+import type { Permit2Sig, PermitSingle } from "../../protocol/deposit-request.js";
 import type { Permit2SignArgs } from "../types.js";
 import { PERMIT2_PERMIT_ABI, PERMIT2_VIEW_ABI } from "./abi.js";
 import { addr, hex, type ViemCtx } from "./ctx.js";

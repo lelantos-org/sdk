@@ -1,6 +1,6 @@
 // Uniswap Permit2 witness signing for MASP deposits.
 //
-// Flow: build DepositIntent + AuxValidation.Output[2], hash via abi.encode +
+// Flow: build DepositRequest + AuxValidation.Output[2], hash via abi.encode +
 // keccak (matches MASP._permit2Pull), wrap piHash in EIP-712 `MASPDeposit`
 // witness, sign the outer Permit2 `PermitWitnessTransferFrom` typed-data.
 //
@@ -11,17 +11,17 @@ import type { EthSigner } from "../core/signer.js";
 import {
     AUX_OUTPUT_COMPONENTS,
     type AuxOutput,
-    type DepositIntent,
+    type DepositRequest,
     PERMIT2_ADDRESS,
     type Permit2Sig,
     type PermitDetails,
     type PermitSingle,
-} from "../protocol/deposit-intent.js";
+} from "../protocol/deposit-request.js";
 
 export {
     AUX_OUTPUT_COMPONENTS,
     type AuxOutput,
-    type DepositIntent,
+    type DepositRequest,
     PERMIT2_ADDRESS,
     type Permit2Sig,
     type PermitDetails,
@@ -57,7 +57,7 @@ export interface SignPermit2Args {
     nonce: bigint;
     /** Unix-seconds Permit2 expiry. */
     deadline: bigint;
-    /** keccak256(abi.encode(DepositIntent, AuxValidation.Output[2])). */
+    /** keccak256(abi.encode(DepositRequest, AuxValidation.Output[2])). */
     piHash: string;
     /**
      * Optional override for the Permit2 contract address (non-standard

@@ -12,22 +12,22 @@ export { auxDigest, computePiHash } from "./abi-hash.js";
 export {
     AUX_OUTPUT_COMPONENTS,
     type AuxOutput,
-    type DepositIntent,
+    type DepositRequest,
     PERMIT2_ADDRESS,
     type Permit2Sig,
     type PermitDetails,
     type PermitSingle,
-} from "./deposit-intent.js";
+} from "./deposit-request.js";
 export type {
     MerkleProofResponse,
-    RelayerIntentResponse,
+    RelayerDepositResponse,
     RelayerSubmitResponse,
     ScannedNote,
     TreeStateResponse,
 } from "./responses.js";
 export type {
     SpendKind,
-    SubmitIntentPayload,
+    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     SwapBlob,

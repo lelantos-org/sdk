@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { flatten } from "../circuit/index.js";
 import { BN254_FR } from "../core/field.js";
 import { bytesToHex } from "../core/hex.js";
-import { auxDigest, computePiHash, DEPOSIT_INTENT_COMPONENTS } from "./abi-hash.js";
-import { AUX_OUTPUT_COMPONENTS, type AuxOutput } from "./deposit-intent.js";
+import { auxDigest, computePiHash, DEPOSIT_REQUEST_COMPONENTS } from "./abi-hash.js";
+import { AUX_OUTPUT_COMPONENTS, type AuxOutput } from "./deposit-request.js";
 
 type AbiParam = { name?: string; type: string; components?: readonly AbiParam[] };
 type AbiFn = { type: string; name?: string; inputs?: readonly AbiParam[] };
@@ -115,19 +115,19 @@ describe("flatten", () => {
 // the hand-written component list.
 
 describe("computePiHash vs the canonical ABI", () => {
-    // `submitIntentNative` is the shortest signature carrying both structs.
+    // `submitDepositNative` is the shortest signature carrying both structs.
     const submit = (maspAbi as readonly AbiFn[]).find(
-        (i) => i.type === "function" && i.name === "submitIntentNative",
+        (i) => i.type === "function" && i.name === "submitDepositNative",
     );
-    if (!submit?.inputs) throw new Error("submitIntentNative missing from the canonical ABI");
-    const [intentParam, auxParam] = submit.inputs;
+    if (!submit?.inputs) throw new Error("submitDepositNative missing from the canonical ABI");
+    const [depositParam, auxParam] = submit.inputs;
 
     /** Names and types only; `internalType` is Foundry bookkeeping. */
     const layout = (params: readonly AbiParam[] = []) =>
         params.map((c) => ({ name: c.name, type: c.type }));
 
-    it("declares DepositIntent exactly as the contract does", () => {
-        expect(layout(intentParam?.components)).toEqual(layout(DEPOSIT_INTENT_COMPONENTS));
+    it("declares DepositRequest exactly as the contract does", () => {
+        expect(layout(depositParam?.components)).toEqual(layout(DEPOSIT_REQUEST_COMPONENTS));
     });
 
     it("declares AuxValidation.Output exactly as the contract does", () => {
@@ -137,7 +137,7 @@ describe("computePiHash vs the canonical ABI", () => {
     });
 
     it("matches a hash encoded straight from the canonical components", () => {
-        const intent = {
+        const request = {
             chainId: 31337n,
             publicAssetId: 1n,
             publicIn: 1_000n,
@@ -151,9 +151,9 @@ describe("computePiHash vs the canonical ABI", () => {
         const wire = { ...a, ciphertext: bytesToHex(a.ciphertext) };
 
         const fromCanonical = keccak256(
-            encodeAbiParameters([intentParam, auxParam] as never, [intent, wire] as never),
+            encodeAbiParameters([depositParam, auxParam] as never, [request, wire] as never),
         );
 
-        expect(computePiHash(intent, a)).toBe(fromCanonical);
+        expect(computePiHash(request, a)).toBe(fromCanonical);
     });
 });

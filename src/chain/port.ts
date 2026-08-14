@@ -7,14 +7,14 @@
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
 import type {
     AuxOutput,
-    DepositIntent,
+    DepositRequest,
     Permit2Sig,
     PermitSingle,
-} from "../protocol/deposit-intent.js";
+} from "../protocol/deposit-request.js";
 import type {
     AssetEntry,
-    CancelIntentInputs,
-    EscrowedIntentView,
+    CancelDepositInputs,
+    EscrowedDepositView,
     Permit2SignArgs,
     TokenMeta,
 } from "./types.js";
@@ -29,20 +29,26 @@ export interface ChainAdapter {
     payerAddress(): Promise<EvmAddress>;
     /** Used as the Permit2 `spender`. */
     maspAddress(): Promise<EvmAddress>;
+    /**
+     * `NativeAdapter` address, or `undefined` where none is deployed. It is
+     * the `payer` a native deposit must name, so the deposit builder needs it
+     * before it builds the request. Optional.
+     */
+    nativeAdapterAddress?(): EvmAddress | undefined;
     fetchAsset(id: AssetId): Promise<AssetEntry>;
     /** 0 disables fees. */
     fetchFeeBps(): Promise<bigint>;
     /**
      * Sign Permit2 `PermitWitnessTransferFrom` witness-bound to
-     * `piHash = keccak256(abi.encode(DepositIntent, aux))`.
+     * `piHash = keccak256(abi.encode(DepositRequest, aux))`.
      */
     signPermit2(args: Permit2SignArgs): Promise<Permit2Sig>;
     /**
-     * `MASP.submitIntent(d, sig, aux)`. Returns tx hash + intent id from
-     * the `IntentEscrowed` log. Optional: relayer-broadcast adapters omit.
+     * `MASP.deposit(d, sig, aux)`. Returns tx hash + deposit id from the
+     * `DepositEscrowed` log. Optional: relayer-broadcast adapters omit.
      */
-    submitIntent?(args: {
-        intent: DepositIntent;
+    submitDeposit?(args: {
+        deposit: DepositRequest;
         permit2: Permit2Sig;
         aux: AuxOutput;
         /**
@@ -50,26 +56,29 @@ export interface ChainAdapter {
          * receipt-wait.
          */
         onSent?: (txHash: Hex32) => void;
-    }): Promise<{ txHash: Hex32; intentId: bigint }>;
+    }): Promise<{ txHash: Hex32; depositId: bigint }>;
     /**
-     * `MASP.submitIntentNative` with `msg.value = value`. Pool wraps
-     * internally; no Permit2. Asset id must be WETH-registered. Optional.
+     * `NativeAdapter.depositNative` with `msg.value = value`. The pool is
+     * ERC-20 only, so the adapter wraps the coin, escrows it under its own
+     * name and returns the excess — `deposit.payer` must therefore be the
+     * adapter, not the sender. Asset id must be WETH-registered. Optional,
+     * and unavailable on a chain with no adapter deployed.
      */
-    submitIntentNative?(args: {
-        intent: DepositIntent;
+    submitDepositNative?(args: {
+        deposit: DepositRequest;
         aux: AuxOutput;
         value: bigint;
         onSent?: (txHash: Hex32) => void;
-    }): Promise<{ txHash: Hex32; intentId: bigint }>;
+    }): Promise<{ txHash: Hex32; depositId: bigint }>;
     /**
-     * `MASP.submitIntentAuthorized`. Pulls via Permit2 AllowanceTransfer
-     * against a previously-signed window; no per-deposit sig. Optional.
+     * `MASP.depositAuthorized`. Pulls via Permit2 AllowanceTransfer against
+     * a previously-signed window; no per-deposit sig. Optional.
      */
-    submitIntentAuthorized?(args: {
-        intent: DepositIntent;
+    submitDepositAuthorized?(args: {
+        deposit: DepositRequest;
         aux: AuxOutput;
         onSent?: (txHash: Hex32) => void;
-    }): Promise<{ txHash: Hex32; intentId: bigint }>;
+    }): Promise<{ txHash: Hex32; depositId: bigint }>;
     /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */
     permit2Allowance?(
         token: EvmAddress,
@@ -91,13 +100,22 @@ export interface ChainAdapter {
     /** Sign `PermitSingle` for AllowanceTransfer-mode deposits. Optional. */
     signPermit2Allowance?(permit: PermitSingle): Promise<{ signature: string }>;
     /**
-     * `MASP.cancelIntent`. On-chain digest check rejects tampered
+     * `MASP.cancelDeposit`. On-chain digest check rejects tampered
      * preimages. Optional.
      */
-    cancelIntent?(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: Hex32 }>;
+    cancelDeposit?(id: bigint, inputs: CancelDepositInputs): Promise<{ txHash: Hex32 }>;
+    /**
+     * `NativeAdapter.cancelNative` — the only way to settle an adapter-owned
+     * escrow by refund, since the pool would return the coin to the adapter.
+     * No `payer`: the adapter supplies its own. Optional.
+     */
+    cancelDepositNative?(
+        id: bigint,
+        inputs: Omit<CancelDepositInputs, "payer">,
+    ): Promise<{ txHash: Hex32 }>;
     /** `MASP.escrowed(id)` — null if flushed/cancelled. Optional. */
-    getEscrowed?(id: bigint): Promise<EscrowedIntentView | null>;
-    /** Blocks before `cancelIntent` is allowed. Optional. */
+    getEscrowed?(id: bigint): Promise<EscrowedDepositView | null>;
+    /** Blocks before `cancelDeposit` is allowed. Optional. */
     cancelDelay?(): Promise<number>;
     /**
      * Free slot in Permit2's unordered nonce bitmap. Optional; adapters
@@ -140,7 +158,7 @@ export type AllowanceTransferChain = ChainAdapter &
     Required<
         Pick<
             ChainAdapter,
-            | "submitIntentAuthorized"
+            | "submitDepositAuthorized"
             | "permit2Allowance"
             | "permit2PermitAllowance"
             | "signPermit2Allowance"
@@ -148,15 +166,18 @@ export type AllowanceTransferChain = ChainAdapter &
     >;
 
 /**
- * Native-ETH deposit path; pool wraps msg.value internally.
+ * Native-ETH deposit path. The pool is ERC-20 only, so this runs through
+ * `NativeAdapter`, which wraps `msg.value` and escrows the WETH as its own
+ * payer — hence the address is part of the capability, not just the call.
  *
  * @internal
  */
-export type NativeEthChain = ChainAdapter & Required<Pick<ChainAdapter, "submitIntentNative">>;
+export type NativeEthChain = ChainAdapter &
+    Required<Pick<ChainAdapter, "submitDepositNative" | "nativeAdapterAddress">>;
 
 export function supportsAllowanceTransfer(c: ChainAdapter): c is AllowanceTransferChain {
     return (
-        !!c.submitIntentAuthorized &&
+        !!c.submitDepositAuthorized &&
         !!c.permit2Allowance &&
         !!c.permit2PermitAllowance &&
         !!c.signPermit2Allowance
@@ -164,5 +185,7 @@ export function supportsAllowanceTransfer(c: ChainAdapter): c is AllowanceTransf
 }
 
 export function supportsNativeEth(c: ChainAdapter): c is NativeEthChain {
-    return !!c.submitIntentNative;
+    // The address is what the deposit builder needs as `payer`, so an adapter
+    // that can encode the call but cannot name the contract is not usable.
+    return !!c.submitDepositNative && !!c.nativeAdapterAddress?.();
 }

@@ -3,8 +3,8 @@
 // The transact spend builders (`buildTransfer`, `buildWithdraw`, `buildWithdrawNative`)
 // prove the transact_2x2 SNARK and return a `SubmitTransactPayload` for
 // `/v1/transact`. `buildDeposit` does NOT prove — deposits go through
-// `MASP.submitIntent` (Permit2 witness); returns a `BuiltIntent` for the
-// wallet to sign + POST to `/v1/intent`.
+// `MASP.deposit` (Permit2 witness); returns a `BuiltDeposit` for the
+// wallet to sign + POST to `/v1/deposit`.
 
 import type { CircomTransactInput } from "../circuit/index.js";
 import {
@@ -203,7 +203,7 @@ export async function finalize(
         payload: {
             chainId: common.chainId,
             kind,
-            proof2x2: groth16ToWire(proof),
+            proof: groth16ToWire(proof),
             pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
             aux: [...aux],
         },
@@ -289,7 +289,7 @@ function extractPubInputs(
 const addrToField = (hex: string): Field => BigInt(hex);
 
 /** @internal */
-const groth16ToWire = (p: Groth16Proof): SubmitTransactPayload["proof2x2"] => ({
+const groth16ToWire = (p: Groth16Proof): SubmitTransactPayload["proof"] => ({
     piA: p.pi_a,
     piB: p.pi_b,
     piC: p.pi_c,

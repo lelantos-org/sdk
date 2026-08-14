@@ -2,7 +2,7 @@
 // `./result.ts`. `Wallet` in `./wallet.ts` is the default impl.
 
 import type { ChainAdapter } from "../chain/port.js";
-import type { CancelIntentInputs } from "../chain/types.js";
+import type { CancelDepositInputs } from "../chain/types.js";
 import type { AssetId, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
 import type { SpendingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
@@ -118,10 +118,10 @@ export interface WalletApi {
     /**
      * Reclaim an escrowed deposit that the relayer never flushed.
      * Permissionless once `chain.cancelDelay()` blocks have passed. Supply
-     * the `IntentEscrowed` event payload — the contract re-derives the
+     * the `DepositEscrowed` event payload — the contract re-derives the
      * digest from it.
      */
-    cancelIntent(id: bigint, inputs: CancelIntentInputs): Promise<{ txHash: Hex32 }>;
+    cancelDeposit(id: bigint, inputs: CancelDepositInputs): Promise<{ txHash: Hex32 }>;
     markSpent(noteIds: string[]): Promise<void>;
     /**
      * Drop notes flagged `spent: true` from the underlying store. Returns

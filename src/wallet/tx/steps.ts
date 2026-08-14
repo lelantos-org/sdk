@@ -1,7 +1,7 @@
 // Steps every spend shares.
 //
 // The cover-selection preamble, the change-note split, the submit-and-finalize
-// tail, and the deposit-intent randomness block, shared by transfer, withdraw
+// tail, and the deposit-request randomness block, shared by transfer, withdraw
 // and swap. Each is parameterised rather than assumed identical: transfer
 // computes `ownIndices` from a self-transfer check, while withdraw and swap
 // pass `[0, 1]`.
@@ -94,7 +94,7 @@ export function splitChange(pk: bigint, asset: bigint, remainder: bigint, slots:
     }));
 }
 
-/** Fresh randomness for a deposit intent's single output slot. */
+/** Fresh randomness for a deposit request's single output slot. */
 export function freshDepositSlots(): { output0: NoteOutputRandomness } {
     return { output0: freshOutput() };
 }

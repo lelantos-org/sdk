@@ -1,11 +1,11 @@
-// Deposit intent builder. Does NOT prove — deposits go through
-// `MASP.submitIntent` (Permit2 witness). Returns a `BuiltIntent` for the
-// wallet to sign + POST to `/v1/intent`.
+// Deposit request builder. Does NOT prove — deposits go through
+// `MASP.deposit` (Permit2 witness). Returns a `BuiltDeposit` for the
+// wallet to sign + POST to `/v1/deposit`.
 
 import { buildNoteCommitment, type Field, type Jubjub, type Poseidon } from "../crypto/index.js";
 import type { Note } from "../notes/note.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
-import type { AuxOutput, DepositIntent } from "../protocol/deposit-intent.js";
+import type { AuxOutput, DepositRequest } from "../protocol/deposit-request.js";
 import {
     buildAuxForReal,
     fieldToBytes32,
@@ -21,7 +21,7 @@ export interface DepositArgs {
     asset: bigint;
     /** 0x ETH; payer's account (Permit2 transfer source). */
     payerAddress: string;
-    /** 0x ETH; on-chain recipient (binds DepositIntent.recipient). */
+    /** 0x ETH; on-chain recipient (binds DepositRequest.recipient). */
     recipientAddress: string;
     publicIn: bigint;
     /**
@@ -34,19 +34,19 @@ export interface DepositArgs {
 }
 
 /** @internal */
-export interface BuiltIntent {
+export interface BuiltDeposit {
     /**
-     * Plaintext DepositIntent — the wallet hashes this with `aux` to derive
+     * Plaintext DepositRequest — the wallet hashes this with `aux` to derive
      * the Permit2 witness `piHash`, then signs the Permit2 typed-data.
      */
-    intent: DepositIntent;
+    deposit: DepositRequest;
     /** FMD clue + ECDH + ciphertext for the output. Bound into `piHash`. */
     aux: AuxOutput;
     cm: Field;
     producedNotes: [Note];
 }
 
-export function buildDeposit(a: DepositArgs): BuiltIntent {
+export function buildDeposit(a: DepositArgs): BuiltDeposit {
     const { P, J } = a;
 
     const realOut: Note = {
@@ -69,7 +69,7 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
     const assetGen = J.hashToAssetGen(a.asset);
     const cvDep = J.valueCommit(realOut.value, assetGen, realOut.rcvDep);
 
-    const intent: DepositIntent = {
+    const deposit: DepositRequest = {
         chainId: a.chainId,
         publicAssetId: a.asset,
         publicIn: a.publicIn,
@@ -81,7 +81,7 @@ export function buildDeposit(a: DepositArgs): BuiltIntent {
     };
 
     return {
-        intent,
+        deposit,
         aux: auxOutputToWire(aux0.aux),
         cm: cm0,
         producedNotes: [realOut],

@@ -37,10 +37,10 @@ export interface DepositResult extends TxResultBase {
     /** Gross publicIn (circuit units) the depositor sent into escrow. */
     sent: CircuitAmount;
     /**
-     * On-chain intent id from `MASP.submitIntent`. Absent only if the
+     * On-chain deposit id from `MASP.deposit`. Absent only if the
      * submitter path didn't surface one (relayer batch flow).
      */
-    intentId?: bigint;
+    depositId?: bigint;
 }
 
 /**
@@ -79,8 +79,8 @@ export interface SwapResult extends TxResultBase {
     /** publicOut leg-1 paid to the wrapper. */
     sent: CircuitAmount;
     change: CircuitAmount;
-    /** On-chain intent id of the leg-2 B-note deposit, if available. */
-    intentId?: bigint;
+    /** On-chain deposit id of the leg-2 B-note deposit, if available. */
+    depositId?: bigint;
 }
 
 /** Discriminated union over per-tx receipt shapes. Switch on `kind`. */

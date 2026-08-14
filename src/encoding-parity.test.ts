@@ -9,7 +9,7 @@
 //
 // - `lelantosTypedDataHash` → nsk caches diverge; every shielded address
 //   regenerates.
-// - `computePiHash` → on-chain `submitIntent` reverts (contract recomputes
+// - `computePiHash` → on-chain `submitDeposit` reverts (contract recomputes
 //   the hash and checks it against the Permit2 witness).
 // - `auxDigest` → the final PolyEval coefficient moves, so `PubInputs.sol`
 //   recomputes a different slot from calldata and the SNARK fails to verify.
@@ -18,7 +18,7 @@
 // Update these constants only with a contract/relayer upgrade that bumps
 // the corresponding domain version.
 //
-// The `computePiHash` vector covers the one-output `DepositIntent` the
+// The `computePiHash` vector covers the one-output `DepositRequest` the
 // contract takes today, and is cross-checked below against a hand-rolled ABI
 // encoder built from the spec rather than copied from `encodeAbiParameters`
 // output. `abi-hash.test.ts` additionally derives the component list from the
@@ -31,7 +31,7 @@ import { BN254_FR } from "./core/field.js";
 import { hexToBytes } from "./core/hex.js";
 import { lelantosTypedDataHash } from "./keys/metamask.js";
 import { auxDigest, computePiHash } from "./protocol/abi-hash.js";
-import type { AuxOutput, DepositIntent } from "./protocol/deposit-intent.js";
+import type { AuxOutput, DepositRequest } from "./protocol/deposit-request.js";
 
 const PINNED = {
     lelantosTypedDataHash: "0xaf9b4003f47701e282c9f5934e4ea6e5fe0f794e18c0e12c60bb6ba68ee3a93f",
@@ -52,7 +52,7 @@ const AUX: [AuxOutput, AuxOutput] = [
     { clueRx: 5n, clueRy: 6n, ephPubX: 7n, ephPubY: 8n, ciphertext: new Uint8Array([0x12, 0x34]) },
 ];
 
-const INTENT: DepositIntent = {
+const INTENT: DepositRequest = {
     chainId: 31337n,
     publicAssetId: 1n,
     publicIn: 1000n,
@@ -74,12 +74,12 @@ describe("encoding parity (independent implementation → viem)", () => {
 
     it("computePiHash agrees with the layout spelled out from the ABI spec", () => {
         // Same argument as the `auxDigest` cross-check below: the pin alone
-        // would survive a change applied to both sides at once. `DepositIntent`
+        // would survive a change applied to both sides at once. `DepositRequest`
         // is fully static (9 words — `cvDep` takes two), so the preimage is
         // those words, then a single offset to the dynamic `aux` tuple, whose
         // own `ciphertext` needs a further nested offset.
         const encoded = encodePiHashFromSpec(INTENT, AUX[0]);
-        expect(encoded.length / 32).toBe(17); // 9 intent + 1 offset + 4 aux + 1 offset + 1 len+data
+        expect(encoded.length / 32).toBe(17); // 9 deposit + 1 offset + 4 aux + 1 offset + 1 len+data
         expect(bytesToHexWord(keccak_256(encoded))).toBe(PINNED.computePiHash);
     });
 
@@ -166,11 +166,11 @@ function encodeAuxArrayFromSpec(aux: readonly AuxOutput[]): Uint8Array {
 }
 
 /**
- * `abi.encode(DepositIntent, AuxValidation.Output)`, written out from the
+ * `abi.encode(DepositRequest, AuxValidation.Output)`, written out from the
  * encoding rules rather than produced by `encodeAbiParameters`.
  */
-function encodePiHashFromSpec(d: DepositIntent, a: AuxOutput): Uint8Array {
-    const intentWords = [
+function encodePiHashFromSpec(d: DepositRequest, a: AuxOutput): Uint8Array {
+    const depositWords = [
         word(d.chainId),
         word(d.publicAssetId),
         word(d.publicIn),
@@ -181,7 +181,7 @@ function encodePiHashFromSpec(d: DepositIntent, a: AuxOutput): Uint8Array {
         word(d.cvDep[1]),
         word(d.rcv),
     ];
-    // The intent is static and occupies 9 words, so the tail begins at 10 * 32.
+    // The request is static and occupies 9 words, so the tail begins at 10 * 32.
     const AUX_OFFSET = 320n;
     // Inside the aux tuple, `ciphertext` follows 4 static words + its offset.
     const CIPHERTEXT_OFFSET = 160n;
@@ -197,5 +197,5 @@ function encodePiHashFromSpec(d: DepositIntent, a: AuxOutput): Uint8Array {
         word(BigInt(a.ciphertext.length)),
         body,
     ];
-    return hexToBytes(`0x${[...intentWords, word(AUX_OFFSET), ...auxWords].join("")}`);
+    return hexToBytes(`0x${[...depositWords, word(AUX_OFFSET), ...auxWords].join("")}`);
 }

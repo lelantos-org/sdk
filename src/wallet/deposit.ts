@@ -44,13 +44,27 @@ export async function executeDeposit(
     const fee = applyFee(inAmt, feeBps);
     const total = branded<TokenAmount>(inAmt + fee);
 
+    // Strategy first: it decides who the on-chain escrow belongs to, and the
+    // request is signed and digest-bound over that address. A native deposit
+    // is escrowed by `NativeAdapter` — it wraps `msg.value` and the pool
+    // pulls against the adapter's own allowance — so naming the sender there
+    // reverts `AdapterNotPayer`.
+    const strategy = await pickDepositStrategy(ctx, args, {
+        payer,
+        token: assetEntry.token,
+        total,
+    });
+    const escrowPayer = strategy === "native" ? ctx.cfg.chain.nativeAdapterAddress!()! : payer;
+
     const { output0: o0 } = freshDepositSlots();
     const built = buildDeposit({
         P: ctx.P,
         J: ctx.J,
         chainId: ctx.cfg.chainId,
         asset,
-        payerAddress: payer,
+        payerAddress: escrowPayer,
+        // The depositor either way: `recipient` is the refund-side identity
+        // the note is bound to, and the adapter is only the escrow's owner.
         recipientAddress: payer,
         publicIn: args.amount,
         recipient,
@@ -62,13 +76,7 @@ export async function executeDeposit(
             aux: o0.aux,
         },
     });
-
-    const strategy = await pickDepositStrategy(ctx, args, {
-        payer,
-        token: assetEntry.token,
-        total,
-    });
-    const { txHash, intentId } = await runDepositStrategy(ctx, strategy, {
+    const { txHash, depositId } = await runDepositStrategy(ctx, strategy, {
         built,
         args,
         assetEntry,
@@ -82,9 +90,9 @@ export async function executeDeposit(
         txHash,
         built: { cm: [built.cm], producedNotes: built.producedNotes },
         sent: args.amount,
-        intentId,
-        // `MASP.submitIntent` escrows exactly one leaf, credited to the
-        // depositor's own shielded address.
+        depositId,
+        // A deposit escrows exactly one leaf, credited to the depositor's own
+        // shielded address.
         ownIndices: [0],
     });
 }
@@ -103,7 +111,7 @@ async function pickDepositStrategy(
     const chain = ctx.cfg.chain;
     if (args.asEth) {
         if (!supportsNativeEth(chain)) {
-            throw new DepositAdapterError("native", ["submitIntentNative"]);
+            throw new DepositAdapterError("native", ["submitDepositNative + nativeAdapterAddress"]);
         }
         return "native";
     }
@@ -115,13 +123,13 @@ async function pickDepositStrategy(
             return "allowance";
         }
     }
-    if (!ctx.submitter.submitIntent && !chain.submitIntent) {
-        throw new DepositAdapterError("witness", ["submitter.submitIntent | chain.submitIntent"]);
+    if (!ctx.submitter.submitDeposit && !chain.submitDeposit) {
+        throw new DepositAdapterError("witness", ["submitter.submitDeposit | chain.submitDeposit"]);
     }
     return "witness";
 }
 
-/** Every branch returns the same `{ txHash, intentId }` shape. */
+/** Every branch returns the same `{ txHash, depositId }` shape. */
 async function runDepositStrategy(
     ctx: SpendContext,
     strategy: DepositStrategy,
@@ -131,22 +139,22 @@ async function runDepositStrategy(
         assetEntry: { token: EvmAddress; scale: bigint };
         total: TokenAmount;
     },
-): Promise<{ txHash: Hex32; intentId?: bigint }> {
+): Promise<{ txHash: Hex32; depositId?: bigint }> {
     const { built, args, assetEntry, total } = plan;
     const chain = ctx.cfg.chain;
 
     // `broadcast` fires once the wallet returns a tx hash (tx in mempool);
     // `mined` fires after `tx.wait()` resolves.
     const onSent = () => safePhase(args.onPhase, "broadcast");
-    const emitMined = (r: { txHash: Hex32; intentId: bigint }) => {
+    const emitMined = (r: { txHash: Hex32; depositId: bigint }) => {
         safePhase(args.onPhase, "mined");
         return r;
     };
 
     if (strategy === "native") {
         safePhase(args.onPhase, "submitting");
-        return chain.submitIntentNative!({
-            intent: built.intent,
+        return chain.submitDepositNative!({
+            deposit: built.deposit,
             aux: built.aux,
             value: total,
             onSent,
@@ -154,8 +162,8 @@ async function runDepositStrategy(
     }
     if (strategy === "allowance") {
         safePhase(args.onPhase, "submitting");
-        return chain.submitIntentAuthorized!({
-            intent: built.intent,
+        return chain.submitDepositAuthorized!({
+            deposit: built.deposit,
             aux: built.aux,
             onSent,
         }).then(emitMined);
@@ -163,7 +171,7 @@ async function runDepositStrategy(
     // witness path
     const deadline =
         args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT2_DEFAULT_DEADLINE_SECS);
-    const piHash = computePiHash(built.intent, built.aux);
+    const piHash = computePiHash(built.deposit, built.aux);
     const nonce = chain.permit2Nonce ? await chain.permit2Nonce() : BigInt(Date.now());
     safePhase(args.onPhase, "signing");
     const permit2 = await chain.signPermit2({
@@ -174,12 +182,12 @@ async function runDepositStrategy(
         nonce,
     });
     safePhase(args.onPhase, "submitting");
-    if (ctx.submitter.submitIntent) {
+    if (ctx.submitter.submitDeposit) {
         // Relayer path has no mempool visibility; treat the submitter
         // response as both broadcast and mined.
-        const r = await ctx.submitter.submitIntent({
+        const r = await ctx.submitter.submitDeposit({
             chainId: ctx.cfg.chainId,
-            intent: built.intent,
+            deposit: built.deposit,
             permit2,
             aux: built.aux,
         });
@@ -187,7 +195,7 @@ async function runDepositStrategy(
         safePhase(args.onPhase, "mined");
         return r;
     }
-    return chain.submitIntent!({ intent: built.intent, permit2, aux: built.aux, onSent }).then(
+    return chain.submitDeposit!({ deposit: built.deposit, permit2, aux: built.aux, onSent }).then(
         emitMined,
     );
 }

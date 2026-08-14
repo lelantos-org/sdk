@@ -2,17 +2,17 @@
 //
 // Both functions encode `AUX_OUTPUT_COMPONENTS`, so they belong together: a
 // change to the struct layout has to move both or neither. `computePiHash` is
-// the deposit-side binding (MASP.submitIntent); `auxDigest` is the spend-side
+// the deposit-side binding (MASP.deposit); `auxDigest` is the spend-side
 // one (PubInputs.compress).
 
 import { encodeAbiParameters, keccak256 } from "viem";
 import { branded, type Hex32 } from "../core/brand.js";
 import { BN254_FR, type Field } from "../core/field.js";
 import { bytesToHex } from "../core/hex.js";
-import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositIntent } from "./deposit-intent.js";
+import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositRequest } from "./deposit-request.js";
 
 /**
- * Component list of `PubInputs.DepositIntent`, in declaration order.
+ * Component list of `PubInputs.DepositRequest`, in declaration order.
  *
  * The Permit2 witness is `keccak256(abi.encode(d, aux))`, so every field, its
  * type and its position are consensus-binding: a mismatch produces a signature
@@ -21,7 +21,7 @@ import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositIntent } from "./dep
  *
  * @internal
  */
-export const DEPOSIT_INTENT_COMPONENTS = [
+export const DEPOSIT_REQUEST_COMPONENTS = [
     { name: "chainId", type: "uint256" },
     { name: "publicAssetId", type: "uint64" },
     { name: "publicIn", type: "uint64" },
@@ -33,25 +33,25 @@ export const DEPOSIT_INTENT_COMPONENTS = [
 ] as const;
 
 /**
- * Compute `piHash = keccak256(abi.encode(DepositIntent, AuxValidation.Output))`.
- * Mirrors MASP.submitIntent line `keccak256(abi.encode(d, aux))`.
+ * Compute `piHash = keccak256(abi.encode(DepositRequest, AuxValidation.Output))`.
+ * Mirrors MASP.deposit line `keccak256(abi.encode(d, aux))`.
  */
-export function computePiHash(intent: DepositIntent, aux: AuxOutput): Hex32 {
+export function computePiHash(deposit: DepositRequest, aux: AuxOutput): Hex32 {
     const encoded = encodeAbiParameters(
         [
-            { type: "tuple", components: [...DEPOSIT_INTENT_COMPONENTS] },
+            { type: "tuple", components: [...DEPOSIT_REQUEST_COMPONENTS] },
             { type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
         ],
         [
             {
-                chainId: intent.chainId,
-                publicAssetId: intent.publicAssetId,
-                publicIn: intent.publicIn,
-                payer: intent.payer as `0x${string}`,
-                recipient: intent.recipient as `0x${string}`,
-                outCm: intent.outCm as `0x${string}`,
-                cvDep: intent.cvDep,
-                rcv: intent.rcv,
+                chainId: deposit.chainId,
+                publicAssetId: deposit.publicAssetId,
+                publicIn: deposit.publicIn,
+                payer: deposit.payer as `0x${string}`,
+                recipient: deposit.recipient as `0x${string}`,
+                outCm: deposit.outCm as `0x${string}`,
+                cvDep: deposit.cvDep,
+                rcv: deposit.rcv,
             },
             {
                 clueRx: aux.clueRx,

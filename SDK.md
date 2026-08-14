@@ -178,16 +178,16 @@ const tx = await wallet.deposit({
     asset: 1n,                // optional, default 1
     to: peerBech32,           // optional, default own address
     deadline: 1700000000n,    // optional permit expiry (default: now + 3600s)
-    asEth: false,             // optional; true sends native ETH via submitIntentNative
+    asEth: false,             // optional; true routes native ETH via NativeAdapter
     onPhase: (p) => console.log(p),   // "signing" | "submitting" | "broadcast" | "mined"
 });
 // DepositResult: { kind: "deposit", txHash, strategy, commitments,
-//                  nonZeroCommitments, ownCommitments, ownInflow, sent, intentId? }
+//                  nonZeroCommitments, ownCommitments, ownInflow, sent, depositId? }
 ```
 
 Each method returns its own receipt type — `deposit()` gives you a
 `DepositResult`, not the four-way `TransactionResult` union — so
-`tx.intentId` needs no narrowing.
+`tx.depositId` needs no narrowing.
 
 Chain adapter signs EIP-2612 permit so deposit + ERC20 pull happen in one atomic tx (no separate `approve`). Deposit strategies (`native`, `allowance`, `witness`) picked per-asset by the adapter; `DepositAdapterError` raised on mismatch.
 
@@ -291,12 +291,14 @@ Related methods:
 - `wallet.awaitCommitments(cms, opts?)` — block until commitments appear in chain index.
 - `wallet.markSpent(ids)` — mark notes spent manually (recovery flows).
 - `wallet.compact()` — drop spent notes from the store; returns `{ removed }`.
-- `wallet.cancelIntent(id, inputs)` — reclaim an escrowed deposit the relayer never
+- `wallet.cancelDeposit(id, inputs)` — reclaim an escrowed deposit the relayer never
   flushed, once `chain.cancelDelay()` blocks have passed. The contract stores only
-  `keccak(intent)` per escrow, so `inputs` (`CancelIntentInputs`) carries back every
+  `keccak(request)` per escrow, so `inputs` (`CancelDepositInputs`) carries back every
   field it checks against that digest — `publicIn`, `cm`, `cvDep`, `publicAssetId`,
   `feeBpsAtSubmit`, `payer` and `submittedAt`. All of them come off the
-  `IntentEscrowed` log, so cache it: `escrowed(id)` returns the digest alone.
+  `DepositEscrowed` log, so cache it: `escrowed(id)` returns the digest alone.
+  A native-ETH deposit is escrowed by `NativeAdapter`, which owns the refund
+  record, so those cancel through `chain.cancelDepositNative` instead.
 
 #### Sync strategies
 
