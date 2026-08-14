@@ -1,9 +1,9 @@
 // bech32m payment address.
 //
-//   HRP     "sswap"
-//   payload pk_d (32 B, Baby-Jubjub packed)
-//        || dk  (32 B, little-endian field scalar — FMD detection seed)
-//        || pk  (32 B, little-endian field scalar — note-commitment binding)
+//   HRP     "sswap2"
+//   payload pk_d (32 B, Baby-Jubjub packed — ECDH target)
+//        || pk   (32 B, little-endian field scalar — note-commitment binding)
+//        || ck   (32 B, Baby-Jubjub packed — FMD clue key)
 //
 // HRP carries the format version: bumping it invalidates old strings and
 // lets format changes fail-fast.
@@ -12,6 +12,16 @@
 // valid note commitment for the recipient. Spend authority remains gated
 // solely by `nsk` (nullifier check uses `nsk`, not `pk`); publishing `pk`
 // does not enable forgery and does not worsen linkability beyond `pk_d`.
+//
+// `ck = dk · Base8` is the public half of the FMD key. Senders expand it into
+// flag-key points (`fmdExpandFlagKey`) to build a clue; recovering the
+// detection scalars from it requires a discrete log, so the address confers
+// the ability to flag a recipient but not to detect for them. The detection
+// secret `dk` must never appear in an address.
+//
+// Both point fields are validated on decode (on-curve, prime-order subgroup,
+// non-identity). A payload carrying a field scalar in the `ck` slot therefore
+// fails to decode rather than yielding a usable address.
 
 import { bech32m } from "bech32";
 import { branded, type ShieldedAddress } from "../core/brand.js";
@@ -19,7 +29,7 @@ import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
 
-export const ADDRESS_HRP = "sswap";
+export const ADDRESS_HRP = "sswap2";
 /** @internal */
 export const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
 const BECH32_LIMIT = 256;
@@ -27,16 +37,16 @@ const BECH32_LIMIT = 256;
 /** @internal */
 export interface DecodedAddress {
     pk_d: Point;
-    dk: Field;
     pk: Field;
+    ck: Point;
 }
 
 /** @internal */
-export function encodeAddress(J: Jubjub, pk_d: Point, dk: Field, pk: Field): ShieldedAddress {
+export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): ShieldedAddress {
     const payload = new Uint8Array(ADDRESS_PAYLOAD_LEN);
     payload.set(J.packPoint(pk_d), 0);
-    payload.set(toLeBytes(dk), FIELD_BYTES);
-    payload.set(toLeBytes(pk), 2 * FIELD_BYTES);
+    payload.set(toLeBytes(pk), FIELD_BYTES);
+    payload.set(J.packPoint(ck), 2 * FIELD_BYTES);
     return branded<ShieldedAddress>(
         bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), BECH32_LIMIT),
     );
@@ -52,12 +62,20 @@ export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
         throw new Error(`bad payload length: ${payload.length}`);
     }
 
-    const pk_d = J.unpackPoint(payload.slice(0, FIELD_BYTES));
-    if (!pk_d) throw new Error("pk_d not on Baby-Jubjub");
-    if (!J.inSubgroup(pk_d)) throw new Error("pk_d not in prime subgroup");
+    const pk_d = unpackChecked(J, payload.slice(0, FIELD_BYTES), "pk_d");
+    const pk = fromLeBytes(payload.slice(FIELD_BYTES, 2 * FIELD_BYTES));
+    const ck = unpackChecked(J, payload.slice(2 * FIELD_BYTES), "ck");
 
-    const dk = fromLeBytes(payload.slice(FIELD_BYTES, 2 * FIELD_BYTES));
-    const pk = fromLeBytes(payload.slice(2 * FIELD_BYTES));
+    return { pk_d, pk, ck };
+}
 
-    return { pk_d, dk, pk };
+// Rejects the identity alongside the usual curve checks: an identity `ck`
+// expands to flag-key points with a known discrete log, which makes every
+// clue bit predictable.
+function unpackChecked(J: Jubjub, bytes: Uint8Array, name: string): Point {
+    const p = J.unpackPoint(bytes);
+    if (!p) throw new Error(`${name} not on Baby-Jubjub`);
+    if (!J.inSubgroup(p)) throw new Error(`${name} not in prime subgroup`);
+    if (p[0] === 0n && p[1] === 1n) throw new Error(`${name} is the identity`);
+    return p;
 }

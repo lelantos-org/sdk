@@ -40,16 +40,24 @@ describe("hex32", () => {
 });
 
 describe("shieldedAddress", () => {
-    it("accepts a bech32m string under the `sswap` HRP", () => {
-        const a = "sswap1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+    it("accepts a bech32m string under the `sswap2` HRP", () => {
+        const a = "sswap21qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
         expect(shieldedAddress(a)).toBe(a);
     });
 
     it("rejects an EVM address, a bare HRP, and out-of-charset input", () => {
         expect(() => shieldedAddress(ADDR)).toThrow(/shielded address/);
-        expect(() => shieldedAddress("sswap1")).toThrow(/shielded address/);
+        expect(() => shieldedAddress("sswap21")).toThrow(/shielded address/);
         // `b`, `i` and `o` are not in the bech32 charset.
-        expect(() => shieldedAddress("sswap1bio")).toThrow(/shielded address/);
+        expect(() => shieldedAddress("sswap21bio")).toThrow(/shielded address/);
+    });
+
+    it("rejects an `sswap1…` address", () => {
+        // A neighbouring HRP must not match, or a payment would be routed to a
+        // different address format.
+        expect(() => shieldedAddress("sswap1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")).toThrow(
+            /shielded address/,
+        );
     });
 });
 

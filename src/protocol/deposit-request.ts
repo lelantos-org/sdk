@@ -14,10 +14,10 @@ export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 /**
  * `PubInputs.DepositRequest` mirror — wire-side bigints/hex.
  *
- * One output. The request used to carry a second, zero-value pad leaf so the
- * deposit produced the same two-leaf shape as a spend; the contract collapsed
- * it, which also removed `rcvTotal` and `rcvDepPad` (both existed only to pin
- * the pad leaf's value to zero).
+ * One output: the contract collapses the deposit to a single leaf rather than
+ * padding it to the two-leaf shape of a spend. There is correspondingly no
+ * `rcvTotal` or `rcvDepPad`, which would only have pinned a pad leaf's value
+ * to zero.
  */
 export interface DepositRequest {
     /**

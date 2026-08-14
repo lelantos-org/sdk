@@ -3,17 +3,9 @@
 // Both real and pad slots go through `buildOutputAux`.
 
 import { bitAt } from "../core/bits.js";
-import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
-import {
-    FMD_DEFAULT_GAMMA,
-    type FmdDetectionKey,
-    type FmdFlagKey,
-    fmdFlag,
-    fmdFlagKeyFromDetection,
-    fmdGenDetectionKey,
-} from "../fmd/fmd.js";
+import { type FmdFlagKey, fmdFlag } from "../fmd/fmd.js";
 import {
     clueBitsToPrefix,
     encodeNotePayload,
@@ -102,25 +94,4 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
             clueRy: clueRPoint[1],
         },
     };
-}
-
-/**
- * Convenience: derive a deterministic flag-key from a single scalar `dkSeed`
- * (the `dk` field in a bech32m address). Each γ-component scalar is mixed
- * from `dkSeed` via a counter, matching the receiver's wallet that
- * generates its detection key from the same seed.
- */
-export function flagKeyFromAddressDk(
-    J: Jubjub,
-    dkSeed: Field,
-    gamma: number = FMD_DEFAULT_GAMMA,
-): { detection: FmdDetectionKey; flag: FmdFlagKey } {
-    let n = dkSeed;
-    const stream = (): Field => {
-        n = (n + 0x9e3779b97f4a7c15n) % BABYJUB_SUBGROUP_ORDER;
-        return n === 0n ? 1n : n;
-    };
-    const detection = fmdGenDetectionKey(stream, gamma);
-    const flag = fmdFlagKeyFromDetection(J, detection);
-    return { detection, flag };
 }

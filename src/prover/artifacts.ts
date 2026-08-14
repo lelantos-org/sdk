@@ -28,8 +28,8 @@ const log = getLogger("lelantos:prover:artifacts");
  * stalled download needs a long leash but not none.
  *
  * 120 s covers the default shape down to roughly 3 Mbps. Slower links fail
- * here rather than hanging; raise it via `LoadArtifactOpts.timeoutMs` if you
- * serve users below that.
+ * here rather than hanging; raise it via `LoadArtifactOpts.timeoutMs` to
+ * support slower clients.
  */
 const ARTIFACT_TIMEOUT_MS = 120_000;
 const ARTIFACT_RETRIES = 2;

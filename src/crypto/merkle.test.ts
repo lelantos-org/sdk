@@ -183,7 +183,7 @@ describe("MerkleTree", () => {
 
         it("a stride fixed at 2^18 would hold at depth 10 and alias above it", () => {
             const FIXED = 2 ** 18;
-            // Depth 10: largest level-1 index is 4^9 - 1 = 2^18 - 1. Fits, just.
+            // Depth 10: largest level-1 index is 4^9 - 1 = 2^18 - 1, which fits.
             expect(4 ** 9).toBe(FIXED);
             expect(cacheKeyStride(10)).toBe(FIXED);
 

@@ -28,7 +28,7 @@ export interface ScanHit extends NotePayload {
 
 /**
  * Per-scan tallies. They are what distinguishes a systematic decode failure
- * from "you have no notes"; the log line alone cannot.
+ * from an empty result; the log line alone cannot.
  */
 export interface ScanStats {
     scanned: number;

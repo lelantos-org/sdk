@@ -17,7 +17,8 @@ export function derivePk(P: Poseidon, nsk: Field): Field {
 }
 
 /** @internal */
-// Off-circuit FMD detection key.
+// Off-circuit FMD root detection secret. Not published; the address carries
+// `ck = dk · Base8` instead (see `fmdClueKeyFromRoot`).
 export function deriveDk(P: Poseidon, ivk: Field): Field {
     return P.hash([TAG_DK, ivk]);
 }
@@ -35,11 +36,11 @@ export function deriveNk(P: Poseidon, nsk: Field): Field {
  * Deriving it leaves a wallet with no extra secret to persist: losing local
  * state costs a re-derivation, not the subscription.
  *
- * The input is `ivk`, not `dk`. `dk` is public in the bech32m address, and
- * the γ detection scalars the wallet POSTs are an additive counter stream off
- * it (`flagKeyFromAddressDk`) and so invert back to it, which would make a
- * `dk`-derived token computable by every sender. `ivk` is secret, and
- * `dk = Poseidon(TAG_DK, ivk)` is one-way.
+ * The input is `ivk`, not `dk`. Any detection delegate can recover `dk`: the γ
+ * scalars a wallet POSTs are `x_i = dk + h_i`, and `h_i` follows from the
+ * public `ck`. A `dk`-derived token would therefore be computable by the server
+ * it authenticates against. `ivk` is secret and `dk = Poseidon(TAG_DK, ivk)` is
+ * one-way, so a token derived from `ivk` is not.
  *
  * `epoch` makes the token rotatable; without it the token is a pure function
  * of an identity the wallet cannot change. The token is a bearer credential

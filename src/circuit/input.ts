@@ -1,5 +1,5 @@
 // The transact circuit witness. Shape-agnostic: the arity is read off the
-// input arrays, and 2×2 is simply the deployed instance.
+// input arrays; 2×2 is the deployed instance.
 //
 // `CircomTransactInput` is a named interface, shared by `flatten` and
 // `extractPubInputs`, so neither needs a cast or a re-parse of the same shape.

@@ -34,10 +34,10 @@ export interface Permit2SignArgs {
 }
 
 /**
- * `MASP.escrowed(id)` view — now the digest and nothing else. The row used to
- * carry `payer`, `submittedAt`, `publicAssetId` and `feeBpsAtSubmit`; those are
- * folded into the digest and must be reconstructed from the `DepositEscrowed`
- * log, which is also what `cancelDeposit` now takes back as arguments.
+ * `MASP.escrowed(id)` view — the digest and nothing else. `payer`,
+ * `submittedAt`, `publicAssetId` and `feeBpsAtSubmit` are folded into the
+ * digest and must be reconstructed from the `DepositEscrowed` log, which is
+ * also what `cancelDeposit` takes back as arguments.
  */
 export interface EscrowedDepositView {
     digest: Hex32;

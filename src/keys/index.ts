@@ -24,6 +24,7 @@ export {
     buildSpendingKey,
     deriveKeysFromMnemonic,
     deriveKeysFromNsk,
+    detectionKeyFor,
     type FullViewingKey,
     fullViewingKeyFromSpending,
     type SpendingKey,

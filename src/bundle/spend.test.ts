@@ -3,6 +3,7 @@ import { randomFr, randomJubjubScalar } from "../core/random.js";
 import type { Jubjub } from "../crypto/jubjub.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
+import { fmdClueKeyFromRoot } from "../fmd/fmd.js";
 import type { Note } from "../notes/note.js";
 import type { SpendKind } from "../protocol/transact.js";
 import type { Prover } from "../prover/types.js";
@@ -50,9 +51,8 @@ describe("buildSpend", () => {
         const P = await Poseidon.build();
         const J = await WasmJubjub.build();
         const pk = randomFr();
-        const dk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
-        const recipient = { pk_d: pkD, dk, pk };
+        const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
 
         const treeDepth = 4;
         const input: InputSlot = {
@@ -105,7 +105,7 @@ describe("buildSpend", () => {
         const J = await WasmJubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
-        const recipient = { pk_d: pkD, dk: randomFr(), pk };
+        const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
 
         const args: SpendArgs = {
             P,
@@ -144,7 +144,7 @@ describe("buildSpend", () => {
         const J = await WasmJubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
-        const recipient = { pk_d: pkD, dk: randomFr(), pk };
+        const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
 
         await expect(
             buildSpend({

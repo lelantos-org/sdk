@@ -35,6 +35,19 @@ pub fn try_decrypt_note(
         return Err(JsValue::from_str("epk must be 32 bytes"));
     }
 
+    // Small-subgroup guard, ~40% of this function's cost.
+    //
+    // Baby-Jubjub is Z_8 x Z_n, so a sender may pick `epk = T + [t]B` with `T`
+    // in the 8-torsion and `t` of their choosing. Then
+    // `shared = [ivk]T + [t]pk_d`, where `[t]pk_d` follows from the recipient's
+    // public address and `[ivk]T` has at most 8 values. Eight crafted notes,
+    // one of which decrypts, therefore reveal `ivk mod 8`.
+    //
+    // Three properties this relies on: the check is the full order-n test
+    // (`[8]epk == O` admits the attack, since `[8]epk = [8t]B != O`); it runs
+    // before any secret-dependent computation (deferring past Poly1305 lets the
+    // crafted note verify and leaves the extra work observable as timing); and
+    // a failure is treated as not-for-me.
     let mut epk_arr = [0u8; FIELD_BYTES];
     epk_arr.copy_from_slice(epk_packed);
     let epk = match decode_subgroup_point(&epk_arr) {

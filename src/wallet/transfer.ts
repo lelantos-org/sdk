@@ -63,7 +63,7 @@ export async function executeTransfer(
     const { txHash } = await ctx.submitter.submit(built.payload);
     const spent = selection.notes.map((n) => n.id);
     await ctx.markSpent(spent);
-    // Slot 0 is the recipient's, so it is ours only on a self-transfer; the
+    // Slot 0 is the recipient's, so it is the sender's only on a self-transfer; the
     // change slots always are.
     const isSelf = args.to === ctx.address;
     const changeSlots: OutputSlot[] = changeNotes.map((_, i) => i + 1);

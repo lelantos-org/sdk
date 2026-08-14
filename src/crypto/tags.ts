@@ -16,6 +16,7 @@
 // | TAG_LEAF    | 10    | leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y) arity 4
 // | TAG_RHO     | 11    | out rho = Poseidon(TAG_RHO, nullifier[0], out_index) arity 3
 // | TAG_SUB_TOKEN | 12  | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch) arity 3, off-circuit
+// | TAG_FMD_EXPAND | 13 | h_i = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i) arity 4, off-circuit, FMD
 
 /** @internal */
 export const TAG_CM = 1n;
@@ -41,3 +42,5 @@ export const TAG_LEAF = 10n;
 export const TAG_RHO = 11n;
 /** @internal */
 export const TAG_SUB_TOKEN = 12n;
+/** @internal */
+export const TAG_FMD_EXPAND = 13n;

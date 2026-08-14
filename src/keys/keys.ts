@@ -4,12 +4,19 @@
 //    ├─ ivk  = Poseidon(TAG_IVK, nsk)
 //    │    ├─ pk    = Poseidon(TAG_PK, ivk)        — scalar, binds note commitment
 //    │    ├─ pk_d  = (ivk mod q) · Base8          — Baby-Jubjub key, used for ECDH
-//    │    └─ dk    = Poseidon(TAG_DK, ivk)        — FMD detection-key seed
+//    │    └─ dk    = Poseidon(TAG_DK, ivk)        — FMD root detection secret
+//    │         └─ ck = (dk mod q) · Base8         — FMD clue key, public
 //    └─ nk   = Poseidon(TAG_NK, nsk)              — nullifier-deriving key (FVK)
 //
+// `dk` carries the detection capability and is released only to a delegate the
+// owner chooses. The address publishes `ck`; senders expand it into flag-key
+// points via `fmdExpandFlagKey`, which is one-way. The separate `TAG_DK` step
+// keeps `ck` distinct from `pk_d`, so the clue stream is unlinked from the
+// ECDH key.
+//
 // Two viewing-key flavors:
-//   IncomingViewingKey {ivk, pk_d, dk} — detect + decrypt incoming notes.
-//   FullViewingKey     {ivk, pk_d, dk, nk} — adds spent-note visibility:
+//   IncomingViewingKey {ivk, pk_d, dk, ck} — detect + decrypt incoming notes.
+//   FullViewingKey     {ivk, pk_d, dk, ck, nk} — adds spent-note visibility:
 //     holder can recompute nf = Poseidon(TAG_NF, nk, rho, cm) for any decrypted
 //     note's rho and match against the on-chain nullifier set, learning
 //     which notes the owner has spent. Cannot derive nsk from nk (Poseidon
@@ -21,6 +28,12 @@ import { deriveDk, deriveIvk, deriveNk, derivePkFromIvk } from "../crypto/derive
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { type Field, Poseidon } from "../crypto/poseidon.js";
+import {
+    FMD_DEFAULT_GAMMA,
+    type FmdDetectionKey,
+    fmdClueKeyFromRoot,
+    fmdExpandDetectionKey,
+} from "../fmd/fmd.js";
 import { encodeAddress } from "./address.js";
 import { mnemonicToAccountKey } from "./hd.js";
 
@@ -30,7 +43,10 @@ export interface SpendingKey {
     nk: Field;
     pk: Field;
     pk_d: Point;
+    /** FMD root detection secret. Never publish — see `ck`. */
     dk: Field;
+    /** FMD clue key `dk · Base8`. The public half; goes in the address. */
+    ck: Point;
 }
 
 /** @internal */
@@ -39,6 +55,7 @@ export interface ViewingKey {
     ivk: Field;
     pk_d: Point;
     dk: Field;
+    ck: Point;
 }
 
 /** @internal */
@@ -50,29 +67,47 @@ export interface FullViewingKey extends ViewingKey {
 
 export function buildSpendingKey(P: Poseidon, J: Jubjub, nsk: Field): SpendingKey {
     const ivk = deriveIvk(P, nsk);
+    const dk = deriveDk(P, ivk);
     return {
         nsk,
         ivk,
         nk: deriveNk(P, nsk),
         pk: derivePkFromIvk(P, ivk),
         pk_d: J.mulPointEscalar(J.base8, ivk % BABYJUB_SUBGROUP_ORDER),
-        dk: deriveDk(P, ivk),
+        dk,
+        ck: fmdClueKeyFromRoot(J, dk),
     };
 }
 
 /** @internal */
 export function viewingKeyFromSpending(sk: SpendingKey): ViewingKey {
-    return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk };
+    return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, ck: sk.ck };
 }
 
 /** @internal */
 export function fullViewingKeyFromSpending(sk: SpendingKey): FullViewingKey {
-    return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, nk: sk.nk };
+    return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, ck: sk.ck, nk: sk.nk };
 }
 
 /** @internal */
 export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddress {
-    return encodeAddress(J, sk.pk_d, sk.dk, sk.pk);
+    return encodeAddress(J, sk.pk_d, sk.pk, sk.ck);
+}
+
+/**
+ * The γ FMD detection scalars for a viewing key, as `POST /v1/subscriptions`
+ * expects them via `detectionKeyToHex`.
+ *
+ * Releasing these releases the root detection secret permanently: `h_i` is
+ * public, so any single `x_i` yields `dk = x_i - h_i`.
+ */
+export function detectionKeyFor(
+    J: Jubjub,
+    P: Poseidon,
+    vk: ViewingKey,
+    gamma = FMD_DEFAULT_GAMMA,
+): FmdDetectionKey {
+    return fmdExpandDetectionKey(J, P, vk.dk, gamma);
 }
 
 /** @internal */

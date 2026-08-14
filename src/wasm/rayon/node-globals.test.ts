@@ -49,7 +49,7 @@ describe("installWorkerGlobals", () => {
         const handle = installWorkerGlobals();
         expect(g.postMessage).toBe(hostPostMessage);
         handle.restore();
-        // Not ours to delete.
+        // Not installed by this module, so not removed here.
         expect(g.postMessage).toBe(hostPostMessage);
     });
 

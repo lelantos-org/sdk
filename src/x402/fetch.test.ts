@@ -48,7 +48,7 @@ function shieldedRequirements(over: Partial<PaymentRequirements> = {}): PaymentR
         network: `shielded:${CHAIN_ID}`,
         amount: "1500",
         asset: "1",
-        payTo: "sswap1qqqq",
+        payTo: "sswap21qqqq",
         maxTimeoutSeconds: 120,
         extra: { pool: "lelantos", paymentFlow: "upfront" },
         ...over,
@@ -112,7 +112,7 @@ describe("x402", () => {
         expect(res.status).toBe(200);
         expect(fetchImpl).toHaveBeenCalledTimes(2);
         expect(wallet.transfer).toHaveBeenCalledWith(
-            expect.objectContaining({ to: "sswap1qqqq", amount: 1500n, asset: 1n }),
+            expect.objectContaining({ to: "sswap21qqqq", amount: 1500n, asset: 1n }),
         );
 
         const payload = decodePaymentHeader(fetchImpl.mock.calls[1]![1]);

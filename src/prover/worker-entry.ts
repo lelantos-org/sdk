@@ -19,12 +19,10 @@ let setupApplied = false;
 /**
  * The prover for `paths`.
  *
- * No memo here on purpose. `WasmProver.build` already keys its own cache on the
+ * Deliberately unmemoised. `WasmProver.build` already keys its own cache on the
  * same artifact pair, so a second map would hold nothing extra while giving the
- * key two definitions that must agree — and a drift between them reproduces the
- * bug this used to have, where a single unkeyed slot answered every request
- * with the first circuit's prover and a shape switch silently returned proofs
- * from the wrong circuit.
+ * key two definitions that must agree. If they drift, a shape switch returns
+ * proofs from the wrong circuit.
  */
 async function getProver(
     paths: ProverPaths,

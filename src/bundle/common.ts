@@ -25,12 +25,8 @@ import {
     type Point,
     type Poseidon,
 } from "../crypto/index.js";
-import {
-    buildOutputAux,
-    flagKeyFromAddressDk,
-    type OutputAux,
-    type OutputAuxWithWitness,
-} from "../notes/aux.js";
+import { FMD_DEFAULT_GAMMA, fmdExpandFlagKey } from "../fmd/fmd.js";
+import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
 import { auxDigest } from "../protocol/abi-hash.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
@@ -40,12 +36,16 @@ import type { Groth16Proof, Prover, ProverPaths } from "../prover/types.js";
 
 export interface OutputRecipient {
     pk_d: Point;
-    dk: Field;
     /**
      * Note-commitment binding scalar; same value the receiver derives via
      * `derivePkFromIvk`. Part of the bech32m address.
      */
     pk: Field;
+    /**
+     * FMD clue key from the recipient's address: the public half. Expanding it
+     * yields flag-key points, never detection scalars.
+     */
+    ck: Point;
 }
 
 /**
@@ -143,12 +143,12 @@ export function buildAuxForReal(
     note: Note,
     recipient: OutputRecipient,
     rng: OutputRandomness,
+    gamma: number = FMD_DEFAULT_GAMMA,
 ): OutputAuxWithWitness {
-    const { flag } = flagKeyFromAddressDk(J, recipient.dk);
     return buildOutputAux({
         J,
         P,
-        recipientFlagKey: flag,
+        recipientFlagKey: fmdExpandFlagKey(J, P, recipient.ck, gamma),
         recipientPkD: recipient.pk_d,
         note: {
             asset: note.asset,

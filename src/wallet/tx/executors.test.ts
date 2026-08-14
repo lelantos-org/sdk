@@ -125,7 +125,7 @@ describe("executeTransfer", () => {
         const { ctx } = await makeCtx([storedNote("01", 100n)]);
         const { address: recipient } = await makeCtx([]);
         const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
-        // Slot 0 is the recipient's; every other slot is change back to us.
+        // Slot 0 is the recipient's; every other slot is change back to the sender.
         expect(res.commitments).toHaveLength(DEFAULT_SHAPE.nOut);
         expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut - 1);
     });
@@ -180,7 +180,7 @@ describe("executeWithdraw", () => {
         expect(markedSpent).toEqual([["01"]]);
         expect(res.sent).toBe(40n);
         expect(res.change).toBe(60n);
-        // Every slot is change, so all of them are ours.
+        // Every slot is change, so all belong to the sender.
         expect(res.commitments).toHaveLength(DEFAULT_SHAPE.nOut);
         expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
         expect(res.ownInflow).toBe(60n);
@@ -303,7 +303,7 @@ describe("shape 3x3", () => {
     });
 });
 
-// 2×2 is no longer the default, so it needs its own coverage: a pool whose
+// 2×2 is not the default shape, so it needs its own coverage: a pool whose
 // verifier predates the wider circuit passes `shape: TRANSACT_2X2` and must
 // still get exactly two slots.
 describe("shape 2x2", () => {

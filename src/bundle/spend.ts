@@ -35,7 +35,7 @@ export interface SpendArgs extends BundleCommon {
     outputs: readonly Note[];
     /**
      * Recipient address per output slot (drives the FMD clue + ECDH).
-     * Pass your own address for change slots.
+     * Change slots take the sender's own address.
      */
     outputRecipients: readonly OutputRecipient[];
     outputRandomness: readonly OutputRandomness[];

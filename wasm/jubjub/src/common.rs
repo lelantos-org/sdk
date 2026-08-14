@@ -1,6 +1,6 @@
-//! Shared crate-internal helpers used by `lib.rs`, `decrypt.rs`, `fmd.rs`.
-//! Centralizes byte<->scalar conversion, packed-point decoding+subgroup
-//! validation, and blake2b 32-byte hashing.
+//! Shared crate-internal helpers used by `lib.rs` and `decrypt.rs`:
+//! byte<->scalar conversion, packed-point decoding with subgroup validation,
+//! and blake2b hashing.
 
 use blake2::digest::consts::{U12, U32};
 use blake2::{Blake2b, Digest};
@@ -38,8 +38,8 @@ pub fn decode_subgroup_point(packed: &[u8; FIELD_BYTES]) -> Option<Point> {
     }
 }
 
-/// blake2b 32-byte digest over concatenated parts. Both KDF and FMD use
-/// this shape (domain || R/epk || ... || shared_packed).
+/// blake2b 32-byte digest over concatenated parts, in the shape the note KDF
+/// expects (domain || epk || shared_packed).
 pub fn blake2b_32(parts: &[&[u8]]) -> [u8; 32] {
     let mut h = Blake2b::<U32>::new();
     for p in parts {

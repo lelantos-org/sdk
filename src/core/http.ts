@@ -87,6 +87,10 @@ export function createHttpClient(
 
     return {
         async fetch(url, init) {
+            // Errors and retry logs report `safeUrl`, never `url`: both reach
+            // application logs, so a credential in a query string would be
+            // copied verbatim into them.
+            const safeUrl = redactUrl(url);
             const method = (init?.method ?? "GET").toUpperCase();
             const idempotent = IDEMPOTENT.has(method);
             const timeoutMs =
@@ -113,12 +117,12 @@ export function createHttpClient(
                     );
                 } catch (err) {
                     if (err instanceof TimeoutMarker) {
-                        throw new NetworkError(timeoutCode, url, err.message, {
+                        throw new NetworkError(timeoutCode, safeUrl, err.message, {
                             cause: err,
                             context: { method },
                         });
                     }
-                    throw new NetworkError(failureCode, url, "network error", {
+                    throw new NetworkError(failureCode, safeUrl, "network error", {
                         cause: err,
                         context: { method },
                     });
@@ -134,7 +138,7 @@ export function createHttpClient(
                 lastBody = await res.text().catch(() => undefined);
                 throw new NetworkError(
                     failureCode,
-                    url,
+                    safeUrl,
                     `HTTP ${res.status}${lastBody ? `: ${lastBody.slice(0, 200)}` : ""}`,
                     { status: res.status, body: lastBody, context: { method } },
                 );
@@ -147,20 +151,20 @@ export function createHttpClient(
                     shouldRetry: (err) => isTransient(err),
                     onRetry: ({ attempt: n, delayMs }) => {
                         log.debug("retrying request", {
-                            url,
+                            url: safeUrl,
                             method,
                             attempt: n + 1,
                             delayMs,
                             status: lastStatus,
                         });
-                        opts.onRetry?.({ url, method, attempt: n + 1, delayMs });
+                        opts.onRetry?.({ url: safeUrl, method, attempt: n + 1, delayMs });
                     },
                 });
             } catch (err) {
                 // The final failure may be a timeout while an earlier attempt
                 // carried a 5xx body worth reporting.
                 if (err instanceof NetworkError && err.body === undefined && lastBody) {
-                    throw new NetworkError(err.code, url, err.message, {
+                    throw new NetworkError(err.code, safeUrl, err.message, {
                         cause: err.cause,
                         status: lastStatus,
                         body: lastBody,
@@ -175,6 +179,40 @@ export function createHttpClient(
 
 /** Internal marker so `withTimeout` rejections are distinguishable. */
 class TimeoutMarker extends Error {}
+
+// Query params that carry a credential rather than a selector, matched
+// case-insensitively. Anything unlisted is preserved, since the URL is what
+// makes a network log readable.
+const SECRET_PARAMS = new Set(["token", "fmdsecret", "detectionkey", "detectionkeyhex"]);
+// Path prefixes whose FINAL segment is a bearer token, not a resource id.
+const SECRET_PATH_PREFIXES = ["/v1/subscriptions/"];
+
+/**
+ * Strip credentials from a URL before it reaches a log line or an error
+ * message. Host, path shape and param names are preserved, so the result
+ * remains diagnosable.
+ *
+ * An unparseable URL yields `<unparseable url>` rather than passing through,
+ * since a credential may sit somewhere this function does not inspect.
+ */
+export function redactUrl(raw: string): string {
+    let u: URL;
+    try {
+        u = new URL(raw);
+    } catch {
+        return "<unparseable url>";
+    }
+
+    for (const key of [...u.searchParams.keys()]) {
+        if (SECRET_PARAMS.has(key.toLowerCase())) u.searchParams.set(key, "REDACTED");
+    }
+    for (const prefix of SECRET_PATH_PREFIXES) {
+        if (u.pathname.startsWith(prefix) && u.pathname.length > prefix.length) {
+            u.pathname = `${prefix}REDACTED`;
+        }
+    }
+    return u.toString();
+}
 
 function isTransient(err: unknown): boolean {
     if (!(err instanceof NetworkError)) return false;

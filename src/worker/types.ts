@@ -13,7 +13,7 @@ import type { LogLevel } from "../log/logger.js";
  * Minimal worker surface. Satisfied by a DOM `Worker`, a
  * `node:worker_threads` Worker, and any test double.
  *
- * Note that Node's Worker is an `EventEmitter`: it has `on`, but neither
+ * Node's Worker is an `EventEmitter`: it has `on`, but neither
  * `onmessage` nor `onerror`. The client probes for all three.
  */
 export interface WorkerLike {

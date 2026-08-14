@@ -39,7 +39,7 @@ export function serveWorkerRpc<M extends MethodMap>(
     const onMessage = async (ev: { data: unknown }): Promise<void> => {
         const ctrl = ev?.data as RpcControl | undefined;
         if (ctrl?.kind === "log-config") {
-            // Replicate the client's level/filter; the sink is already ours.
+            // Replicate the client's level/filter; the sink is local.
             configureLogging({ level: ctrl.level, namespaces: ctrl.namespaces });
             return;
         }

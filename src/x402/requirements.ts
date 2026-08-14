@@ -53,7 +53,7 @@ export function parseCaip2(network: string): Caip2 {
  *
  * Both halves are worth distinguishing in the message: a wrong namespace
  * means the offer was meant for a different kind of mechanism, while a wrong
- * reference means the right mechanism on a chain we have no bridge to.
+ * reference means the right mechanism on a chain with no bridge.
  */
 export function requireNetwork(
     scope: string,

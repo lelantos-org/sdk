@@ -89,16 +89,29 @@ export interface NullifierChunkOut {
  * `gamma * 32` bytes.
  */
 export const GAMMA_MIN = 1;
+// Mirrors the server's declared range. `AuxValidation.sol` masks the on-chain
+// clue-bits field to 0x3FFF, so bits 14-15 are never set and γ > 14 is
+// unreachable.
 export const GAMMA_MAX = 16;
 
 export interface CreateSubscriptionInput {
+    /**
+     * The γ expanded detection scalars, from `detectionKeyFor` +
+     * `detectionKeyToHex`.
+     *
+     * Confers the full detection capability, which cannot be scoped or
+     * revoked: `h_i` is public, so `dk = x_i - h_i` recovers the root. The
+     * server can then identify this recipient's incoming notes, at a 2^-γ
+     * false-positive rate, for as long as the key is valid.
+     */
     detectionKeyHex: string;
     gamma: number;
     /**
      * Capability token for `/v1/matches` and `DELETE /v1/subscriptions`,
      * bare 32-byte hex. Build it with `deriveSubscriptionToken` +
-     * `subscriptionTokenToHex` — never from `dk` or the detection key, both
-     * of which are recoverable by senders and by the server.
+     * `subscriptionTokenToHex`, never from `dk` or the detection key: the
+     * scalars are `x_i = dk + h_i` over a publicly computable `h_i`, so this
+     * server can invert either back to `dk` and mint its own token.
      */
     tokenHex: string;
 }

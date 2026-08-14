@@ -4,7 +4,6 @@
 export {
     type BuildAuxArgs,
     buildOutputAux,
-    flagKeyFromAddressDk,
     ON_CURVE_IDENTITY,
     type OutputAux,
     type OutputAuxWithWitness,

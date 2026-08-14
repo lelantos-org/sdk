@@ -52,7 +52,7 @@ const requirements = (over: Partial<PaymentRequirements> = {}): PaymentRequireme
     network: shieldedNetwork(CHAIN_ID),
     amount: "1500",
     asset: "1",
-    payTo: "sswap1qqqq",
+    payTo: "sswap21qqqq",
     maxTimeoutSeconds: 120,
     extra: { pool: LELANTOS_POOL, paymentFlow: "upfront" },
     ...over,
@@ -77,14 +77,14 @@ describe("shieldedExact", () => {
         const result = await shieldedExact(wallet).createPaymentPayload(2, requirements());
 
         expect(transfer).toHaveBeenCalledWith(
-            expect.objectContaining({ to: "sswap1qqqq", amount: 1500n, asset: 1n }),
+            expect.objectContaining({ to: "sswap21qqqq", amount: 1500n, asset: 1n }),
         );
         expect(result).toEqual({
             x402Version: 2,
             payload: {
                 pool: LELANTOS_POOL,
                 txHash: hex32(`0x${"fe".repeat(32)}`),
-                // Output 0 is the recipient's note — output 1 is our change,
+                // Output 0 is the recipient's note; output 1 is the sender's change,
                 // and quoting it would make the payment unverifiable.
                 commitment: RECIPIENT_CM,
                 asset: "1",

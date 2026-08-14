@@ -52,10 +52,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         ctx.cfg.chain.fetchAsset(assetOut),
     ]);
 
-    // B-note value bounded so the wrapper covers the Permit2 pull:
-    // `bValue * scaleOut * (10_000 + feeBps) / 10_000 ≤ minOut`.
-    // Floor-div remainder becomes wrapper-side dust to treasury.
-    const bValue = (quote.minOut * BPS_DENOMINATOR) / (entryOut.scale * (BPS_DENOMINATOR + feeBps));
+    const bValue = sizeBNote(quote.minOut, entryOut.scale, feeBps);
     if (bValue <= 0n) {
         throw new InvalidArgumentError(
             `swap: minOut ${quote.minOut} below scaleOut*(1+fee) (zero B-note)`,
@@ -69,14 +66,25 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     });
 
     safePhase(args.onPhase, "proving");
-    // Leg 1: withdraw → wrapper. MASP enforces `pi.relayer == msg.sender`.
+    // Leg 1: withdraw → wrapper.
+    //
+    // `relayer` and `recipient` are the wrapper: it is the contract that calls
+    // `MASP.withdraw`, so it is the pool's `msg.sender` (which the pool pins
+    // via `pi.relayer == msg.sender`) and the address the tokens must land on.
+    //
+    // `payer` is different — the wrapper reads it as *who may drive this
+    // swap*. `swap` is permissionless and `deposit_d` is unauthenticated
+    // calldata, so without that check this withdraw proof could be replayed
+    // out of the mempool under a different deposit, redirecting the output
+    // note. It therefore names the account that submits the swap, which is
+    // the relayer; naming the wrapper reverts `UnauthorizedSwapCaller`.
     const built = await buildSpend({
         kind: "withdraw",
         P: ctx.P,
         J: ctx.J,
         chainId: ctx.cfg.chainId,
         asset: assetIn,
-        payerAddress: wrapperAddress,
+        payerAddress: ctx.cfg.relayerAddress,
         relayerAddress: wrapperAddress,
         recipientAddress: wrapperAddress,
         prover: ctx.prover,
@@ -148,4 +156,30 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         change: remainder,
         ownIndices: change.map((_, i) => i),
     });
+}
+
+/**
+ * Smallest B-note value whose on-chain Permit2 pull covers `minOut`.
+ *
+ * The wrapper enforces a window, not a ceiling: `minOut ≤ pulled ≤ actualOut`,
+ * as `MaspPullBelowMinOut` and `MaspPullExceedsActualOut`. Solving only the
+ * upper bound — the closed form `minOut * BPS / (scale * (BPS + feeBps))` —
+ * lands *below* `minOut` whenever the division is inexact, and reverts.
+ *
+ * `pulled` is principal plus fee, and the pool floors the fee, so it advances
+ * in steps no closed form always hits. Start from the floor-div estimate (a
+ * lower bound) and walk up. Minimality is what keeps the answer under
+ * `actualOut`; any overshoot is wrapper-side dust forwarded to the treasury.
+ *
+ * @internal
+ */
+export function sizeBNote(minOut: bigint, scaleOut: bigint, feeBps: bigint): bigint {
+    const pullFor = (v: bigint): bigint => {
+        const inAmt = v * scaleOut;
+        return inAmt + applyFee(inAmt, feeBps);
+    };
+    let v = (minOut * BPS_DENOMINATOR) / (scaleOut * (BPS_DENOMINATOR + feeBps));
+    // `pullFor` is strictly increasing in `v`, so this terminates.
+    while (pullFor(v) < minOut) v += 1n;
+    return v;
 }

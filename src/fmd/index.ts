@@ -1,4 +1,4 @@
-// Fuzzy Message Detection (FMD2 / Niwl), scheme variant lelantos.fmd.v3.
+// Fuzzy Message Detection (FMD2 / Niwl), scheme variant lelantos.fmd.v4.
 
 export {
     decodeClue,
@@ -10,6 +10,9 @@ export {
     type FmdClue,
     type FmdDetectionKey,
     type FmdFlagKey,
+    fmdClueKeyFromRoot,
+    fmdExpandDetectionKey,
+    fmdExpandFlagKey,
     fmdFlag,
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,

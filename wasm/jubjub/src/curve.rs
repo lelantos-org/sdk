@@ -1,17 +1,21 @@
 //! Vendored minimal Baby Jubjub Edwards arithmetic.
 //!
-//! Adapted from `babyjubjub-rs` v0.0.11 (Apache-2.0, arnaucube). Strips the
-//! EdDSA / Schnorr / Poseidon paths so we don't pull `blake-hash`, `blake`,
-//! `poseidon-rs`, `arrayref`, `generic-array`, `lazy_static`, or `rand`.
+//! Adapted from `babyjubjub-rs` v0.0.11 (Apache-2.0, arnaucube). The EdDSA,
+//! Schnorr and Poseidon paths are omitted, which drops the `blake-hash`,
+//! `blake`, `poseidon-rs`, `arrayref`, `generic-array`, `lazy_static` and
+//! `rand` dependencies.
 //!
-//! Public surface kept: `Point`, `PointProjective`, `decompress_point`,
-//! `compress`, `mul_scalar`, `add`, plus modular helpers.
+//! Public surface: `Point`, `PointProjective`, `decompress_point`, `compress`,
+//! `mul_scalar`, `add`, `double`.
+//!
+//! `decompress_point` and `mul_scalar` run once per note during a wallet sync
+//! and dominate its cost; both are tuned for that and diverge from upstream.
+//! See their doc comments.
 
 #![allow(clippy::too_many_arguments)]
 
 use ff::*;
-use num_bigint::{BigInt, Sign};
-use num_traits::One;
+use num_bigint::BigInt;
 use std::sync::OnceLock;
 
 #[derive(PrimeField)]
@@ -46,27 +50,6 @@ fn q_half_repr() -> &'static FrRepr {
         let mut r = Fr::char();
         r.div2();
         r
-    })
-}
-
-fn d_big() -> &'static BigInt {
-    static V: OnceLock<BigInt> = OnceLock::new();
-    V.get_or_init(|| BigInt::parse_bytes(b"168696", 10).unwrap())
-}
-
-fn a_big() -> &'static BigInt {
-    static V: OnceLock<BigInt> = OnceLock::new();
-    V.get_or_init(|| BigInt::parse_bytes(b"168700", 10).unwrap())
-}
-
-pub fn q() -> &'static BigInt {
-    static V: OnceLock<BigInt> = OnceLock::new();
-    V.get_or_init(|| {
-        BigInt::parse_bytes(
-            b"21888242871839275222246405745257275088548364400416034343698204186575808495617",
-            10,
-        )
-        .unwrap()
     })
 }
 
@@ -137,6 +120,49 @@ impl PointProjective {
             z: z3,
         }
     }
+
+    // dbl-2008-bbjlp https://hyperelliptic.org/EFD/g1p/auto-twisted-projective.html#doubling-dbl-2008-bbjlp
+    //
+    // 3M + 4S, against 10M + 1S for `add`. `mul_scalar` doubles once per bit
+    // and adds only on set bits, so doublings are roughly two thirds of its
+    // work. Guarded by `double_matches_add`, which covers the identity and a
+    // low-order point.
+    pub fn double(&self) -> PointProjective {
+        let mut b = self.x;
+        b.add_assign(&self.y);
+        b.square();
+        let mut c = self.x;
+        c.square();
+        let mut dd = self.y;
+        dd.square();
+        let mut e = a_coeff();
+        e.mul_assign(&c);
+        let mut f = e;
+        f.add_assign(&dd);
+        let mut h = self.z;
+        h.square();
+        let mut j = f;
+        j.sub_assign(&h);
+        j.sub_assign(&h);
+        // X3 = (B - C - D) * J
+        let mut x3 = b;
+        x3.sub_assign(&c);
+        x3.sub_assign(&dd);
+        x3.mul_assign(&j);
+        // Y3 = F * (E - D)
+        let mut e_minus_d = e;
+        e_minus_d.sub_assign(&dd);
+        let mut y3 = f;
+        y3.mul_assign(&e_minus_d);
+        // Z3 = F * J
+        let mut z3 = f;
+        z3.mul_assign(&j);
+        PointProjective {
+            x: x3,
+            y: y3,
+            z: z3,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -167,7 +193,7 @@ impl Point {
             if test_bit(&b, i as usize) {
                 r = r.add(&exp);
             }
-            exp = exp.add(&exp);
+            exp = exp.double();
         }
         r.affine()
     }
@@ -187,32 +213,48 @@ impl Point {
     }
 }
 
+/// Decompress a circomlibjs-packed point: 32B LE `y`, with the high bit of the
+/// last byte set when `x` is "negative" (`x > (q-1)/2`).
+///
+/// Recovers `x` from `x² = (1 - y²) / (a - d·y²)`.
+///
+/// Every step stays in `Fr`, whose Montgomery `inverse()` and `sqrt()` take
+/// their Tonelli-Shanks constants from the `PrimeField` derive. Performing the
+/// same arithmetic over `num_bigint` costs roughly 8x, largely in re-deriving
+/// those constants per call.
 pub fn decompress_point(bb: [u8; 32]) -> Result<Point, String> {
-    let mut sign = false;
     let mut b = bb;
-    if b[31] & 0x80 != 0 {
-        sign = true;
-        b[31] &= 0x7f;
+    let x_is_negative = b[31] & 0x80 != 0;
+    b[31] &= 0x7f;
+
+    let mut y_repr = FrRepr::default();
+    y_repr.read_le(&b[..]).map_err(|_| "y unreadable")?;
+    // `from_repr` rejects anything >= the modulus, so this is the `y < q` check.
+    let y = Fr::from_repr(y_repr).map_err(|_| "y outside Fq")?;
+
+    let mut y2 = y;
+    y2.square();
+    let mut numerator = fr_one();
+    numerator.sub_assign(&y2);
+    let mut denominator = d();
+    denominator.mul_assign(&y2);
+    denominator.negate();
+    denominator.add_assign(&a_coeff());
+    let mut x2 = denominator.inverse().ok_or("zero denominator")?;
+    x2.mul_assign(&numerator);
+
+    // `Fr::sqrt` maps 0 to `Some(0)`, which would admit `(0, ±1)`: the identity
+    // and the order-2 point. Both are rejected here. Pinned by
+    // `identity_does_not_decompress`.
+    if x2.is_zero() {
+        return Err("not a mod p square".into());
     }
-    let y = BigInt::from_bytes_le(Sign::Plus, &b);
-    if y >= *q() {
-        return Err("y outside Fq".into());
+    let mut x = x2.sqrt().ok_or("not a mod p square")?;
+
+    if (x.into_repr() > *q_half_repr()) != x_is_negative {
+        x.negate();
     }
-    let one: BigInt = One::one();
-    // x^2 = (1 - y^2) / (a - d * y^2) (mod q)
-    let den = modinv(
-        &modulus(&(a_big() - modulus(&(d_big() * (&y * &y)), q())), q()),
-        q(),
-    )?;
-    let mut x = modulus(&((one - modulus(&(&y * &y), q())) * den), q());
-    x = modsqrt(&x, q())?;
-    if sign && x <= (q().clone() >> 1) || (!sign && x > (q().clone() >> 1)) {
-        x = -x;
-    }
-    x = modulus(&x, q());
-    let x_fr = Fr::from_str(&x.to_string()).ok_or("Fr parse x")?;
-    let y_fr = Fr::from_str(&y.to_string()).ok_or("Fr parse y")?;
-    Ok(Point { x: x_fr, y: y_fr })
+    Ok(Point { x, y })
 }
 
 // ---------- helpers ----------
@@ -221,76 +263,151 @@ fn test_bit(b: &[u8], i: usize) -> bool {
     b[i / 8] & (1 << (i % 8)) != 0
 }
 
-fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
-    ((a % m) + m) % m
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{base8_point, sub_order};
 
-fn modinv(a: &BigInt, qq: &BigInt) -> Result<BigInt, String> {
-    let zero: BigInt = num_traits::Zero::zero();
-    if a == &zero {
-        return Err("no mod inv of zero".into());
+    /// Deterministic full-width scalars, matching the sizes `mul_scalar`
+    /// receives in practice.
+    fn scalars() -> Vec<BigInt> {
+        (1u32..=16)
+            .map(|i| {
+                let seed = BigInt::from(i) * BigInt::from(0x9e3779b97f4a7c15u64)
+                    + BigInt::from(0xbf58476d1ce4e5b9u64);
+                (&seed * &seed) % sub_order()
+            })
+            .collect()
     }
-    let mut mn = (qq.clone(), a.clone());
-    let mut xy: (BigInt, BigInt) = (zero.clone(), One::one());
-    while mn.1 != zero {
-        xy = (xy.1.clone(), xy.0 - (mn.0.clone() / mn.1.clone()) * xy.1);
-        mn = (mn.1.clone(), modulus(&mn.0, &mn.1));
-    }
-    while xy.0 < zero {
-        xy.0 = modulus(&xy.0, qq);
-    }
-    Ok(xy.0)
-}
 
-#[allow(clippy::many_single_char_names)]
-fn modsqrt(a: &BigInt, qq: &BigInt) -> Result<BigInt, String> {
-    let zero: BigInt = num_traits::Zero::zero();
-    let one: BigInt = One::one();
-    let two: BigInt = BigInt::from(2);
-    if legendre_symbol(a, qq) != 1 || a == &zero || qq == &two {
-        return Err("not a mod p square".into());
+    /// The order-2 point: on the curve (a·0 + y² = 1 with y = -1) but outside
+    /// the odd-order subgroup.
+    fn order_two() -> Point {
+        let mut y = fr_one();
+        y.negate();
+        Point { x: fr_zero(), y }
     }
-    if qq % BigInt::from(4) == BigInt::from(3) {
-        return Ok(a.modpow(&((qq + &one) / BigInt::from(4)), qq));
-    }
-    let mut s = qq - &one;
-    let mut e: BigInt = zero.clone();
-    while &s % &two == zero {
-        s >>= 1;
-        e += &one;
-    }
-    let mut n: BigInt = two.clone();
-    while legendre_symbol(&n, qq) != -1 {
-        n += &one;
-    }
-    let mut y = a.modpow(&((&s + &one) >> 1), qq);
-    let mut b = a.modpow(&s, qq);
-    let mut g = n.modpow(&s, qq);
-    let mut r = e;
-    loop {
-        let mut t = b.clone();
-        let mut m: BigInt = zero.clone();
-        while t != one {
-            t = modulus(&(&t * &t), qq);
-            m += &one;
+
+    #[test]
+    fn compress_decompress_round_trips() {
+        for k in scalars() {
+            let p = base8_point().mul_scalar(&k);
+            let got = decompress_point(p.compress()).expect("decompress");
+            assert_eq!(got.x, p.x, "x mismatch for k={k}");
+            assert_eq!(got.y, p.y, "y mismatch for k={k}");
+            // Compression must be canonical: same point, same bytes.
+            assert_eq!(got.compress(), p.compress());
         }
-        if m == zero {
-            return Ok(y);
-        }
-        t = g.modpow(&two.modpow(&(&r - &m - &one), qq), qq);
-        g = g.modpow(&two.modpow(&(r - &m), qq), qq);
-        y = modulus(&(y * t), qq);
-        b = modulus(&(b * &g), qq);
-        r = m;
     }
-}
 
-fn legendre_symbol(a: &BigInt, qq: &BigInt) -> i32 {
-    let one: BigInt = One::one();
-    let ls = a.modpow(&((qq - &one) >> 1), qq);
-    if ls == qq - one {
-        -1
-    } else {
-        1
+    #[test]
+    fn round_trips_the_generator() {
+        let g = base8_point();
+        let got = decompress_point(g.compress()).unwrap();
+        assert_eq!((got.x, got.y), (g.x, g.y));
+    }
+
+    /// The identity `(0, 1)` does not decompress, diverging from circomlibjs
+    /// `unpackPoint`, which accepts it.
+    ///
+    /// This has no effect in practice: `ON_CURVE_IDENTITY` appears only as a
+    /// placeholder for an unused pad-output `ephPub`, and a pad note is
+    /// discarded either way — here by the decompress failure, otherwise by the
+    /// AEAD tag. Asserted so that any change to it is deliberate.
+    #[test]
+    fn identity_does_not_decompress() {
+        let id = Point {
+            x: fr_zero(),
+            y: fr_one(),
+        };
+        assert!(decompress_point(id.compress()).is_err());
+    }
+
+    #[test]
+    fn decompress_rejects_y_outside_the_field() {
+        // q - 1 is the largest valid y; q and above must be refused. Take the
+        // modulus itself, low 255 bits (sign bit cleared by construction).
+        let mut b = [0xffu8; 32];
+        b[31] = 0x7f; // 2^255 - 1 > q
+        assert!(decompress_point(b).is_err());
+    }
+
+    #[test]
+    fn decompress_rejects_a_y_with_no_matching_x() {
+        // Search for a y where (1-y²)/(a-d·y²) is a non-residue. Roughly half
+        // of all y qualify, so this terminates immediately.
+        let mut found = false;
+        for i in 2u32..64 {
+            let y = Fr::from_str(&i.to_string()).unwrap();
+            let mut b = [0u8; 32];
+            y.into_repr().write_le(&mut b[..]).unwrap();
+            if decompress_point(b).is_err() {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "expected some small y to be off-curve");
+    }
+
+    #[test]
+    fn sign_bit_selects_the_correct_x() {
+        // The two roots ±x differ only in the compressed sign bit, and each
+        // must decompress back to its own root.
+        for k in scalars().into_iter().take(4) {
+            let p = base8_point().mul_scalar(&k);
+            let mut neg = p.clone();
+            neg.x.negate();
+            assert_ne!(p.compress(), neg.compress(), "sign bit must differ");
+            assert_eq!(decompress_point(neg.compress()).unwrap().x, neg.x);
+            assert_eq!(decompress_point(p.compress()).unwrap().x, p.x);
+        }
+    }
+
+    #[test]
+    fn in_subgroup_accepts_multiples_of_the_generator() {
+        for k in scalars() {
+            assert!(crate::common::in_subgroup(&base8_point().mul_scalar(&k)));
+        }
+    }
+
+    #[test]
+    fn in_subgroup_rejects_a_low_order_point() {
+        let t = order_two();
+        // Sanity: it really is order 2 and really is on the curve.
+        assert!(crate::common::is_identity(&t.mul_scalar(&BigInt::from(2u32))));
+        assert!(!crate::common::in_subgroup(&t));
+    }
+
+    #[test]
+    fn double_matches_add() {
+        // The dedicated doubling must agree with the generic addition on every
+        // input, including the identity and a low-order point.
+        let g = base8_point();
+        let mut points: Vec<Point> = scalars().iter().map(|k| g.mul_scalar(k)).collect();
+        points.push(Point {
+            x: fr_zero(),
+            y: fr_one(),
+        });
+        points.push(order_two());
+        for p in points {
+            let pp = p.projective();
+            let via_add = pp.add(&pp).affine();
+            let via_dbl = pp.double().affine();
+            assert_eq!((via_dbl.x, via_dbl.y), (via_add.x, via_add.y));
+        }
+    }
+
+    #[test]
+    fn mul_scalar_is_additively_homomorphic() {
+        // [j]B + [k]B == [j+k]B. Guards any rewrite of the scalar-mult loop.
+        let g = base8_point();
+        let ks = scalars();
+        for w in ks.chunks(2).filter(|c| c.len() == 2) {
+            let (j, k) = (&w[0], &w[1]);
+            let lhs = g.mul_scalar(j).projective().add(&g.mul_scalar(k).projective());
+            let rhs = g.mul_scalar(&((j + k) % sub_order()));
+            let lhs = lhs.affine();
+            assert_eq!((lhs.x, lhs.y), (rhs.x, rhs.y), "j={j} k={k}");
+        }
     }
 }

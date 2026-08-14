@@ -41,15 +41,15 @@ async function resolveProverPaths(config: {
 export interface FastWalletOpts {
     keys: KeySource;
     /**
-     * Standard `WalletConfig` minus the bits the preset wires for you
+     * Standard `WalletConfig` minus the fields the preset wires up
      * (`scanner`, `prover`).
      */
     config: Omit<WalletConfig, "scanner" | "prover">;
     /** Worker pool size. Default `navigator.hardwareConcurrency` clamped 2-8. */
     workerSize?: number | undefined;
     /**
-     * Worker pool config. `workerUrl` required — pass from your ESM call
-     * site: `new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`.
+     * Worker pool config. `workerUrl` is required and must come from the
+     * ESM call site: `new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)`.
      */
     workerOpts: Omit<BrowserWorkerScannerOpts, "size">;
     /**

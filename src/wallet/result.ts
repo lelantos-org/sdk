@@ -4,8 +4,7 @@ import type { DepositStrategy } from "../core/errors.js";
 // Wallet operation result types. Re-exported from `./api.ts` and the public barrel.
 
 /**
- * Common fields on every receipt variant. The `kind` discriminator
- * tells you which variant you have.
+ * Common fields on every receipt variant. `kind` is the discriminator.
  */
 interface TxResultBase {
     txHash: Hex32;

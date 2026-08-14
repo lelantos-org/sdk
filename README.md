@@ -77,12 +77,25 @@ between circuit units and user-facing decimal strings.
 
 | Field    | Value                                                                      |
 | -------- | -------------------------------------------------------------------------- |
-| HRP      | `sswap`                                                                     |
+| HRP      | `sswap2`                                                                    |
 | Encoding | bech32m                                                                     |
-| Payload  | 96 B: `pk_d` (32 B, packed Baby-Jubjub) \|\| `dk` (32 B, LE field) \|\| `pk` (32 B, LE field) |
+| Payload  | 96 B: `pk_d` (32 B, packed Baby-Jubjub) \|\| `pk` (32 B, LE field) \|\| `ck` (32 B, packed Baby-Jubjub) |
 
 `pk` is published so that any sender can construct a valid note commitment for
 the recipient. Spend authority remains gated by `nsk`, which stays private.
+
+`ck = dk · Base8` is the FMD **clue key** — the public half. A sender expands it
+into flag-key points to attach a clue; deriving the detection scalars from it is
+a discrete log. Holding an address therefore lets you pay someone, not watch
+them.
+
+> **v1 addresses (`sswap1…`) are rejected.** That format published `dk` itself,
+> which handed the detection capability to everyone holding the address: any
+> holder could test every on-chain clue and enumerate the recipient's incoming
+> notes at a 2^-γ false-positive rate. There is no compatibility path — v1
+> strings fail on the HRP, and any that get past it fail the `ck` curve checks.
+> Clues already on chain remain testable against a v1 address that was
+> published, so treat pre-v2 receipts as public.
 
 ## Browser CSP
 

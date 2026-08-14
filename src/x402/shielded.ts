@@ -83,7 +83,7 @@ interface Terms {
  * client.register(shieldedNetwork(chainId), shieldedExact(wallet));
  * ```
  *
- * or let {@link x402} do it for you.
+ * or delegate to {@link x402}.
  */
 export function shieldedExact(
     wallet: WalletApi,

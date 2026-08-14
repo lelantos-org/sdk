@@ -137,9 +137,9 @@ export async function cancelDeposit(
     const data = encodeFunctionData({
         abi: MASP_ABI,
         functionName: "cancelDeposit",
-        // The contract keeps only `keccak(deposit)` per escrow, so the fields
-        // it used to read from storage are now supplied by the caller and
-        // checked against that digest. They come off the `DepositEscrowed` log.
+        // The contract keeps only `keccak(deposit)` per escrow, so the caller
+        // supplies every field and the contract checks them against that
+        // digest. They come off the `DepositEscrowed` log.
         args: [
             id,
             // `uint48`, so viem wants a JS number. Lossless: 2^48 is well

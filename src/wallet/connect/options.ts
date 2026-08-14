@@ -35,7 +35,7 @@ type KeyOptionKeys = "mnemonic" | "account" | "passphrase" | "signature" | "nsk"
  * - `mnemonic` — BIP-39 phrase, ZIP-32 derived. The portable option.
  * - `signature` — hex of the canonical EIP-712 message, for wallet-derived
  *   keys where the user already signed (see `keys/metamask.ts`).
- * - `nsk` — pre-derived nullifier spending key; you own the derivation.
+ * - `nsk` — pre-derived nullifier spending key; derivation is the caller's.
  */
 export type ConnectKeyOptions =
     | Only<

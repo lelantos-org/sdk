@@ -89,7 +89,7 @@ export async function initBrowserThreadPool(
  * The 32 ceiling is a runaway guard, not a tuning knob: each worker is a JS
  * realm plus a stack in the prover's *shared* wasm memory, which can never
  * shrink. Above that, arkworks 0.5's MSM has nothing left to hand out — it
- * parallelises over ~20 scalar windows at our circuit size, so the extra
+ * parallelises over ~20 scalar windows at this circuit size, so additional
  * workers cost memory and buy nothing.
  */
 function defaultThreads(hw: number): number {

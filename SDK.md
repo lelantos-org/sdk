@@ -306,8 +306,8 @@ Two strategies via `WalletConfig.syncStrategy` (selects default `NoteSource`; ig
 
 | Strategy | Endpoint | FMD runs | Anonymity | Bandwidth |
 |---|---|---|---|---|
-| `{ kind: "full" }` (default) | `/v1/notes` (firehose) | client-side (or skipped) | max — server sees no detection key | every encrypted note |
-| `{ kind: "matches", token }` | `/v1/matches?token=…` | server-side via registered subscription | reduced — server learns FMD-positive subset | only false-positive subset |
+| `{ kind: "full" }` (default) | `/v1/notes` (firehose) | skipped | max — no detection key leaves the wallet | every encrypted note |
+| `{ kind: "matches", token }` | `/v1/matches?token=…` | server-side via registered subscription | reduced — server learns the FMD-positive subset, and holds your detection capability permanently | only false-positive subset |
 
 ```ts
 // Full firehose — no FMD on server, max anonymity.
@@ -317,10 +317,17 @@ const wallet = await connect({ ...cfg, syncStrategy: { kind: "full" } });
 // `epoch` is 0 until you rotate; see below for why you must store it after that.
 const epoch = BigInt(myAppConfig.subscriptionEpoch ?? 0);
 const tokenHex = subscriptionTokenToHex(deriveSubscriptionToken(P, keys.ivk, epoch));
+const detectionKeyHex = detectionKeyToHex(detectionKeyFor(J, P, viewingKey, 8));
 const fmd = new FmdClient(fmdUrl, chainId);
 await fmd.createSubscription({ detectionKeyHex, gamma: 8, tokenHex });
 const wallet = await connect({ ...cfg, syncStrategy: { kind: "matches", token: tokenHex } });
 ```
+
+Delegating detection is one-way. The scalars you POST are `x_i = dk + h_i` over
+a publicly computable `h_i`, so the server recovers your root FMD secret `dk`
+and keeps the ability to detect your incoming notes at any γ, forever. Rotating
+the subscription token does not revoke it; only a new `nsk` does. `full` is the
+default for this reason.
 
 The capability token is client-chosen, so at the default epoch there is nothing
 extra to persist: `deriveSubscriptionToken(P, ivk)` regenerates it from a secret
@@ -328,9 +335,10 @@ the wallet already holds, and re-registering re-attaches to the same
 subscription (`created: false`) instead of duplicating it and re-running the
 backfill.
 
-Derive it from `ivk`, never from `dk` or the detection key — the γ detection
-scalars are a counter stream off the address's `dk`, so both are recoverable by
-senders and by the server, and a token built from either would be forgeable.
+Derive it from `ivk`, never from `dk` or the detection key. The γ detection
+scalars are `x_i = dk + h_i` over an `h_i` anyone can compute from the public
+`ck`, so the server you hand them to can invert back to `dk` — a token built
+from either would be forgeable by that server.
 
 #### Rotating a subscription token
 
@@ -359,9 +367,11 @@ current note count so a match set always keeps enough decoys — a `gamma` that
 is too high is rejected with the applicable ceiling. `detectionKeyHex` must be
 exactly `gamma * 32` bytes, and `tokenHex` exactly 32 bytes.
 
-- No detection key: `scanNotes` trial-decrypts every note. Highest CPU, zero FMD leak.
-- Client-side FMD: pass detection key; clues pre-filter locally. CPU cut, server sees nothing.
-- Server-side FMD (`matches`): server holds detection key, returns false-positive subset. Lowest bandwidth, server learns approximate recipient set.
+- No detection key (`full`, the default): `scanNotes` trial-decrypts every note. Highest CPU, zero FMD leak.
+- Server-side FMD (`matches`): server holds the detection key, returns the false-positive subset. Lowest bandwidth, server learns your approximate recipient set — and, because `x_i = dk + h_i` inverts, your root detection secret for good.
+
+There is no client-side FMD pre-filter. The note feed does not carry `clue.R`,
+so one is not implementable today — see `sync/scanner.ts`.
 
 ### Inspect cache
 

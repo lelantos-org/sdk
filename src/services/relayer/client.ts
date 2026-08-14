@@ -15,16 +15,17 @@
 //
 // Relayer can censor but not forge: every merkle path must verify against
 // on-chain `isKnownRoot` before the wallet trusts it.
+//
+// It must also not learn which note a wallet cares about: this client exposes
+// no per-item lookup and places no secret in a URL. Callers page the chunk
+// feeds and filter locally, as with `FmdClient`.
 
 import { hex32 } from "../../core/brand.js";
-import { bigintFrom, mapArr, obj, str } from "../../core/decode.js";
+import { bigintFrom, obj, str } from "../../core/decode.js";
 import { createJsonClient, type HttpClientOptions, type JsonClient } from "../../core/http.js";
-import type { Field } from "../../crypto/index.js";
 import type {
-    MerkleProofResponse,
     RelayerDepositResponse,
     RelayerSubmitResponse,
-    ScannedNote,
     TreeStateResponse,
 } from "../../protocol/responses.js";
 import type {
@@ -33,8 +34,6 @@ import type {
     SubmitTransactPayload,
 } from "../../protocol/transact.js";
 import {
-    deserializeMerkleProof,
-    deserializeScannedNote,
     deserializeTreeState,
     serializeSubmitDeposit,
     serializeSubmitSwap,
@@ -78,18 +77,6 @@ export class RelayerClient {
             txHash: hex32(str(r.txHash, "$.txHash")),
             depositId: bigintFrom(r.depositId, "$.depositId"),
         };
-    }
-
-    async scan(fmdSecret: string): Promise<ScannedNote[]> {
-        const raw = await this.json.get<unknown>(
-            `/scan?fmdSecret=${encodeURIComponent(fmdSecret)}`,
-        );
-        const d = obj(raw, "$");
-        return mapArr(d.notes, "$.notes", (n, p) => deserializeScannedNote(n, p));
-    }
-
-    async path(cm: Field): Promise<MerkleProofResponse> {
-        return deserializeMerkleProof(await this.json.get<unknown>(`/path?cm=${cm.toString()}`));
     }
 
     async treeState(): Promise<TreeStateResponse> {

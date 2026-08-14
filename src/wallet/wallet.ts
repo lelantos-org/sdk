@@ -332,8 +332,8 @@ export class Wallet implements WalletApi, SpendContext {
     /**
      * Registry entry for `id` plus ERC-20 symbol/decimals when the adapter
      * exposes them. Cached for the wallet's lifetime — asset entries are
-     * immutable apart from the `disabled` flag, so pass `{ refresh: true }`
-     * if you need to re-read that.
+     * immutable apart from the `disabled` flag; `{ refresh: true }` re-reads
+     * it.
      */
     async asset(id: AssetId, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
         const hit = this.assetCache.get(id);
