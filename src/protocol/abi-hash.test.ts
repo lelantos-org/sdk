@@ -115,11 +115,12 @@ describe("flatten", () => {
 // the hand-written component list.
 
 describe("computePiHash vs the canonical ABI", () => {
-    // `submitDepositNative` is the shortest signature carrying both structs.
+    // `depositAuthorized` is the shortest signature carrying both structs:
+    // `deposit` interposes the Permit2 sig between them.
     const submit = (maspAbi as readonly AbiFn[]).find(
-        (i) => i.type === "function" && i.name === "submitDepositNative",
+        (i) => i.type === "function" && i.name === "depositAuthorized",
     );
-    if (!submit?.inputs) throw new Error("submitDepositNative missing from the canonical ABI");
+    if (!submit?.inputs) throw new Error("depositAuthorized missing from the canonical ABI");
     const [depositParam, auxParam] = submit.inputs;
 
     /** Names and types only; `internalType` is Foundry bookkeeping. */
