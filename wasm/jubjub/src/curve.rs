@@ -374,7 +374,9 @@ mod tests {
     fn in_subgroup_rejects_a_low_order_point() {
         let t = order_two();
         // Sanity: it really is order 2 and really is on the curve.
-        assert!(crate::common::is_identity(&t.mul_scalar(&BigInt::from(2u32))));
+        assert!(crate::common::is_identity(
+            &t.mul_scalar(&BigInt::from(2u32))
+        ));
         assert!(!crate::common::in_subgroup(&t));
     }
 
@@ -404,7 +406,10 @@ mod tests {
         let ks = scalars();
         for w in ks.chunks(2).filter(|c| c.len() == 2) {
             let (j, k) = (&w[0], &w[1]);
-            let lhs = g.mul_scalar(j).projective().add(&g.mul_scalar(k).projective());
+            let lhs = g
+                .mul_scalar(j)
+                .projective()
+                .add(&g.mul_scalar(k).projective());
             let rhs = g.mul_scalar(&((j + k) % sub_order()));
             let lhs = lhs.affine();
             assert_eq!((lhs.x, lhs.y), (rhs.x, rhs.y), "j={j} k={k}");
