@@ -30,8 +30,8 @@ export type EvmAddress = Brand<`0x${string}`, "EvmAddress">;
 /** 32-byte value as `0x`-prefixed hex: commitments, nullifiers, tx hashes. */
 export type Hex32 = Brand<`0x${string}`, "Hex32">;
 
-/** bech32m shielded payment address (`sswap21…`). */
-export type ShieldedAddress = Brand<`sswap21${string}`, "ShieldedAddress">;
+/** bech32m shielded payment address (`lelantos1…`). */
+export type ShieldedAddress = Brand<`lelantos1${string}`, "ShieldedAddress">;
 
 /** MASP registry asset id (`uint64`). */
 export type AssetId = Brand<bigint, "AssetId">;
@@ -68,8 +68,8 @@ export type TokenAmount = Brand<bigint, "TokenAmount">;
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HEX_32 = /^0x[0-9a-fA-F]{64}$/;
-// bech32m: HRP `sswap2`, separator `1`, then the charset minus `1bio`.
-const SHIELDED = /^sswap21[02-9ac-hj-np-z]+$/;
+// bech32m: HRP `lelantos`, separator `1`, then the charset minus `1bio`.
+const SHIELDED = /^lelantos1[02-9ac-hj-np-z]+$/;
 const U64_MAX = (1n << 64n) - 1n;
 
 /**
@@ -109,12 +109,12 @@ export function hex32(value: string): Hex32 {
  * checksum and curve checks when the payload is actually needed.
  *
  * @throws {InvalidArgumentError} when the string is not a well-formed
- * `sswap21…` bech32m address.
+ * `lelantos1…` bech32m address.
  */
 export function shieldedAddress(value: string): ShieldedAddress {
     if (!SHIELDED.test(value)) {
         throw new InvalidArgumentError(
-            `not a bech32m shielded address (expected \`sswap21…\`): ${JSON.stringify(value)}`,
+            `not a bech32m shielded address (expected \`lelantos1…\`): ${JSON.stringify(value)}`,
             { argument: "address" },
         );
     }

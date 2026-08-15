@@ -78,7 +78,7 @@ values scaled down from ERC-20 base units quotes both in its own terms;
       "network": "shielded:11155111",
       "amount": "1500",
       "asset": "1",
-      "payTo": "sswap1qq…",
+      "payTo": "lelantos1qq…",
       "maxTimeoutSeconds": 120,
       "extra": {
         "pool": "lelantos",
@@ -202,7 +202,7 @@ client.register(shieldedNetwork(await wallet.chain.chainId()), shieldedExact(wal
 
 `extra.pool` is `"lelantos"`; `asset` is a MASP registry id; `amount` is in
 circuit units (`tokenBaseUnits = amount × scale`); `payTo` is a bech32m
-`sswap1…` address.
+`lelantos1…` address.
 
 The wire contract above is asserted in `src/x402/shielded.test.ts` — those
 tests and this document are meant to be changed together.

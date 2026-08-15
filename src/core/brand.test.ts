@@ -23,7 +23,7 @@ describe("evmAddress", () => {
         expect(() => evmAddress(`${ADDR}00`)).toThrow(/EVM address/);
         expect(() => evmAddress(ADDR.slice(2))).toThrow(/EVM address/);
         expect(() => evmAddress(WORD)).toThrow(/EVM address/);
-        expect(() => evmAddress("sswap1qqqq")).toThrow(/EVM address/);
+        expect(() => evmAddress("lelantos1qqqq")).toThrow(/EVM address/);
     });
 });
 
@@ -40,22 +40,22 @@ describe("hex32", () => {
 });
 
 describe("shieldedAddress", () => {
-    it("accepts a bech32m string under the `sswap2` HRP", () => {
-        const a = "sswap21qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+    it("accepts a bech32m string under the `lelantos` HRP", () => {
+        const a = "lelantos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
         expect(shieldedAddress(a)).toBe(a);
     });
 
     it("rejects an EVM address, a bare HRP, and out-of-charset input", () => {
         expect(() => shieldedAddress(ADDR)).toThrow(/shielded address/);
-        expect(() => shieldedAddress("sswap21")).toThrow(/shielded address/);
+        expect(() => shieldedAddress("lelantos1")).toThrow(/shielded address/);
         // `b`, `i` and `o` are not in the bech32 charset.
-        expect(() => shieldedAddress("sswap21bio")).toThrow(/shielded address/);
+        expect(() => shieldedAddress("lelantos1bio")).toThrow(/shielded address/);
     });
 
-    it("rejects an `sswap1…` address", () => {
-        // A neighbouring HRP must not match, or a payment would be routed to a
+    it("rejects a legacy `sswap2…` address", () => {
+        // A superseded HRP must not match, or a payment would be routed to a
         // different address format.
-        expect(() => shieldedAddress("sswap1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")).toThrow(
+        expect(() => shieldedAddress("sswap21qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")).toThrow(
             /shielded address/,
         );
     });

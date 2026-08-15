@@ -83,7 +83,7 @@ between circuit units and user-facing decimal strings.
 
 | Field    | Value                                                                      |
 | -------- | -------------------------------------------------------------------------- |
-| HRP      | `sswap2`                                                                    |
+| HRP      | `lelantos`                                                                  |
 | Encoding | bech32m                                                                     |
 | Payload  | 96 B: `pk_d` (32 B, packed Baby-Jubjub) \|\| `pk` (32 B, LE field) \|\| `ck` (32 B, packed Baby-Jubjub) |
 
@@ -95,13 +95,15 @@ into flag-key points to attach a clue; deriving the detection scalars from it is
 a discrete log. Holding an address therefore lets you pay someone, not watch
 them.
 
-> **v1 addresses (`sswap1…`) are rejected.** That format published `dk` itself,
-> which handed the detection capability to everyone holding the address: any
-> holder could test every on-chain clue and enumerate the recipient's incoming
-> notes at a 2^-γ false-positive rate. There is no compatibility path — v1
-> strings fail on the HRP, and any that get past it fail the `ck` curve checks.
-> Clues already on chain remain testable against a v1 address that was
-> published, so treat pre-v2 receipts as public.
+> **Legacy `sswap1…` and `sswap2…` addresses are rejected.** The HRP identifies
+> the format, so superseded strings fail fast on the HRP check. The oldest
+> format (`sswap1…`) additionally published `dk` itself, which handed the
+> detection capability to everyone holding the address: any holder could test
+> every on-chain clue and enumerate the recipient's incoming notes at a 2^-γ
+> false-positive rate. There is no compatibility path — any legacy string that
+> got past the HRP check would still fail the `ck` curve checks. Clues already
+> on chain remain testable against an `sswap1…` address that was published, so
+> treat those receipts as public.
 
 ## Browser CSP
 

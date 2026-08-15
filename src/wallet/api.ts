@@ -50,7 +50,7 @@ import type { SyncProgress, SyncResult } from "./sync.js";
  * ```
  */
 export interface WalletApi {
-    /** This wallet's shielded `sswap1…` address (bech32m). */
+    /** This wallet's shielded `lelantos1…` address (bech32m). */
     readonly address: ShieldedAddress;
     readonly keys: SpendingKey;
     readonly noteStore: NoteStore;
@@ -107,7 +107,7 @@ export interface WalletApi {
 
     /** Shield ERC-20 (or native ETH via `asEth`) into the MASP. */
     deposit(args: DepositOptions): Promise<DepositResult>;
-    /** Shielded transfer to another `sswap1…` address. */
+    /** Shielded transfer to another `lelantos1…` address. */
     transfer(args: TransferOptions): Promise<TransferResult>;
     /** Unshield to an ERC-20 recipient. */
     withdraw(args: WithdrawOptions): Promise<WithdrawResult>;

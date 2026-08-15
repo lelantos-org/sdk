@@ -1,6 +1,6 @@
 // bech32m payment address.
 //
-//   HRP     "sswap2"
+//   HRP     "lelantos"
 //   payload pk_d (32 B, Baby-Jubjub packed — ECDH target)
 //        || pk   (32 B, little-endian field scalar — note-commitment binding)
 //        || ck   (32 B, Baby-Jubjub packed — FMD clue key)
@@ -29,7 +29,7 @@ import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
 
-export const ADDRESS_HRP = "sswap2";
+export const ADDRESS_HRP = "lelantos";
 /** @internal */
 export const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
 const BECH32_LIMIT = 256;
