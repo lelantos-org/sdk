@@ -46,7 +46,9 @@ async function makeWallet(notes: StoredNote[], spent: Set<bigint>) {
             // Never dialled: every consumer of the client is stubbed.
             fmdUrl: "http://fmd.invalid",
             noteStore,
-            noteSource: { listNotes: async () => [] },
+            // An empty page: these tests drive `reconcileSpentOnChain`, which
+            // reads the local store, so the feed only has to terminate paging.
+            noteSource: { listNotes: async () => ({ inputs: [], nextAfter: 0, resumeAfter: 0 }) },
             nullifierStore,
             submitter: { submit: async () => ({}) } as never,
             prover: {} as Prover,
