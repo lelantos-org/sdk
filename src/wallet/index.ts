@@ -49,6 +49,7 @@ export {
     FmdNoteSource,
     type JubjubPacker,
     type ListNotesOpts,
+    type NotePage,
     type NoteSource,
 } from "./note-source.js";
 export {

@@ -12,6 +12,7 @@
 // Persistence: pass a `TreePersistence` to `TreeStore.withPersistence`;
 // `load` runs once at startup, `save` after every successful `sync()`.
 
+import { WireFormatError } from "../core/errors.js";
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleNode, type MerkleProof, MerkleTree } from "../crypto/merkle.js";
 import type { FmdClient } from "../services/fmd-server/client.js";
@@ -120,6 +121,7 @@ export class TreeStore {
                 (chunk) => {
                     const fresh = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
                     if (fresh.length > 0) {
+                        assertContiguous(fresh, this.tree.leaves.length, chunk.chunkId);
                         this.tree.bulkInsert(fresh.map((e) => e.leafHash));
                         this.syncedCount = fresh[fresh.length - 1]!.leafIndex + 1;
                     }
@@ -190,5 +192,38 @@ export class TreeStore {
     async verifyRoot(): Promise<boolean> {
         const state = await this.fmd.fetchTreeState();
         return state.root === this.root();
+    }
+}
+
+/**
+ * Reject a chunk whose leaves do not sit exactly where the tree expects them.
+ *
+ * `bulkInsert` appends, so position is implied by arrival order: `leafIndex`
+ * is otherwise never read. A chunk that starts at the wrong index, or has a
+ * gap in the middle, would place every following leaf one slot off and produce
+ * a wrong Merkle root — with no error, and no symptom until a proof against
+ * that root is rejected on chain.
+ *
+ * Cheap to check and the only thing making `leafIndex` load-bearing, so it is
+ * checked rather than assumed.
+ */
+function assertContiguous(
+    fresh: readonly { leafIndex: number }[],
+    expectedFirst: number,
+    chunkId: number,
+): void {
+    const first = fresh[0]!.leafIndex;
+    const last = fresh[fresh.length - 1]!.leafIndex;
+    if (first !== expectedFirst) {
+        throw new WireFormatError(
+            `$.entries[0].leafIndex`,
+            `commitment chunk ${chunkId} starts at leaf ${first}, expected ${expectedFirst}`,
+        );
+    }
+    if (last - first !== fresh.length - 1) {
+        throw new WireFormatError(
+            "$.entries",
+            `commitment chunk ${chunkId} has a gap: leaves ${first}..${last} in ${fresh.length} entries`,
+        );
     }
 }

@@ -647,13 +647,41 @@ A `NoteSource` only supplies the encrypted-note feed. Merkle paths come from
 chunk feeds — neither is a per-item server query, because asking for one path
 or one nullifier names the note you are about to spend.
 
+`listNotes` returns a page, not a bare array: `syncWallet` calls it in a loop
+until a short page comes back, resuming from a cursor it persists. Two cursors
+come back because a feed can be filled out of order:
+
+- `nextAfter` drives the loop within one sync and must advance past everything
+  just returned, or paging cannot terminate.
+- `resumeAfter` is the highest cursor safe to *write down* and resume from in a
+  later session. On a strictly append-only feed it equals `nextAfter`. It lags
+  only when rows can still appear below the highest id already served — the
+  built-in `matches` source clamps it to the server's backfill watermark for
+  exactly that reason, because a cursor placed above the gap would skip those
+  rows permanently.
+
 ```ts
-import type { NoteSource } from "@lelantos-org/sdk";
+import type { ListNotesOpts, NotePage, NoteSource } from "@lelantos-org/sdk";
 import type { ScanInput } from "@lelantos-org/sdk/sync";
 
 class IndexerNoteSource implements NoteSource {
-    async listNotes(opts?: { limit?: number }): Promise<ScanInput[]> {
-        return []; // fetch from your indexer
+    async listNotes(opts: ListNotesOpts = {}): Promise<NotePage> {
+        const after = opts.after ?? 0;
+
+        // Fetch from your indexer, keeping each row's monotonic id: that id is
+        // the cursor, so it has to survive alongside the decoded note.
+        const rows: Array<{ id: number; input: ScanInput }> = await Promise.resolve([]);
+
+        // Highest id in the page, falling back to the request cursor so an
+        // empty page does not rewind one that has already moved.
+        const hi = rows.reduce((m, r) => Math.max(m, r.id), after);
+
+        return {
+            inputs: rows.map((r) => r.input),
+            nextAfter: hi,
+            // Append-only feed: nothing can land below `hi` later.
+            resumeAfter: hi,
+        };
     }
 }
 ```

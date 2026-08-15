@@ -163,8 +163,11 @@ export {
     HttpRelayerSubmitter,
     InMemoryNoteStore,
     minAmount,
+    type ListNotesOpts,
     type NotesFile,
     type NotesFilter,
+    // A custom `NoteSource` cannot be written without naming these two.
+    type NotePage,
     type NoteSource,
     type NoteStore,
     type NullifierPersistence,
