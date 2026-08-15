@@ -96,9 +96,13 @@ describe("listNotes", () => {
 describe("listMatches", () => {
     it("normalises `noteId` to `id` and authorises with the token alone", async () => {
         const { id: _id, ...rest } = NOTE_ROW;
-        const fetchMock = respondWith([{ ...rest, noteId: 42 }]);
+        const fetchMock = respondWith({
+            backfilledThroughNoteId: 40,
+            matches: [{ ...rest, noteId: 42 }],
+        });
 
-        const [m] = await client().listMatches({ token: "abcd" });
+        const { matches } = await client().listMatches({ token: "abcd" });
+        const [m] = matches;
         if (!m) throw new Error("expected one match");
 
         expect(m.id).toBe(42);
@@ -115,6 +119,27 @@ describe("listMatches", () => {
         // The subscription already pins the chain; sending chainId too would
         // only widen what the request discloses.
         expect(url.searchParams.has("chainId")).toBe(false);
+    });
+
+    it("reads the backfill watermark from the envelope", async () => {
+        respondWith({ backfilledThroughNoteId: 1234, matches: [] });
+
+        const page = await client().listMatches({ token: "abcd" });
+
+        expect(page.backfilledThroughNoteId).toBe(1234);
+        expect(page.matches).toEqual([]);
+    });
+
+    it("treats a bare array from an older server as watermark 0", async () => {
+        // Nothing is known to be backfilled, so a caller clamping its cursor
+        // to this re-scans rather than stepping over rows still pending.
+        const { id: _id, ...rest } = NOTE_ROW;
+        respondWith([{ ...rest, noteId: 42 }]);
+
+        const page = await client().listMatches({ token: "abcd" });
+
+        expect(page.matches).toHaveLength(1);
+        expect(page.backfilledThroughNoteId).toBe(0);
     });
 });
 
@@ -133,36 +158,46 @@ describe("deleteSubscription", () => {
 });
 
 describe("chunk feeds", () => {
-    it("decodes commitment entries into a cm plus a cvDep point", async () => {
+    it("decodes commitment entries into a pre-hashed leaf", async () => {
+        respondWith({
+            chunkId: 0,
+            entries: [{ leafIndex: 0, leafHash: "0x0a" }],
+            isComplete: false,
+        });
+
+        const chunk = await client().fetchCommitmentChunk(0);
+
+        // The leaf arrives ready to insert; `cm`/`cvDep` are no longer served,
+        // so nothing here recomputes it.
+        expect(chunk.entries[0]).toEqual({ leafIndex: 0, leafHash: 10n });
+        expect(chunk.isComplete).toBe(false);
+    });
+
+    it("reads the leaf hash as hex, not decimal", async () => {
+        // The `0x` prefix is what disambiguates: these digits are also a valid
+        // decimal literal for a different number.
+        respondWith({
+            chunkId: 0,
+            entries: [{ leafIndex: 0, leafHash: `0x${"12345678".padStart(64, "0")}` }],
+            isComplete: false,
+        });
+
+        const chunk = await client().fetchCommitmentChunk(0);
+
+        expect(chunk.entries[0]?.leafHash).toBe(0x12345678n);
+        expect(chunk.entries[0]?.leafHash).not.toBe(12345678n);
+    });
+
+    it("rejects a commitment entry with no leaf hash", async () => {
+        // A server that predates the pre-hashed feed must fail loudly rather
+        // than yield a tree of undefined leaves.
         respondWith({
             chunkId: 0,
             entries: [{ leafIndex: 0, cmHex: "0a", cvDepX: "0x01", cvDepY: "0x02" }],
             isComplete: false,
         });
 
-        const chunk = await client().fetchCommitmentChunk(0);
-
-        expect(chunk.entries[0]).toEqual({ leafIndex: 0, cm: 10n, cvDep: [1n, 2n] });
-    });
-
-    it("reads cvDep coordinates as hex, not decimal", async () => {
-        respondWith({
-            chunkId: 0,
-            entries: [
-                {
-                    leafIndex: 0,
-                    cmHex: "0a",
-                    cvDepX: `0x${"12345678".padStart(64, "0")}`,
-                    cvDepY: "0x02",
-                },
-            ],
-            isComplete: false,
-        });
-
-        const chunk = await client().fetchCommitmentChunk(0);
-        expect(chunk.entries[0]?.cvDep).toEqual([0x12345678n, 2n]);
-        expect(chunk.entries[0]?.cvDep[0]).not.toBe(12345678n);
-        expect(chunk.isComplete).toBe(false);
+        await expect(client().fetchCommitmentChunk(0)).rejects.toThrow(/leafHash/);
     });
 
     it("decodes nullifiers to Fields and puts chainId in the path", async () => {

@@ -213,10 +213,13 @@ stream.close();
 
 Open the stream *before* depositing. The relayer does not replay, so a fast
 flush can land before you subscribe; the stream buffers recent events and
-`awaitFlush` matches them, which closes that race.
+`awaitFlush` matches them, which closes that race. The buffer holds the last
+64 events — raise `replayBuffer` on a busy chain, where 64 flushes can go by
+between broadcasting and awaiting.
 
 `EventSource` is a browser global with no Node equivalent, so outside the
-browser pass one:
+browser pass one — the constructor throws `EnvironmentError` when there is no
+global to fall back to:
 
 ```ts
 import { DepositStream } from "@lelantos-org/sdk/relayer";
@@ -226,12 +229,53 @@ const stream = new DepositStream(relayerUrl, chainId, {
 });
 ```
 
-`awaitFlush` never rejects. It resolves a value discriminated on `kind`: the
-settlement event itself, `{ kind: "aborted" }` if the signal fired, or
+`awaitFlush` never rejects. It resolves a `FlushWait`, discriminated on `kind`:
+the settlement event itself, `{ kind: "aborted" }` if the signal fired, or
 `{ kind: "closed" }` if the feed died. The success arm *is* the event, so a
 narrowed `wait` reads `wait.txHash` directly. The other two mean settlement
 went unobserved, not that the deposit failed — the tx is already mined either
 way.
+
+`wait.txHash` is the relayer's `flushBatch` tx, **not** your deposit tx — they
+are different transactions in different blocks, so `wait.blockNumber` is when
+the note entered the tree, not when your deposit was mined. Keep
+`tx.txHash` from the `DepositResult` if you need to link back to the deposit
+itself.
+
+### Watching every deposit
+
+`awaitFlush` is one deposit; `subscribe` is the whole feed — for a UI that
+reconciles several in flight, or an indexer that mirrors them.
+
+```ts
+import { DepositStream, type RelayerDepositEvent } from "@lelantos-org/sdk/relayer";
+
+const stream = new DepositStream(relayerUrl, chainId, { replayBuffer: 256 });
+
+const unsubscribe = stream.subscribe((ev: RelayerDepositEvent) => {
+    if (ev.kind === "flushed") console.log("settled", ev.depositId, ev.txHash);
+});
+
+// Later — drop this listener without tearing down the shared stream.
+unsubscribe();
+
+// A fatal transport error closes the feed without any call to `close()`.
+if (stream.isClosed) console.log("feed gone; construct a new DepositStream");
+```
+
+`subscribe` only sees events from now on — it does not read the replay buffer,
+unlike `awaitFlush`. Register it before the deposits you care about.
+
+`isClosed` is how you tell a stream you closed from one the transport killed.
+Pending `awaitFlush` calls settle as `{ kind: "closed" }` in both cases, so
+without checking it a reconnect loop cannot tell "the wallet went away" from
+"the relayer went away". The stream does not reopen itself once closed;
+construct a new one.
+
+`RelayerDepositEvent` is a union with one member today (`DepositFlushed`) and
+the relayer may add variants, so narrow on `kind` rather than assuming
+`flushed`. Unrecognised frames are logged and dropped, never thrown — one bad
+event must not tear down a feed another waiter depends on.
 
 A transient disconnect is not a close — the browser reconnects and the stream
 keeps waiting. Only a fatal error (`readyState === CLOSED`, which is what an

@@ -295,6 +295,16 @@ export type QueryParams = Record<string, string | number | boolean | undefined>;
 export interface JsonRequestOptions {
     params?: QueryParams | undefined;
     headers?: Record<string, string> | undefined;
+    /**
+     * Overrides the `no-store` in {@link PRIVACY_REQUEST_DEFAULTS}.
+     *
+     * Only for routes that are global and identical for every caller, where
+     * the URL discloses nothing about who asked. Anything scoped to a wallet
+     * — notes, matches, subscriptions — must keep the default, since a cache
+     * entry is a record of that request on the device and in any intermediary
+     * that honors it.
+     */
+    cache?: RequestCache | undefined;
 }
 
 export interface JsonClient {
@@ -342,7 +352,10 @@ export function createJsonClient(
         raw: http,
         async get<T>(path: string, o?: JsonRequestOptions): Promise<T> {
             const target = url(path, o?.params);
-            const init = o?.headers ? { headers: o.headers } : undefined;
+            const init: RequestInit = {
+                ...(o?.headers ? { headers: o.headers } : {}),
+                ...(o?.cache ? { cache: o.cache } : {}),
+            };
             return json<T>(await http.fetch(target, init), target);
         },
         async post<T>(path: string, body: unknown, o?: JsonRequestOptions): Promise<T> {

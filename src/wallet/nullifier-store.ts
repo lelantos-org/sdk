@@ -83,31 +83,38 @@ export class NullifierStore {
     async sync(opts: NullifierSyncOpts = {}): Promise<NullifierSyncSummary> {
         const startCount = this.syncedCount;
 
-        const { chunksFetched, stoppedBy } = await pageChunks(
-            (chunkId) => this.fmd.fetchNullifierChunk(chunkId),
-            chunkOf(this.syncedCount),
-            (chunk) => {
-                const base = chunk.chunkId * CHUNK_SIZE;
-                const fresh = chunk.nullifiers.slice(Math.max(0, this.syncedCount - base));
-                for (const nf of fresh) this.spent.add(nf);
-                this.syncedCount = Math.max(this.syncedCount, base + chunk.nullifiers.length);
-                opts.onProgress?.({
-                    chunkId: chunk.chunkId,
-                    added: fresh.length,
-                    syncedCount: this.syncedCount,
-                });
-            },
-            { maxChunks: opts.maxChunks, signal: opts.signal, feed: "nullifiers" },
-        );
+        try {
+            const { chunksFetched, stoppedBy } = await pageChunks(
+                (chunkId) => this.fmd.fetchNullifierChunk(chunkId),
+                chunkOf(this.syncedCount),
+                (chunk) => {
+                    const base = chunk.chunkId * CHUNK_SIZE;
+                    const fresh = chunk.nullifiers.slice(Math.max(0, this.syncedCount - base));
+                    for (const nf of fresh) this.spent.add(nf);
+                    this.syncedCount = Math.max(this.syncedCount, base + chunk.nullifiers.length);
+                    opts.onProgress?.({
+                        chunkId: chunk.chunkId,
+                        added: fresh.length,
+                        syncedCount: this.syncedCount,
+                    });
+                },
+                { maxChunks: opts.maxChunks, signal: opts.signal, feed: "nullifiers" },
+            );
 
-        await this.persistence?.save(this.saveState());
-
-        return {
-            chunksFetched,
-            added: this.syncedCount - startCount,
-            syncedCount: this.syncedCount,
-            stoppedBy,
-        };
+            return {
+                chunksFetched,
+                added: this.syncedCount - startCount,
+                syncedCount: this.syncedCount,
+                stoppedBy,
+            };
+        } finally {
+            // Same reasoning as `TreeStore.sync`: persist on partial progress
+            // so a failed page resumes, and skip the write entirely when the
+            // cursor did not move, which is every steady-state poll.
+            if (this.syncedCount > startCount) {
+                await this.persistence?.save(this.saveState());
+            }
+        }
     }
 
     /**

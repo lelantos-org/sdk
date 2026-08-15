@@ -233,3 +233,69 @@ describe("MerkleTree", () => {
         });
     });
 });
+
+describe("node cache export/import", () => {
+    it("restores a tree without recomputing any node", () => {
+        const leaves = Array.from({ length: 40 }, (_, i) => BigInt(i + 1));
+        const source = makeTree(3, leaves);
+        const want = source.root();
+        const nodes = source.exportNodes();
+        expect(nodes.length).toBeGreaterThan(0);
+
+        // Counting Poseidon calls is the whole point: a restore that still
+        // rebuilds would return the right root and look fine.
+        let hashes = 0;
+        const countingP: Poseidon = {
+            hash: (arr: Field[]) => {
+                hashes++;
+                return stubP.hash(arr);
+            },
+        };
+        const restored = new MerkleTree(countingP, 3);
+        restored.setLeaves(leaves);
+        // The constructor hashes the zero-ladder; only count from here.
+        hashes = 0;
+        restored.importNodes(nodes);
+
+        expect(restored.root()).toBe(want);
+        expect(hashes).toBe(0);
+    });
+
+    it("still yields the right root when nodes are not restored", () => {
+        const leaves = Array.from({ length: 17 }, (_, i) => BigInt(i * 7 + 1));
+        const source = makeTree(3, leaves);
+        const fresh = new MerkleTree(stubP, 3);
+        fresh.setLeaves(leaves);
+        expect(fresh.root()).toBe(source.root());
+    });
+
+    it("refuses a node from a level the tree does not have", () => {
+        // `(level, index)` is depth-independent, so nodes move between trees
+        // freely — but a level this tree cannot represent would be cached
+        // under a key it later reads back as a different level.
+        const deep = makeTree(4, [1n, 2n, 3n, 4n]);
+        deep.root(); // nodes are memoized lazily; nothing is cached before this
+        const nodes = deep.exportNodes();
+        expect(nodes.some((n) => n.level > 2)).toBe(true);
+
+        const shallow = new MerkleTree(stubP, 2);
+        expect(() => shallow.importNodes(nodes)).toThrow(RangeError);
+    });
+
+    it("keeps a restored tree correct across further inserts", () => {
+        const leaves = Array.from({ length: 20 }, (_, i) => BigInt(i + 1));
+        const source = makeTree(3, leaves);
+        source.root();
+
+        const restored = new MerkleTree(stubP, 3);
+        restored.setLeaves(leaves);
+        restored.importNodes(source.exportNodes());
+        restored.insert(999n);
+        source.insert(999n);
+
+        // The restored cache must be invalidated by the insert just like a
+        // natively-built one, or the new leaf is silently ignored.
+        expect(restored.root()).toBe(source.root());
+        expect(restored.root()).toBe(naiveRoot(3, [...leaves, 999n]));
+    });
+});

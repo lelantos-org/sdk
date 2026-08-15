@@ -183,7 +183,11 @@ export class Wallet implements WalletApi, SpendContext {
 
     /**
      * Pull encrypted notes, trial-decrypt with `ivk + dk`, persist hits.
-     * Idempotent — resumes from `lastIndex` cursor. Does not sync the tree.
+     *
+     * Pages the feed to exhaustion, resuming from the cursor on
+     * `NotesFile.cursor`, so a caught-up wallet fetches nothing. Idempotent:
+     * re-scanning a note already stored is dropped by `cm`. Does not sync the
+     * tree. `limit` is the page size, not a ceiling on notes fetched.
      */
     async syncNotes(opts?: {
         limit?: number;

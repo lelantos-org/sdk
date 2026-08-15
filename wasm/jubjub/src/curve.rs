@@ -53,6 +53,10 @@ fn q_half_repr() -> &'static FrRepr {
     })
 }
 
+/// Window width for [`Point::mul_scalar`]. See its doc comment for why 4.
+const MUL_WINDOW_BITS: usize = 4;
+const MUL_TABLE_SIZE: usize = 1 << MUL_WINDOW_BITS;
+
 #[derive(Clone, Debug)]
 pub struct PointProjective {
     pub x: Fr,
@@ -180,20 +184,65 @@ impl Point {
         }
     }
 
+    /// Fixed-window scalar multiplication, window width [`MUL_WINDOW_BITS`].
+    ///
+    /// Two of these run per note during a trial decrypt — the ECDH plus
+    /// `in_subgroup` — so this is the innermost loop of a wallet sync.
+    ///
+    /// Double-and-add costs one addition per set bit: ~126 for a 251-bit
+    /// scalar. A width-`w` window instead precomputes `2^w - 2` multiples of
+    /// the base and spends one addition per window, for `2^w - 2 + bits/w`.
+    /// At 251 bits that is minimised at `w = 4` (14 + 63 = 77 additions,
+    /// against 126), and rises again at `w = 5` as the table outgrows the
+    /// saving. Doublings are unchanged at one per bit.
+    ///
+    /// Bit-for-bit identical to double-and-add — same group law, same
+    /// operations in a different order — which `mul_scalar_matches_naive`
+    /// pins down against the previous implementation.
     pub fn mul_scalar(&self, n: &BigInt) -> Point {
         let one = fr_one();
-        let mut r = PointProjective {
+        let identity = PointProjective {
             x: fr_zero(),
             y: one,
             z: one,
         };
-        let mut exp = self.projective();
+
+        let bits = n.bits() as usize;
+        if bits == 0 {
+            return identity.affine();
+        }
+
+        // table[i] = [i] * self. Built with additions rather than doublings so
+        // every entry is reachable; table[0] is never read.
+        let base = self.projective();
+        let mut table: Vec<PointProjective> = Vec::with_capacity(MUL_TABLE_SIZE);
+        table.push(identity.clone());
+        table.push(base.clone());
+        for i in 2..MUL_TABLE_SIZE {
+            table.push(table[i - 1].add(&base));
+        }
+
         let (_, b) = n.to_bytes_le();
-        for i in 0..n.bits() {
-            if test_bit(&b, i as usize) {
-                r = r.add(&exp);
+        let windows = bits.div_ceil(MUL_WINDOW_BITS);
+
+        // Most-significant window first. Starting from the identity and
+        // doubling through the leading windows is a no-op on the identity, so
+        // no special case for the first iteration is needed.
+        let mut r = identity;
+        for w in (0..windows).rev() {
+            for _ in 0..MUL_WINDOW_BITS {
+                r = r.double();
             }
-            exp = exp.double();
+            let mut idx = 0usize;
+            for k in 0..MUL_WINDOW_BITS {
+                let bit = w * MUL_WINDOW_BITS + k;
+                if bit < bits && test_bit(&b, bit) {
+                    idx |= 1 << k;
+                }
+            }
+            if idx != 0 {
+                r = r.add(&table[idx]);
+            }
         }
         r.affine()
     }
@@ -278,6 +327,26 @@ mod tests {
                 (&seed * &seed) % sub_order()
             })
             .collect()
+    }
+
+    /// The double-and-add `mul_scalar` that the windowed one replaced, kept
+    /// verbatim as the differential reference.
+    fn mul_scalar_naive(p: &Point, n: &BigInt) -> Point {
+        let one = fr_one();
+        let mut r = PointProjective {
+            x: fr_zero(),
+            y: one,
+            z: one,
+        };
+        let mut exp = p.projective();
+        let (_, b) = n.to_bytes_le();
+        for i in 0..n.bits() {
+            if test_bit(&b, i as usize) {
+                r = r.add(&exp);
+            }
+            exp = exp.double();
+        }
+        r.affine()
     }
 
     /// The order-2 point: on the curve (a·0 + y² = 1 with y = -1) but outside
@@ -396,6 +465,33 @@ mod tests {
             let via_add = pp.add(&pp).affine();
             let via_dbl = pp.double().affine();
             assert_eq!((via_dbl.x, via_dbl.y), (via_add.x, via_add.y));
+        }
+    }
+
+    #[test]
+    fn mul_scalar_matches_naive() {
+        // The windowed loop feeds Merkle roots and note decryption, so it has
+        // to agree with double-and-add on every input, not merely on typical
+        // ones. Boundaries first: 0 (empty loop), 1, and scalars that land
+        // exactly on and just past a window edge.
+        let mut ks: Vec<BigInt> = vec![
+            BigInt::from(0u32),
+            BigInt::from(1u32),
+            BigInt::from(15u32),
+            BigInt::from(16u32),
+            BigInt::from(17u32),
+            BigInt::from(255u32),
+            BigInt::from(256u32),
+            sub_order() - BigInt::from(1u32),
+        ];
+        ks.extend(scalars());
+
+        for p in [base8_point().clone(), order_two()] {
+            for k in &ks {
+                let got = p.mul_scalar(k);
+                let want = mul_scalar_naive(&p, k);
+                assert_eq!((got.x, got.y), (want.x, want.y), "k={k}");
+            }
         }
     }
 

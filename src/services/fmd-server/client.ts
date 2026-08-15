@@ -54,6 +54,25 @@ export interface FmdNoteOut {
 export interface FmdMatchOut extends FmdNoteOut {}
 
 /**
+ * A page of matches plus the subscription's backfill watermark.
+ *
+ * `matches` is filled from both ends at once: the indexer's live tick inserts
+ * rows for notes at the head while its backfill walks history upward. So the
+ * highest `id` in a page is NOT a safe resume cursor — rows below it may still
+ * be pending, and a cursor placed above the gap would skip them permanently.
+ *
+ * `backfilledThroughNoteId` is the highest note id already scanned against
+ * this subscription's key; a persisted cursor must be clamped to it. Rows
+ * above it are still delivered, so a new note never waits for a backfill —
+ * they are simply re-delivered until the watermark passes them, which
+ * `addHits` dedupes by `cm`.
+ */
+export interface FmdMatchesPage {
+    matches: FmdMatchOut[];
+    backfilledThroughNoteId: number;
+}
+
+/**
  * Result of `POST /v1/subscriptions`. Neither the token nor the detection key
  * is echoed: the caller derives and supplies both.
  *
@@ -70,9 +89,20 @@ export interface SubscriptionOut {
 
 export interface CommitmentChunkEntry {
     leafIndex: number;
-    cm: Field;
-    /** Value-commitment point; hashed together with `cm` into the Merkle leaf. */
-    cvDep: Point;
+    /**
+     * `Poseidon(TAG_LEAF, cm, cvDep.x, cvDep.y)`, computed server-side.
+     *
+     * The feed used to carry `cm` and the `cvDep` point instead, and the only
+     * thing any client did with them was hash them into this. Sending the
+     * result is one field element rather than three: it drops ~1.05M pure-JS
+     * Poseidon-4 calls over a full tree — the single largest term in a cold
+     * sync — and cuts this feed roughly threefold on the wire.
+     *
+     * The client no longer derives leaves from primary data, so a wrong value
+     * here yields a wrong root. That costs a rejected transaction, not funds,
+     * and `TreeStore.verifyRoot` is the check that catches it.
+     */
+    leafHash: Field;
 }
 
 export interface CommitmentChunkOut {
@@ -168,8 +198,7 @@ function commitmentChunk(raw: unknown): CommitmentChunkOut {
             const entry = obj(e, p);
             return {
                 leafIndex: int(entry.leafIndex, `${p}.leafIndex`),
-                cm: hexInt(entry.cmHex, `${p}.cmHex`),
-                cvDep: point(entry, "cvDep", p),
+                leafHash: hexInt(entry.leafHash, `${p}.leafHash`),
             };
         }),
         isComplete: bool(d.isComplete, "$.isComplete"),
@@ -231,7 +260,7 @@ export class FmdClient {
         token: string;
         limit?: number;
         after?: number;
-    }): Promise<FmdMatchOut[]> {
+    }): Promise<FmdMatchesPage> {
         // The token is the whole authorisation, so nothing else — not even
         // chainId — rides along; the subscription already pins the chain.
         //
@@ -243,14 +272,40 @@ export class FmdClient {
             params: { limit: opts.limit, after: opts.after },
             headers: bearerAuth(opts.token),
         });
-        return mapArr(raw, "$", (row, p) => note(row, "noteId", p));
+
+        // A server predating the watermark answers with a bare array. Treat
+        // its watermark as 0 — "nothing is known to be backfilled" — which
+        // pins the caller's persisted cursor at 0 and degrades to re-scanning
+        // from the start rather than silently skipping notes.
+        if (Array.isArray(raw)) {
+            return {
+                matches: mapArr(raw, "$", (row, p) => note(row, "noteId", p)),
+                backfilledThroughNoteId: 0,
+            };
+        }
+
+        const d = obj(raw, "$");
+        return {
+            matches: mapArr(d.matches, "$.matches", (row, p) => note(row, "noteId", p)),
+            backfilledThroughNoteId: int(d.backfilledThroughNoteId, "$.backfilledThroughNoteId"),
+        };
     }
 
-    /** Leaves `chunkId * 1024 .. +1024`. Complete chunks are immutable. */
+    /**
+     * Leaves `chunkId * 1024 .. +1024`. Complete chunks are immutable.
+     *
+     * One of the two routes exempted from the SDK's blanket `no-store`. The
+     * feed is global and append-only: every wallet fetches the identical
+     * bytes, so a cache entry says only that this device synced, which the
+     * request itself already said. The origin serves complete chunks as
+     * `max-age=31536000, immutable`, and honoring that turns a repeat sync
+     * into no network at all — the single largest transfer in a cold sync.
+     */
     async fetchCommitmentChunk(chunkId: number): Promise<CommitmentChunkOut> {
         return commitmentChunk(
             await this.json.get<unknown>(
                 `/v1/chains/${this.chainId}/commitments/chunks/${chunkId}`,
+                { cache: "default" },
             ),
         );
     }
@@ -262,7 +317,13 @@ export class FmdClient {
      */
     async fetchNullifierChunk(chunkId: number): Promise<NullifierChunkOut> {
         return nullifierChunk(
-            await this.json.get<unknown>(`/v1/chains/${this.chainId}/nullifiers/chunks/${chunkId}`),
+            await this.json.get<unknown>(
+                `/v1/chains/${this.chainId}/nullifiers/chunks/${chunkId}`,
+                // Cacheable for the same reason as the commitment feed: the
+                // whole set is global, and it is precisely because the client
+                // downloads all of it that the server learns nothing.
+                { cache: "default" },
+            ),
         );
     }
 

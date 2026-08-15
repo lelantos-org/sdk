@@ -32,6 +32,24 @@ export function cacheKeyStride(depth: number): number {
     return 2 ** (2 * depth - 2);
 }
 
+/**
+ * A memoized internal node, addressed the way the tree thinks about it.
+ *
+ * Deliberately not the packed `nodeCache` key: that encoding depends on
+ * `cacheKeyStride(depth)`, and anything persisting nodes would have to
+ * reimplement it to unpack them. `(level, index)` also means the same subtree
+ * in any tree containing those leaves, so a snapshot stays meaningful even if
+ * the configured depth changes.
+ *
+ * @internal
+ */
+export interface MerkleNode {
+    /** 1-based; level 0 is the leaves, which are stored separately. */
+    level: number;
+    index: number;
+    value: Field;
+}
+
 /** @internal */
 export interface MerkleProof {
     pathElements: Field[][];
@@ -89,6 +107,43 @@ export class MerkleTree {
     setLeaves(leaves: Field[]): void {
         this.leaves = [...leaves];
         this.nodeCache.clear();
+    }
+
+    /**
+     * Memoized internal nodes, for persistence.
+     *
+     * Restoring these is what lets a reloaded tree skip rebuilding: without
+     * them the first `root()` or `getPath()` recomputes every internal node
+     * from the leaves — ~350K Poseidon-5 hashes on a full tree, on every
+     * single app open rather than only the first.
+     */
+    exportNodes(): MerkleNode[] {
+        const out: MerkleNode[] = [];
+        for (const [key, value] of this.nodeCache) {
+            const level = Math.floor(key / this.keyStride);
+            out.push({ level, index: key - level * this.keyStride, value });
+        }
+        return out;
+    }
+
+    /**
+     * Reload previously exported nodes. Call *after* `setLeaves`, which
+     * clears the cache.
+     *
+     * A level outside `1..depth` cannot have come from a tree this one can
+     * represent, and caching it under a key this tree would later read as a
+     * different level is exactly how a wrong root gets produced silently, so
+     * it is rejected rather than skipped.
+     */
+    importNodes(nodes: Iterable<MerkleNode>): void {
+        for (const { level, index, value } of nodes) {
+            if (level < 1 || level > this.depth) {
+                throw new RangeError(
+                    `MerkleTree.importNodes: level ${level} outside 1..${this.depth}`,
+                );
+            }
+            this.nodeCache.set(this.cacheKey(level, index), value);
+        }
     }
 
     root(): Field {

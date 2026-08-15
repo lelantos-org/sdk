@@ -18,6 +18,15 @@ import type { StoredNote } from "../core/note-record.js";
 export interface NotesFile {
     version: 1 | 2;
     notes: StoredNote[];
+    /**
+     * Resume point for `syncWallet`: the highest source row id whose notes are
+     * known to be accounted for. Absent means "start from the beginning",
+     * which is always safe — scanning is idempotent, only slow.
+     *
+     * A `NoteStore` implementation MUST round-trip this. Dropping it silently
+     * turns every sync back into a re-scan from zero.
+     */
+    cursor?: number;
 }
 
 export interface NoteStore {
@@ -30,12 +39,22 @@ export class InMemoryNoteStore implements NoteStore {
 
     async load(): Promise<NotesFile> {
         // Clone so caller mutations don't affect internal state.
-        return { version: this.file.version, notes: [...this.file.notes] };
+        return { version: this.file.version, notes: [...this.file.notes], ...cursorOf(this.file) };
     }
 
     async save(file: NotesFile): Promise<void> {
-        this.file = { version: 2, notes: [...file.notes] };
+        this.file = { version: 2, notes: [...file.notes], ...cursorOf(file) };
     }
+}
+
+/**
+ * `{ cursor }` when one is set, `{}` otherwise.
+ *
+ * Spread rather than assigned so the key stays absent under
+ * `exactOptionalPropertyTypes`, which rejects an explicit `undefined`.
+ */
+function cursorOf(file: NotesFile): { cursor?: number } {
+    return file.cursor === undefined ? {} : { cursor: file.cursor };
 }
 
 /** Append `ScanHit[]` to a `NotesFile`. Idempotent: existing `cm`s are skipped. */

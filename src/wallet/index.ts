@@ -78,5 +78,10 @@ export {
 } from "./selection.js";
 export { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 export { type SyncDeps, type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
-export { type TreePersistence, TreeStore, type TreeStoreState } from "./tree-store.js";
+export {
+    type MerkleNode,
+    type TreePersistence,
+    TreeStore,
+    type TreeStoreState,
+} from "./tree-store.js";
 export { Wallet } from "./wallet.js";
