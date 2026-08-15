@@ -85,6 +85,17 @@ declare global {
     const paths: import("@lelantos-org/sdk").ProverPaths;
     const myCache: import("@lelantos-org/sdk/prover").ArtifactCache;
 
+    /** Caller-supplied cancellation, for the examples that accept one. */
+    const signal: AbortSignal;
+    /**
+     * Stand-in for a Node `EventSource` polyfill. Typed as the structural
+     * slice `DepositStream` needs; the concrete class belongs to whichever
+     * package the caller picks.
+     */
+    const MyEventSourcePolyfill: new (
+        url: string,
+    ) => import("@lelantos-org/sdk/relayer").EventSourceLike;
+
     // Third-party objects the x402 examples hand the SDK's fetch wrapper to.
     // Typed loosely on purpose: their shape belongs to those libraries.
     const url: string;

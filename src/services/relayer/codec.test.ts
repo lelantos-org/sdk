@@ -11,7 +11,6 @@ import type {
 import {
     deserializeMerkleProof,
     deserializeScannedNote,
-    deserializeTreeState,
     serializeSubmitDeposit,
     serializeSubmitSwap,
     serializeSubmitTransact,
@@ -222,11 +221,13 @@ describe("inbound validation", () => {
     });
 
     it("rejects a non-object response", () => {
-        expect(() => deserializeTreeState("nope")).toThrow(/expected an object/);
+        expect(() => deserializeMerkleProof("nope")).toThrow(/expected an object/);
     });
 
     it("rejects a missing field rather than yielding undefined downstream", () => {
-        expect(() => deserializeTreeState({ leafCount: 1, root: "1" })).toThrow(/\$\.frontier/);
+        expect(() => deserializeMerkleProof({ leafIndex: 1, root: "1" })).toThrow(
+            /\$\.pathElements/,
+        );
     });
 
     it("rejects odd-length hex in a scanned note", () => {

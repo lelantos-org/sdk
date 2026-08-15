@@ -23,7 +23,6 @@ export type {
     RelayerDepositResponse,
     RelayerSubmitResponse,
     ScannedNote,
-    TreeStateResponse,
 } from "./responses.js";
 export type {
     SpendKind,

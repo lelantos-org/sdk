@@ -193,6 +193,51 @@ Each method returns its own receipt type — `deposit()` gives you a
 
 Chain adapter signs EIP-2612 permit so deposit + ERC20 pull happen in one atomic tx (no separate `approve`). Deposit strategies (`native`, `allowance`, `witness`) picked per-asset by the adapter; `DepositAdapterError` raised on mismatch.
 
+#### Waiting for the relayer to settle a deposit
+
+A mined deposit is escrowed, not yet in the tree — the relayer folds it in
+with `flushBatch`, and publishes that on an SSE feed. `depositId` from the
+receipt is the correlation key.
+
+```ts
+import { DepositStream } from "@lelantos-org/sdk/relayer";
+
+const stream = new DepositStream(relayerUrl, chainId);
+const tx = await wallet.deposit({ amount: 1000n });
+if (tx.depositId !== undefined) {
+    const wait = await stream.awaitFlush(tx.depositId, { signal });
+    if (wait.kind === "flushed") console.log("settled in", wait.txHash, wait.blockNumber);
+}
+stream.close();
+```
+
+Open the stream *before* depositing. The relayer does not replay, so a fast
+flush can land before you subscribe; the stream buffers recent events and
+`awaitFlush` matches them, which closes that race.
+
+`EventSource` is a browser global with no Node equivalent, so outside the
+browser pass one:
+
+```ts
+import { DepositStream } from "@lelantos-org/sdk/relayer";
+
+const stream = new DepositStream(relayerUrl, chainId, {
+    eventSourceFactory: (src) => new MyEventSourcePolyfill(src),
+});
+```
+
+`awaitFlush` never rejects. It resolves a value discriminated on `kind`: the
+settlement event itself, `{ kind: "aborted" }` if the signal fired, or
+`{ kind: "closed" }` if the feed died. The success arm *is* the event, so a
+narrowed `wait` reads `wait.txHash` directly. The other two mean settlement
+went unobserved, not that the deposit failed — the tx is already mined either
+way.
+
+A transient disconnect is not a close — the browser reconnects and the stream
+keeps waiting. Only a fatal error (`readyState === CLOSED`, which is what an
+HTTP error status produces) settles waiters, rather than leaving them to wait
+out a caller-side timeout against a source that is gone.
+
 ### Transfer (shielded → shielded)
 
 ```ts

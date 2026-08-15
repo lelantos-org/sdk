@@ -33,13 +33,6 @@ export interface MerkleProofResponse {
 }
 
 /** @internal */
-export interface TreeStateResponse {
-    leafCount: number;
-    root: Field;
-    frontier: Field[][];
-}
-
-/** @internal */
 export interface ScannedNote {
     /** Encrypted note (ChaCha20-Poly1305 body + clueBits prefix). */
     ciphertext: Uint8Array;

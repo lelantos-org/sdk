@@ -47,13 +47,6 @@ export interface SerializedMerkleProof {
     root: string;
 }
 
-/** @internal */
-export interface SerializedTreeState {
-    leafCount: number;
-    root: string;
-    frontier: string[][];
-}
-
 /**
  * Encode as a JSON number, for a field whose Rust DTO is `u64`.
  *
@@ -183,23 +176,6 @@ export function deserializeMerkleProof(
         ),
         pathIndices: mapArr(d.pathIndices, `${path}.pathIndices`, int),
         root: bigintFrom(d.root, `${path}.root`),
-    };
-}
-
-/** @internal */
-export function deserializeTreeState(
-    raw: unknown,
-    path = "$",
-): {
-    leafCount: number;
-    root: Field;
-    frontier: Field[][];
-} {
-    const d = obj(raw, path);
-    return {
-        leafCount: int(d.leafCount, `${path}.leafCount`),
-        root: bigintFrom(d.root, `${path}.root`),
-        frontier: mapArr(d.frontier, `${path}.frontier`, (lvl, p) => mapArr(lvl, p, bigintFrom)),
     };
 }
 

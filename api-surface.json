@@ -489,7 +489,6 @@
     "SwapBlob",
     "TransactAux",
     "TransactPubInputs",
-    "TreeStateResponse",
     "auxDigest",
     "computePiHash"
   ],
@@ -606,7 +605,15 @@
   ],
   "./prover-worker": [],
   "./relayer": [
-    "RelayerClient"
+    "DepositFlushed",
+    "DepositStream",
+    "DepositStreamOptions",
+    "EventSourceFactory",
+    "EventSourceLike",
+    "FlushWait",
+    "RelayerClient",
+    "RelayerDepositEvent",
+    "serializeSubmitDeposit"
   ],
   "./fmd-server": [
     "CommitmentChunkEntry",

@@ -12,7 +12,12 @@ import { RelayerClient } from "../services/relayer/client.js";
 export interface Submitter {
     /** Spend op. Relayer attaches the matching tree_update_batch SNARK + tpi. */
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse>;
-    /** Deposit escrow. Falls back to `chain.submitDeposit` when absent. */
+    /**
+     * Deposit escrow, for a relayer that broadcasts on the wallet's behalf.
+     * Absent on `HttpRelayerSubmitter`, so the default wiring falls back to
+     * `chain.submitDeposit`. Encode the body with `serializeSubmitDeposit`
+     * from `@lelantos-org/sdk/relayer`.
+     */
     submitDeposit?(payload: SubmitDepositPayload): Promise<RelayerDepositResponse>;
     /** Atomic shielded swap. Required for `Wallet.swap`. */
     submitSwap?(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse>;
