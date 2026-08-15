@@ -63,8 +63,11 @@ const HEX_BODY = /^[0-9a-fA-F]*$/;
 /**
  * A field element as a decimal string, a `0x`-hex string, or a JSON number.
  *
- * Accepts all three because the two servers disagree: fmd-webserver returns
- * 0x-hex for paths and tree state, decimal for note coordinates.
+ * Accepts all three for the relayer, whose Rust DTOs disagree field by field
+ * (`String` here, `u64` there — see `services/relayer/codec.ts`). Only use it
+ * where the wire form is genuinely not pinned: a field known to be hex must go
+ * through `hexInt`, or a bare-hex value made only of decimal digits decodes as
+ * the wrong number.
  */
 export function bigintFrom(v: unknown, path: string): bigint {
     if (typeof v === "bigint") return v;

@@ -32,8 +32,8 @@ const NOTE_ROW = {
     commitmentHex: DIGITS_ONLY_CM,
     clueBitsHex: "0x00ff",
     ciphertextHex: "dead",
-    ephPubX: "5",
-    ephPubY: "6",
+    ephPubX: `0x${"5".padStart(64, "0")}`,
+    ephPubY: `0x${"6".padStart(64, "0")}`,
 };
 
 describe("listNotes", () => {
@@ -47,6 +47,18 @@ describe("listNotes", () => {
         expect(n.clueBits).toBe(255);
         expect(n.ciphertext).toEqual(new Uint8Array([0xde, 0xad]));
         expect(n.ephPub).toEqual([5n, 6n]);
+    });
+
+    it("reads ephPub coordinates as hex, not decimal", async () => {
+        // fmd-webserver serves coordinates as `0x`-hex. "12345678" is also a
+        // valid decimal literal for a different number, so a decoder that
+        // accepted both forms would be one dropped prefix away from silently
+        // returning the wrong point.
+        respondWith([{ ...NOTE_ROW, ephPubX: "0x12345678", ephPubY: "0x06" }]);
+
+        const [n] = await client().listNotes();
+        expect(n?.ephPub).toEqual([0x12345678n, 6n]);
+        expect(n?.ephPub[0]).not.toBe(12345678n);
     });
 
     it("reads a bare-hex commitment as hex even when it is all digits", async () => {
@@ -124,13 +136,32 @@ describe("chunk feeds", () => {
     it("decodes commitment entries into a cm plus a cvDep point", async () => {
         respondWith({
             chunkId: 0,
-            entries: [{ leafIndex: 0, cmHex: "0a", cvDepX: "1", cvDepY: "2" }],
+            entries: [{ leafIndex: 0, cmHex: "0a", cvDepX: "0x01", cvDepY: "0x02" }],
             isComplete: false,
         });
 
         const chunk = await client().fetchCommitmentChunk(0);
 
         expect(chunk.entries[0]).toEqual({ leafIndex: 0, cm: 10n, cvDep: [1n, 2n] });
+    });
+
+    it("reads cvDep coordinates as hex, not decimal", async () => {
+        respondWith({
+            chunkId: 0,
+            entries: [
+                {
+                    leafIndex: 0,
+                    cmHex: "0a",
+                    cvDepX: `0x${"12345678".padStart(64, "0")}`,
+                    cvDepY: "0x02",
+                },
+            ],
+            isComplete: false,
+        });
+
+        const chunk = await client().fetchCommitmentChunk(0);
+        expect(chunk.entries[0]?.cvDep).toEqual([0x12345678n, 2n]);
+        expect(chunk.entries[0]?.cvDep[0]).not.toBe(12345678n);
         expect(chunk.isComplete).toBe(false);
     });
 

@@ -13,13 +13,14 @@
 // instead of a `TypeError` surfacing later inside a store.
 //
 // That validation is not cosmetic. The backend is inconsistent about the `0x`
-// prefix — tree state, nullifiers and clue bits carry it; note/match
-// commitments and ciphertexts and chunk commitments do not. Bare hex is
-// decoded with `hexInt`/`hexBytes` and never with `bigintFrom`, because a
-// bare-hex value that happens to be all decimal digits would otherwise decode
-// as decimal.
+// prefix — tree state, nullifiers, clue bits and curve coordinates carry it;
+// note/match commitments and ciphertexts and chunk commitments do not. Every
+// one of them is hex, so every one goes through `hexInt`/`hexBytes` and none
+// through `bigintFrom`: that decoder also accepts decimal, and a bare-hex
+// value whose digits happen to all be decimal would decode as the wrong
+// number, silently.
 
-import { bigintFrom, bool, hexBytes, hexInt, int, mapArr, obj } from "../../core/decode.js";
+import { bool, hexBytes, hexInt, int, mapArr, obj } from "../../core/decode.js";
 import {
     bearerAuth,
     createJsonClient,
@@ -125,11 +126,11 @@ export interface CreateSubscriptionInput {
 
 // ─── decoders ────────────────────────────────────────────────────────────────
 
-/** Curve points arrive as sibling decimal fields, `<prefix>X` and `<prefix>Y`. */
+/** Curve points arrive as sibling hex fields, `<prefix>X` and `<prefix>Y`. */
 function point(d: Record<string, unknown>, prefix: string, path: string): Point {
     return [
-        bigintFrom(d[`${prefix}X`], `${path}.${prefix}X`),
-        bigintFrom(d[`${prefix}Y`], `${path}.${prefix}Y`),
+        hexInt(d[`${prefix}X`], `${path}.${prefix}X`),
+        hexInt(d[`${prefix}Y`], `${path}.${prefix}Y`),
     ];
 }
 
