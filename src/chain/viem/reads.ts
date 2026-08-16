@@ -6,6 +6,7 @@ import { TxMiningError } from "../../core/errors.js";
 import type { AssetEntry, DepositEscrowedRecord, EscrowedDepositView } from "../types.js";
 import { MASP_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
+import { evmBlockNumber } from "./evm-block.js";
 
 /** `bytes32(0)` — what an unset escrow row reads back as. */
 const ZERO_WORD = `0x${"0".repeat(64)}` as const;
@@ -96,8 +97,10 @@ export async function fetchDepositEscrowed(
         cm: branded<Hex32>(a.cm),
         cvDep: [a.cvDepX, a.cvDepY],
         rcv: a.rcv,
-        // Not in the event: `cancelDeposit` needs it, and the log's own block
-        // is by definition the block that escrowed the deposit.
-        submittedAt: Number(first.blockNumber),
+        // Not in the event, and NOT simply the log's block number: the digest
+        // hashes `uint32(block.number)` as the EVM saw it, which on Arbitrum is
+        // the L1 height rather than the L2 height the log reports. Getting this
+        // wrong makes `cancelDeposit` revert `DigestMismatch` forever.
+        submittedAt: Number(await evmBlockNumber(ctx.publicClient, first.blockNumber)),
     };
 }

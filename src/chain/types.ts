@@ -47,8 +47,12 @@ export interface EscrowedDepositView {
  * Preimage fields for `cancelDeposit`. The escrow row keeps only
  * `keccak(request)`, so every field the contract once read from storage is now
  * passed back in and checked against that digest — including `publicAssetId`,
- * `feeBpsAtSubmit`, `payer` and `submittedAt`. All of them come off the
- * `DepositEscrowed` log; cache it, because `escrowed()` no longer returns them.
+ * `feeBpsAtSubmit`, `payer` and `submittedAt`. Cache them, because `escrowed()`
+ * no longer returns any of them.
+ *
+ * All but `submittedAt` come straight off the `DepositEscrowed` log. That one
+ * is the EVM's `block.number`, which the log does not carry on Arbitrum —
+ * `fetchDepositEscrowed` resolves it rather than reusing `log.blockNumber`.
  */
 export interface CancelDepositInputs {
     publicIn: bigint;
@@ -74,7 +78,14 @@ export interface DepositEscrowedRecord {
     cm: Hex32;
     cvDep: [bigint, bigint];
     rcv: bigint;
-    /** Block number of the deposit that created this escrow. */
+    /**
+     * What Solidity's `block.number` returned when the deposit was escrowed —
+     * the value folded into the on-chain digest.
+     *
+     * NOT always the block number of the `DepositEscrowed` log. On Arbitrum the
+     * EVM reports the L1 height while the log carries the L2 height, so this is
+     * resolved via the block's `l1BlockNumber` (see `viem/evm-block.ts`).
+     */
     submittedAt: number;
 }
 
