@@ -116,9 +116,12 @@ describe("listMatches", () => {
         expect((init as RequestInit).headers).toMatchObject({
             Authorization: "Bearer abcd",
         });
-        // The subscription already pins the chain; sending chainId too would
-        // only widen what the request discloses.
-        expect(url.searchParams.has("chainId")).toBe(false);
+        // The subscription does NOT pin the chain: `detection_key` is globally
+        // unique, so one subscription spans every chain a deployment serves.
+        // Without this the feed returns other chains' notes, which decrypt
+        // against the same chain-independent key and land in the wallet as
+        // unspendable balance.
+        expect(url.searchParams.get("chainId")).toBe(String(CHAIN));
     });
 
     it("reads the backfill watermark from the envelope", async () => {

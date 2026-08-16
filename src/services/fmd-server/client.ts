@@ -261,15 +261,21 @@ export class FmdClient {
         limit?: number;
         after?: number;
     }): Promise<FmdMatchesPage> {
-        // The token is the whole authorisation, so nothing else — not even
-        // chainId — rides along; the subscription already pins the chain.
+        // `chainId` is required, and the earlier claim that "the subscription
+        // already pins the chain" was wrong: `subscriptions.detection_key` is
+        // globally unique, so one subscription spans every chain a deployment
+        // serves, and `matches` tags rows per chain. Because the detection key
+        // is chain-independent, another chain's note still trial-decrypts here
+        // — it would be stored, inflate the balance, and be unspendable, since
+        // its leaf index addresses a different tree.
         //
-        // It travels as a header rather than a query param: derived from `ivk`
-        // and stable across sessions, machines and IPs, a copy in a URL is a
-        // long-lived pseudonymous identifier recorded by every proxy, CDN and
-        // access log on the path, on every poll.
+        // The token still travels as a header rather than a query param:
+        // derived from `ivk` and stable across sessions, machines and IPs, a
+        // copy in a URL is a long-lived pseudonymous identifier recorded by
+        // every proxy, CDN and access log on the path, on every poll. The
+        // chainId is not identifying in that way.
         const raw = await this.json.get<unknown>("/v1/matches", {
-            params: { limit: opts.limit, after: opts.after },
+            params: { chainId: this.chainId, limit: opts.limit, after: opts.after },
             headers: bearerAuth(opts.token),
         });
 

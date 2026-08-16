@@ -1,6 +1,6 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.14.0",
+    "version": "0.15.0",
     "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
     "license": "Apache-2.0",
     "author": "Lelantos",
