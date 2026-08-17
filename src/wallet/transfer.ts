@@ -10,7 +10,7 @@ import type { TransferOptions, TransferResult } from "./api.js";
 import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult, type OutputSlot } from "./internal.js";
-import { prepareSpend, splitChange } from "./tx/steps.js";
+import { prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
 
 export async function executeTransfer(
     ctx: SpendContext,
@@ -62,9 +62,8 @@ export async function executeTransfer(
     });
 
     safePhase(args.onPhase, "submitting");
-    const { txHash } = await ctx.submitter.submit(built.payload);
     const spent = selection.notes.map((n) => n.id);
-    await ctx.markSpent(spent);
+    const { txHash } = await submitSpend(ctx, spent, () => ctx.submitter.submit(built.payload));
     // Slot 0 is the recipient's, so it is the sender's only on a self-transfer; the
     // change slots always are.
     const isSelf = args.to === ctx.address;

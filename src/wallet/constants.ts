@@ -40,6 +40,19 @@ export const AWAIT_COMMITMENTS_DEFAULT_MAX_ATTEMPTS = 30;
 export const AWAIT_COMMITMENTS_SYNC_LIMIT = 200;
 
 /**
+ * How long a note stays reserved after a spend whose outcome was never
+ * learned, in milliseconds. See `StoredNote.pendingSpendAt`.
+ *
+ * Sized against the relayer, which refuses a nullifier it has already
+ * submitted for 15 minutes while it waits for the indexer — reserving for
+ * less would hand the same notes back in time to be refused again. Past that,
+ * a spend that had landed has been observed on-chain and the note is spent on
+ * evidence; one that never landed is released, and the balance returns
+ * without a rescan.
+ */
+export const SPEND_RESERVATION_MS = 15 * 60 * 1000;
+
+/**
  * Basis-points denominator. `feeBps` is a uint16 fraction of 10_000;
  * `fee = amount * feeBps / BPS_DENOMINATOR` mirrors `MASP._takeFee`
  * on-chain.

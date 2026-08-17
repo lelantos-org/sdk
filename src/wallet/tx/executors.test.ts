@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
+import { NetworkError } from "../../core/errors.js";
 import { randomFr, randomJubjubScalar } from "../../core/random.js";
 import { type CircuitShape, DEFAULT_SHAPE, TRANSACT_2X2, TRANSACT_3X3 } from "../../core/shape.js";
 import { WasmJubjub } from "../../crypto/jubjub-wasm/index.js";
@@ -40,6 +41,13 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
 
     const submitted: unknown[] = [];
     const markedSpent: string[][] = [];
+    const reserved: string[][] = [];
+    // Overridable so a test can make the submit fail with a chosen error.
+    const submit = {
+        impl: async (_payload: unknown): Promise<{ txHash: string }> => ({
+            txHash: "0xdeadbeef",
+        }),
+    };
 
     const prover: Prover = {
         async prove() {
@@ -83,7 +91,7 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
         submitter: {
             async submit(payload: unknown) {
                 submitted.push(payload);
-                return { txHash: "0xdeadbeef" };
+                return submit.impl(payload);
             },
         },
         selector: {
@@ -99,11 +107,14 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
         markSpent: async (ids: string[]) => {
             markedSpent.push(ids);
         },
+        markPendingSpend: async (ids: string[]) => {
+            reserved.push(ids);
+        },
         autoConsolidate: async () => undefined,
         feeBps: async () => 0n,
     } as unknown as SpendContext;
 
-    return { ctx, prover, submitted, markedSpent, treeStore, address };
+    return { ctx, prover, submitted, submit, markedSpent, reserved, treeStore, address };
 }
 
 describe("executeTransfer", () => {
@@ -335,5 +346,30 @@ describe("shape 2x2", () => {
         expect(res.commitments).toHaveLength(2);
         expect(res.ownCommitments).toHaveLength(2);
         expect(res.ownInflow).toBe(60n);
+    });
+});
+
+// Which failures reserve notes is `outcomeUnknown`'s decision, and is tested
+// against the errors themselves in `steps.test.ts`. What is left to pin here
+// is that an executor routes its submit through that decision at all, rather
+// than dropping the notes on the floor when a submit throws.
+describe("a spend whose submit fails", () => {
+    it("reserves its notes when the outcome is unknown", async () => {
+        const { ctx, markedSpent, reserved, submit } = await makeCtx([storedNote("01", 100n)]);
+        const { address: recipient } = await makeCtx([]);
+        submit.impl = async () => {
+            throw new NetworkError("RELAYER_FAILED", "/v1/spend", "HTTP 409", {
+                status: 409,
+                body: "nullifier in flight: chain 1",
+            });
+        };
+
+        await expect(
+            executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) }),
+        ).rejects.toThrow(/409/);
+
+        expect(reserved).toEqual([["01"]]);
+        // Reserved, not spent: nothing here proves the notes are gone.
+        expect(markedSpent).toEqual([]);
     });
 });

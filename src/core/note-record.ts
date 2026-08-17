@@ -25,6 +25,20 @@ export interface StoredNote {
      * breaks same-block change-link heuristics. Skipped when absent.
      */
     firstSeenBlock?: number | undefined;
+    /**
+     * When a spend of this note was submitted without a known outcome, as an
+     * ISO timestamp. Withholds the note from selection while it may already
+     * be spent, without asserting that it is.
+     *
+     * `spent` is only ever set from evidence — a relayer that acknowledged the
+     * spend, or the note's nullifier observed on-chain — and nothing clears it
+     * again. A submit whose response was lost has no such evidence, so it
+     * cannot set `spent` without risking a note that is merely unreachable
+     * until the next wipe-and-rescan. It reserves the note instead: selection
+     * skips it, and the reservation is dropped once the nullifier settles the
+     * question, or once it expires. See `SPEND_RESERVATION_MS`.
+     */
+    pendingSpendAt?: string | undefined;
 }
 
 /**
@@ -53,6 +67,7 @@ export interface NoteRecord {
     spent: boolean;
     discoveredAt: string;
     firstSeenBlock?: number | undefined;
+    pendingSpendAt?: string | undefined;
 }
 
 export function decodeStoredNote(s: StoredNote): NoteRecord {
@@ -68,5 +83,6 @@ export function decodeStoredNote(s: StoredNote): NoteRecord {
         spent: s.spent,
         discoveredAt: s.discoveredAt,
         firstSeenBlock: s.firstSeenBlock,
+        pendingSpendAt: s.pendingSpendAt,
     };
 }

@@ -14,6 +14,22 @@ export {
 } from "../core/note-record.js";
 
 import type { StoredNote } from "../core/note-record.js";
+import { SPEND_RESERVATION_MS } from "./constants.js";
+
+/**
+ * Whether a note's spend reservation is still standing at `now`.
+ *
+ * Both readers of `pendingSpendAt` go through this: the selector, which
+ * withholds a reserved note, and reconciliation, which releases one that has
+ * expired. An unparseable or absent stamp is no reservation — the failure mode
+ * of a bad timestamp is a note offered too early, never one stranded forever.
+ */
+export function withinReservation(pendingSpendAt: string | undefined, now: number): boolean {
+    if (pendingSpendAt === undefined) return false;
+    const at = Date.parse(pendingSpendAt);
+    if (Number.isNaN(at)) return false;
+    return now - at < SPEND_RESERVATION_MS;
+}
 
 export interface NotesFile {
     version: 1 | 2;

@@ -48,7 +48,12 @@ import {
     NoteCache,
 } from "./note-cache.js";
 import type { NoteSource } from "./note-source.js";
-import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
+import {
+    type NoteStore,
+    type NotesFile,
+    type StoredNote,
+    withinReservation,
+} from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
 import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
@@ -257,8 +262,16 @@ export class Wallet implements WalletApi, SpendContext {
             if (!keep.has(id) || spentIds.has(id)) this.nullifierCache.delete(id);
         }
 
-        if (spentIds.size === 0) return;
-        await this.cache.applySpent((n) => spentIds.has(n.id));
+        // A reservation stands in for exactly the answer this pass just
+        // fetched, so it is released either way: a note found spent no longer
+        // needs one, and one that outlived `SPEND_RESERVATION_MS` without its
+        // nullifier appearing describes a spend that never landed — releasing
+        // it returns the balance without a rescan.
+        const now = Date.now();
+        await this.cache.reconcile({
+            spent: (n) => spentIds.has(n.id),
+            release: (n) => spentIds.has(n.id) || !withinReservation(n.pendingSpendAt, now),
+        });
     }
 
     /** This note's nullifier, deriving it only the first time it is asked for. */
@@ -423,6 +436,17 @@ export class Wallet implements WalletApi, SpendContext {
      */
     async markSpent(noteIds: string[]): Promise<void> {
         await this.cache.markSpent(noteIds);
+    }
+
+    /**
+     * Reserve notes against a spend whose outcome is unknown, so the selector
+     * stops offering them until reconciliation or expiry settles it.
+     *
+     * Called automatically when a submit fails without an answer; see
+     * `submitSpend` and `StoredNote.pendingSpendAt`.
+     */
+    async markPendingSpend(noteIds: string[]): Promise<void> {
+        await this.cache.markPendingSpend(noteIds);
     }
 
     /**

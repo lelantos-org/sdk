@@ -5,7 +5,7 @@ import { SelectionError } from "../core/errors.js";
 import { randomFloat01 } from "../core/random.js";
 import { DEFAULT_SHAPE } from "../core/shape.js";
 import { getLogger } from "../log/logger.js";
-import type { StoredNote } from "./note-store.js";
+import { type StoredNote, withinReservation } from "./note-store.js";
 
 const log = getLogger("lelantos:wallet:selection");
 
@@ -73,6 +73,7 @@ export type SelectionResult = DirectSelection | ConsolidateFirst;
  */
 interface RejectionCounts {
     spent: number;
+    reserved: number;
     otherAsset: number;
     dust: number;
     cooldown: number;
@@ -82,14 +83,24 @@ interface RejectionCounts {
 function partitionSpendable(
     all: readonly StoredNote[],
     asset: AssetId,
-    rules: { dust: bigint; cooldown: number; tip: number | undefined },
+    rules: { dust: bigint; cooldown: number; tip: number | undefined; now: number },
 ): { candidates: StoredNote[]; rejected: RejectionCounts } {
-    const rejected: RejectionCounts = { spent: 0, otherAsset: 0, dust: 0, cooldown: 0 };
+    const rejected: RejectionCounts = {
+        spent: 0,
+        reserved: 0,
+        otherAsset: 0,
+        dust: 0,
+        cooldown: 0,
+    };
     const candidates: StoredNote[] = [];
 
     for (const n of all) {
         if (n.spent) {
             rejected.spent++;
+        } else if (withinReservation(n.pendingSpendAt, rules.now)) {
+            // A spend of this note is outstanding: it may already be spent,
+            // and offering it again earns a duplicate rejection, not a tx.
+            rejected.reserved++;
         } else if (BigInt(n.asset) !== asset) {
             rejected.otherAsset++;
         } else if (BigInt(n.value) < rules.dust) {
@@ -119,6 +130,7 @@ function inCooldown(n: StoredNote, rules: { cooldown: number; tip: number | unde
 function describeRejections(r: RejectionCounts): string {
     const reasons: ReadonlyArray<readonly [count: number, label: string]> = [
         [r.spent, "spent"],
+        [r.reserved, "awaiting an earlier spend"],
         [r.otherAsset, "other asset"],
         [r.dust, "below dust threshold"],
         [r.cooldown, "in spend cooldown"],
@@ -159,7 +171,12 @@ export function selectNotes(
     const rng = opts.rng ?? randomFloat01;
     const threshold = target + fee;
 
-    const { candidates, rejected } = partitionSpendable(all, asset, { dust, cooldown, tip });
+    const { candidates, rejected } = partitionSpendable(all, asset, {
+        dust,
+        cooldown,
+        tip,
+        now: Date.now(),
+    });
 
     if (candidates.length === 0) {
         throw new SelectionError(

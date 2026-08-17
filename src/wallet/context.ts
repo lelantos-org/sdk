@@ -35,6 +35,12 @@ export interface SpendContext {
      */
     storedNotes(): readonly StoredNote[];
     markSpent(ids: string[]): Promise<void>;
+    /**
+     * Withhold notes from selection after a spend whose outcome was never
+     * learned. Weaker than `markSpent`, and reversible — see
+     * `StoredNote.pendingSpendAt`.
+     */
+    markPendingSpend(ids: string[]): Promise<void>;
     /** Self-spend two notes into one so a 2-note cover becomes available. */
     autoConsolidate(asset: bigint, selection: SelectionResult): Promise<void>;
     /** Config override, else the chain's current fee. */

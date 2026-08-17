@@ -13,10 +13,14 @@ import type { SubmitSwapPayload } from "../protocol/transact.js";
 import type { SwapOptions, SwapResult } from "./api.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./internal.js";
-import { freshDepositSlots, prepareSpend, splitChange } from "./tx/steps.js";
+import { freshDepositSlots, prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
 
 export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise<SwapResult> {
-    if (!ctx.submitter.submitSwap) {
+    // Bound here rather than read at the call site: `submitSwap` is optional
+    // on `Submitter`, and the narrowing this check gives does not survive into
+    // the closure that submits.
+    const submitSwap = ctx.submitter.submitSwap?.bind(ctx.submitter);
+    if (!submitSwap) {
         throw new WalletConfigError(
             "swap requires a submitter implementing submitSwap; the configured " +
                 "submitter does not",
@@ -144,9 +148,8 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     };
 
     safePhase(args.onPhase, "submitting");
-    const { txHash } = await ctx.submitter.submitSwap(payload);
     const spent = selection.notes.map((n) => n.id);
-    await ctx.markSpent(spent);
+    const { txHash } = await submitSpend(ctx, spent, () => submitSwap(payload));
 
     // B note materialises asynchronously via the relayer's flushBatch;
     // only leg-1 change commitments surface here.

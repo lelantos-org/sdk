@@ -137,26 +137,64 @@ export class NoteCache {
     async markSpent(ids: Iterable<string>): Promise<void> {
         const set = new Set(ids);
         if (set.size === 0) return;
-        await this._mutate((n) => set.has(n.id));
+        await this.update((n) => setSpent(n, set.has(n.id)));
     }
 
     /**
-     * Apply spent-set reconciliation. `predicate(note)` returns true when
-     * the note's nullifier was observed on-chain. Persists once if any
-     * flip occurred.
+     * Reserve every note whose id is in `ids` against a spend of unknown
+     * outcome, then persist. See `StoredNote.pendingSpendAt`.
      */
-    async applySpent(predicate: (note: StoredNote) => boolean): Promise<void> {
-        await this._mutate(predicate);
+    async markPendingSpend(ids: Iterable<string>): Promise<void> {
+        const set = new Set(ids);
+        if (set.size === 0) return;
+        const stamp = new Date().toISOString();
+        await this.update((n) => {
+            if (n.spent || !set.has(n.id) || n.pendingSpendAt === stamp) return false;
+            n.pendingSpendAt = stamp;
+            return true;
+        });
     }
 
-    private async _mutate(predicate: (n: StoredNote) => boolean): Promise<void> {
+    /**
+     * Apply spent-set reconciliation. `spent(note)` returns true when the
+     * note's nullifier was observed on-chain; `release(note)` returns true
+     * when its reservation no longer stands for anything — either that same
+     * observation, or expiry.
+     *
+     * Both in one pass, so a sync writes the notes file once and cannot leave
+     * a note marked spent while it still carries a reservation.
+     */
+    async reconcile(rules: {
+        spent: (note: StoredNote) => boolean;
+        release: (note: StoredNote) => boolean;
+    }): Promise<void> {
+        await this.update((n) => {
+            const released = n.pendingSpendAt !== undefined && rules.release(n);
+            if (released) n.pendingSpendAt = undefined;
+            return setSpent(n, rules.spent(n)) || released;
+        });
+    }
+
+    /**
+     * Apply `edit` to every note and persist once if any of them changed.
+     *
+     * `edit` returns whether it changed the note it was given — the single
+     * rule every mutation here follows, so none of them has to remember to
+     * save, and an unchanged pass never touches the store.
+     */
+    private async update(edit: (n: StoredNote) => boolean): Promise<void> {
         let mutated = false;
         for (const n of this.snapshot.notes) {
-            if (!n.spent && predicate(n)) {
-                n.spent = true;
-                mutated = true;
-            }
+            if (edit(n)) mutated = true;
         }
         if (mutated) await this.store.save(this.snapshot);
     }
+}
+
+/** Spend a note if `spent`, reporting whether that was a change. Spending is
+ *  one-way: a note already spent stays spent. */
+function setSpent(n: StoredNote, spent: boolean): boolean {
+    if (!spent || n.spent) return false;
+    n.spent = true;
+    return true;
 }

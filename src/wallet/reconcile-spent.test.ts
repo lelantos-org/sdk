@@ -3,6 +3,7 @@ import type { ChainAdapter } from "../chain/port.js";
 import { randomFr, randomJubjubScalar } from "../core/random.js";
 import { buildNullifierFromNsk } from "../crypto/index.js";
 import type { Prover } from "../prover/types.js";
+import { SPEND_RESERVATION_MS } from "./constants.js";
 import { InMemoryNoteStore, type StoredNote } from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
 import { Wallet } from "./wallet.js";
@@ -107,5 +108,41 @@ describe("reconcileSpentOnChain", () => {
 
         const memo = (wallet as unknown as { nullifierCache: Map<string, bigint> }).nullifierCache;
         expect([...memo.keys()]).toEqual(["b"]);
+    });
+});
+
+describe("spend reservations", () => {
+    const agoIso = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+    it("releases a reservation whose spend never landed", async () => {
+        const { wallet } = await makeWallet([storedNote("a")], new Set());
+        await wallet.markPendingSpend(["a"]);
+        expect(wallet.file.notes[0]?.pendingSpendAt).toBeDefined();
+
+        // Still within the window: the answer is not in yet, so the note stays
+        // reserved rather than being handed back to the selector.
+        await wallet.reconcileSpentOnChain();
+        expect(wallet.file.notes[0]?.pendingSpendAt).toBeDefined();
+
+        const stale = wallet.file.notes[0];
+        if (!stale) throw new Error("fixture note missing");
+        stale.pendingSpendAt = agoIso(SPEND_RESERVATION_MS + 1000);
+        await wallet.reconcileSpentOnChain();
+        expect(wallet.file.notes[0]?.pendingSpendAt).toBeUndefined();
+        expect(wallet.file.notes[0]?.spent).toBe(false);
+    });
+
+    it("retires a reservation the nullifier feed has answered", async () => {
+        const spent = new Set<bigint>();
+        const { wallet } = await makeWallet([storedNote("a")], spent);
+        await wallet.markPendingSpend(["a"]);
+
+        const a = wallet.file.notes.find((n) => n.id === "a");
+        if (!a) throw new Error("fixture note missing");
+        spent.add(buildNullifierFromNsk(wallet.P, wallet.keys.nsk, BigInt(a.rho), BigInt(a.cm)));
+
+        await wallet.reconcileSpentOnChain();
+        expect(wallet.file.notes[0]?.spent).toBe(true);
+        expect(wallet.file.notes[0]?.pendingSpendAt).toBeUndefined();
     });
 });

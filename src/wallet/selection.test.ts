@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { assetId, circuitAmount } from "../core/brand.js";
+import { SPEND_RESERVATION_MS } from "./constants.js";
 import type { StoredNote } from "./note-store.js";
 import { type SelectOpts, selectNotes } from "./selection.js";
 
 function note(
     id: string,
     value: bigint,
-    opts: { asset?: bigint; spent?: boolean; firstSeenBlock?: number } = {},
+    opts: {
+        asset?: bigint;
+        spent?: boolean;
+        firstSeenBlock?: number;
+        pendingSpendAt?: string;
+    } = {},
 ): StoredNote {
     return {
         id,
@@ -20,8 +26,11 @@ function note(
         spent: opts.spent ?? false,
         discoveredAt: "1970-01-01T00:00:00Z",
         firstSeenBlock: opts.firstSeenBlock,
+        pendingSpendAt: opts.pendingSpendAt,
     };
 }
+
+const agoIso = (ms: number) => new Date(Date.now() - ms).toISOString();
 
 /** Mulberry32 PRNG. */
 function seededRng(seed: number): () => number {
@@ -289,5 +298,27 @@ describe("maxInputs", () => {
         if (r.plan !== "consolidate-first") throw new Error("unreachable");
         expect(r.consolidate).toHaveLength(3);
         expect(r.consolidateSum).toBe(60n);
+    });
+});
+
+describe("notes reserved by an outstanding spend", () => {
+    it("are not offered again while the reservation stands", () => {
+        const notes = [note("01", 100n, { pendingSpendAt: agoIso(60_000) }), note("02", 100n)];
+        const sel = selectNotes(notes, assetId(1n), circuitAmount(50n), baseOpts());
+        expect(sel.plan).toBe("direct");
+        expect(sel.plan === "direct" && sel.notes.map((n) => n.id)).toEqual(["02"]);
+    });
+
+    it("come back once the reservation expires", () => {
+        const notes = [note("01", 100n, { pendingSpendAt: agoIso(SPEND_RESERVATION_MS + 1000) })];
+        const sel = selectNotes(notes, assetId(1n), circuitAmount(50n), baseOpts());
+        expect(sel.plan === "direct" && sel.notes.map((n) => n.id)).toEqual(["01"]);
+    });
+
+    it("say so when they are the only thing held", () => {
+        const notes = [note("01", 100n, { pendingSpendAt: agoIso(60_000) })];
+        expect(() => selectNotes(notes, assetId(1n), circuitAmount(50n), baseOpts())).toThrow(
+            /awaiting an earlier spend/,
+        );
     });
 });
