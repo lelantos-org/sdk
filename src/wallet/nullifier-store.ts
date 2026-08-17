@@ -9,6 +9,9 @@
 // which entries it has already folded in. Entries are ordered by insertion, so
 // a chunk's k-th entry has sequence `chunkId * CHUNK_SIZE + k`.
 //
+// Entries arrive truncated — see `WIRE_BYTES` — so everything held here is the
+// low-bit slice of a nullifier, never a field element.
+//
 // Persistence: pass a `NullifierPersistence` to
 // `NullifierStore.withPersistence`; `load` runs once at startup, `save` after
 // every successful `sync()`.
@@ -17,7 +20,27 @@ import type { Field } from "../crypto/index.js";
 import type { FmdClient } from "../services/fmd-server/client.js";
 import { CHUNK_SIZE, chunkOf, type PagingOpts, type PagingStop, pageChunks } from "./chunk-feed.js";
 
+/**
+ * Bytes of a nullifier the server sends, taken from the low end. Must match
+ * `WIRE_BYTES` in the server's `services::nullifiers`.
+ *
+ * The feed is downloaded in full by every wallet, so the other 22 bytes are
+ * pure wire cost — nothing here compares more than set membership. The spent
+ * set is bounded by the tree's `4^10` leaves, putting the chance a live note
+ * collides with it at `2^20 / 2^80 = 2^-60`; a collision would make this store
+ * report a live note as spent, costing that note's spendability in this
+ * client, not the note.
+ */
+const WIRE_BYTES = 10;
+const WIRE_MASK = (1n << BigInt(WIRE_BYTES * 8)) - 1n;
+
+/** Reduces a nullifier to the form the feed carries. */
+function truncate(nf: Field): bigint {
+    return nf & WIRE_MASK;
+}
+
 export interface NullifierStoreState {
+    /** Truncated per `WIRE_BYTES`, so not usable as field elements. */
     nullifiers: bigint[];
     syncedCount: number;
 }
@@ -48,7 +71,7 @@ export interface NullifierSyncSummary {
 }
 
 export class NullifierStore {
-    private spent = new Set<Field>();
+    private spent = new Set<bigint>();
     private syncedCount = 0;
     private persistence?: NullifierPersistence;
 
@@ -123,7 +146,7 @@ export class NullifierStore {
      * spent.
      */
     has(nf: Field): boolean {
-        return this.spent.has(nf);
+        return this.spent.has(truncate(nf));
     }
 
     /** Nullifiers mirrored so far. */

@@ -11,7 +11,8 @@ import { NullifierStore } from "./nullifier-store.js";
 /**
  * A fake server holding `total` nullifiers, numbered `1..total`. `FmdClient`
  * decodes hex at its own boundary, so this stands in downstream of that and
- * hands back the decoded `Field`s.
+ * hands back the decoded values — truncated ones, as the server sends them,
+ * though these are small enough that truncation is a no-op.
  */
 function fakeFmd(initialTotal: number) {
     let total = initialTotal;
@@ -93,6 +94,19 @@ describe("NullifierStore.sync", () => {
         expect(restored.has(7n)).toBe(true);
         // Resuming re-reads only the tail chunk, and adds nothing new.
         expect((await restored.sync()).added).toBe(0);
+    });
+
+    it("truncates the queried nullifier to the width the server sends", async () => {
+        // The mirror holds low-10-byte slices, so a full-width nullifier only
+        // ever matches through the same truncation. Without it every `has`
+        // returns false and the wallet believes nothing was ever spent.
+        const { fmd } = fakeFmd(3);
+        const store = new NullifierStore(fmd);
+        await store.sync();
+
+        const highBits = 0x1234n << 80n;
+        expect(store.has(highBits + 2n)).toBe(true);
+        expect(store.has(highBits + 4n)).toBe(false);
     });
 
     it("stops paging when aborted", async () => {

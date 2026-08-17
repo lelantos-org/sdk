@@ -114,8 +114,16 @@ export interface CommitmentChunkOut {
 
 export interface NullifierChunkOut {
     chunkId: number;
-    /** Ascending by insertion order. */
-    nullifiers: Field[];
+    /**
+     * Ascending by insertion order.
+     *
+     * `bigint`, not `Field`: the server sends the low 10 bytes of each
+     * nullifier, so these are truncations rather than field elements and must
+     * not be fed anywhere a real nullifier is expected. Compare against one
+     * only through `NullifierStore.has`, which truncates its argument the same
+     * way.
+     */
+    nullifiers: bigint[];
     isComplete: boolean;
 }
 
