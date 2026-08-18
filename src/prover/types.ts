@@ -40,4 +40,11 @@ export interface ProveResult {
 export interface Prover {
     /** Prove a witness against the configured circuit. */
     prove(input: Record<string, unknown>): Promise<ProveResult>;
+    /**
+     * Release held resources — worker threads, wasm heaps.
+     *
+     * Optional because the in-process backends hold nothing a GC will not
+     * reclaim. `WorkerProver` owns a real worker and must be told.
+     */
+    dispose?(): Promise<void> | void;
 }

@@ -81,6 +81,18 @@ export const FMD_SENDER_GAMMA = FMD_DEFAULT_GAMMA;
  * Reject a detection γ above `FMD_SENDER_GAMMA`. A higher γ does not lower the
  * false-positive rate; it discards the recipient's own notes.
  */
+/**
+ * Reject a γ that cannot appear on the wire. Distinct from
+ * {@link assertDetectionGamma}, which additionally caps γ at the sender's:
+ * a clue may carry any γ a sender could have encoded, and the wire format
+ * gives it one byte.
+ */
+export function assertClueGamma(gamma: number): void {
+    if (!Number.isInteger(gamma) || gamma < 1 || gamma > 255) {
+        throw new WireFormatError("$.clue.gamma", `clue gamma must be 1..255; got ${gamma}`);
+    }
+}
+
 export function assertDetectionGamma(gamma: number): void {
     if (!Number.isInteger(gamma) || gamma < 1) {
         throw new InvalidArgumentError(`FMD gamma must be a positive integer; got ${gamma}`, {
@@ -167,6 +179,11 @@ export function fmdGenDetectionKey(
     randomScalar: () => Field,
     gamma = FMD_DEFAULT_GAMMA,
 ): FmdDetectionKey {
+    // `assertDetectionGamma` is defined in this file and was simply not called
+    // here. Without it `gamma = -1` threw a bare `RangeError: Invalid array
+    // length` rather than a typed SDK error, and `gamma = 0` produced an empty
+    // key that `fmdTest` accepts against any zero-γ clue.
+    assertDetectionGamma(gamma);
     const x = Array.from({ length: gamma }, () => {
         const xi = randomScalar() % BABYJUB_SUBGROUP_ORDER;
         return xi === 0n ? 1n : xi;
@@ -262,18 +279,36 @@ export function fmdTest(J: Jubjub, P: Poseidon, dk: FmdDetectionKey, clue: FmdCl
     const R = J.unpackPoint(clue.R);
     if (!R || !J.inSubgroup(R)) return false;
 
+    // Every index is evaluated, with no early exit on a mismatching bit.
+    //
+    // Each iteration costs a Baby-Jubjub scalar multiplication plus a 254-bit
+    // Legendre exponentiation — easily the dominant cost and easily timed. So
+    // returning on the first mismatch leaked `k`, the number of leading bits
+    // that matched, rather than the single match/no-match bit the clue is
+    // supposed to reveal. At the default gamma of 5 that is most of what the
+    // clue says about the detection key, and it matters precisely in the
+    // delegated-detection model this file documents, where the `x_i` scalars
+    // are handed to a remote server.
+    //
+    // The `dk.x.length !== clue.gamma` and `R` checks above stay
+    // short-circuiting: both are public metadata, not key-dependent.
     const cBits = unpackBits(clue.bits, clue.gamma);
+    let matched = 1;
     for (let i = 0; i < clue.gamma; i++) {
         const x = dk.x[i];
         if (x === undefined) return false;
         const shared = J.mulPointEscalar(R, x);
-        if ((sharedBit(P, R, i, shared) ^ (cBits[i] ?? 0)) !== 1) return false;
+        // Bitwise `&`, not `&&`: the loop must not become data-dependent.
+        matched &= sharedBit(P, R, i, shared) ^ (cBits[i] ?? 0);
     }
-    return true;
+    return matched === 1;
 }
 
 /** @internal */
 export function encodeClue(c: FmdClue): Uint8Array {
+    // `out[0] = gamma` truncates to a byte, so γ = 256 would encode as 0 — a
+    // clue `fmdTest` accepts against any zero-length detection key.
+    assertClueGamma(c.gamma);
     const out = new Uint8Array(1 + 32 + c.bits.length);
     out[0] = c.gamma;
     out.set(c.R, 1);
@@ -287,11 +322,16 @@ export function decodeClue(buf: Uint8Array): FmdClue {
     if (gamma === undefined) {
         throw new WireFormatError("$.clue", "clue is empty; expected at least a gamma byte");
     }
+    assertClueGamma(gamma);
     const want = 1 + 32 + Math.ceil(gamma / 8);
-    if (buf.length < want) {
+    // Exact, not a minimum. A tolerant length made the encoding non-canonical:
+    // two distinct byte strings decoded to the same `FmdClue`, so anything
+    // deduping or hashing clue *bytes* disagreed with anything comparing
+    // decoded clues.
+    if (buf.length !== want) {
         throw new WireFormatError(
             "$.clue",
-            `clue is ${buf.length} bytes; gamma ${gamma} needs ${want}`,
+            `clue is ${buf.length} bytes; gamma ${gamma} needs exactly ${want}`,
         );
     }
     return {

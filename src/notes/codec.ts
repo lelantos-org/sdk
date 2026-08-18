@@ -98,16 +98,42 @@ export function stripClueBitsPrefix(wire: Uint8Array): { prefix: Uint8Array; bod
 }
 
 /**
- * Pack the FMD `clue.bits` (LSB-first byte array, ⌈γ/8⌉B) into the
- * 16-bit big-endian wire prefix the indexer expects.
+ * Pack the FMD `clue.bits` (LSB-first byte array, ⌈γ/8⌉B) into one integer.
+ *
+ * The single source of truth for this packing. It is consumed twice — as the
+ * 16-bit wire prefix the indexer reads, and as the `out_clue_bits` witness
+ * slot the proof commits to — and the contract recomputes the second from the
+ * first, so the two must agree bit for bit. They were two independent loops in
+ * two numeric types; a drift in either would have made every proof fail
+ * verification with no local symptom.
+ *
+ * `bigint` because the witness slot is a field element. The wire prefix is two
+ * bytes, so γ > 16 cannot be represented there — asserted rather than
+ * silently truncated, which is what the `number` version did (and it wrapped
+ * negative at γ ≥ 31 besides).
+ *
+ * @internal
+ */
+export function packClueBits(bits: Uint8Array, gamma: number): bigint {
+    if (gamma > CLUE_BITS_PREFIX_BYTES * 8) {
+        throw new Error(
+            `clue gamma ${gamma} exceeds the ${CLUE_BITS_PREFIX_BYTES * 8}-bit wire prefix`,
+        );
+    }
+    let acc = 0n;
+    for (let i = 0; i < gamma; i++) {
+        if (bitAt(bits, i)) acc |= 1n << BigInt(i);
+    }
+    return acc;
+}
+
+/**
+ * The 16-bit big-endian wire prefix, derived from {@link packClueBits}.
  *
  * @internal
  */
 export function clueBitsToPrefix(bits: Uint8Array, gamma: number): Uint8Array {
-    let acc = 0;
-    for (let i = 0; i < gamma; i++) {
-        if (bitAt(bits, i)) acc |= 1 << i;
-    }
+    const acc = Number(packClueBits(bits, gamma));
     const out = new Uint8Array(CLUE_BITS_PREFIX_BYTES);
     out[0] = (acc >> 8) & 0xff;
     out[1] = acc & 0xff;

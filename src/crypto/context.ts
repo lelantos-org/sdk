@@ -9,6 +9,7 @@
 // own, benchmarks comparing backends — still pass them: the explicit
 // overloads take precedence and nothing here is on their path.
 
+import { memoAsync } from "../core/async.js";
 import type { Jubjub } from "./jubjub.js";
 import { WasmJubjub } from "./jubjub-wasm/index.js";
 import { Poseidon } from "./poseidon.js";
@@ -19,8 +20,10 @@ export interface CryptoContext {
     J: Jubjub;
 }
 
-let pending: Promise<CryptoContext> | undefined;
-let ready: CryptoContext | undefined;
+const context = memoAsync<CryptoContext>(async () => {
+    const [P, J] = await Promise.all([Poseidon.build(), WasmJubjub.build()]);
+    return { P, J };
+});
 
 /**
  * The shared context, built on first use.
@@ -28,18 +31,21 @@ let ready: CryptoContext | undefined;
  * Concurrent callers await the same promise, so the WASM module is
  * instantiated once however many code paths race for it. Nothing is built at
  * import time: a bundle that never calls this never pays for it.
+ *
+ * A failed build is not cached — see {@link memoAsync}. A caller that races
+ * ahead of `configureJubjubWasm`, or one transient import failure, would
+ * otherwise brick the wallet for the lifetime of the process.
  */
 export function cryptoContext(): Promise<CryptoContext> {
-    if (!pending) {
-        pending = Promise.all([Poseidon.build(), WasmJubjub.build()]).then(([P, J]) => {
-            ready = { P, J };
-            return ready;
-        });
-    }
-    return pending;
+    return context.get();
 }
 
-/** The shared context if already built, otherwise `undefined`. */
+/**
+ * The shared context if already built, otherwise `undefined`.
+ *
+ * For callers that must not trigger a wasm load — a synchronous fast path that
+ * falls back when the context is cold.
+ */
 export function cryptoContextIfReady(): CryptoContext | undefined {
-    return ready;
+    return context.peek();
 }

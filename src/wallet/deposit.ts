@@ -13,6 +13,7 @@ import {
 import { safePhase } from "../core/callbacks.js";
 import { DepositAdapterError, type DepositStrategy, InvalidArgumentError } from "../core/errors.js";
 import { applyFee, assertPublicInFits } from "../core/fees.js";
+import { randomU256 } from "../core/random.js";
 import { decodeAddress } from "../keys/address.js";
 import { getLogger } from "../log/logger.js";
 import { computePiHash } from "../protocol/abi-hash.js";
@@ -23,7 +24,7 @@ import {
     PERMIT2_DEFAULT_DEADLINE_SECS,
 } from "./constants.js";
 import type { SpendContext } from "./context.js";
-import { makeTransactionResult } from "./internal.js";
+import { makeTransactionResult } from "./result-builder.js";
 import { freshDepositSlots } from "./tx/steps.js";
 
 const log = getLogger("lelantos:wallet:deposit");
@@ -184,7 +185,12 @@ async function runDepositStrategy(
     const deadline =
         args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT2_DEFAULT_DEADLINE_SECS);
     const piHash = computePiHash(built.deposit, built.aux);
-    const nonce = chain.permit2Nonce ? await chain.permit2Nonce() : BigInt(Date.now());
+    // Random, not a clock. Permit2 nonces index an unordered bitmap, so two
+    // deposits within the same millisecond collided and the second reverted
+    // `InvalidNonce` — and a timestamp is predictable besides. Matches what
+    // `ViemChainAdapter.permit2Nonce` already does; this is the fallback for
+    // adapters that do not implement it.
+    const nonce = chain.permit2Nonce ? await chain.permit2Nonce() : randomU256();
     safePhase(args.onPhase, "signing");
     const permit2 = await chain.signPermit2({
         token: assetEntry.token,

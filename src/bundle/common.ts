@@ -17,21 +17,14 @@ import {
 } from "../circuit/index.js";
 import { InternalError, WalletConfigError } from "../core/errors.js";
 import { randomFr } from "../core/random.js";
-import {
-    buildNoteCommitment,
-    buildRho,
-    type Field,
-    type Jubjub,
-    type Point,
-    type Poseidon,
-} from "../crypto/index.js";
+import type { CircuitShape } from "../core/shape.js";
+import { buildRho, type Field, type Jubjub, type Point, type Poseidon } from "../crypto/index.js";
 import { FMD_DEFAULT_GAMMA, fmdExpandFlagKey } from "../fmd/fmd.js";
 import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
 import { auxDigest } from "../protocol/abi-hash.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
 import type { SpendKind, SubmitTransactPayload, TransactPubInputs } from "../protocol/transact.js";
-import { prove } from "../prover/snarkjs.js";
 import type { Groth16Proof, Prover, ProverPaths } from "../prover/types.js";
 
 export interface OutputRecipient {
@@ -76,6 +69,16 @@ export interface BundleCommon {
     proverPaths?: ProverPaths;
     prover?: Prover;
     treeDepth: number;
+    /**
+     * Circuit arity, when the caller knows it.
+     *
+     * Optional because `toCircomInput` reads the shape off the array lengths
+     * and does not need telling. Supplying it buys a pre-flight check that the
+     * slot counts match the zkey about to be loaded — otherwise a 2-output
+     * spend against a 3x3 key builds a perfectly valid witness with the wrong
+     * number of public inputs and fails inside the prover.
+     */
+    shape?: CircuitShape;
 }
 
 /** @internal */
@@ -174,7 +177,10 @@ export async function finalize(
     auxAndWitness: readonly OutputAuxWithWitness[],
 ): Promise<BuiltBundle> {
     if (!common.prover && !common.proverPaths) {
-        throw new Error("BundleCommon: either `prover` or `proverPaths` is required");
+        // `WalletConfigError`, matching `runProver`'s check on the identical
+        // condition — a caller filtering on `isWalletError` used to catch one
+        // and not the other.
+        throw new WalletConfigError("BundleCommon: either `prover` or `proverPaths` is required");
     }
     const aux: OutputAux[] = auxAndWitness.map((a) => a.aux);
 
@@ -207,7 +213,11 @@ export async function finalize(
             pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
             aux: [...aux],
         },
-        cm: outputs.map((note) => buildNoteCommitment(common.P, note)),
+        // Read back from the witness rather than recomputed. `toCircomInput`
+        // already hashed each output commitment; hashing them a second time
+        // was both wasted Poseidon work and a second source of truth for a
+        // value the proof commits to.
+        cm: baseInput.out_cm.map((c) => BigInt(c)),
         producedNotes: [...outputs],
     };
 }
@@ -237,6 +247,14 @@ export async function runProver(
         // a caller built a bundle by hand and skipped that check.
         throw new WalletConfigError("bundle: one of `prover` or `proverPaths` is required");
     }
+    // Loaded here, not statically at module scope. `prover/index.ts` states
+    // the invariant: only `./snarkjs.js` may reach the optional `snarkjs`
+    // peer, and only lazily — an eager import anywhere on the default path
+    // makes the optional dependency mandatory again. `bundle/common.ts` is
+    // squarely on the default path (`buildSpend` → `finalize` → here), so the
+    // static import meant every `./bundle` consumer carried the backend and
+    // the invariant was no longer checkable by reading `prover/`.
+    const { prove } = await import("../prover/snarkjs.js");
     return (await prove(input, common.proverPaths)).proof;
 }
 

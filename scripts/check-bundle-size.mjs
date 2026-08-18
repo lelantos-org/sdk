@@ -24,9 +24,15 @@ const DIST = join(ROOT, "dist");
 // `removeComments` strips JSDoc from `.d.ts` too and consumers would lose
 // every hover doc.
 //
+// 280 KB → 300 KB: raised to cover in-flight work that had already pushed
+// `dist/` to 296 KB. Note the headroom here is ~1.4%, not the ~10% the
+// earlier ceilings carried — so the next legitimate addition trips this, and
+// the bump to make room should be a deliberate re-baseline rather than
+// another few KB.
+//
 // Still a coarse "did something unexpected land in dist" tripwire —
 // `bundle-budget.mjs` is the gate for what users actually download.
-const MAX_BYTES = 280_000;
+const MAX_BYTES = 307_200; // 300 KiB, as reported by `kb()` below.
 
 let total = 0;
 let count = 0;

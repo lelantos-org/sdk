@@ -1,5 +1,13 @@
-// Shared HTTP: AbortController timeout, exponential-backoff retry with
-// jitter, typed `NetworkError`, and a thin JSON layer on top.
+// Shared HTTP: per-attempt AbortController timeout, exponential-backoff retry
+// with jitter, typed `NetworkError`, and a thin JSON layer on top.
+//
+// Cancellation
+// ------------
+// Each attempt gets its own controller, aborted on timeout so a dead request
+// releases its connection instead of running on beside the retry. A caller
+// `signal` in `init` is honoured separately: it stops the retry loop rather
+// than being retried as though it were a network flake, and the rejection is
+// the caller's own abort reason.
 //
 // Every HTTP-speaking client in the SDK consumes these rather than
 // reimplementing timeout/retry/backoff locally.
@@ -131,7 +139,12 @@ export function createHttpClient(
                 opts.timeoutMs ?? (idempotent ? DEFAULTS.timeoutMs : DEFAULTS.submitTimeoutMs);
             const allowRetry = idempotent || retryOnSubmit;
 
+            // Held separately, and deliberately not copied into `request`:
+            // each attempt composes it with a fresh per-attempt controller,
+            // and a shared signal there would be overwritten by the first one.
+            const callerSignal = init?.signal ?? undefined;
             const request: RequestInit = { ...PRIVACY_REQUEST_DEFAULTS, ...init };
+            delete request.signal;
             // One key for every attempt of a logical request, so the server
             // can recognise the repeat.
             if (!idempotent) {
@@ -146,14 +159,32 @@ export function createHttpClient(
             let lastStatus: number | undefined;
 
             const attempt = async (): Promise<Response> => {
+                // A caller that already gave up must not have another attempt
+                // issued on its behalf.
+                if (callerSignal?.aborted) throw new AbortMarker(callerSignal.reason);
+
+                // Rejecting the wrapper promise does not stop the request:
+                // without this the connection stays open, and with retries a
+                // single logical call can hold several live sockets at once —
+                // for a submit, several copies of the same payload in flight.
+                const ctrl = new AbortController();
+                const perAttempt: RequestInit = { ...request, signal: ctrl.signal };
+
                 let res: Response;
                 try {
                     res = await withTimeout(
-                        fetchImpl(url, request),
+                        fetchImpl(url, perAttempt),
                         timeoutMs,
                         () => new TimeoutMarker(`request timeout (${timeoutMs}ms)`),
+                        callerSignal,
                     );
                 } catch (err) {
+                    ctrl.abort();
+                    // The caller's abort and a timeout both surface as an
+                    // `AbortError` here, so ask the signal rather than the
+                    // error which one happened. Conflating them retries a
+                    // request the caller explicitly cancelled.
+                    if (callerSignal?.aborted) throw new AbortMarker(callerSignal.reason);
                     if (err instanceof TimeoutMarker) {
                         throw new NetworkError(timeoutCode, safeUrl, err.message, {
                             cause: err,
@@ -167,7 +198,7 @@ export function createHttpClient(
                 }
 
                 if (res.status === 402 && onPaymentRequired) {
-                    const handled = await onPaymentRequired(res, url, request);
+                    const handled = await onPaymentRequired(res, url, perAttempt);
                     if (handled) res = handled;
                 }
                 if (res.ok) return res;
@@ -188,6 +219,7 @@ export function createHttpClient(
                 return await retry(attempt, {
                     retries: allowRetry ? retries : 0,
                     backoffMs,
+                    ...(callerSignal ? { signal: callerSignal } : {}),
                     shouldRetry: (err) => isTransient(err),
                     onRetry: ({ attempt: n, delayMs }) => {
                         log.debug("retrying request", {
@@ -201,6 +233,9 @@ export function createHttpClient(
                     },
                 });
             } catch (err) {
+                // Surface the caller's own reason, not an SDK error wrapping
+                // it: `fetch` rejects with the reason, and so should this.
+                if (err instanceof AbortMarker) throw err.reason;
                 // The final failure may be a timeout while an earlier attempt
                 // carried a 5xx body worth reporting.
                 if (err instanceof NetworkError && err.body === undefined && lastBody) {
@@ -219,6 +254,19 @@ export function createHttpClient(
 
 /** Internal marker so `withTimeout` rejections are distinguishable. */
 class TimeoutMarker extends Error {}
+
+/**
+ * Internal marker carrying the caller's abort reason through the retry loop.
+ *
+ * `isTransient` treats it as non-retryable and the catch above rethrows the
+ * reason itself, so a cancelled request neither retries nor arrives dressed up
+ * as a network failure.
+ */
+class AbortMarker extends Error {
+    constructor(readonly reason: unknown) {
+        super("aborted");
+    }
+}
 
 // Query params that carry a credential rather than a selector, matched
 // case-insensitively. Anything unlisted is preserved, since the URL is what
@@ -255,6 +303,7 @@ export function redactUrl(raw: string): string {
 }
 
 function isTransient(err: unknown): boolean {
+    if (err instanceof AbortMarker) return false;
     if (!(err instanceof NetworkError)) return false;
     if (err.status === undefined) return true; // network failure or timeout
     return err.status >= 500 || RETRY_STATUS.has(err.status);
@@ -305,6 +354,14 @@ export interface JsonRequestOptions {
      * that honors it.
      */
     cache?: RequestCache | undefined;
+    /**
+     * Cancels the request, and the retry loop with it.
+     *
+     * Honoured all the way down: `createHttpClient` composes it with the
+     * per-attempt timeout controller, so an abort ends the in-flight request
+     * rather than leaving the connection open beside a retry.
+     */
+    signal?: AbortSignal | undefined;
 }
 
 export interface JsonClient {
@@ -340,6 +397,10 @@ export function createJsonClient(
         return u.toString();
     };
 
+    // `where` is redacted by every caller: this message reaches application
+    // logs verbatim, and a route whose query string carries a detection key or
+    // token would otherwise copy it there — the same reason `createHttpClient`
+    // reports `safeUrl` rather than `url`.
     const json = async <T>(res: Response, where: string): Promise<T> => {
         try {
             return (await res.json()) as T;
@@ -355,8 +416,9 @@ export function createJsonClient(
             const init: RequestInit = {
                 ...(o?.headers ? { headers: o.headers } : {}),
                 ...(o?.cache ? { cache: o.cache } : {}),
+                ...(o?.signal ? { signal: o.signal } : {}),
             };
-            return json<T>(await http.fetch(target, init), target);
+            return json<T>(await http.fetch(target, init), redactUrl(target));
         },
         async post<T>(path: string, body: unknown, o?: JsonRequestOptions): Promise<T> {
             const target = url(path, o?.params);
@@ -364,13 +426,15 @@ export function createJsonClient(
                 method: "POST",
                 headers: { "content-type": "application/json", ...o?.headers },
                 body: JSON.stringify(body),
+                ...(o?.signal ? { signal: o.signal } : {}),
             });
-            return json<T>(res, target);
+            return json<T>(res, redactUrl(target));
         },
         async del(path: string, o?: JsonRequestOptions): Promise<void> {
             await http.fetch(url(path, o?.params), {
                 method: "DELETE",
                 ...(o?.headers ? { headers: o.headers } : {}),
+                ...(o?.signal ? { signal: o.signal } : {}),
             });
         },
     };

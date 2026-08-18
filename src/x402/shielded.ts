@@ -20,6 +20,7 @@
 // the payer to a server that takes payment and does not answer, which is why
 // `budget` is required rather than optional.
 
+import { memoAsync } from "../core/async.js";
 import type { AssetId, CircuitAmount, ShieldedAddress } from "../core/brand.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
@@ -93,12 +94,15 @@ export function shieldedExact(
 
     // Memoised: an offer is read once while selecting and again while paying,
     // and a wallet's chain cannot change underneath it.
-    let chainId: Promise<bigint> | undefined;
+    // Memoised with eviction on rejection: `x402()` builds this mechanism once
+    // and returns a long-lived `fetch`, so a single RPC blip on the first read
+    // would otherwise be replayed to every later payment for the process
+    // lifetime.
+    const chainId = memoAsync(() => wallet.chain.chainId());
     const read = async (req: PaymentRequirements): Promise<Terms> => {
-        chainId ??= wallet.chain.chainId();
         requireNetwork(SCOPE, req.network, {
             namespace: SHIELDED_NAMESPACE,
-            chainId: await chainId,
+            chainId: await chainId.get(),
         });
         requirePool(req);
         requireProvableWindow(req, minTimeoutSeconds);

@@ -73,12 +73,20 @@ function cursorOf(file: NotesFile): { cursor?: number } {
     return file.cursor === undefined ? {} : { cursor: file.cursor };
 }
 
-/** Append `ScanHit[]` to a `NotesFile`. Idempotent: existing `cm`s are skipped. */
+/**
+ * Append `ScanHit[]` to a `NotesFile`. Idempotent: existing `cm`s are skipped.
+ *
+ * `known` lets a caller that appends repeatedly — the sync loop, once per page
+ * — carry the membership set across calls instead of rebuilding it from every
+ * stored note each time, which is O(notes x pages) over a long sync. It is
+ * updated in place, so a caller that passes one must not reuse it against a
+ * different file.
+ */
 export function addHits(
     file: NotesFile,
     hits: ScanHit[],
+    known: Set<string> = new Set(file.notes.map((n) => n.cm)),
 ): { added: StoredNote[]; skipped: number } {
-    const known = new Set(file.notes.map((n) => n.cm));
     const added: StoredNote[] = [];
     let skipped = 0;
     for (const h of hits) {
@@ -87,6 +95,7 @@ export function addHits(
             skipped++;
             continue;
         }
+        known.add(cmHex);
         added.push({
             id: shortId(),
             asset: h.asset.toString(),

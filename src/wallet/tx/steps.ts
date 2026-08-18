@@ -9,7 +9,7 @@
 import type { InputSlots } from "../../bundle/common.js";
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { safePhase } from "../../core/callbacks.js";
-import { NetworkError } from "../../core/errors.js";
+import { NetworkError, WireFormatError } from "../../core/errors.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import { decodeAddress } from "../../keys/address.js";
 import { getLogger } from "../../log/logger.js";
@@ -77,10 +77,40 @@ export async function prepareSpend(
     );
 
     const ownAddr = decodeAddress(ctx.J, ctx.address);
-    await ctx.treeStore.sync();
+    await syncTreeToVerifiedRoot(ctx);
     const inputs = await buildInputSlots(inputsCtx(ctx), selection.notes, args.asset);
 
     return { selection, ownAddr, inputs, merkleRoot: ctx.treeStore.root() };
+}
+
+/**
+ * Sync the tree and confirm the root it built is one the chain holds.
+ *
+ * The wallet no longer derives leaves from primary data — it trusts the
+ * server's `leafHash` — so a wrong or lagging value yields a wrong root with
+ * no local symptom. Proving against it costs a full Groth16 run (seconds to a
+ * minute) and then fails `isKnownRoot` as an unexplained relayer rejection.
+ * `verifyRoot` is the check that catches it, and until now nothing called it.
+ *
+ * One retry, because a mismatch is usually benign: the mirror lags the chain,
+ * so a tree synced mid-block legitimately disagrees for a moment. A second
+ * disagreement is not a race, so it is reported rather than proved against.
+ */
+async function syncTreeToVerifiedRoot(ctx: SpendContext): Promise<void> {
+    await ctx.treeStore.sync();
+    if (await ctx.treeStore.verifyRoot()) return;
+
+    log.debug("local tree root disagrees with the chain; resyncing once");
+    await ctx.treeStore.sync();
+    if (await ctx.treeStore.verifyRoot()) return;
+
+    throw new WireFormatError(
+        "$.root",
+        "local Merkle root does not match the chain after resyncing — the commitment " +
+            "feed is serving leaves that do not reconcile, so any proof built against " +
+            "this tree would be rejected on chain",
+        { context: { root: ctx.treeStore.root().toString() } },
+    );
 }
 
 /**

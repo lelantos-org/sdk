@@ -40,6 +40,45 @@ describe.skipIf(!built)("rayon pool does not pin the Node event loop", () => {
         expect(stdout).toBe("");
     }, 60_000);
 
+    it("refuses to rebuild after a shutdown instead of hanging", async () => {
+        // rayon's global pool is initialised once per wasm module instance,
+        // and the module cannot be replaced: a re-import returns the same
+        // instance from the runtime's module registry, with the same linear
+        // memory and the same now-dead pool registered in it. A second
+        // `initThreadPool` throws and falls back to single-threaded, but the
+        // fallback does not help — the module still dispatches into the dead
+        // pool, so `prove` blocks on a latch nothing will ever signal.
+        //
+        // Verified by hand before this guard existed: prove → shutdown →
+        // prove hung indefinitely. A clear throw is the best available
+        // outcome; a host that needs to prove again needs a fresh realm.
+        const script = `
+            const { WasmProver } = await import(${JSON.stringify(DIST)});
+            const { rayonWorkerCount } = await import(
+                ${JSON.stringify(fileURLToPath(new URL("../../../dist/wasm/rayon/index.js", import.meta.url)))}
+            );
+            await WasmProver.preload();
+            const first = rayonWorkerCount();
+            await WasmProver.shutdown();
+            let message = null;
+            try {
+                await WasmProver.preload();
+            } catch (e) {
+                message = e.message;
+            }
+            console.log(JSON.stringify({ first, down: rayonWorkerCount(), message }));
+        `;
+        const { stdout } = await run(process.execPath, ["--input-type=module", "-e", script], {
+            timeout: 45_000,
+            encoding: "utf8",
+        });
+        const out = JSON.parse(stdout.trim());
+
+        expect(out.first).toBeGreaterThan(0);
+        expect(out.down).toBe(0);
+        expect(out.message).toMatch(/fresh worker or process/);
+    }, 60_000);
+
     it("shutdown() terminates the workers and restores globalThis.Worker", async () => {
         const script = `
             const { WasmProver } = await import(${JSON.stringify(DIST)});

@@ -4,7 +4,9 @@
 // `DEFAULT_SHAPE`, minus whatever `configureArtifactCache` already persisted —
 // so `connect()` stays fast for apps that only read balances.
 
+import { type AsyncMemo, memoAsync } from "../../core/async.js";
 import type { CircuitShape } from "../../core/shape.js";
+import { getLogger } from "../../log/logger.js";
 import {
     bundledProverArtifacts,
     type ProverArtifacts,
@@ -13,6 +15,8 @@ import {
 import { SnarkjsProver } from "../../prover/snarkjs.js";
 import type { ProveResult, Prover, ProverPaths } from "../../prover/types.js";
 import type { WalletConfig } from "../config.js";
+
+const log = getLogger("lelantos:wallet:prover");
 
 async function wasmProverWithFallback(
     paths: ProverPaths,
@@ -29,7 +33,10 @@ async function wasmProverWithFallback(
         const { WasmProver } = await import("../../prover/wasm-prover.js");
         return await WasmProver.build(paths);
     } catch (err) {
-        console.warn("[lelantos-sdk] WASM prover unavailable; falling back to snarkjs:", err);
+        // Through the SDK logger, not `console`: this is the one diagnostic
+        // for a silent downgrade to the slower backend, and on `console` it is
+        // neither routable to an app's sink nor suppressable.
+        log.warn("WASM prover unavailable; falling back to snarkjs", { err });
         return new SnarkjsProver(paths);
     }
 }
@@ -60,28 +67,45 @@ export interface ProverBuildInputs {
 }
 
 /**
- * Defers the prover build off `connect()`'s critical path; `prove()`
- * awaits it. A build failure surfaces on the first `prove()` call.
+ * Defers the prover build off `connect()`'s critical path; `prove()` awaits
+ * it. A build failure surfaces on the first `prove()` call.
+ *
+ * The build is memoised with eviction, so a transient artifact download
+ * failure is retried on the next `prove()` rather than disabling the prover
+ * for the lifetime of the wallet. The layers underneath already evict —
+ * `loadArtifactBytes` and `WasmProver.build` both do — and caching the
+ * rejection here was what stopped their recovery from ever being reached.
  */
 class LazyProver implements Prover {
-    private built?: Promise<Prover>;
-    constructor(private readonly start: () => Promise<Prover>) {}
+    private readonly built: AsyncMemo<Prover>;
+
+    constructor(start: () => Promise<Prover>) {
+        this.built = memoAsync(start);
+    }
 
     /** Kick the build in the background without blocking the caller. */
     warm(): void {
-        this.ensure().catch(() => {
-            // Swallowed here to avoid an unhandled rejection; the retained
-            // promise re-throws on the first `prove()`.
+        this.built.get().catch(() => {
+            // Swallowed to avoid an unhandled rejection; the next `prove()`
+            // rebuilds and surfaces the failure to a caller that can act.
         });
     }
 
-    private ensure(): Promise<Prover> {
-        this.built ??= this.start();
-        return this.built;
+    prove(input: Record<string, unknown>): Promise<ProveResult> {
+        return this.built.get().then((p) => p.prove(input));
     }
 
-    prove(input: Record<string, unknown>): Promise<ProveResult> {
-        return this.ensure().then((p) => p.prove(input));
+    /**
+     * Dispose what was built, if anything was.
+     *
+     * `inFlight`, not `get`: a wallet closed before its first proof has
+     * nothing to release and must not start a build in order to tear it down.
+     * Not `peek` either — a build already under way still has to be awaited,
+     * or closing during warm-up leaks the prover it was building.
+     */
+    async dispose(): Promise<void> {
+        const built = await this.built.inFlight()?.catch(() => undefined);
+        await built?.dispose?.();
     }
 }
 

@@ -70,6 +70,22 @@ export function withPaymentHeader(
     return { ...init, headers };
 }
 
+/**
+ * Copy of `req` carrying the payment header.
+ *
+ * Takes a `Request` rather than a `RequestInit` because the retry has to
+ * reproduce the original call exactly. Rebuilding it from `init` dropped the
+ * method, body and headers of any caller who passed a `Request` — which both
+ * documented integrations do.
+ *
+ * Consumes `req`'s body, so this must be the last use of it.
+ */
+export function withPaymentRequest(req: Request, payload: PaymentPayload): Request {
+    const headers = new Headers(req.headers);
+    headers.set(HEADER_PAYMENT_SIGNATURE, encodeBase64Json(payload));
+    return new Request(req, { headers });
+}
+
 /** The URL a `fetch` argument refers to, in any of its three forms. */
 export function requestUrl(input: RequestInfo | URL): string {
     if (typeof input === "string") return input;

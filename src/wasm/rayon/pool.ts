@@ -7,7 +7,7 @@
 import { withTimeout } from "../../core/async.js";
 import { envProverThreads } from "../../log/env.js";
 import { getLogger } from "../../log/logger.js";
-import { installNodeRayonWorker } from "./node-worker.js";
+import { installNodeRayonWorker, terminateRayonWorkers } from "./node-worker.js";
 
 const NODE_OS = "node:os";
 
@@ -135,6 +135,11 @@ async function startPool(
             () => new Error(`initThreadPool timed out after ${INIT_TIMEOUT_MS / 1000}s`),
         );
     } catch (err) {
+        // The workers that did boot are still parked in `Atomics.wait`, each
+        // holding a stack in shared wasm memory that can never be reclaimed.
+        // Falling back to single-threaded has to take them with it.
+        const leaked = await terminateRayonWorkers().catch(() => 0);
+        if (leaked > 0) log.debug("terminated workers from a failed pool init", { leaked });
         return singleThreaded(label, "failed", "initThreadPool rejected", err);
     }
     log.info("rayon thread pool ready", {

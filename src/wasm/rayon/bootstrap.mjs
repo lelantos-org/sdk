@@ -32,10 +32,16 @@ const pkgUrl = process.env.LELANTOS_RAYON_PKG_URL;
 if (!pkgUrl) throw new Error("LELANTOS_RAYON_PKG_URL missing");
 
 dbg("waiting init");
-parentPort.once("message", async (data) => {
+// `on`, not `once`: with `once` any stray message arriving first consumed the
+// one-shot handler, so the init message that followed was never seen, the
+// worker never posted `wasm_bindgen_worker_ready`, and the pool ate the full
+// 10s init timeout before degrading to single-threaded. Detached below once
+// init has actually happened.
+const onInit = async (data) => {
     try {
         dbg(`got ${data && data.type}`);
         if (data?.type !== "wasm_bindgen_worker_init") return;
+        parentPort.off("message", onInit);
         const pkg = await import(pkgUrl);
         await pkg.default(data.init);
         dbg("wasm initialized; posting ready");
@@ -46,4 +52,5 @@ parentPort.once("message", async (data) => {
         dbg(`worker error: ${(err && err.stack) || err}`);
         throw err;
     }
-});
+};
+parentPort.on("message", onInit);

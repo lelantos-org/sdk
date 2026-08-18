@@ -3,7 +3,7 @@
 // Descriptor coercion, bundled/companion-package lookup, and the byte cache.
 // Backend-agnostic: nothing here touches snarkjs.
 
-import { retry } from "../core/async.js";
+import { linkAbort, retry } from "../core/async.js";
 import { ProverArtifactsFailedError, ProverArtifactsMissingError } from "../core/errors.js";
 import { type CircuitShape, DEFAULT_SHAPE, shapeId } from "../core/shape.js";
 import { isHttpUrl, toAbsoluteUrl, urlToString } from "../core/url.js";
@@ -95,27 +95,46 @@ export async function bundledProverArtifacts(
     const id = shapeId(opts.shape ?? DEFAULT_SHAPE);
     const tried: string[] = [];
 
+    let companionCause: unknown;
+
     if (runtime === "node") {
         const envDir =
             typeof process !== "undefined" ? process.env.LELANTOS_PROVER_ARTIFACTS_DIR : undefined;
         if (envDir) {
-            tried.push(`env LELANTOS_PROVER_ARTIFACTS_DIR=${envDir}`);
-            return {
-                circuit: `${envDir.replace(/\/$/, "")}/${id}.wasm`,
-                zkey: `${envDir.replace(/\/$/, "")}/${id}_final.zkey`,
-            };
+            const base = envDir.replace(/\/$/, "");
+            const pair = { circuit: `${base}/${id}.wasm`, zkey: `${base}/${id}_final.zkey` };
+            // Probed, not trusted. Returning unconditionally made `tried.push`
+            // above dead — it could never reach an error — and deferred a
+            // typo'd directory to an `ENOENT` at proof time instead of the
+            // `ProverArtifactsMissingError` this function promises.
+            if (await bothExist(pair)) return pair;
+            tried.push(`env LELANTOS_PROVER_ARTIFACTS_DIR=${envDir} (files not found)`);
         }
-        const fromCompanion = await tryResolveCompanion(id);
-        if (fromCompanion) return fromCompanion;
+        const companion = await tryResolveCompanion(id);
+        if (companion.found) return companion.artifacts;
+        companionCause = companion.cause;
         tried.push(`npm package ${COMPANION_PKG} (subpath ./${id}/${id}_final.zkey)`);
-    } else if (opts.cdn) {
-        const base = opts.cdn.replace(/\/$/, "");
-        return { circuit: `${base}/${id}.wasm`, zkey: `${base}/${id}_final.zkey` };
-    } else {
-        tried.push("opts.cdn (browser requires explicit `proverArtifactsCdn`)");
     }
 
-    throw new ProverArtifactsMissingError(tried, id);
+    // Not `else if`: a CDN is a valid source on Node too. `loadArtifactBytes`
+    // handles `http(s)` there perfectly — it only treats a *non*-URL as a
+    // filesystem path — so refusing to consider `opts.cdn` outside a browser
+    // failed a Node service that had configured exactly the thing it needed,
+    // with an error that did not even mention the option it ignored.
+    if (opts.cdn) {
+        const base = opts.cdn.replace(/\/$/, "");
+        return { circuit: `${base}/${id}.wasm`, zkey: `${base}/${id}_final.zkey` };
+    }
+    tried.push(
+        runtime === "browser"
+            ? "opts.cdn (browser requires explicit `proverArtifactsCdn`)"
+            : "opts.cdn (not set)",
+    );
+
+    // The companion's own failure is attached rather than dropped: a package
+    // that is installed but broken — missing export subpath, wrong version —
+    // is otherwise indistinguishable from one that is absent.
+    throw new ProverArtifactsMissingError(tried, id, { cause: companionCause });
 }
 
 function detectRuntime(): "node" | "browser" {
@@ -123,9 +142,19 @@ function detectRuntime(): "node" | "browser" {
     return isBrowser ? "browser" : "node";
 }
 
-async function tryResolveCompanion(id: string): Promise<ProverArtifacts | null> {
+/**
+ * Outcome of probing the companion package. A discriminated union rather than
+ * two optional fields, so a caller cannot read `artifacts` without having
+ * established that the probe succeeded.
+ */
+type CompanionProbe =
+    | { readonly found: true; readonly artifacts: ProverArtifacts }
+    | { readonly found: false; readonly cause?: unknown };
+
+/** Resolve the companion package's artifacts. Never throws. */
+async function tryResolveCompanion(id: string): Promise<CompanionProbe> {
     // `import.meta.resolve` sync in Node ≥ 20.6; try/catch so a missing
-    // companion returns null cleanly.
+    // companion reports cleanly.
     try {
         const wasm = (import.meta as { resolve?: (s: string) => string }).resolve?.(
             `${COMPANION_PKG}/${id}/${id}.wasm`,
@@ -133,10 +162,27 @@ async function tryResolveCompanion(id: string): Promise<ProverArtifacts | null> 
         const zkey = (import.meta as { resolve?: (s: string) => string }).resolve?.(
             `${COMPANION_PKG}/${id}/${id}_final.zkey`,
         );
-        if (!wasm || !zkey) return null;
-        return { circuit: new URL(wasm), zkey: new URL(zkey) };
+        if (!wasm || !zkey) return { found: false };
+        return { found: true, artifacts: { circuit: new URL(wasm), zkey: new URL(zkey) } };
+    } catch (cause) {
+        // Returned rather than swallowed, so the thrown
+        // `ProverArtifactsMissingError` can say *why* the companion did not
+        // resolve — an installed-but-broken package looks identical to an
+        // absent one otherwise.
+        log.debug("companion artifact package did not resolve", { id, cause });
+        return { found: false, cause };
+    }
+}
+
+/** Both artifact paths present on disk. Node only; anything else is a URL. */
+async function bothExist(pair: { circuit: string; zkey: string }): Promise<boolean> {
+    if (!IS_NODE) return true;
+    try {
+        const { access } = await import(/* @vite-ignore */ NODE_FS_PROMISES);
+        await Promise.all([access(pair.circuit), access(pair.zkey)]);
+        return true;
     } catch {
-        return null;
+        return false;
     }
 }
 
@@ -195,7 +241,11 @@ function persistentCache(): ArtifactCache | null {
  * @internal
  */
 export function releaseArtifactBytes(...paths: string[]): void {
-    for (const p of paths) _cache.delete(p);
+    // Canonicalised, because `loadArtifactBytes` memoises on the absolute URL.
+    // Deleting the raw string matched nothing for any page-relative path — the
+    // exact spelling `WasmProver.build` accepts from callers — so the entry
+    // this function exists to drop stayed pinned for the realm's lifetime.
+    for (const p of paths) _cache.delete(toAbsoluteUrl(p));
 }
 
 /**
@@ -292,13 +342,20 @@ async function fetchArtifact(
     opts: LoadArtifactOpts,
     attempt: number,
 ): Promise<Uint8Array> {
-    const ctrl = new AbortController();
     const timeoutMs = opts.timeoutMs ?? ARTIFACT_TIMEOUT_MS;
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    if (opts.signal) opts.signal.addEventListener("abort", () => ctrl.abort(), { once: true });
+
+    // Checked before anything is opened, and this runs once per retry — so a
+    // user who cancelled during the first attempt used to have the remaining
+    // attempts each download the full ~49 MB to completion. Cancelling made
+    // the SDK transfer more bytes, not fewer. (`linkAbort` honours an
+    // already-aborted parent, but the error type matters here.)
+    if (opts.signal?.aborted) throw abortedError(path, opts.signal, attempt);
+
+    const cancel = linkAbort(opts.signal);
+    const timer = setTimeout(() => cancel.abort(), timeoutMs);
 
     try {
-        const res = await fetch(path, { signal: ctrl.signal });
+        const res = await fetch(path, { signal: cancel.signal });
         if (!res.ok) {
             throw new ProverArtifactsFailedError(path, `HTTP ${res.status}`, {
                 context: { status: res.status, attempt },
@@ -311,6 +368,10 @@ async function fetchArtifact(
             : new Uint8Array(await res.arrayBuffer());
     } catch (err) {
         if (err instanceof ProverArtifactsFailedError) throw err;
+        // The caller's abort and the timeout both surface as `AbortError`, so
+        // ask the signal which one it was. Reporting a cancellation as
+        // "download timed out" is wrong, and retrying it is worse.
+        if (opts.signal?.aborted) throw abortedError(path, opts.signal, attempt);
         const aborted = (err as { name?: string | undefined })?.name === "AbortError";
         throw new ProverArtifactsFailedError(
             path,
@@ -319,7 +380,20 @@ async function fetchArtifact(
         );
     } finally {
         clearTimeout(timer);
+        // Detached explicitly: a long-lived signal reused across many
+        // `loadArtifactBytes` calls would otherwise accumulate one listener
+        // per call, which Node warns about past ten.
+        cancel.dispose();
     }
+}
+
+/** Non-retryable: the caller asked to stop, so another attempt is not wanted. */
+function abortedError(path: string, signal: AbortSignal, attempt: number): Error {
+    return new ProverArtifactsFailedError(path, "download aborted by caller", {
+        cause: signal.reason,
+        retryable: false,
+        context: { attempt },
+    });
 }
 
 /**

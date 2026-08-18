@@ -39,12 +39,14 @@ export async function resolveConfig(
         shape: cfg.shape ?? DEFAULT_SHAPE,
         noteStore: cfg.noteStore ?? new InMemoryNoteStore(),
         noteSource: cfg.noteSource ?? defaultNoteSource(fmd, cfg, deps.J),
-        treeStore: cfg.treeStore ?? (await defaultTreeStore(fmd, deps.P, cfg.treePersistence)),
+        treeStore:
+            cfg.treeStore ??
+            (await defaultTreeStore(fmd, deps.P, cfg.treePersistence, cfg.treeDepth)),
         nullifierStore:
             cfg.nullifierStore ?? (await defaultNullifierStore(fmd, cfg.nullifierPersistence)),
         submitter: cfg.submitter ?? defaultSubmitter(cfg),
         prover: cfg.prover ?? (await defaultProver(cfg)),
         selector: cfg.selector ?? new SfrtCoinSelector(),
-        scanner: cfg.scanner ?? new LocalScanner(deps.J),
+        scanner: cfg.scanner ?? new LocalScanner(deps.J, deps.P),
     };
 }

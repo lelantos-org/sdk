@@ -10,6 +10,16 @@ import type { WireError } from "./types.js";
 
 const MAX_CAUSE_DEPTH = 3;
 
+/** Carried by `WireError` in their own right, so not repeated in `fields`. */
+const WIRE_OWN_KEYS: ReadonlySet<string> = new Set([
+    "name",
+    "message",
+    "stack",
+    "code",
+    "context",
+    "cause",
+]);
+
 /** Encode anything thrown for transport. Never throws. */
 export function toWireError(err: unknown, depth = 0): WireError {
     if (!(err instanceof Error)) {
@@ -24,6 +34,13 @@ export function toWireError(err: unknown, depth = 0): WireError {
         out.code = err.code;
         const ctx = (err as { context?: Record<string, unknown> | undefined }).context;
         if (ctx && Object.keys(ctx).length > 0) out.context = jsonSafe(ctx);
+        // Own enumerable fields beyond the `Error` shape — the typed extras a
+        // subclass adds, like `InsufficientCoverError.consolidate`. Without
+        // them `isWalletError(e, "INSUFFICIENT_COVER")` still narrowed (it is
+        // duck-typed on `code`) but the narrowed type was a lie: every extra
+        // field read back `undefined`.
+        const extras = ownFields(err);
+        if (extras) out.fields = extras;
     }
     if (err.cause !== undefined && depth < MAX_CAUSE_DEPTH) {
         out.cause = toWireError(err.cause, depth + 1);
@@ -38,6 +55,7 @@ export function fromWireError(w: WireError): Error {
     if (w.stack) e.stack = w.stack;
     if (w.code) (e as { code?: string | undefined }).code = w.code;
     if (w.context) (e as { context?: unknown | undefined }).context = w.context;
+    if (w.fields) Object.assign(e, w.fields);
     if (w.cause) (e as { cause?: unknown | undefined }).cause = fromWireError(w.cause);
     return e;
 }
@@ -68,6 +86,24 @@ export function rpcError(
         err.stack = `${err.name}: ${err.message}\n${frames}`;
     }
     return err;
+}
+
+/**
+ * Own enumerable properties that are not part of the plain `Error` shape and
+ * are safe to clone. `undefined` when there are none.
+ */
+function ownFields(err: Error): Record<string, unknown> | undefined {
+    const out: Record<string, unknown> = {};
+    let any = false;
+    for (const [k, v] of Object.entries(err)) {
+        if (WIRE_OWN_KEYS.has(k)) continue;
+        // Structured clone carries plain data; a function or class instance
+        // would throw at `postMessage` and cost the whole reply.
+        if (typeof v === "function" || typeof v === "symbol") continue;
+        out[k] = typeof v === "bigint" ? v.toString() : v;
+        any = true;
+    }
+    return any ? out : undefined;
 }
 
 function jsonSafe(o: Record<string, unknown>): Record<string, unknown> {

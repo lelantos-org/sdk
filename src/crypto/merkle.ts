@@ -58,7 +58,20 @@ export interface MerkleProof {
 
 /** @internal */
 export class MerkleTree {
-    leaves: Field[] = [];
+    /**
+     * Private backing store with a read-only view below.
+     *
+     * Every mutation path here evicts the dirty range from the node cache, so
+     * a public mutable array let `tree.leaves.push(x)` from outside change the
+     * tree without invalidating anything — leaving `root()` returning the
+     * pre-mutation root.
+     */
+    private _leaves: Field[] = [];
+
+    /** Leaves in insertion order. Mutate through `insert` / `setLeaves`. */
+    get leaves(): readonly Field[] {
+        return this._leaves;
+    }
     private readonly zeros: Field[] = [];
     private readonly strides: number[];
     private readonly nodeCache = new Map<number, Field>();
@@ -84,7 +97,7 @@ export class MerkleTree {
     }
 
     insert(leaf: Field): number {
-        const idx = this.leaves.push(leaf) - 1;
+        const idx = this._leaves.push(leaf) - 1;
         this.invalidatePath(idx);
         return idx;
     }
@@ -95,9 +108,9 @@ export class MerkleTree {
      */
     bulkInsert(leaves: Field[]): void {
         if (leaves.length === 0) return;
-        const lo = this.leaves.length;
-        for (const leaf of leaves) this.leaves.push(leaf);
-        this.invalidateRange(lo, this.leaves.length - 1);
+        const lo = this._leaves.length;
+        for (const leaf of leaves) this._leaves.push(leaf);
+        this.invalidateRange(lo, this._leaves.length - 1);
     }
 
     /**
@@ -105,7 +118,7 @@ export class MerkleTree {
      * on a tree that already holds inserts.
      */
     setLeaves(leaves: Field[]): void {
-        this.leaves = [...leaves];
+        this._leaves = [...leaves];
         this.nodeCache.clear();
     }
 
@@ -142,6 +155,22 @@ export class MerkleTree {
                     `MerkleTree.importNodes: level ${level} outside 1..${this.depth}`,
                 );
             }
+            // `index` needs the same rejection as `level`, for the same reason.
+            // The cache key is `level * keyStride + index`, so an index at or
+            // past `keyStride` aliases into the next level: at the deployed
+            // depth 10, `{level: 1, index: 262144}` is exactly the key for
+            // `{level: 2, index: 0}`. The node is then served as an internal
+            // node covering leaves it knows nothing about, `root()` and every
+            // `proof()` describe a tree the chain never held, and
+            // `exportNodes()` reads it back at the aliased position — so the
+            // corruption survives a save/load cycle.
+            const width = ARITY ** (this.depth - level);
+            if (!Number.isInteger(index) || index < 0 || index >= width) {
+                throw new RangeError(
+                    `MerkleTree.importNodes: index ${index} outside 0..${width - 1} ` +
+                        `at level ${level}`,
+                );
+            }
             this.nodeCache.set(this.cacheKey(level, index), value);
         }
     }
@@ -159,7 +188,7 @@ export class MerkleTree {
      * k ≥ currentSlot entries are not read by the next insert; zeroed deterministically.
      */
     frontier(): Field[][] {
-        const N = this.leaves.length;
+        const N = this._leaves.length;
         const out: Field[][] = [];
         for (let lvl = 0; lvl < this.depth; lvl++) {
             const stride = this.strides[lvl]!;
@@ -179,6 +208,15 @@ export class MerkleTree {
     }
 
     proof(leafIndex: number): MerkleProof {
+        // Bounded: `proof(-1)` walks negative indices, falls through every
+        // `?? 0n` / zeros lookup and returns a well-formed proof for a leaf
+        // that does not exist.
+        if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= this._leaves.length) {
+            throw new RangeError(
+                `MerkleTree.proof: leafIndex ${leafIndex} outside ` +
+                    `0..${this._leaves.length - 1}`,
+            );
+        }
         const pathElements: Field[][] = [];
         const pathIndices: number[] = [];
         let idx = leafIndex;
@@ -198,8 +236,8 @@ export class MerkleTree {
     }
 
     private nodeAt(level: number, index: number): Field {
-        if (level === 0) return this.leaves[index] ?? 0n;
-        if (index * this.strides[level]! >= this.leaves.length) return this.zeros[level]!;
+        if (level === 0) return this._leaves[index] ?? 0n;
+        if (index * this.strides[level]! >= this._leaves.length) return this.zeros[level]!;
 
         const key = this.cacheKey(level, index);
         const cached = this.nodeCache.get(key);

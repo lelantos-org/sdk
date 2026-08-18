@@ -78,7 +78,15 @@ export {
     SfrtCoinSelector,
 } from "./selection.js";
 export { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
-export { type SyncDeps, type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
+export { sizeBNote } from "./swap.js";
+export {
+    type NoteSink,
+    type SyncDeps,
+    type SyncOpts,
+    type SyncProgress,
+    type SyncResult,
+    syncWallet,
+} from "./sync.js";
 export {
     type MerkleNode,
     type TreePersistence,

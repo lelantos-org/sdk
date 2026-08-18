@@ -1,4 +1,4 @@
-import { POW_2_64 } from "../core/field.js";
+import { assertU64, POW_2_64 } from "../core/field.js";
 import type { Field, Poseidon } from "./poseidon.js";
 
 /** @internal */
@@ -15,8 +15,12 @@ export interface NoteCommitInput {
 // Soundness requires asset_id < 2^64 and value < 2^64 (circuit range-checks both; caller
 // responsibility off-circuit).
 export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
-    if (n.asset >= POW_2_64) throw new Error("asset must fit in 64 bits");
-    if (n.value >= POW_2_64) throw new Error("value must fit in 64 bits");
+    // Both bounds, not just the upper one: a negative `asset` or `value` makes
+    // `packedAv` negative, which the circuit's range check would reject but
+    // which used to reach Poseidon unchallenged. `pk`/`rho`/`rcm` are checked
+    // by `P.hash`.
+    assertU64(n.asset, "asset");
+    assertU64(n.value, "value");
     const packedAv = n.asset * POW_2_64 + n.value;
     return P.hash([packedAv, n.pk, n.rho, n.rcm]);
 }

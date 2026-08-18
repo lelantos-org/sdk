@@ -10,10 +10,10 @@
 
 import type { Field, Jubjub } from "../crypto/index.js";
 import { getLogger } from "../log/logger.js";
+import type { ScanHit } from "../sync/scan.js";
 import type { Scanner } from "../sync/scanner.js";
 import type { NoteSource } from "./note-source.js";
-import type { NoteStore } from "./note-store.js";
-import { addHits } from "./note-store.js";
+import type { NotesFile, StoredNote } from "./note-store.js";
 
 const log = getLogger("lelantos:wallet:sync");
 
@@ -35,7 +35,7 @@ const CHECKPOINT_PAGES = 50;
  * behave, and are reported rather than logged-and-forgotten so a caller can
  * tell "caught up" from "gave up".
  */
-export type SyncStop = "exhausted" | "cursorStalled" | "pageCap";
+export type SyncStop = "exhausted" | "cursorStalled" | "pageCap" | "aborted";
 
 export interface SyncResult {
     fetched: number;
@@ -49,12 +49,45 @@ export interface SyncResult {
     stoppedBy: SyncStop;
 }
 
+/**
+ * Where a sync writes what it finds.
+ *
+ * Deliberately not a `NoteStore`: a store hands back a fresh `NotesFile` on
+ * every `load()`, so a sync that owned one would be mutating a second copy of
+ * state the wallet already holds in `NoteCache` — and whichever of the two
+ * saved last would erase the other's writes. The sink is the live file, so
+ * exactly one `NotesFile` exists per wallet. `NoteCache` implements it.
+ */
+export interface NoteSink {
+    /** The live notes file. Read for the resume cursor; never replaced. */
+    readonly file: NotesFile;
+    /** Append hits to the live file in memory. Idempotent by `cm`. */
+    addHits(hits: ScanHit[]): { added: StoredNote[]; skipped: number };
+    /** Persist the current notes together with `cursor`. */
+    checkpoint(cursor: number): Promise<void>;
+}
+
 export interface SyncDeps {
     J: Jubjub;
     ivk: Field;
     source: NoteSource;
-    store: NoteStore;
+    sink: NoteSink;
     scanner: Scanner;
+}
+
+export interface SyncOpts {
+    /** Page size. Not a ceiling on notes fetched. */
+    limit?: number | undefined;
+    onProgress?: ((p: SyncProgress) => void) | undefined;
+    /**
+     * Stops paging at the next page boundary.
+     *
+     * Checkpointing is unaffected: whatever was scanned before the abort is
+     * persisted, so the next sync resumes from there rather than re-scanning.
+     * Without this a sync could page through `MAX_PAGES × limit` notes — ten
+     * million at the defaults — with no way for the caller to stop it.
+     */
+    signal?: AbortSignal | undefined;
 }
 
 export interface SyncProgress {
@@ -63,16 +96,12 @@ export interface SyncProgress {
     hits: number;
 }
 
-export async function syncWallet(
-    deps: SyncDeps,
-    opts: { limit?: number; onProgress?: (p: SyncProgress) => void } = {},
-): Promise<SyncResult> {
+export async function syncWallet(deps: SyncDeps, opts: SyncOpts = {}): Promise<SyncResult> {
     const pageSize = opts.limit ?? 1000;
-    const file = await deps.store.load();
 
     // Where the last sync got to. Absent on a first run, and safe to lose:
     // starting over re-scans notes already stored, and `addHits` drops them.
-    let after = file.cursor ?? 0;
+    let after = deps.sink.file.cursor ?? 0;
     let resumeAfter = after;
 
     const tally = { fetched: 0, hits: 0, added: 0, skipped: 0, pages: 0 };
@@ -83,8 +112,7 @@ export async function syncWallet(
     let stoppedBy: SyncStop = "exhausted";
 
     const save = async (): Promise<void> => {
-        file.cursor = resumeAfter;
-        await deps.store.save(file);
+        await deps.sink.checkpoint(resumeAfter);
         sinceSave = 0;
         foundNotes = false;
     };
@@ -94,6 +122,10 @@ export async function syncWallet(
 
     try {
         for (;;) {
+            if (opts.signal?.aborted) {
+                stoppedBy = "aborted";
+                break;
+            }
             progress("fetching");
             const page = await deps.source.listNotes({ limit: pageSize, after });
             tally.pages++;
@@ -105,7 +137,7 @@ export async function syncWallet(
                 tally.hits += pageHits.length;
 
                 progress("persisting");
-                const { added, skipped } = addHits(file, pageHits);
+                const { added, skipped } = deps.sink.addHits(pageHits);
                 tally.added += added.length;
                 tally.skipped += skipped;
                 // A page that produced notes is worth checkpointing straight
@@ -120,7 +152,7 @@ export async function syncWallet(
             sinceSave++;
             if (foundNotes || sinceSave >= CHECKPOINT_PAGES) await save();
 
-            const stop = stopReason(page.inputs.length, pageSize, advanced, tally.pages);
+            const stop = stopReason(page.inputs.length, advanced, tally.pages);
             if (stop) {
                 stoppedBy = stop;
                 if (stop !== "exhausted") {
@@ -143,17 +175,20 @@ export async function syncWallet(
 /**
  * Whether to stop after a page, and why. `null` means keep going.
  *
- * A short page is the feed running out — the ordinary exit. A *full* page that
- * did not move the cursor would otherwise loop forever; the only way to reach
- * it is a server ignoring `after`, which means paging is not working at all.
+ * Only an *empty* page means the feed ran out. A short page does not: servers
+ * cap `limit` server-side, so against a feed that caps below `pageSize` every
+ * page is short — and treating that as "exhausted" stopped after one page and
+ * reported the wallet as caught up while it was still thousands of rows
+ * behind. Callers trust `stoppedBy === "exhausted"` to mean synced, and
+ * `awaitCommitments` polls at a small limit, so both were silently wrong.
+ *
+ * The cost is one extra empty request per sync. `cursorStalled` remains the
+ * termination guard: a non-empty page that did not move the cursor means the
+ * server is ignoring `after`, so paging is not working at all and looping
+ * would never end.
  */
-function stopReason(
-    pageLength: number,
-    pageSize: number,
-    advanced: boolean,
-    pages: number,
-): SyncStop | null {
-    if (pageLength < pageSize) return "exhausted";
+function stopReason(pageLength: number, advanced: boolean, pages: number): SyncStop | null {
+    if (pageLength === 0) return "exhausted";
     if (!advanced) return "cursorStalled";
     if (pages >= MAX_PAGES) return "pageCap";
     return null;

@@ -9,7 +9,7 @@ import { applyFee } from "../core/fees.js";
 import { freshOutputAuxRandomness } from "../notes/randomness.js";
 import type { WithdrawOptions, WithdrawResult } from "./api.js";
 import type { SpendContext } from "./context.js";
-import { makeTransactionResult } from "./internal.js";
+import { makeTransactionResult } from "./result-builder.js";
 import { prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
 
 export type WithdrawKind = "withdraw" | "withdrawNative";
@@ -87,6 +87,7 @@ export async function executeWithdraw(
         recipientAddress: binding.recipient,
         prover: ctx.prover,
         treeDepth: ctx.cfg.treeDepth,
+        shape: ctx.cfg.shape,
         inputs,
         merkleRoot,
         publicOut,

@@ -1,7 +1,7 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.17.0",
-    "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
+    "version": "0.18.0",
+    "description": "Lelantos MASP client SDK \u2014 keys, notes, FMD, prover.",
     "license": "MIT",
     "author": "Lelantos",
     "type": "module",
@@ -133,10 +133,6 @@
         "./presets": {
             "types": "./dist/presets/index.d.ts",
             "default": "./dist/presets/index.js"
-        },
-        "./witness": {
-            "types": "./dist/circuit/index.d.ts",
-            "default": "./dist/circuit/index.js"
         },
         "./wasm/prover": {
             "types": "./wasm/prover/pkg/prover.d.ts",

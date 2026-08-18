@@ -2,15 +2,18 @@
 // snapshot so `Wallet` stays a thin facade. All cache mutations route
 // through here, keeping store writes and in-memory state in lockstep.
 
-import { sleep } from "../core/async.js";
+import { createMutex, sleep } from "../core/async.js";
 import { NetworkError } from "../core/errors.js";
 import { getLogger } from "../log/logger.js";
+import type { ScanHit } from "../sync/scan.js";
 import {
     AWAIT_COMMITMENTS_DEFAULT_MAX_ATTEMPTS,
     AWAIT_COMMITMENTS_DEFAULT_POLL_MS,
     AWAIT_COMMITMENTS_SYNC_LIMIT,
 } from "./constants.js";
 import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
+import { addHits } from "./note-store.js";
+import type { NoteSink } from "./sync.js";
 
 const log = getLogger("lelantos:wallet:notes");
 
@@ -96,8 +99,23 @@ export async function awaitCommitments(
     return done("timeout", attempts);
 }
 
-export class NoteCache {
+export class NoteCache implements NoteSink {
     private snapshot: NotesFile;
+    /**
+     * Serialises every write. `update`, `compact`, `checkpoint` and `refresh`
+     * all read `snapshot`, then `await` a store write — so without this two
+     * overlapping calls interleave and whichever saves last erases the other's
+     * changes. The direction that loses `spent` flags is the dangerous one: a
+     * spent note offered to the selector again.
+     */
+    private readonly writes = createMutex();
+    /**
+     * Commitment membership for {@link NoteCache.addHits}, built once and kept
+     * in step with the snapshot. Rebuilding it per call made a sync
+     * O(notes x pages). Dropped whenever the snapshot is replaced wholesale.
+     */
+    private known: Set<string> | undefined;
+
     constructor(
         readonly store: NoteStore,
         initial: NotesFile,
@@ -117,20 +135,52 @@ export class NoteCache {
         return this.snapshot.notes;
     }
 
-    /** Replace the in-memory snapshot with the store's current state. */
+    /**
+     * Replace the in-memory snapshot with the store's current state.
+     *
+     * For external mutation only. A sync does not need it: `syncWallet` writes
+     * through this cache via {@link NoteSink}, so the snapshot is already
+     * current when it returns.
+     */
     async refresh(): Promise<void> {
-        this.snapshot = await this.store.load();
+        await this.writes.run(async () => {
+            this.snapshot = await this.store.load();
+            this.known = undefined;
+        });
     }
 
     /** Drop notes flagged `spent: true`. Returns removed count. */
     async compact(): Promise<{ removed: number }> {
-        const before = this.snapshot.notes.length;
-        const live = this.snapshot.notes.filter((n) => !n.spent);
-        const removed = before - live.length;
-        if (removed === 0) return { removed: 0 };
-        this.snapshot.notes = live;
-        await this.store.save(this.snapshot);
-        return { removed };
+        return this.writes.run(async () => {
+            const before = this.snapshot.notes.length;
+            const live = this.snapshot.notes.filter((n) => !n.spent);
+            const removed = before - live.length;
+            if (removed === 0) return { removed: 0 };
+            this.snapshot.notes = live;
+            this.known = undefined;
+            await this.store.save(this.snapshot);
+            return { removed };
+        });
+    }
+
+    // --- NoteSink ------------------------------------------------------------
+
+    /**
+     * Append scan hits to the live file. Synchronous, so it cannot interleave
+     * with a queued write; persistence is deferred to {@link checkpoint} so a
+     * sync still batches its store writes.
+     */
+    addHits(hits: ScanHit[]): { added: StoredNote[]; skipped: number } {
+        this.known ??= new Set(this.snapshot.notes.map((n) => n.cm));
+        return addHits(this.snapshot, hits, this.known);
+    }
+
+    /** Persist the current notes together with the sync resume `cursor`. */
+    async checkpoint(cursor: number): Promise<void> {
+        await this.writes.run(async () => {
+            this.snapshot.cursor = cursor;
+            await this.store.save(this.snapshot);
+        });
     }
 
     /** Flip `spent` for every note whose id is in `ids`, then persist. */
@@ -183,11 +233,13 @@ export class NoteCache {
      * save, and an unchanged pass never touches the store.
      */
     private async update(edit: (n: StoredNote) => boolean): Promise<void> {
-        let mutated = false;
-        for (const n of this.snapshot.notes) {
-            if (edit(n)) mutated = true;
-        }
-        if (mutated) await this.store.save(this.snapshot);
+        await this.writes.run(async () => {
+            let mutated = false;
+            for (const n of this.snapshot.notes) {
+                if (edit(n)) mutated = true;
+            }
+            if (mutated) await this.store.save(this.snapshot);
+        });
     }
 }
 

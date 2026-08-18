@@ -12,7 +12,7 @@ import { auxOutputFromWire } from "../protocol/aux-wire.js";
 import type { SubmitSwapPayload } from "../protocol/transact.js";
 import type { SwapOptions, SwapResult } from "./api.js";
 import type { SpendContext } from "./context.js";
-import { makeTransactionResult } from "./internal.js";
+import { makeTransactionResult } from "./result-builder.js";
 import { freshDepositSlots, prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
 
 export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise<SwapResult> {
@@ -97,6 +97,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         recipientAddress: wrapperAddress,
         prover: ctx.prover,
         treeDepth: ctx.cfg.treeDepth,
+        shape: ctx.cfg.shape,
         inputs,
         merkleRoot,
         publicOut,
@@ -178,7 +179,14 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
  * lower bound) and walk up. Minimality is what keeps the answer under
  * `actualOut`; any overshoot is wrapper-side dust forwarded to the treasury.
  *
- * @internal
+ * Public because it is the only correct answer to "how much will this swap
+ * credit me?", and that is a question every caller showing a quote has to
+ * answer before the user commits. `executeSwap` encodes this exact value as
+ * the deposit leg's `publicIn`, so it is what the wallet receives — not a
+ * floor, since the wrapper pulls only what the B-note needs and forwards any
+ * better-than-quoted fill to the treasury. Callers that derive it themselves
+ * reach for the closed form above and get a figure that is both wrong on
+ * screen and, if used to size a transaction, reverting on chain.
  */
 export function sizeBNote(minOut: bigint, scaleOut: bigint, feeBps: bigint): bigint {
     const pullFor = (v: bigint): bigint => {

@@ -3,7 +3,7 @@
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
-import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
+import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import { keccak256 } from "../core/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
 import { mnemonicToAccountKey } from "./hd.js";
@@ -40,13 +40,19 @@ export function resolveNsk(source: KeySource): Field {
         case "mnemonic":
             return mnemonicToNsk(source.mnemonic, source.account ?? 0, source.passphrase);
         case "signature":
-            if (!/^0x[0-9a-fA-F]+$/.test(source.signature)) {
-                throw new Error("signature must be 0x-hex");
-            }
+            // Length and canonical form are enforced by
+            // `reduceSignatureToScalar`, which owns the signature encoding.
             return reduceSignatureToScalar(source.signature);
         case "privateKey":
             return hexPrivateKeyToNsk(source.hex);
         case "nsk":
+            // The only source that is not the output of a reduction, so it is
+            // the only one that can be out of range. `nsk = 0` gives
+            // `pk_d = 0 · Base8 = O`, a wallet whose ECDH key is the identity
+            // and whose every incoming note is publicly decryptable; an
+            // unreduced value silently aliases onto `nsk mod r`, i.e. a
+            // different wallet than the caller named.
+            assertNonZeroField(source.nsk, "nsk");
             return source.nsk;
     }
 }

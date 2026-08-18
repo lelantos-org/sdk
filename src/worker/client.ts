@@ -117,6 +117,11 @@ export function createWorkerRpc<M extends MethodMap>(
     // A structured-clone failure on the response rejects every in-flight call
     // rather than dropping the message and hanging the caller.
     const onMessageError = (ev: unknown): void => {
+        // Marked dead like `onError`. This handler already fails every call in
+        // flight, because the id of the undeserialisable response is not
+        // recoverable — so continuing to accept new work on a transport that
+        // just proved it can silently drop replies is the worst of both.
+        alive = false;
         log.error("worker message could not be deserialised", { name });
         failAll((method) =>
             rpcError("WORKER_FAILED", `${name}: response could not be deserialised`, {
@@ -158,6 +163,16 @@ export function createWorkerRpc<M extends MethodMap>(
                         site,
                         context: callOpts.context,
                     }),
+                );
+            }
+
+            // `addEventListener("abort", …)` below never fires on a signal
+            // that is already aborted, so without this the request is posted
+            // to the worker and left pending until its method timeout — or
+            // forever, since `timeouts` is per-method and optional.
+            if (callOpts.signal?.aborted) {
+                return Promise.reject(
+                    callOpts.signal.reason ?? new Error(`${name}: ${method} aborted`),
                 );
             }
 

@@ -22,14 +22,8 @@
 import { X402PaymentError } from "../core/errors.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
-import { type Budget, BudgetLedger } from "./budget.js";
-import {
-    hostOf,
-    readPaymentRequired,
-    readSettlement,
-    requestUrl,
-    withPaymentHeader,
-} from "./codec.js";
+import { type Budget, BudgetLedger, type BudgetReservation } from "./budget.js";
+import { hostOf, readPaymentRequired, readSettlement, withPaymentRequest } from "./codec.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
 import { parseCaip2 } from "./requirements.js";
 import { SHIELDED_NAMESPACE, type ShieldedExactOptions, shieldedExact } from "./shielded.js";
@@ -115,10 +109,15 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
     }
 
     const paying = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-        const res = await doFetch(input, init);
+        // Normalised up front so the retry can reproduce the call. A `Request`
+        // body is consumed by the first fetch, so paying and then retrying the
+        // same object threw `Request body is unusable` — after the funds had
+        // already moved. Both documented integrations are POST-shaped.
+        const req = new Request(input instanceof URL ? input.toString() : input, init);
+        const res = await doFetch(req.clone());
         if (res.status !== 402) return res;
 
-        const url = requestUrl(input);
+        const url = req.url;
         ledger.assertHostAllowed(url);
 
         const required = await readPaymentRequired(res, url);
@@ -133,11 +132,19 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
             network: requirements.network,
         });
 
-        const result = await chosen.mechanism.createPaymentPayload(
-            required.x402Version || X402_VERSION,
-            requirements,
-            { host: hostOf(url) },
-        );
+        let result: Awaited<ReturnType<PayableSchemeClient["createPaymentPayload"]>>;
+        try {
+            result = await chosen.mechanism.createPaymentPayload(
+                required.x402Version || X402_VERSION,
+                requirements,
+                { host: hostOf(url) },
+            );
+        } catch (err) {
+            // Nothing was spent, so hand the headroom back.
+            chosen.reservation.release();
+            throw err;
+        }
+
         const payload: PaymentPayload = {
             x402Version: result.x402Version,
             accepted: requirements,
@@ -146,11 +153,11 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
             ...(result.extensions ? { extensions: result.extensions } : {}),
         };
 
-        // The payment is made. Record it before the retry so a network failure
-        // on the retry cannot under-count what was spent.
-        ledger.record(chosen.quote.amount, chosen.quote.asset.id);
+        // The payment is made. Commit before the retry so a network failure on
+        // the retry cannot under-count what was spent.
+        chosen.reservation.commit();
 
-        const paid = await doFetch(input, withPaymentHeader(init, payload));
+        const paid = await doFetch(withPaymentRequest(req, payload));
         if (paid.status === 402) {
             throw new X402PaymentError(
                 "payment-rejected",
@@ -178,6 +185,8 @@ interface Choice {
     requirements: PaymentRequirements;
     namespace: string;
     quote: PaymentQuote;
+    /** Held against the budget from selection until the payment settles. */
+    reservation: BudgetReservation;
 }
 
 /**
@@ -208,8 +217,10 @@ async function select(
         try {
             // The mechanism prices its own network — see `PaymentQuote`.
             const quote = await mechanism.quote(requirements);
-            ledger.assertWithinLimits(quote.amount, quote.asset, url);
-            return { mechanism, requirements, namespace, quote };
+            // Reserved, not merely checked: minting the payload below takes
+            // seconds, and a concurrent payment must see this one coming.
+            const reservation = ledger.reserve(quote.amount, quote.asset, url);
+            return { mechanism, requirements, namespace, quote, reservation };
         } catch (err) {
             if (!isRoutable(err)) throw err;
             rejections.push(`${describe(requirements)}: ${err.message}`);

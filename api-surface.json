@@ -363,6 +363,7 @@
     "TAG_CM",
     "TAG_DK",
     "TAG_FMD_BIT",
+    "TAG_FMD_EXPAND",
     "TAG_IVK",
     "TAG_LEAF",
     "TAG_MERKLE",
@@ -378,6 +379,7 @@
     "buildRho",
     "configureJubjubWasm",
     "cryptoContext",
+    "cryptoContextIfReady",
     "deriveDk",
     "deriveIvk",
     "deriveNk",
@@ -690,6 +692,7 @@
     "NoteCache",
     "NotePage",
     "NoteRecord",
+    "NoteSink",
     "NoteSource",
     "NoteStore",
     "NotesFile",
@@ -709,6 +712,7 @@
     "SwapOptions",
     "SwapResult",
     "SyncDeps",
+    "SyncOpts",
     "SyncProgress",
     "SyncResult",
     "SyncStrategy",
@@ -736,6 +740,7 @@
     "minAmount",
     "parseAmount",
     "requireTokenMeta",
+    "sizeBNote",
     "syncWallet"
   ],
   "./x402": [
@@ -778,19 +783,5 @@
     "ProverPaths",
     "fastWallet",
     "nodeWallet"
-  ],
-  "./witness": [
-    "BuildOpts",
-    "CircomPublicInputs",
-    "CircomTransactInput",
-    "DummyBlinders",
-    "FlattenInput",
-    "SpendableCachedNote",
-    "dummyInputAt",
-    "fiatShamirZ",
-    "flatten",
-    "hornerEval",
-    "toCircomInput",
-    "toSpentNoteFromPath"
   ]
 }

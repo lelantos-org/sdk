@@ -17,7 +17,7 @@
 // mechanism refuses.
 
 import { privateKeyToAccount } from "viem/accounts";
-import { sleep } from "../core/async.js";
+import { createKeyedMutex, memoAsync, sleep } from "../core/async.js";
 import {
     type AssetId,
     branded,
@@ -25,6 +25,7 @@ import {
     type EvmAddress,
     type TokenAmount,
 } from "../core/brand.js";
+import { safeCall } from "../core/callbacks.js";
 import { bytesToHex } from "../core/hex.js";
 import { randomBytes } from "../core/random.js";
 import { getLogger } from "../log/logger.js";
@@ -86,6 +87,21 @@ export interface UnshieldedExactOptions {
     pollMs?: number | undefined;
     /** Give up waiting after this many polls. Default 30. */
     maxPolls?: number | undefined;
+    /**
+     * Fires when a top-up is about to unshield into the payer address.
+     *
+     * The budget caps *payments*, not the withdrawals that fund them, and it
+     * cannot do otherwise: a top-up moves value to an address the user still
+     * controls, so counting it as spend would double-count every payment made
+     * from it. But `topUpMultiple` means far more leaves the pool than any one
+     * payment costs, and if the poll below times out it has left with nothing
+     * recorded anywhere. This is the hook that makes that observable.
+     *
+     * Must not throw.
+     */
+    onTopUp?:
+        | ((info: { payer: EvmAddress; asset: AssetId; amount: CircuitAmount }) => void)
+        | undefined;
 }
 
 /** Everything an offer yields once it is known to be payable. */
@@ -116,6 +132,14 @@ interface PayerSlot {
 /** Slot used when nothing identifies the resource. See `PayerSlot`. */
 const SHARED_PAYER_INDEX = 0;
 
+/**
+ * Ceiling on an EIP-3009 authorization window: 1 hour.
+ *
+ * The authorization is a bearer instrument until it expires, so a server that
+ * asks for a year gets an hour.
+ */
+const MAX_AUTHORIZATION_SECONDS = 3600;
+
 function resolvePayerSlot(pinned: number | undefined, host: string | undefined): PayerSlot {
     if (pinned !== undefined) return { index: pinned, provenance: "pinned" };
     if (host) return { index: hostPayerIndex(host), provenance: "host" };
@@ -137,10 +161,16 @@ export function unshieldedExact(
     const candidates = opts.assetIds ?? [DEFAULT_ASSET];
     const topUpMultiple = opts.topUpMultiple ?? 10n;
 
-    let chainId: Promise<bigint> | undefined;
+    // Per slot, not global: slots are distinct ephemeral addresses, so
+    // concurrent payments to different hosts still top up in parallel.
+    const funding = createKeyedMutex<number>();
+    // Memoised with eviction on rejection: `x402()` builds this mechanism once
+    // and returns a long-lived `fetch`, so a single RPC blip on the first read
+    // would otherwise be replayed to every later payment for the process
+    // lifetime.
+    const chainId = memoAsync(() => wallet.chain.chainId());
     const read = async (req: PaymentRequirements): Promise<Terms> => {
-        chainId ??= wallet.chain.chainId();
-        const id = await chainId;
+        const id = await chainId.get();
         requireNetwork(SCOPE, req.network, { namespace: EVM_NAMESPACE, chainId: id });
         return {
             domain: requireEip712Domain(req),
@@ -181,19 +211,29 @@ export function unshieldedExact(
             }
             const account = privateKeyToAccount(deriveEphemeralKey(wallet.keys.nsk, slot.index));
 
-            await ensureFunded(wallet, branded<EvmAddress>(account.address), asset, value, {
-                topUpMultiple,
-                onPhase: opts.onPhase,
-                pollMs: opts.pollMs ?? 2000,
-                maxPolls: opts.maxPolls ?? 30,
-            });
+            // Serialised per payer slot. `ensureFunded` reads the balance and
+            // then decides whether to withdraw, with an await in between — so
+            // two concurrent payments to the same host both saw the pre-top-up
+            // balance and both unshielded: two proofs for one shortfall. The
+            // symmetric case is worse — both see a sufficient balance, both
+            // sign a full-value authorization, and the second settlement
+            // reverts on chain.
+            await funding.run(slot.index, () =>
+                ensureFunded(wallet, branded<EvmAddress>(account.address), asset, value, {
+                    topUpMultiple,
+                    onPhase: opts.onPhase,
+                    onTopUp: opts.onTopUp,
+                    pollMs: opts.pollMs ?? 2000,
+                    maxPolls: opts.maxPolls ?? 30,
+                }),
+            );
 
             const authorization = {
                 from: account.address,
                 to: req.payTo as `0x${string}`,
                 value,
                 validAfter: 0n,
-                validBefore: BigInt(Math.floor(Date.now() / 1000) + req.maxTimeoutSeconds),
+                validBefore: BigInt(Math.floor(Date.now() / 1000) + timeoutSeconds(req)),
                 nonce: bytesToHex(randomBytes(32)) as `0x${string}`,
             };
 
@@ -247,6 +287,7 @@ async function ensureFunded(
         onPhase?: OnPhase<SpendPhase> | undefined;
         pollMs: number;
         maxPolls: number;
+        onTopUp?: UnshieldedExactOptions["onTopUp"];
     },
 ): Promise<void> {
     const { tokenBalanceOf } = wallet.chain;
@@ -273,6 +314,9 @@ async function ensureFunded(
         asset: asset.id.toString(),
         circuitUnits: target.toString(),
     });
+    // Reported before the withdraw, so a caller still hears about value that
+    // left the pool even if the poll below times out.
+    safeCall("onTopUp", opts.onTopUp, { payer, asset: asset.id, amount: target });
     await wallet.withdraw({ to: payer, amount: target, asset: asset.id, onPhase: opts.onPhase });
 
     for (let i = 0; i < opts.maxPolls; i++) {
@@ -328,4 +372,23 @@ function requireEip712Domain(req: PaymentRequirements): { name: string; version:
 
 function ceilDiv(a: bigint, b: bigint): bigint {
     return (a + b - 1n) / b;
+}
+
+/**
+ * `maxTimeoutSeconds` from the offer, validated and clamped.
+ *
+ * Server-supplied, and the only requirement field that skipped the `require*`
+ * guards. A non-integer produced `BigInt(NaN)` — a `RangeError`, not an
+ * `X402PaymentError`, so `isRoutable` said no and the whole request aborted
+ * rather than falling through to the next `accepts[]` entry. A huge value
+ * minted an authorization valid for years that the facilitator could hold and
+ * replay against a later top-up. The shielded mechanism validates its own
+ * window; this is the matching guard.
+ */
+function timeoutSeconds(req: PaymentRequirements): number {
+    const seconds = req.maxTimeoutSeconds;
+    if (typeof seconds !== "number" || !Number.isSafeInteger(seconds) || seconds <= 0) {
+        throw unsupported(SCOPE, `maxTimeoutSeconds ${seconds} is not a positive integer`);
+    }
+    return Math.min(seconds, MAX_AUTHORIZATION_SECONDS);
 }

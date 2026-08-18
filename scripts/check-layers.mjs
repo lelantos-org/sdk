@@ -18,12 +18,23 @@ import { join, relative, resolve as resolvePath, dirname } from "node:path";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 
-/** First path segment -> tier. Anything unlisted is treated as tier 7. */
+/**
+ * First path segment -> tier.
+ *
+ * Every directory under `src/` must appear here. The tier-7 default exists for
+ * new files inside a listed directory, not for whole modules: an unlisted
+ * module is checked against nothing and can silently acquire any dependency it
+ * likes, which is the failure this script exists to prevent. `check` below
+ * fails on an unlisted directory rather than defaulting it.
+ */
 const TIERS = {
     core: 0,
     log: 0,
     worker: 0,
     wasm: 0,
+    // Ambient `.d.ts` declarations for untyped dependencies. Tier 0: they
+    // declare types and import nothing, so anything may reference them.
+    "types-ambient": 0,
     crypto: 1,
     fmd: 2,
     keys: 2,
@@ -38,6 +49,7 @@ const TIERS = {
     sync: 5,
     wallet: 6,
     presets: 7,
+    x402: 7,
 };
 
 /** `wasm/loader.ts` is tier 0, but the rayon glue may reach for logging. */
@@ -64,6 +76,20 @@ const DYNAMIC_RE = /import\(\s*(?:\/\*[^*]*\*\/\s*)?"([^"]+)"\s*\)/g;
 const EXPORT_STAR_RE = /^\s*export\s+\*\s+from\s+"/m;
 
 const problems = [];
+
+// Rule 4: every directory under `src/` carries an explicit tier.
+//
+// Without this the tier-7 default silently adopts a whole new module — as it
+// had for `x402`, 2.9k lines checked against nothing. Tier 7 happened to be
+// right there, which is the point: nothing would have said otherwise.
+for (const name of readdirSync(SRC)) {
+    if (!statSync(join(SRC, name)).isDirectory()) continue;
+    if (!(name in TIERS)) {
+        problems.push(
+            `src/${name}/ has no entry in TIERS — add one (see the table in this script)`,
+        );
+    }
+}
 
 for (const abs of walk(SRC)) {
     const rel = relative(SRC, abs);

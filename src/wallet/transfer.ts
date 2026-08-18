@@ -9,7 +9,7 @@ import { freshNoteRandomness, freshOutputAuxRandomness } from "../notes/randomne
 import type { TransferOptions, TransferResult } from "./api.js";
 import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
-import { makeTransactionResult, type OutputSlot } from "./internal.js";
+import { makeTransactionResult, type OutputSlot } from "./result-builder.js";
 import { prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
 
 export async function executeTransfer(
@@ -54,6 +54,7 @@ export async function executeTransfer(
         recipientAddress: ctx.cfg.relayerAddress,
         prover: ctx.prover,
         treeDepth: ctx.cfg.treeDepth,
+        shape: ctx.cfg.shape,
         inputs,
         merkleRoot,
         outputs,
@@ -66,7 +67,13 @@ export async function executeTransfer(
     const { txHash } = await submitSpend(ctx, spent, () => ctx.submitter.submit(built.payload));
     // Slot 0 is the recipient's, so it is the sender's only on a self-transfer; the
     // change slots always are.
-    const isSelf = args.to === ctx.address;
+    //
+    // Compared on the decoded `pk`, not on the address string. bech32m permits
+    // an all-uppercase spelling, and a re-encode of the same key is not
+    // guaranteed to be byte-identical either — both would read as "not self",
+    // dropping slot 0 from `ownIndices` so `ownCommitments` and `ownInflow`
+    // under-report a note the caller does own.
+    const isSelf = recipient.pk === ctx.keys.pk;
     const changeSlots: OutputSlot[] = changeNotes.map((_, i) => i + 1);
     const ownIndices: OutputSlot[] = isSelf ? [0, ...changeSlots] : changeSlots;
     return makeTransactionResult({

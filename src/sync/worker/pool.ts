@@ -61,7 +61,14 @@ export class WorkerPoolScanner implements Scanner {
             name: `scanner#${index}`,
             timeouts: { init: INIT_TIMEOUT_MS, scan: SCAN_TIMEOUT_MS },
         });
-        return { rpc, ready: rpc.call("init", this.wasm ? { wasm: this.wasm } : {}) };
+        const ready = rpc.call("init", this.wasm ? { wasm: this.wasm } : {});
+        // `ready` is only awaited inside `runChunk`, so a pool that is
+        // disposed — or whose owner never scans — would leave this rejection
+        // unobserved and trip Node's `unhandledRejection`. Marking it handled
+        // here does not swallow it: `runChunk` still awaits the same promise
+        // and still sees the failure.
+        ready.catch(() => {});
+        return { rpc, ready };
     }
 
     /**
@@ -88,9 +95,29 @@ export class WorkerPoolScanner implements Scanner {
         const ivkStr = ivk.toString();
         log.debug("scanning", { notes: inputs.length, chunks: chunks.length, workers: n });
 
-        const partials = await Promise.all(
-            chunks.map((chunk, idx) => this.runChunk(idx % n, ivkStr, chunk, idx)),
-        );
+        // One in-flight scan per slot, pulling from a shared queue, rather
+        // than dispatching every chunk at once.
+        //
+        // A worker handles its messages serially, so dispatching N chunks to
+        // one slot did not make it faster — it made all N share a single
+        // `SCAN_TIMEOUT_MS` while queued behind each other. A large sync with
+        // a small `chunkSize` therefore timed out chunks that had done no work
+        // yet, and `recycle` then discarded a perfectly healthy worker.
+        //
+        // Pulling also load-balances: a slot that finishes early takes the
+        // next chunk instead of idling while a slower one works through a
+        // fixed share.
+        const partials: ScanHit[][] = new Array(chunks.length);
+        let nextChunk = 0;
+        const runner = async (slotIndex: number): Promise<void> => {
+            for (;;) {
+                const idx = nextChunk++;
+                const chunk = chunks[idx];
+                if (!chunk) return;
+                partials[idx] = await this.runChunk(slotIndex, ivkStr, chunk, idx);
+            }
+        };
+        await Promise.all(Array.from({ length: n }, (_, i) => runner(i)));
 
         const out: ScanHit[] = [];
         for (const p of partials) for (const h of p) out.push(h);

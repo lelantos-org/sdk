@@ -78,6 +78,16 @@ export function configureProverWasm(loader: ProverWasmLoader): void {
     proverLoader.configure(loader);
 }
 
+/**
+ * Forget the memoised prover module, so the next `loadProver()` re-runs
+ * `postInit` — which is what starts the rayon thread pool.
+ *
+ * @internal
+ */
+export function resetProverModule(): void {
+    proverLoader.reset();
+}
+
 /** @internal */
 export async function loadProver(): Promise<ProverCtor> {
     // The worker-shaped globals are only needed while the pkg module

@@ -43,6 +43,7 @@ declare global {
 
     // Values a preceding block established.
     const wallet: WalletApi;
+    const quote: import("@lelantos-org/sdk/quoter").SwapQuote;
     const peerBech32: ShieldedAddress;
     const to: ShieldedAddress;
     const amount: CircuitAmount;

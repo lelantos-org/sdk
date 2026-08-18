@@ -63,7 +63,9 @@ describe("NullifierStore.sync", () => {
         expect(summary.added).toBe(2);
         expect(summary.syncedCount).toBe(12);
         expect(store.size).toBe(12);
-        expect(server.chunk).toHaveBeenCalledWith(0);
+        // Chunk id is what matters; the second argument is the abort signal
+        // `pageChunks` threads through so an abandoned window is cancelled.
+        expect(server.chunk.mock.calls.map((c) => c[0])).toContain(0);
     });
 
     it("stops at `maxChunks` and says so rather than paging forever", async () => {

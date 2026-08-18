@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     const single: ScanInput[] = [foreign[0]!];
     const decrypt = bench("try_decrypt_note (not mine)", N, (i) => {
         single[0] = foreign[i % N]!;
-        scanNotes(J, me.ivk, single);
+        scanNotes(J, P, me.ivk, single);
     });
     const fmd = bench("fmdTest (not mine)", N, (i) => {
         fmdTest(J, P, detection, clues[i % N]!);
@@ -117,7 +117,7 @@ async function main(): Promise<void> {
 
     console.log("\nend-to-end scan");
     console.log("=".repeat(48));
-    const scanner = new LocalScanner(J);
+    const scanner = new LocalScanner(J, P);
     const batch = 1000;
     for (const minePercent of [0, 5]) {
         const inputs = buildBatch(J, batch, minePercent / 100, me.pk_d, eve.pk_d);

@@ -25,6 +25,7 @@
 
 import { bech32m } from "bech32";
 import { branded, type ShieldedAddress } from "../core/brand.js";
+import { assertField } from "../core/field.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
@@ -60,7 +61,13 @@ export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
     }
 
     const pk_d = unpackChecked(J, payload.slice(0, FIELD_BYTES), "pk_d");
+    // The two point slots are validated by `unpackChecked`; the scalar slot
+    // needs its own range check. An unreduced `pk` decodes cleanly and the
+    // sender then commits to `pk mod r`, while the recipient derives a
+    // canonical `pk` from their `ivk` — a note the sender believes delivered
+    // and the recipient cannot spend.
     const pk = fromLeBytes(payload.slice(FIELD_BYTES, 2 * FIELD_BYTES));
+    assertField(pk, "address pk");
     const ck = unpackChecked(J, payload.slice(2 * FIELD_BYTES), "ck");
 
     return { pk_d, pk, ck };

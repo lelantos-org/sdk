@@ -2,7 +2,6 @@
 // and ChaCha20-Poly1305 ciphertext (prefixed with 2B big-endian clueBits).
 // Both real and pad slots go through `buildOutputAux`.
 
-import { bitAt } from "../core/bits.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
 import { type FmdFlagKey, fmdFlag } from "../fmd/fmd.js";
@@ -10,6 +9,7 @@ import {
     clueBitsToPrefix,
     encodeNotePayload,
     type NotePayload,
+    packClueBits,
     withClueBitsPrefix,
 } from "./codec.js";
 import { encryptNote } from "./encrypt.js";
@@ -80,11 +80,10 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
     const prefix = clueBitsToPrefix(clue.bits, clue.gamma);
     const ciphertext = withClueBitsPrefix(prefix, enc.ciphertext);
 
-    // Re-pack clueBits as a single field element, LSB-first within γ bits.
-    let clueBitsField: bigint = 0n;
-    for (let i = 0; i < clue.gamma; i++) {
-        if (bitAt(clue.bits, i)) clueBitsField |= 1n << BigInt(i);
-    }
+    // The same packing the wire prefix above is derived from — one loop, not
+    // two. The contract recomputes this slot from that prefix, so a drift
+    // between them would make every proof fail verification.
+    const clueBitsField = packClueBits(clue.bits, clue.gamma);
 
     return {
         aux: { clueR: clueRPoint, ephPub, ciphertext },

@@ -1,7 +1,8 @@
 // Hex codecs. Sole implementation for the whole SDK.
 
 import { branded, type Hex32 } from "./brand.js";
-import type { Field } from "./field.js";
+import { InvalidArgumentError } from "./errors.js";
+import { assertRange, type Field } from "./field.js";
 
 /** `0x`-prefixed lowercase hex of a byte array. */
 export function bytesToHex(b: Uint8Array): string {
@@ -42,13 +43,31 @@ export function hexToBigint(h: string): bigint {
     return BigInt(h.startsWith("0x") || h.startsWith("0X") ? h : `0x${h}`);
 }
 
-/** Format a field element as a `0x`-prefixed, zero-padded 32-byte hex word. */
+/** One past the largest value representable in 32 bytes. */
+const TWO_POW_256 = 1n << 256n;
+
+/**
+ * Format a field element as a `0x`-prefixed, zero-padded 32-byte hex word.
+ *
+ * Range-checked because this brands its result `Hex32` through the unvalidated
+ * escape hatch, and the output feeds ABI encoding and persisted note records.
+ * `(-1n).toString(16)` is `"-1"`, which `padStart(64)` pads to a 64-character
+ * string containing a minus sign — long enough to pass a length check — and
+ * `2n ** 256n` overflows to 65 digits with `padStart` a no-op.
+ */
 export function fieldToBytes32(x: Field): Hex32 {
+    assertRange(x, 0n, TWO_POW_256, "fieldToBytes32 input", "a 32-byte unsigned integer");
     return branded<Hex32>(`0x${x.toString(16).padStart(64, "0")}`);
 }
 
-/** Minimal-width `0x`-prefixed hex of a bigint, padded to a whole byte. */
+/**
+ * Minimal-width `0x`-prefixed hex of a bigint, padded to a whole byte.
+ *
+ * Negatives are rejected rather than emitted as `"0x-1"`, which is typed
+ * `` `0x${string}` `` but is not hex.
+ */
 export function bigintToHex(n: bigint): `0x${string}` {
+    if (n < 0n) throw new InvalidArgumentError(`bigintToHex: ${n} is negative`);
     const hex = n.toString(16);
     return `0x${hex.length % 2 ? `0${hex}` : hex}`;
 }

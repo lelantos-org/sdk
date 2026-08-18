@@ -51,15 +51,29 @@ export async function cancelDelay(ctx: ViemCtx): Promise<number> {
     });
 }
 
+/**
+ * Blocks to look back when the caller names no `fromBlock`.
+ *
+ * Bounded rather than open-ended: public RPCs reject `eth_getLogs` spanning
+ * more than a few thousand blocks, so the old `0n` default could never succeed
+ * on mainnet or sepolia — it only worked on a fresh anvil, where genesis is a
+ * few blocks back. ~12h at 12s blocks, which comfortably covers the cancel
+ * window this lookup serves. A caller that needs further back passes an
+ * explicit `fromBlock`.
+ */
+const DEFAULT_LOG_LOOKBACK_BLOCKS = 3_600n;
+
 export async function fetchDepositEscrowed(
     ctx: ViemCtx,
     id: bigint,
-    fromBlock: bigint = 0n,
+    fromBlock?: bigint,
 ): Promise<DepositEscrowedRecord | null> {
     const event = MASP_ABI.find((a) => a.type === "event" && a.name === "DepositEscrowed") as
         | Extract<(typeof MASP_ABI)[number], { type: "event" }>
         | undefined;
     if (!event) throw new TxMiningError("fetchDepositEscrowed: ABI missing DepositEscrowed");
+
+    const from = fromBlock ?? (await defaultFromBlock(ctx));
 
     // Always the pool's log, including for a native deposit: the adapter
     // escrows through `MASP.depositAuthorized`, so the event and the id are
@@ -68,10 +82,20 @@ export async function fetchDepositEscrowed(
         address: ctx.maspAddress,
         event,
         args: { id } as never,
-        fromBlock,
+        fromBlock: from,
         toBlock: "latest",
     });
     if (logs.length === 0) return null;
+
+    // `id` is unique per escrow, so more than one log means the chain state
+    // does not match what this function assumes. Reporting it beats silently
+    // decoding whichever arrived first.
+    if (logs.length > 1) {
+        throw new TxMiningError(
+            `fetchDepositEscrowed: ${logs.length} DepositEscrowed logs for id ${id}; ` +
+                "expected at most one",
+        );
+    }
 
     const first = logs[0];
     if (!first) return null;
@@ -103,4 +127,10 @@ export async function fetchDepositEscrowed(
         // wrong makes `cancelDeposit` revert `DigestMismatch` forever.
         submittedAt: Number(await evmBlockNumber(ctx.publicClient, first.blockNumber)),
     };
+}
+
+/** Tip minus {@link DEFAULT_LOG_LOOKBACK_BLOCKS}, floored at genesis. */
+async function defaultFromBlock(ctx: ViemCtx): Promise<bigint> {
+    const tip = await ctx.publicClient.getBlockNumber();
+    return tip > DEFAULT_LOG_LOOKBACK_BLOCKS ? tip - DEFAULT_LOG_LOOKBACK_BLOCKS : 0n;
 }

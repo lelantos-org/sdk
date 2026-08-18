@@ -360,6 +360,27 @@ Atomic shielded-to-shielded swap: leg-1 unshields to `SwapWrapper`, leg-2
 re-shields the output note. Both legs are bundled through
 `submitter.submitSwap`.
 
+#### What the swap actually credits
+
+The re-shielded B-note is **not** `quote.minOut / scaleOut`, and it is not a
+floor either. `swap()` sizes it with `sizeBNote` and encodes that exact value as
+the deposit leg's `publicIn`, so it is what the wallet receives — the wrapper
+pulls only what the note needs, and any better-than-quoted fill goes to the
+treasury as dust. Show this figure, not `expectedOut`:
+
+```ts
+import { sizeBNote } from "@lelantos-org/sdk/wallet";
+
+const feeBps = await chain.fetchFeeBps();
+const { scale } = await chain.fetchAsset(asset);
+const credited = sizeBNote(quote.minOut, scale, feeBps);
+```
+
+Do not re-derive it. The obvious closed form —
+`minOut * BPS / (scale * (BPS + feeBps))` — is only the lower bound the search
+starts from, and lands *below* `minOut` whenever the division is inexact: wrong
+on screen, and reverting on chain if used to size a transaction.
+
 ---
 
 ## Note management

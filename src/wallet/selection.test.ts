@@ -322,3 +322,38 @@ describe("notes reserved by an outstanding spend", () => {
         );
     });
 });
+
+describe("cover search cost", () => {
+    // Regression: the branch-and-bound prune only engaged once an incumbent
+    // existed, so a wallet whose largest notes cannot reach the target
+    // enumerated every C(n, size) before reporting `consolidate-first`. At the
+    // default arity of 3 that is ~1.7e8 bigint operations on the main thread —
+    // and it is precisely the dusty wallet that needs consolidating.
+    it("reports consolidate-first on a large dust wallet without enumerating", () => {
+        const notes = Array.from({ length: 1000 }, (_, i) => note((i + 1).toString(16), 1n));
+
+        const started = Date.now();
+        const r = selectNotes(notes, assetId(1n), circuitAmount(500n), baseOpts());
+        const elapsedMs = Date.now() - started;
+
+        expect(r.plan).toBe("consolidate-first");
+        // Generous by three orders of magnitude against the unpruned walk,
+        // so this pins the complexity class rather than the machine.
+        expect(elapsedMs).toBeLessThan(1000);
+    });
+
+    it("still finds the minimal cover when one exists", () => {
+        // 1..40: the smallest single note ≥ 30 is 30 itself, and no pair or
+        // triple of smaller notes beats it on the fewer-notes tiebreak.
+        const notes = Array.from({ length: 40 }, (_, i) =>
+            note((i + 1).toString(16), BigInt(i + 1)),
+        );
+
+        const r = selectNotes(notes, assetId(1n), circuitAmount(30n), baseOpts());
+
+        expect(r.plan).toBe("direct");
+        if (r.plan !== "direct") throw new Error("unreachable");
+        expect(r.sum).toBe(30n);
+        expect(r.notes).toHaveLength(1);
+    });
+});

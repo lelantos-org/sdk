@@ -16,8 +16,9 @@
 // `NullifierStore.withPersistence`; `load` runs once at startup, `save` after
 // every successful `sync()`.
 
+import { WireFormatError } from "../core/errors.js";
 import type { Field } from "../crypto/index.js";
-import type { FmdClient } from "../services/fmd-server/client.js";
+import type { FmdClient, NullifierChunkOut } from "../services/fmd-server/client.js";
 import { CHUNK_SIZE, chunkOf, type PagingOpts, type PagingStop, pageChunks } from "./chunk-feed.js";
 
 /**
@@ -105,12 +106,16 @@ export class NullifierStore {
      */
     async sync(opts: NullifierSyncOpts = {}): Promise<NullifierSyncSummary> {
         const startCount = this.syncedCount;
+        // `pageChunks` folds in chunk-id order starting here, so the id each
+        // chunk must carry is known in advance.
+        let expectedChunkId = chunkOf(this.syncedCount);
 
         try {
             const { chunksFetched, stoppedBy } = await pageChunks(
-                (chunkId) => this.fmd.fetchNullifierChunk(chunkId),
+                (chunkId, signal) => this.fmd.fetchNullifierChunk(chunkId, { signal }),
                 chunkOf(this.syncedCount),
                 (chunk) => {
+                    assertWellFormed(chunk, expectedChunkId++);
                     const base = chunk.chunkId * CHUNK_SIZE;
                     const fresh = chunk.nullifiers.slice(Math.max(0, this.syncedCount - base));
                     for (const nf of fresh) this.spent.add(nf);
@@ -152,5 +157,56 @@ export class NullifierStore {
     /** Nullifiers mirrored so far. */
     get size(): number {
         return this.spent.size;
+    }
+}
+
+/**
+ * Reject a chunk that does not sit exactly where the fold expects it.
+ *
+ * Position here is implied, exactly as it is for commitments: a chunk's k-th
+ * entry has sequence `chunkId * CHUNK_SIZE + k`, and `syncedCount` advances by
+ * the chunk's own length. So an over-long chunk pushes `syncedCount` into the
+ * next chunk's range, and the next fold's
+ * `slice(syncedCount - base)` silently drops that many *real* entries. Those
+ * nullifiers are never mirrored, `reconcileSpentOnChain` never marks their
+ * notes spent, and the selector keeps offering them — relayer rejections and
+ * reservation churn, forever, with nothing to point at.
+ *
+ * `TreeStore` guards the same shape with `assertContiguous`; this feed had no
+ * equivalent.
+ */
+function assertWellFormed(chunk: NullifierChunkOut, expectedChunkId: number): void {
+    if (chunk.chunkId !== expectedChunkId) {
+        throw new WireFormatError(
+            "$.chunkId",
+            `nullifier chunk is ${chunk.chunkId}, expected ${expectedChunkId}`,
+        );
+    }
+    if (chunk.nullifiers.length > CHUNK_SIZE) {
+        throw new WireFormatError(
+            "$.nullifiers",
+            `nullifier chunk ${chunk.chunkId} has ${chunk.nullifiers.length} entries, ` +
+                `at most ${CHUNK_SIZE}`,
+        );
+    }
+    if (chunk.isComplete && chunk.nullifiers.length !== CHUNK_SIZE) {
+        throw new WireFormatError(
+            "$.nullifiers",
+            `nullifier chunk ${chunk.chunkId} is marked complete with ` +
+                `${chunk.nullifiers.length} entries, expected ${CHUNK_SIZE}`,
+        );
+    }
+    // Entries arrive already truncated to `WIRE_BYTES`. An untruncated one
+    // would be stored at full width while `has()` looks it up truncated, so
+    // every lookup would miss and no note would ever be marked spent —
+    // silently, and in the direction that keeps spending stale notes.
+    for (const nf of chunk.nullifiers) {
+        if (nf < 0n || nf > WIRE_MASK) {
+            throw new WireFormatError(
+                "$.nullifiers",
+                `nullifier chunk ${chunk.chunkId} carries an entry wider than ` +
+                    `${WIRE_BYTES} bytes`,
+            );
+        }
     }
 }

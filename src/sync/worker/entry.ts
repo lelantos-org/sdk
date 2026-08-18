@@ -5,21 +5,26 @@
 // imports would crash module evaluation before any diagnostic could leave
 // the worker.
 //
-// Poseidon is not built here: there is no client-side FMD pre-filter (see
-// `./protocol.ts`), and trial-decrypt alone produces the full hit set.
+// Poseidon is built alongside Jubjub, but only for the per-hit commitment
+// check in `scanNotes` — not for a client-side FMD pre-filter, which is still
+// not implementable here (see `./protocol.ts`). The cost profiles differ: an
+// FMD filter runs per *input*, while the commitment check runs per *hit*, and
+// hits are rare.
 
+import { memoAsync } from "../../core/async.js";
 import type { WasmJubjub as WasmJubjubT } from "../../crypto/jubjub-wasm/index.js";
+import type { Poseidon as PoseidonT } from "../../crypto/poseidon.js";
 import { serveWorkerRpc } from "../../worker/serve.js";
 import { decodeInput, encodeHit, type ScannerMethods, type WireWasmConfig } from "./protocol.js";
 
-let jubPromise: Promise<WasmJubjubT> | null = null;
-
-async function jub(): Promise<WasmJubjubT> {
-    if (!jubPromise) {
-        jubPromise = import("../../crypto/jubjub-wasm/index.js").then((m) => m.WasmJubjub.build());
-    }
-    return jubPromise;
-}
+// Both memoised with eviction on rejection, so a transient import or wasm
+// failure does not permanently disable this worker.
+const jubjub = memoAsync<WasmJubjubT>(() =>
+    import("../../crypto/jubjub-wasm/index.js").then((m) => m.WasmJubjub.build()),
+);
+const poseidon = memoAsync<PoseidonT>(() =>
+    import("../../crypto/poseidon.js").then((m) => m.Poseidon.build()),
+);
 
 async function applyWasmConfig(cfg: WireWasmConfig): Promise<void> {
     const m = await import("../../crypto/jubjub-wasm/index.js");
@@ -33,12 +38,16 @@ serveWorkerRpc<ScannerMethods>(
     {
         async init({ wasm }) {
             if (wasm) await applyWasmConfig(wasm);
-            await jub();
+            await Promise.all([jubjub.get(), poseidon.get()]);
         },
 
         async scan({ ivk, inputs }) {
-            const [J, { scanNotes }] = await Promise.all([jub(), import("../scan.js")]);
-            const hits = scanNotes(J, BigInt(ivk), inputs.map(decodeInput));
+            const [J, P, { scanNotes }] = await Promise.all([
+                jubjub.get(),
+                poseidon.get(),
+                import("../scan.js"),
+            ]);
+            const hits = scanNotes(J, P, BigInt(ivk), inputs.map(decodeInput));
             return { hits: hits.map(encodeHit) };
         },
     },

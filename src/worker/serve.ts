@@ -64,9 +64,15 @@ export function serveWorkerRpc<M extends MethodMap>(
         try {
             const result = await handler(req.params);
             const transfer = opts.transferablesOf?.(req.method as keyof M & string, result);
-            post(scope, { id: req.id, ok: true, result }, transfer);
+            try {
+                post(scope, { id: req.id, ok: true, result }, transfer);
+            } catch (err) {
+                // Same reasoning as `postError`: an unclonable *result* must
+                // reach the caller as a failure rather than as silence.
+                postError(scope, req.id, err);
+            }
         } catch (err) {
-            post(scope, { id: req.id, ok: false, error: toWireError(err) });
+            postError(scope, req.id, err);
         }
     };
 
@@ -79,6 +85,31 @@ export function serveWorkerRpc<M extends MethodMap>(
 
 function post(scope: WorkerScopeLike, msg: RpcResponse, transfer?: readonly unknown[]): void {
     scope.postMessage(msg, transfer);
+}
+
+/**
+ * Answer a failed call, falling back to a minimal payload if the rich one
+ * cannot be cloned.
+ *
+ * `toWireError` carries the error's `context`, and structured clone rejects a
+ * function or class instance nested in there. That threw inside the catch, so
+ * no response was ever sent and the caller hung until its timeout — turning a
+ * diagnostic detail into a lost reply.
+ */
+function postError(scope: WorkerScopeLike, id: number, err: unknown): void {
+    try {
+        post(scope, { id, ok: false, error: toWireError(err) });
+    } catch {
+        post(scope, {
+            id,
+            ok: false,
+            error: {
+                name: "WorkerRpcError",
+                message: `worker error could not be serialised: ${String(err)}`,
+                code: "WORKER_FAILED",
+            },
+        });
+    }
 }
 
 function installLogForwarder(scope: WorkerScopeLike, perSecond: number): void {

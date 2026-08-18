@@ -32,8 +32,23 @@ export interface Budget {
  * been spent. One ledger per `x402()` call — the totals are the payer's
  * lifetime, not the process's.
  */
+/**
+ * A payment that has passed the limits and is being minted.
+ *
+ * Exactly one of `commit` / `release` must be called; both are idempotent, so
+ * a `finally` that releases after a `commit` is safe.
+ */
+export interface BudgetReservation {
+    /** The payment landed: move the hold into recorded spend. */
+    commit(): void;
+    /** The payment did not happen: give the headroom back. */
+    release(): void;
+}
+
 export class BudgetLedger {
     private readonly totals = new Map<bigint, bigint>();
+    /** Reserved but not yet committed — see {@link BudgetLedger.reserve}. */
+    private readonly held = new Map<bigint, bigint>();
     private readonly hosts?: ReadonlySet<string> | undefined;
 
     constructor(
@@ -80,7 +95,9 @@ export class BudgetLedger {
             );
         }
         const total = parseAmount(this.budget.total, meta);
-        const already = this.totals.get(asset.id) ?? 0n;
+        // Reservations included: a payment being minted right now is spend the
+        // wallet has committed to, even though it has not landed yet.
+        const already = (this.totals.get(asset.id) ?? 0n) + (this.held.get(asset.id) ?? 0n);
         if (already + amount > total) {
             throw new X402PaymentError(
                 "budget-exceeded",
@@ -90,6 +107,35 @@ export class BudgetLedger {
                 { resource },
             );
         }
+    }
+
+    /**
+     * Check the limits and hold `amount` against them in one step.
+     *
+     * Checking and recording separately is not enough: minting a payment takes
+     * seconds (a Groth16 prove, then a submit), and nothing held the ledger
+     * across that await — so N concurrent payments all passed the check before
+     * any of them recorded, and the budget was enforced against a total that
+     * ignored every payment still in flight. With `{ total: "5" }` and 1-unit
+     * payments, twenty concurrent calls all went through.
+     *
+     * The reservation is synchronous and counts toward the limits until it is
+     * committed or released, so a concurrent caller sees it.
+     *
+     * @throws {X402PaymentError} `per-request-limit` or `budget-exceeded`
+     */
+    reserve(amount: CircuitAmount, asset: AssetInfo, resource?: string): BudgetReservation {
+        this.assertWithinLimits(amount, asset, resource);
+        this.held.set(asset.id, (this.held.get(asset.id) ?? 0n) + amount);
+
+        let settled = false;
+        const settle = (commit: boolean) => {
+            if (settled) return;
+            settled = true;
+            this.held.set(asset.id, (this.held.get(asset.id) ?? 0n) - amount);
+            if (commit) this.record(amount, asset.id);
+        };
+        return { commit: () => settle(true), release: () => settle(false) };
     }
 
     /** Call only once a payment has been made. */

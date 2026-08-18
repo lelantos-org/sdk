@@ -1,4 +1,12 @@
-import { keccak256, recoverTypedDataAddress } from "viem";
+import { maspAbi } from "@lelantos-org/contracts";
+import {
+    concat,
+    encodeAbiParameters,
+    hashTypedData,
+    keccak256,
+    recoverTypedDataAddress,
+    toBytes,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 import { PrivateKeySigner } from "../chain/eth-signer.js";
@@ -7,6 +15,7 @@ import {
     type AuxOutput,
     type DepositRequest,
     PERMIT2_ADDRESS,
+    signPermit2Allowance,
     signPermit2Witness,
 } from "./sign.js";
 
@@ -94,5 +103,200 @@ describe("permit2", () => {
 
         const other = { ...deposit, publicIn: 1001n };
         expect(computePiHash(other, aux)).not.toBe(h1);
+    });
+});
+
+describe("permit2 witness type string", () => {
+    // The signing tests above re-declare the same type table and recover with
+    // viem — which proves viem is self-consistent and nothing about the bytes
+    // the contract verifies. These pin those bytes, so an edit to
+    // `PERMIT2_TYPES` (a reordered field, a changed width, a renamed struct)
+    // fails here rather than on chain.
+    //
+    // Permit2 builds the signed type string by concatenating its own stub with
+    // the caller's witness type string, so this concatenation is what has to
+    // equal `MASP._DEPOSIT_WITNESS_TYPE_STRING`.
+    const WITNESS_TYPE_STRING =
+        "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce," +
+        "uint256 deadline,MASPDeposit witness)MASPDeposit(bytes32 piHash)" +
+        "TokenPermissions(address token,uint256 amount)";
+
+    const WITNESS_TYPEHASH = keccak256(toBytes(WITNESS_TYPE_STRING));
+    const TOKEN_PERMISSIONS_TYPEHASH = keccak256(
+        toBytes("TokenPermissions(address token,uint256 amount)"),
+    );
+    const MASP_DEPOSIT_TYPEHASH = keccak256(toBytes("MASPDeposit(bytes32 piHash)"));
+
+    it("pins the typehashes the contract must agree with", () => {
+        expect(WITNESS_TYPEHASH).toBe(
+            "0x4fc8400d890c6f8cb526e53b865ce226717ac018bc6d2660ff9496a031c8fc1a",
+        );
+        expect(TOKEN_PERMISSIONS_TYPEHASH).toBe(
+            "0x618358ac3db8dc274f0cd8829da7e234bd48cd73c4a740aede1adec9846d06a1",
+        );
+        expect(MASP_DEPOSIT_TYPEHASH).toBe(
+            "0x8cfbfdbca8208f4e8028b3a50b2e83e8204f8fa08223df4eda5dacc99020ba19",
+        );
+    });
+
+    it("produces the digest a hand-rolled EIP-712 encoding gives", () => {
+        // The independent half: the struct hash is assembled here from the
+        // type strings above, byte for byte as Solidity would, and compared
+        // against what viem derives from the SDK's own `PERMIT2_TYPES`. They
+        // agree only if that table encodes to exactly this type string — which
+        // is the property the contract depends on and nothing else checked.
+        const token = "0x0000000000000000000000000000000000001234" as const;
+        const spender = "0x0000000000000000000000000000000000005678" as const;
+        const amount = 1_000n;
+        const nonce = 42n;
+        const deadline = 1_700_000_000n;
+        const piHash = keccak256("0xdeadbeef");
+
+        const tokenPermissionsHash = keccak256(
+            encodeAbiParameters(
+                [{ type: "bytes32" }, { type: "address" }, { type: "uint256" }],
+                [TOKEN_PERMISSIONS_TYPEHASH, token, amount],
+            ),
+        );
+        const witnessHash = keccak256(
+            encodeAbiParameters(
+                [{ type: "bytes32" }, { type: "bytes32" }],
+                [MASP_DEPOSIT_TYPEHASH, piHash],
+            ),
+        );
+        const structHash = keccak256(
+            encodeAbiParameters(
+                [
+                    { type: "bytes32" },
+                    { type: "bytes32" },
+                    { type: "address" },
+                    { type: "uint256" },
+                    { type: "uint256" },
+                    { type: "bytes32" },
+                ],
+                [WITNESS_TYPEHASH, tokenPermissionsHash, spender, nonce, deadline, witnessHash],
+            ),
+        );
+
+        const domain = {
+            name: "Permit2",
+            chainId: 31337,
+            verifyingContract: PERMIT2_ADDRESS as `0x${string}`,
+        };
+        // Domain separator hand-rolled too. Permit2's domain omits `version`,
+        // which is exactly the kind of detail a helper would paper over.
+        const domainSeparator = keccak256(
+            encodeAbiParameters(
+                [
+                    { type: "bytes32" },
+                    { type: "bytes32" },
+                    { type: "uint256" },
+                    { type: "address" },
+                ],
+                [
+                    keccak256(
+                        toBytes(
+                            "EIP712Domain(string name,uint256 chainId,address verifyingContract)",
+                        ),
+                    ),
+                    keccak256(toBytes("Permit2")),
+                    BigInt(domain.chainId),
+                    domain.verifyingContract,
+                ],
+            ),
+        );
+        const expected = keccak256(concat(["0x1901", domainSeparator, structHash]));
+
+        const viaSdkTable = hashTypedData({
+            domain,
+            types: PERMIT2_TYPES,
+            primaryType: "PermitWitnessTransferFrom",
+            message: {
+                permitted: { token, amount },
+                spender,
+                nonce,
+                deadline,
+                witness: { piHash },
+            },
+        });
+
+        expect(viaSdkTable).toBe(expected);
+    });
+
+    it("still finds the constants on the canonical MASP ABI", () => {
+        // A rename on the contract side is the other way these drift. Read
+        // from the published ABI, not the SDK's trimmed local copy.
+        const names = maspAbi.filter((e) => e.type === "function").map((e) => e.name);
+        expect(names).toContain("DEPOSIT_WITNESS_TYPE_STRING");
+        expect(names).toContain("DEPOSIT_WITNESS_TYPEHASH");
+    });
+});
+
+describe("signPermit2Allowance", () => {
+    // Zero coverage before this: the function launders its input through
+    // `as unknown as Record<string, unknown>`, so a wrong uint48/uint160 width
+    // was caught by nothing in the repo.
+    const permit = {
+        details: {
+            token: `0x${"11".repeat(20)}` as `0x${string}`,
+            amount: (1n << 160n) - 1n,
+            expiration: 2 ** 48 - 1,
+            nonce: 7,
+        },
+        spender: `0x${"22".repeat(20)}` as `0x${string}`,
+        sigDeadline: 1_700_000_000n,
+    };
+
+    it("recovers to the signer over the AllowanceTransfer types", async () => {
+        const account = privateKeyToAccount(ANVIL_KEY);
+        const { signature } = await signPermit2Allowance({
+            signer: new PrivateKeySigner(ANVIL_KEY, "http://localhost:0", 31337n),
+            chainId: 31337n,
+            permit,
+        });
+
+        const recovered = await recoverTypedDataAddress({
+            domain: { name: "Permit2", chainId: 31337, verifyingContract: PERMIT2_ADDRESS },
+            types: {
+                PermitSingle: [
+                    { name: "details", type: "PermitDetails" },
+                    { name: "spender", type: "address" },
+                    { name: "sigDeadline", type: "uint256" },
+                ],
+                PermitDetails: [
+                    { name: "token", type: "address" },
+                    { name: "amount", type: "uint160" },
+                    { name: "expiration", type: "uint48" },
+                    { name: "nonce", type: "uint48" },
+                ],
+            },
+            primaryType: "PermitSingle",
+            message: permit,
+            signature: signature as `0x${string}`,
+        });
+
+        expect(recovered.toLowerCase()).toBe(account.address.toLowerCase());
+    });
+
+    it("rejects a value that overflows its declared width", async () => {
+        // `uint160` and `uint48` are the widths the contract reads; viem
+        // enforces them, which is the only thing standing between a silently
+        // truncated allowance and a correct one.
+        await expect(
+            signPermit2Allowance({
+                signer: new PrivateKeySigner(ANVIL_KEY, "http://localhost:0", 31337n),
+                chainId: 31337n,
+                permit: { ...permit, details: { ...permit.details, amount: 1n << 160n } },
+            }),
+        ).rejects.toThrow();
+    });
+
+    it("returns the permit it was given, unmodified", async () => {
+        const { permit: out } = await signPermit2Allowance({
+            signer: new PrivateKeySigner(ANVIL_KEY, "http://localhost:0", 31337n),
+            chainId: 31337n,
+            permit,
+        });
+        expect(out).toBe(permit);
     });
 });

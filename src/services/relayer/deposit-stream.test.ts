@@ -24,6 +24,15 @@ class FakeSource implements EventSourceLike {
         this.handlers.set(type, listener);
     }
 
+    removeEventListener(type: string, listener: (ev: { data?: unknown }) => void): void {
+        if (this.handlers.get(type) === listener) this.handlers.delete(type);
+    }
+
+    /** Handler types still attached, for leak assertions. */
+    get attached(): string[] {
+        return [...this.handlers.keys()].sort();
+    }
+
     close(): void {
         this.closeCalls += 1;
         this.readyState = CLOSED;
@@ -243,5 +252,61 @@ describe("DepositStream", () => {
             src.emit(flushed(2));
             expect(seen).toEqual([1n]);
         });
+    });
+});
+
+describe("DepositStream teardown", () => {
+    it("detaches its transport handlers on close", async () => {
+        // The handlers were inline arrows, so nothing could remove them: every
+        // closed stream stayed attached to its source for as long as the
+        // source was reachable.
+        const stream = new DepositStream("http://relayer.test", 1n, {
+            eventSourceFactory: (url) => new FakeSource(url),
+        });
+        const source = FakeSource.last;
+        if (!source) throw new Error("no source");
+
+        expect(source.attached).toEqual(["error", "message"]);
+
+        stream.close();
+
+        expect(source.attached).toEqual([]);
+    });
+
+    it("detaches when the transport closes the stream, not just on close()", async () => {
+        const stream = new DepositStream("http://relayer.test", 1n, {
+            eventSourceFactory: (url) => new FakeSource(url),
+        });
+        const source = FakeSource.last;
+        if (!source) throw new Error("no source");
+
+        source.fail();
+
+        expect(stream.isClosed).toBe(true);
+        expect(source.attached).toEqual([]);
+    });
+
+    it("ignores a subscriber registered after close", async () => {
+        // `markClosed` clears the listener set, so a later `subscribe` added to
+        // a set nothing drains — unreachable, and never cleaned up.
+        const stream = new DepositStream("http://relayer.test", 1n, {
+            eventSourceFactory: (url) => new FakeSource(url),
+        });
+        stream.close();
+
+        const seen: unknown[] = [];
+        const unsubscribe = stream.subscribe((ev) => seen.push(ev));
+
+        expect(() => unsubscribe()).not.toThrow();
+        expect(seen).toEqual([]);
+    });
+
+    it("settles a waiter on an already-closed stream", async () => {
+        const stream = new DepositStream("http://relayer.test", 1n, {
+            eventSourceFactory: (url) => new FakeSource(url),
+        });
+        stream.close();
+
+        await expect(stream.awaitFlush(1n)).resolves.toEqual({ kind: "closed" });
     });
 });

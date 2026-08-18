@@ -66,6 +66,9 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
 
     const treeStore = {
         sync: vi.fn(async () => undefined),
+        // `prepareSpend` confirms the local root is one the chain holds before
+        // spending anything; these tests are not about that check.
+        verifyRoot: vi.fn(async () => true),
         root: () => 0n,
         getPath: () => ({
             pathElements: Array.from({ length: 4 }, () => [0n, 0n, 0n]),
@@ -144,6 +147,22 @@ describe("executeTransfer", () => {
     it("credits every slot on a self-transfer", async () => {
         const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
         const res = await executeTransfer(ctx, { to: address, amount: circuitAmount(30n) });
+        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
+    });
+
+    it("recognises a self-transfer written in uppercase bech32m", async () => {
+        // Detection compares the decoded `pk`, not the address string.
+        // bech32m permits an all-uppercase spelling of the same address, and a
+        // string compare read it as "not self" — dropping slot 0 from
+        // `ownIndices`, so `ownCommitments` and `ownInflow` under-reported a
+        // note the caller does own.
+        const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
+
+        const res = await executeTransfer(ctx, {
+            to: address.toUpperCase(),
+            amount: circuitAmount(30n),
+        });
+
         expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
     });
 
@@ -371,5 +390,48 @@ describe("a spend whose submit fails", () => {
         expect(reserved).toEqual([["01"]]);
         // Reserved, not spent: nothing here proves the notes are gone.
         expect(markedSpent).toEqual([]);
+    });
+});
+
+describe("root verification before proving", () => {
+    // The wallet trusts the server's `leafHash` rather than deriving leaves,
+    // so a wrong one yields a wrong root with no local symptom. Proving
+    // against it costs a full Groth16 run and then fails `isKnownRoot` as an
+    // unexplained relayer rejection.
+
+    it("proves against a root the chain confirms", async () => {
+        const { ctx, treeStore, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const { address: recipient } = await makeCtx([]);
+
+        await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
+
+        expect(treeStore.verifyRoot).toHaveBeenCalled();
+        expect(submitted).toHaveLength(1);
+    });
+
+    it("resyncs once when the root disagrees, then proceeds", async () => {
+        // Usually benign: the mirror lags the chain, so a tree synced
+        // mid-block legitimately disagrees for a moment.
+        const { ctx, treeStore, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const { address: recipient } = await makeCtx([]);
+        treeStore.verifyRoot.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+        await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
+
+        expect(treeStore.sync).toHaveBeenCalledTimes(2);
+        expect(submitted).toHaveLength(1);
+    });
+
+    it("refuses to prove when the root still disagrees after a resync", async () => {
+        const { ctx, treeStore, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const { address: recipient } = await makeCtx([]);
+        treeStore.verifyRoot.mockResolvedValue(false);
+
+        await expect(
+            executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) }),
+        ).rejects.toThrow(/does not match the chain/);
+
+        // The point of the check: nothing was proved and nothing was sent.
+        expect(submitted).toHaveLength(0);
     });
 });

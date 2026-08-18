@@ -249,22 +249,52 @@ const MAX_COMBINATIONS = 50_000;
  * continues.
  */
 function smallestCover(values: readonly bigint[], threshold: bigint, size: number): bigint | null {
-    let best: bigint | null = null;
+    if (size > values.length) return null;
+
+    // Seeded with the sum of the `size` largest values — the most any
+    // combination of this size can reach.
+    //
+    // Two things follow, and the second is the load-bearing one. If even that
+    // falls short, no combination qualifies and the walk is skipped entirely.
+    // Otherwise it is itself a valid cover, so the prune below has an incumbent
+    // from the very first branch. Starting at `null` instead meant the prune
+    // was dead until the first success — and on a wallet whose largest notes
+    // cannot reach `threshold` there is no success, so every C(n, size) was
+    // enumerated before returning null. That is exactly the dusty wallet that
+    // needs `consolidate-first`, which is reached only after this returns.
+    let best = 0n;
+    for (let i = values.length - size; i < values.length; i++) best += values[i]!;
+    if (best < threshold) return null;
+
+    // The seed makes the search cheap in practice, but branch-and-bound has no
+    // polynomial guarantee, so the documented cap is enforced here too. Bailing
+    // early returns the incumbent, which is always a real cover — a possibly
+    // non-minimal selection, never a stalled spend.
+    let visited = 0;
+    let truncated = false;
 
     const walk = (start: number, remaining: number, sum: bigint): void => {
         if (remaining === 0) {
-            if (sum >= threshold && (best === null || sum < best)) best = sum;
+            if (sum >= threshold && sum < best) best = sum;
             return;
         }
         for (let i = start; i + remaining <= values.length; i++) {
+            if (++visited > MAX_COMBINATIONS) {
+                truncated = true;
+                return;
+            }
             const v = values[i]!;
             const floor = sum + v * BigInt(remaining);
-            if (best !== null && floor >= best) break;
+            // Ascending values: if this branch's best case cannot beat the
+            // incumbent, no later index can either.
+            if (floor >= best) break;
             walk(i + 1, remaining - 1, sum + v);
+            if (truncated) return;
         }
     };
 
     walk(0, size, 0n);
+    if (truncated) log.debug("selection cover search truncated", { size, cap: MAX_COMBINATIONS });
     return best;
 }
 

@@ -62,4 +62,33 @@ export class SnarkjsProver implements Prover {
     prove(input: Record<string, unknown>): Promise<ProveResult> {
         return prove(input, this.paths);
     }
+
+    /**
+     * Terminate the curve worker pool snarkjs leaves running.
+     *
+     * `groth16.fullProve` installs `globalThis.curve_bn128` and its worker
+     * threads, and nothing tears them down — so a Node CLI that proves once
+     * then finishes hangs at exit instead of returning to the shell.
+     * Idempotent, and safe when nothing was ever proved. Unlike
+     * `WasmProver.shutdown` this is not a one-way door: snarkjs rebuilds the
+     * curve on the next proof.
+     */
+    async dispose(): Promise<void> {
+        await disposeCurve();
+    }
+}
+
+/** Tear down snarkjs's global bn128 curve, if one was built. */
+async function disposeCurve(): Promise<void> {
+    const g = globalThis as {
+        curve_bn128?: { terminate?: () => Promise<void> | void } | undefined;
+    };
+    const curve = g.curve_bn128;
+    if (!curve?.terminate) return;
+    try {
+        await curve.terminate();
+    } catch {
+        // Already gone, or a snarkjs build without a terminable pool.
+    }
+    g.curve_bn128 = undefined;
 }

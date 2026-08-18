@@ -49,9 +49,17 @@ export function modSqrt(n: bigint, p: bigint): bigint | null {
         s++;
     }
 
-    // Find any QNR z.
-    let z = 2n;
-    while (legendreSymbol(z, p) !== -1) z++;
+    // Find any QNR z. Pinned for BN254's Fr, which is the only modulus the
+    // SDK actually calls this with — the trial search costs three extra
+    // 254-bit `modPow`s on every `fmdLegendreWitness`, for a constant
+    // `core/field.ts` already exports and `hash_to_bit.circom` already pins.
+    let z: bigint;
+    if (p === BN254_FR) {
+        z = FMD_LEGENDRE_QNR;
+    } else {
+        z = 2n;
+        while (legendreSymbol(z, p) !== -1) z++;
+    }
 
     let m = s;
     let c = modPow(z, q, p);

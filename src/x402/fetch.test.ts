@@ -62,8 +62,13 @@ function encode(value: unknown): string {
     return btoa(binary);
 }
 
-function decodePaymentHeader(init: RequestInit | undefined): PaymentPayload {
-    const header = new Headers(init?.headers).get(HEADER_PAYMENT_SIGNATURE);
+/**
+ * The payment payload on a paid retry. The retry is issued as a single
+ * `Request` so a caller-supplied one is reproduced faithfully, so the header
+ * lives on the request rather than on a separate `init`.
+ */
+function decodePaymentHeader(input: unknown): PaymentPayload {
+    const header = (input as Request).headers?.get(HEADER_PAYMENT_SIGNATURE);
     if (!header) throw new Error("no payment header");
     const binary = atob(header);
     const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
@@ -115,7 +120,7 @@ describe("x402", () => {
             expect.objectContaining({ to: "lelantos1qqqq", amount: 1500n, asset: 1n }),
         );
 
-        const payload = decodePaymentHeader(fetchImpl.mock.calls[1]![1]);
+        const payload = decodePaymentHeader(fetchImpl.mock.calls[1]![0]);
         expect(payload.x402Version).toBe(2);
         expect(payload.accepted.network).toBe(`shielded:${CHAIN_ID}`);
         expect(payload.payload).toEqual({
@@ -223,7 +228,7 @@ describe("x402", () => {
         await pay("https://api.example.com/premium");
 
         // The shielded entry is second in `accepts[]` but must still win.
-        expect(decodePaymentHeader(fetchImpl.mock.calls[1]![1]).accepted.network).toBe(
+        expect(decodePaymentHeader(fetchImpl.mock.calls[1]![0]).accepted.network).toBe(
             `shielded:${CHAIN_ID}`,
         );
         expect(wallet.transfer).toHaveBeenCalledTimes(1);
@@ -374,5 +379,95 @@ describe("x402", () => {
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(
             /without a usable PAYMENT-REQUIRED header/,
         );
+    });
+});
+
+describe("x402 concurrency and request handling", () => {
+    it("enforces the budget across payments that overlap in flight", async () => {
+        // Minting a payment takes seconds in reality (prove, then submit).
+        // Nothing held the ledger across that await, so every concurrent call
+        // passed the check against a total that ignored the others.
+        const wallet = stubWallet();
+        let release: () => void = () => {};
+        const gate = new Promise<void>((r) => {
+            release = r;
+        });
+        const transfer = vi.mocked(wallet.transfer);
+        const ok = await transfer({} as never);
+        let started = 0;
+        transfer.mockImplementation(async () => {
+            started++;
+            await gate;
+            return ok;
+        });
+
+        const fetchImpl = vi.fn<typeof fetch>(async () =>
+            paymentRequired([shieldedRequirements()]),
+        );
+        // WETH here is scale 1e15 / 18 decimals, so one payment of 1500
+        // circuit units is "1.5". A total of "3" affords exactly two.
+        const pay = x402(wallet, { budget: { total: "3" }, fetchImpl });
+
+        const calls = [1, 2, 3, 4].map(() =>
+            pay("https://api.example.com/premium").catch((e: Error) => e),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        release();
+        const settled = await Promise.all(calls);
+
+        const overBudget = settled.filter(
+            (r) => r instanceof Error && /budget/.test(r.message),
+        ).length;
+        expect(overBudget).toBe(2);
+        // The ledger held the first two, so only two payments were ever minted.
+        expect(started).toBe(2);
+    });
+
+    it("returns the headroom when minting the payment fails", async () => {
+        const wallet = stubWallet();
+        const transfer = vi.mocked(wallet.transfer);
+        const ok = await transfer({} as never);
+        transfer.mockRejectedValueOnce(new Error("prover exploded")).mockResolvedValue(ok);
+
+        const fetchImpl = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
+            .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
+            .mockResolvedValueOnce(new Response("premium", { status: 200 }));
+
+        // Budget for exactly one payment: a reservation left held by the
+        // failure would make the retry unaffordable.
+        const pay = x402(wallet, { budget: { total: "1.5" }, fetchImpl });
+
+        await expect(pay("https://api.example.com/premium")).rejects.toThrow("prover exploded");
+        expect((await pay("https://api.example.com/premium")).status).toBe(200);
+    });
+
+    it("pays for a POST passed as a Request and preserves its body and headers", async () => {
+        const wallet = stubWallet();
+        const fetchImpl = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
+            .mockResolvedValueOnce(new Response("premium", { status: 200 }));
+
+        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        // The shape both documented integrations use. The first fetch consumes
+        // a Request body, so retrying the same object threw
+        // `Request body is unusable` — after the funds had already moved.
+        const req = new Request("https://api.example.com/premium", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-caller": "keep-me" },
+            body: JSON.stringify({ prompt: "hi" }),
+        });
+
+        const res = await pay(req);
+
+        expect(res.status).toBe(200);
+        const retried = fetchImpl.mock.calls[1]![0] as Request;
+        expect(retried.method).toBe("POST");
+        expect(retried.headers.get("x-caller")).toBe("keep-me");
+        expect(await retried.text()).toBe(JSON.stringify({ prompt: "hi" }));
+        expect(decodePaymentHeader(retried).accepted.network).toBe(`shielded:${CHAIN_ID}`);
     });
 });

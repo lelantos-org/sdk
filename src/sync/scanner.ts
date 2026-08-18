@@ -1,6 +1,6 @@
 // Pluggable note scanner.
 
-import type { Field, Jubjub } from "../crypto/index.js";
+import type { Field, Jubjub, Poseidon } from "../crypto/index.js";
 import { emptyScanStats, type ScanHit, type ScanInput, type ScanStats, scanNotes } from "./scan.js";
 
 export interface Scanner {
@@ -25,11 +25,15 @@ export class LocalScanner implements Scanner {
     /** Tallies from the most recent `scan`. */
     lastStats: ScanStats = emptyScanStats();
 
-    constructor(private readonly J: Jubjub) {}
+    /** `P` reproduces each hit's commitment — see {@link scanNotes}. */
+    constructor(
+        private readonly J: Jubjub,
+        private readonly P: Poseidon,
+    ) {}
 
     async scan(ivk: Field, inputs: ScanInput[]): Promise<ScanHit[]> {
         this.lastStats = emptyScanStats();
-        return scanNotes(this.J, ivk, inputs, this.lastStats);
+        return scanNotes(this.J, this.P, ivk, inputs, this.lastStats);
     }
 }
 

@@ -51,6 +51,13 @@ export interface WireError {
     /** `WalletError.code` when the remote threw a typed SDK error. */
     code?: string | undefined;
     context?: Record<string, unknown> | undefined;
+    /**
+     * Typed fields a `WalletError` subclass adds beyond the `Error` shape —
+     * `InsufficientCoverError.consolidate` and the like. Carried so the
+     * narrowed type a caller gets from `isWalletError(e, code)` is not a lie
+     * on a worker-origin error.
+     */
+    fields?: Record<string, unknown> | undefined;
     cause?: WireError | undefined;
 }
 

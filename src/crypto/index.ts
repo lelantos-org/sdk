@@ -7,7 +7,7 @@ export {
 export { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
 export type { NoteCommitInput } from "./commit.js";
 export { buildNoteCommitment } from "./commit.js";
-export { type CryptoContext, cryptoContext } from "./context.js";
+export { type CryptoContext, cryptoContext, cryptoContextIfReady } from "./context.js";
 export {
     deriveDk,
     deriveIvk,
@@ -34,6 +34,7 @@ export {
     TAG_CM,
     TAG_DK,
     TAG_FMD_BIT,
+    TAG_FMD_EXPAND,
     TAG_IVK,
     TAG_LEAF,
     TAG_MERKLE,

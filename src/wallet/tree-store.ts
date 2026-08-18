@@ -16,7 +16,14 @@ import { WireFormatError } from "../core/errors.js";
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleNode, type MerkleProof, MerkleTree } from "../crypto/merkle.js";
 import type { FmdClient } from "../services/fmd-server/client.js";
-import { chunkOf, type PagingOpts, type PagingStop, pageChunks, TREE_DEPTH } from "./chunk-feed.js";
+import {
+    chunkOf,
+    maxChunksFor,
+    type PagingOpts,
+    type PagingStop,
+    pageChunks,
+    TREE_DEPTH,
+} from "./chunk-feed.js";
 
 // Re-exported because `TreeStoreState.nodes` is typed by it: a
 // `TreePersistence` implementation cannot be written without naming it.
@@ -70,11 +77,18 @@ export class TreeStore {
     private syncedCount = 0;
     private persistence?: TreePersistence;
 
+    /**
+     * `treeDepth` must be the same value the spend path gives the circuit
+     * (`WalletConfig.treeDepth`). A local tree of a different depth produces
+     * paths and a root of that depth, the proof is built for another, and
+     * nothing errors — the proof simply fails to verify on chain.
+     */
     constructor(
         private readonly P: Poseidon,
         private readonly fmd: FmdClient,
+        private readonly treeDepth: number = TREE_DEPTH,
     ) {
-        this.tree = new MerkleTree(P, TREE_DEPTH);
+        this.tree = new MerkleTree(P, treeDepth);
     }
 
     /** Build a TreeStore and restore any previously persisted state. */
@@ -82,8 +96,9 @@ export class TreeStore {
         P: Poseidon,
         fmd: FmdClient,
         persistence: TreePersistence,
+        treeDepth: number = TREE_DEPTH,
     ): Promise<TreeStore> {
-        const store = new TreeStore(P, fmd);
+        const store = new TreeStore(P, fmd, treeDepth);
         store.persistence = persistence;
         const saved = await persistence.load();
         if (saved) store.loadState(saved);
@@ -91,7 +106,7 @@ export class TreeStore {
     }
 
     loadState(state: TreeStoreState): void {
-        this.tree = new MerkleTree(this.P, TREE_DEPTH);
+        this.tree = new MerkleTree(this.P, this.treeDepth);
         // Order matters: `setLeaves` clears the node cache.
         this.tree.setLeaves(state.leaves);
         if (state.nodes) this.tree.importNodes(state.nodes);
@@ -116,7 +131,7 @@ export class TreeStore {
 
         try {
             const { chunksFetched, stoppedBy } = await pageChunks(
-                (chunkId) => this.fmd.fetchCommitmentChunk(chunkId),
+                (chunkId, signal) => this.fmd.fetchCommitmentChunk(chunkId, { signal }),
                 chunkOf(this.syncedCount),
                 (chunk) => {
                     const fresh = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
@@ -131,7 +146,14 @@ export class TreeStore {
                         syncedCount: this.syncedCount,
                     });
                 },
-                { maxChunks: opts.maxChunks, signal: opts.signal, feed: "commitments" },
+                {
+                    // Derived from the configured depth, not the module
+                    // default: a deeper tree holds more leaves and so more
+                    // chunks, and the ceiling has to follow it.
+                    maxChunks: opts.maxChunks ?? maxChunksFor(this.treeDepth),
+                    signal: opts.signal,
+                    feed: "commitments",
+                },
             );
 
             return {

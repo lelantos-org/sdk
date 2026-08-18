@@ -136,7 +136,11 @@ export async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> 
 
         terminate(): void {
             spawned.delete(this.w);
-            void this.w.terminate();
+            // `void` marks the value ignored but attaches no rejection
+            // handler, so a worker that was already gone surfaced as an
+            // unhandled rejection. `shutdownRayonWorkers` catches the same
+            // call; this path should too.
+            this.w.terminate()?.catch(() => {});
         }
     }
 
@@ -153,6 +157,30 @@ export async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> 
  * long-lived hosts and test suites a deterministic teardown point.
  */
 export async function shutdownRayonWorkers(): Promise<void> {
+    const terminated = await terminateRayonWorkers();
+
+    if (installedFor !== null) {
+        const g = globalThis as Record<string, unknown>;
+        if (previousWorker === undefined) delete g.Worker;
+        else g.Worker = previousWorker;
+        installedFor = null;
+        previousWorker = undefined;
+    }
+    if (terminated > 0) log.debug("rayon pool shut down", { workers: terminated });
+}
+
+/**
+ * Terminate every spawned worker but leave the `globalThis.Worker` shim in
+ * place. Returns how many were terminated.
+ *
+ * Split out for the failed-init path: `initThreadPool` spawns all N workers
+ * before awaiting N readies, so if one fails to boot the promise never settles
+ * and the timeout fires — leaving the N-1 that *did* boot parked in
+ * `Atomics.wait`, each holding a stack in the prover's shared wasm memory,
+ * which can never shrink. Degrading to single-threaded has to take them with
+ * it, but must not uninstall the shim a later retry would need.
+ */
+export async function terminateRayonWorkers(): Promise<number> {
     const workers = [...spawned];
     spawned.clear();
     await Promise.all(
@@ -164,15 +192,7 @@ export async function shutdownRayonWorkers(): Promise<void> {
             }
         }),
     );
-
-    if (installedFor !== null) {
-        const g = globalThis as Record<string, unknown>;
-        if (previousWorker === undefined) delete g.Worker;
-        else g.Worker = previousWorker;
-        installedFor = null;
-        previousWorker = undefined;
-    }
-    if (workers.length > 0) log.debug("rayon pool shut down", { workers: workers.length });
+    return workers.length;
 }
 
 /** Live worker count. Exposed for tests and diagnostics. */

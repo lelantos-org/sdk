@@ -56,6 +56,12 @@ const READY_STATE_CLOSED = 2;
 export interface EventSourceLike {
     readonly readyState: number;
     addEventListener(type: string, listener: (ev: { data?: unknown }) => void): void;
+    /**
+     * Optional so a minimal custom source stays valid, but implement it where
+     * possible: without it a closed stream's handlers stay attached to the
+     * source for as long as the source itself is reachable.
+     */
+    removeEventListener?(type: string, listener: (ev: { data?: unknown }) => void): void;
     close(): void;
 }
 
@@ -122,12 +128,20 @@ export class DepositStream {
     private readonly recent: DepositFlushed[] = [];
     private closed = false;
 
+    /**
+     * Retained so {@link markClosed} can detach them. An inline arrow could
+     * not be removed, so every closed stream kept its handlers attached to the
+     * source for as long as the source stayed reachable.
+     */
+    private readonly onMessageEvent = (ev: { data?: unknown }): void => this.onMessage(ev.data);
+    private readonly onErrorEvent = (): void => this.onError();
+
     constructor(baseUrl: string, chainId: bigint, opts: DepositStreamOptions = {}) {
         this.replayBuffer = opts.replayBuffer ?? DEFAULT_REPLAY;
         this.url = `${baseUrl.replace(/\/$/, "")}/v1/deposits/stream?chain_id=${chainId}`;
         this.source = (opts.eventSourceFactory ?? globalEventSourceFactory())(this.url);
-        this.source.addEventListener("message", (ev) => this.onMessage(ev.data));
-        this.source.addEventListener("error", () => this.onError());
+        this.source.addEventListener("message", this.onMessageEvent);
+        this.source.addEventListener("error", this.onErrorEvent);
     }
 
     /** True once the feed can no longer deliver events. */
@@ -135,8 +149,15 @@ export class DepositStream {
         return this.closed;
     }
 
-    /** Observe every event from now on. Returns an unsubscribe function. */
+    /**
+     * Observe every event from now on. Returns an unsubscribe function.
+     *
+     * A no-op once closed. Registering then would add to a set nothing drains
+     * and nothing can reach: `markClosed` has already cleared it, so the
+     * listener could never fire and no cleanup would ever find it.
+     */
     subscribe(listener: (ev: RelayerDepositEvent) => void): () => void {
+        if (this.closed) return () => {};
         this.listeners.add(listener);
         return () => {
             this.listeners.delete(listener);
@@ -185,8 +206,17 @@ export class DepositStream {
         this.markClosed();
     }
 
-    /** Register a one-shot close callback. Returns an unregister function. */
+    /**
+     * Register a one-shot close callback. Returns an unregister function.
+     *
+     * Fires immediately on an already-closed stream: the event it waits for
+     * has happened, and queueing it would leave it unreachable.
+     */
     private onClose(listener: () => void): () => void {
+        if (this.closed) {
+            listener();
+            return () => {};
+        }
         this.closeListeners.add(listener);
         return () => {
             this.closeListeners.delete(listener);
@@ -228,6 +258,10 @@ export class DepositStream {
     private markClosed(): void {
         if (this.closed) return;
         this.closed = true;
+        // Detached here rather than in `close()`, so a stream the transport
+        // closed under us is cleaned up too.
+        this.source.removeEventListener?.("message", this.onMessageEvent);
+        this.source.removeEventListener?.("error", this.onErrorEvent);
         this.listeners.clear();
         for (const listener of [...this.closeListeners]) listener();
         this.closeListeners.clear();

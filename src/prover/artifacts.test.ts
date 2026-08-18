@@ -200,6 +200,84 @@ describe("releaseArtifactBytes", () => {
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
+
+    it("releases a page-relative path, which memoises under its absolute URL", async () => {
+        // `WasmProver.build` is documented as taking caller-supplied paths
+        // without passing them through `resolveArtifacts`, so a browser app
+        // passing "/artifacts/3x3_final.zkey" is the ordinary case — and the
+        // one where deleting the raw string matched no entry at all, pinning
+        // ~49 MB for the lifetime of the realm. Every other test here uses an
+        // already-absolute URL, where the mismatch cannot show.
+        //
+        // With persistence off, the memo is the only thing that can serve a
+        // second load, so the fetch count reports whether the release landed.
+        configureArtifactCache(false);
+        vi.stubGlobal("location", { href: "https://app.test/wallet/" });
+        const relative = "/artifacts/3x3_final.zkey";
+        const fetchMock = respondWith(BYTES);
+
+        expect(await loadArtifactBytes(relative)).toEqual(BYTES);
+        expect(await loadArtifactBytes(relative)).toEqual(BYTES);
+        expect(fetchMock).toHaveBeenCalledTimes(1); // memoised
+
+        releaseArtifactBytes(relative);
+
+        expect(await loadArtifactBytes(relative)).toEqual(BYTES);
+        expect(fetchMock).toHaveBeenCalledTimes(2); // memo actually dropped
+    });
+});
+
+describe("loadArtifactBytes cancellation", () => {
+    it("does not download anything for an already-aborted signal", async () => {
+        configureArtifactCache(false);
+        const fetchMock = respondWith(BYTES);
+
+        await expect(
+            loadArtifactBytes(ZKEY, { signal: AbortSignal.abort(new Error("user left")) }),
+        ).rejects.toThrow(/aborted by caller/);
+
+        // `fetchArtifact` runs once per retry, so an abort that was ignored
+        // meant every remaining attempt pulled the full artifact.
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("does not retry after the caller aborts mid-download", async () => {
+        configureArtifactCache(false);
+        const ctrl = new AbortController();
+        const fetchMock = vi.fn(async (_u: string, init?: RequestInit) => {
+            ctrl.abort(new Error("user left"));
+            const err = new Error("The operation was aborted.");
+            err.name = "AbortError";
+            void init;
+            throw err;
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(loadArtifactBytes(ZKEY, { signal: ctrl.signal })).rejects.toThrow(
+            /aborted by caller/,
+        );
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("still reports a genuine timeout as a timeout", async () => {
+        configureArtifactCache(false);
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(
+                (_u: string, init?: RequestInit) =>
+                    new Promise<Response>((_res, rej) => {
+                        init?.signal?.addEventListener("abort", () => {
+                            const err = new Error("aborted");
+                            err.name = "AbortError";
+                            rej(err);
+                        });
+                    }),
+            ),
+        );
+
+        await expect(loadArtifactBytes(ZKEY, { timeoutMs: 5 })).rejects.toThrow(/timed out/);
+    });
 });
 
 describe("resolveArtifacts", () => {

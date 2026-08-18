@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { Field, Jubjub } from "../crypto/index.js";
 import type { ScanHit, ScanInput } from "../sync/scan.js";
 import type { Scanner } from "../sync/scanner.js";
+import { NoteCache } from "./note-cache.js";
 import type { ListNotesOpts, NotePage, NoteSource } from "./note-source.js";
 import { InMemoryNoteStore } from "./note-store.js";
 import { syncWallet } from "./sync.js";
@@ -99,16 +100,18 @@ class FakeScanner implements Scanner {
     }
 }
 
-function deps(source: NoteSource, scanner: Scanner, store = new InMemoryNoteStore()) {
+async function deps(source: NoteSource, scanner: Scanner, store = new InMemoryNoteStore()) {
+    const cache = await NoteCache.open(store);
     return {
         deps: {
             J: {} as Jubjub,
             ivk: 1n as Field,
             source,
-            store,
+            sink: cache,
             scanner,
         },
         store,
+        cache,
     };
 }
 
@@ -117,7 +120,7 @@ describe("syncWallet paging", () => {
         // The original bug exactly: one request for `limit` rows, so note 1200
         // was never fetched no matter how many times sync ran.
         const source = new FakeSource(rows(1, 2000));
-        const { deps: d, store } = deps(source, new FakeScanner(new Set([1200])));
+        const { deps: d, store } = await deps(source, new FakeScanner(new Set([1200])));
 
         const result = await syncWallet(d, { limit: 500 });
 
@@ -127,21 +130,46 @@ describe("syncWallet paging", () => {
         expect(file.notes[0]?.leafIndex).toBe(1200);
     });
 
-    it("stops on the first short page", async () => {
+    it("stops on the first empty page, not the first short one", async () => {
         const source = new FakeSource(rows(1, 1200));
-        const { deps: d } = deps(source, new FakeScanner(new Set()));
+        const { deps: d } = await deps(source, new FakeScanner(new Set()));
 
         const result = await syncWallet(d, { limit: 500 });
 
-        // 500, 500, 200 — the 200 ends it, with no extra empty request.
-        expect(result.pages).toBe(3);
+        // 500, 500, 200, 0 — the empty page ends it. The short 200 does not:
+        // a server that caps `limit` returns short pages forever, and stopping
+        // there reported a wallet as caught up while it was still behind. One
+        // extra empty request is the price.
+        expect(result.pages).toBe(4);
         expect(result.stoppedBy).toBe("exhausted");
-        expect(source.requests.map((r) => r.after)).toEqual([0, 500, 1000]);
+        expect(source.requests.map((r) => r.after)).toEqual([0, 500, 1000, 1200]);
+    });
+
+    it("keeps paging when the server caps `limit` below the requested size", async () => {
+        // fmd-webserver caps page size server-side, so every page comes back
+        // short. Treating short as exhausted stopped after 200 of 1000 rows
+        // and still reported `exhausted`.
+        const all = rows(1, 1000);
+        const capped: NoteSource = {
+            async listNotes(opts) {
+                const after = opts?.after ?? 0;
+                const page = all.filter((r) => r.id > after).slice(0, 200);
+                const hi = page.at(-1)?.id ?? after;
+                return { inputs: page.map(toInput), nextAfter: hi, resumeAfter: hi };
+            },
+        };
+        const { deps: d } = await deps(capped, new FakeScanner(new Set([777])));
+
+        const result = await syncWallet(d, { limit: 1000 });
+
+        expect(result.fetched).toBe(1000);
+        expect(result.added).toBe(1);
+        expect(result.stoppedBy).toBe("exhausted");
     });
 
     it("resumes from the persisted cursor instead of re-fetching", async () => {
         const source = new FakeSource(rows(1, 600));
-        const { deps: d, store } = deps(source, new FakeScanner(new Set()));
+        const { deps: d, store } = await deps(source, new FakeScanner(new Set()));
 
         await syncWallet(d, { limit: 500 });
         const first = source.requests.length;
@@ -157,7 +185,7 @@ describe("syncWallet paging", () => {
         // Rows above 700 are live-tick matches; backfill has only reached 700,
         // so ids between are still pending and must be re-requested next sync.
         const source = new FakeSource(rows(1, 1200), 700);
-        const { deps: d, store } = deps(source, new FakeScanner(new Set()));
+        const { deps: d, store } = await deps(source, new FakeScanner(new Set()));
 
         const result = await syncWallet(d, { limit: 500 });
 
@@ -168,7 +196,7 @@ describe("syncWallet paging", () => {
     it("terminates when the server ignores `after`", async () => {
         // Full pages forever would otherwise loop until the page cap.
         const source = new StuckSource(rows(1, 500));
-        const { deps: d } = deps(source, new FakeScanner(new Set()));
+        const { deps: d } = await deps(source, new FakeScanner(new Set()));
 
         const result = await syncWallet(d, { limit: 500 });
 
@@ -188,7 +216,7 @@ describe("syncWallet paging", () => {
                 return good.listNotes(opts);
             },
         };
-        const { deps: d, store } = deps(failing, new FakeScanner(new Set([10])));
+        const { deps: d, store } = await deps(failing, new FakeScanner(new Set([10])));
 
         await expect(syncWallet(d, { limit: 500 })).rejects.toThrow("network down");
 
@@ -196,5 +224,66 @@ describe("syncWallet paging", () => {
         expect(file.notes).toHaveLength(1);
         // Two pages were consumed before the throw; the third never landed.
         expect(file.cursor).toBe(1000);
+    });
+});
+
+describe("syncWallet cancellation", () => {
+    it("stops at the next page boundary when aborted", async () => {
+        // Without a signal a sync could page through `MAX_PAGES * limit`
+        // notes — ten million at the defaults — with no way to stop it.
+        const source = new FakeSource(rows(1, 5000));
+        const ctrl = new AbortController();
+        const { deps: d } = await deps(source, new FakeScanner(new Set()));
+
+        // Abort once the feed has served two pages.
+        const inner = d.source.listNotes.bind(d.source);
+        let pages = 0;
+        d.source = {
+            async listNotes(opts) {
+                if (++pages === 2) ctrl.abort();
+                return inner(opts);
+            },
+        };
+
+        const result = await syncWallet(d, { limit: 500, signal: ctrl.signal });
+
+        expect(result.stoppedBy).toBe("aborted");
+        expect(result.pages).toBe(2);
+    });
+
+    it("persists what it scanned before the abort", async () => {
+        // Cancelling must not turn into a full re-scan next time.
+        const source = new FakeSource(rows(1, 5000));
+        const ctrl = new AbortController();
+        const { deps: d, store } = await deps(source, new FakeScanner(new Set([10])));
+
+        const inner = d.source.listNotes.bind(d.source);
+        let pages = 0;
+        d.source = {
+            async listNotes(opts) {
+                if (++pages === 2) ctrl.abort();
+                return inner(opts);
+            },
+        };
+
+        await syncWallet(d, { limit: 500, signal: ctrl.signal });
+
+        const file = await store.load();
+        expect(file.notes).toHaveLength(1);
+        expect(file.cursor).toBe(1000);
+    });
+
+    it("does nothing at all for an already-aborted signal", async () => {
+        const source = new FakeSource(rows(1, 5000));
+        const { deps: d } = await deps(source, new FakeScanner(new Set()));
+
+        const result = await syncWallet(d, {
+            limit: 500,
+            signal: AbortSignal.abort(new Error("gone")),
+        });
+
+        expect(result.stoppedBy).toBe("aborted");
+        expect(result.pages).toBe(0);
+        expect(source.requests).toHaveLength(0);
     });
 });

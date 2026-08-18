@@ -315,11 +315,14 @@ export class FmdClient {
      * `max-age=31536000, immutable`, and honoring that turns a repeat sync
      * into no network at all — the single largest transfer in a cold sync.
      */
-    async fetchCommitmentChunk(chunkId: number): Promise<CommitmentChunkOut> {
+    async fetchCommitmentChunk(
+        chunkId: number,
+        opts: { signal?: AbortSignal | undefined } = {},
+    ): Promise<CommitmentChunkOut> {
         return commitmentChunk(
             await this.json.get<unknown>(
                 `/v1/chains/${this.chainId}/commitments/chunks/${chunkId}`,
-                { cache: "default" },
+                { cache: "default", ...(opts.signal ? { signal: opts.signal } : {}) },
             ),
         );
     }
@@ -329,14 +332,17 @@ export class FmdClient {
      * set is paged down and filtered client-side — the server must never learn
      * which nullifiers a wallet cares about.
      */
-    async fetchNullifierChunk(chunkId: number): Promise<NullifierChunkOut> {
+    async fetchNullifierChunk(
+        chunkId: number,
+        opts: { signal?: AbortSignal | undefined } = {},
+    ): Promise<NullifierChunkOut> {
         return nullifierChunk(
             await this.json.get<unknown>(
                 `/v1/chains/${this.chainId}/nullifiers/chunks/${chunkId}`,
                 // Cacheable for the same reason as the commitment feed: the
                 // whole set is global, and it is precisely because the client
                 // downloads all of it that the server learns nothing.
-                { cache: "default" },
+                { cache: "default", ...(opts.signal ? { signal: opts.signal } : {}) },
             ),
         );
     }

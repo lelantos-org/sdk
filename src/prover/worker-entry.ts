@@ -46,8 +46,11 @@ serveWorkerRpc<ProverMethods>(
         },
 
         async prove({ paths, input, ...setup }) {
-            const p = await timed(log, "getProver", () => getProver(paths, setup));
+            // Before `getProver`, which fetches and parses ~49 MB of
+            // artifacts. Rejecting a malformed request after that work is
+            // pure waste.
             if (!input) throw new Error("prove request missing input");
+            const p = await timed(log, "getProver", () => getProver(paths, setup));
             return timed(log, "prove", () => p.prove(input));
         },
     },

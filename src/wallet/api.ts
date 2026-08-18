@@ -28,7 +28,7 @@ import type {
 } from "./result.js";
 import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
-import type { SyncProgress, SyncResult } from "./sync.js";
+import type { SyncOpts, SyncResult } from "./sync.js";
 
 /**
  * The high-level wallet surface. `Wallet` in `./wallet.ts` is the shipped
@@ -65,16 +65,13 @@ export interface WalletApi {
     // --- sync ----------------------------------------------------------------
 
     /** Pull encrypted notes only. Sufficient for balance display; does not sync the Merkle tree. */
-    syncNotes(opts?: {
-        limit?: number;
-        onProgress?: (p: SyncProgress) => void;
-    }): Promise<SyncResult>;
+    syncNotes(opts?: SyncOpts): Promise<SyncResult>;
     /** Fetch new Merkle commitment chunks and rebuild the local tree. Required before spending. */
     syncTree(): Promise<void>;
     /**
      * Pull notes and sync the tree in parallel. Convenience wrapper around `syncNotes` + `syncTree`.
      */
-    sync(opts?: { limit?: number; onProgress?: (p: SyncProgress) => void }): Promise<SyncResult>;
+    sync(opts?: SyncOpts): Promise<SyncResult>;
     refresh(): Promise<void>;
     /**
      * Poll until every commitment in `cms` is in the local store.
@@ -129,6 +126,15 @@ export interface WalletApi {
      * the on-disk file. Live notes and reconcile state are preserved.
      */
     compact(): Promise<{ removed: number }>;
+    /**
+     * Release scanner workers and any prover worker this wallet built.
+     *
+     * A `WorkerPoolScanner` holds 2–8 workers, each with its own wasm heap, so
+     * an app that rebuilds its wallet on an account or network switch must
+     * call this or leak a pool per switch. Idempotent; the wallet must not be
+     * used afterwards.
+     */
+    dispose(): Promise<void>;
 }
 
 export type { AssetInfo, AssetInfoWithMeta } from "./assets.js";

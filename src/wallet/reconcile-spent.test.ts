@@ -1,62 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChainAdapter } from "../chain/port.js";
-import { randomFr, randomJubjubScalar } from "../core/random.js";
 import { buildNullifierFromNsk } from "../crypto/index.js";
-import type { Prover } from "../prover/types.js";
 import { SPEND_RESERVATION_MS } from "./constants.js";
-import { InMemoryNoteStore, type StoredNote } from "./note-store.js";
-import type { NullifierStore } from "./nullifier-store.js";
-import { Wallet } from "./wallet.js";
+import type { Wallet } from "./wallet.js";
+import { storedNote, testWallet } from "./wallet-test-utils.js";
 
 // `reconcileSpentOnChain` runs on every sync over every unspent note, so the
 // nullifier derivation behind it is memoised. These pin both halves: the
 // derivation happens once per note, and the memo does not grow without bound.
-
-function storedNote(id: string): StoredNote {
-    return {
-        id,
-        asset: "1",
-        value: "100",
-        rho: randomFr().toString(),
-        rcm: randomFr().toString(),
-        rcvDep: randomJubjubScalar().toString(),
-        cm: `0x${id.padStart(64, "0")}`,
-        leafIndex: 0,
-        spent: false,
-        discoveredAt: "1970-01-01T00:00:00Z",
-    };
-}
-
-/** Wallet with every network-touching pluggable stubbed out. */
-async function makeWallet(notes: StoredNote[], spent: Set<bigint>) {
-    const noteStore = new InMemoryNoteStore();
-    await noteStore.save({ version: 2, notes });
-
-    const nullifierStore = {
-        sync: vi.fn(async () => undefined),
-        has: (nf: bigint) => spent.has(nf),
-    } as unknown as NullifierStore;
-
-    const wallet = await Wallet.create(
-        { type: "nsk", nsk: randomJubjubScalar() },
-        {
-            chainId: 31337n,
-            treeDepth: 10,
-            relayerAddress: `0x${"11".repeat(20)}`,
-            chain: {} as ChainAdapter,
-            // Never dialled: every consumer of the client is stubbed.
-            fmdUrl: "http://fmd.invalid",
-            noteStore,
-            // An empty page: these tests drive `reconcileSpentOnChain`, which
-            // reads the local store, so the feed only has to terminate paging.
-            noteSource: { listNotes: async () => ({ inputs: [], nextAfter: 0, resumeAfter: 0 }) },
-            nullifierStore,
-            submitter: { submit: async () => ({}) } as never,
-            prover: {} as Prover,
-        },
-    );
-    return { wallet, nullifierStore };
-}
 
 /** `buildNullifierFromNsk` bottoms out in `P.hash`, so this counts derivations. */
 function countDerivations(wallet: Wallet) {
@@ -65,7 +15,7 @@ function countDerivations(wallet: Wallet) {
 
 describe("reconcileSpentOnChain", () => {
     it("derives each note's nullifier once across repeated passes", async () => {
-        const { wallet } = await makeWallet([storedNote("a"), storedNote("b")], new Set());
+        const { wallet } = await testWallet({ notes: [storedNote("a"), storedNote("b")] });
 
         const hash = countDerivations(wallet);
         await wallet.reconcileSpentOnChain();
@@ -81,7 +31,7 @@ describe("reconcileSpentOnChain", () => {
     it("marks a note spent once its nullifier shows up in the mirror", async () => {
         const notes = [storedNote("a"), storedNote("b")];
         const spent = new Set<bigint>();
-        const { wallet } = await makeWallet(notes, spent);
+        const { wallet } = await testWallet({ notes, spent });
 
         await wallet.reconcileSpentOnChain();
         expect(wallet.file.notes.filter((n) => n.spent)).toHaveLength(0);
@@ -98,7 +48,7 @@ describe("reconcileSpentOnChain", () => {
 
     it("drops memo entries for notes that are no longer candidates", async () => {
         const notes = [storedNote("a"), storedNote("b")];
-        const { wallet } = await makeWallet(notes, new Set());
+        const { wallet } = await testWallet({ notes });
         await wallet.reconcileSpentOnChain();
 
         // `markSpent` retires "a" outside the reconcile path; the next pass
@@ -115,7 +65,7 @@ describe("spend reservations", () => {
     const agoIso = (ms: number) => new Date(Date.now() - ms).toISOString();
 
     it("releases a reservation whose spend never landed", async () => {
-        const { wallet } = await makeWallet([storedNote("a")], new Set());
+        const { wallet } = await testWallet({ notes: [storedNote("a")] });
         await wallet.markPendingSpend(["a"]);
         expect(wallet.file.notes[0]?.pendingSpendAt).toBeDefined();
 
@@ -134,7 +84,7 @@ describe("spend reservations", () => {
 
     it("retires a reservation the nullifier feed has answered", async () => {
         const spent = new Set<bigint>();
-        const { wallet } = await makeWallet([storedNote("a")], spent);
+        const { wallet } = await testWallet({ notes: [storedNote("a")], spent });
         await wallet.markPendingSpend(["a"]);
 
         const a = wallet.file.notes.find((n) => n.id === "a");

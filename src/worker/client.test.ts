@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isWalletError, WalletConfigError } from "../core/errors.js";
 import { configureLogging, loggingConfig } from "../log/logger.js";
 import { createWorkerRpc } from "./client.js";
-import { toWireError } from "./error-wire.js";
+import { fromWireError, toWireError } from "./error-wire.js";
 import { type Handlers, serveWorkerRpc } from "./serve.js";
 import type { RpcRequest, RpcResponse, WorkerLike, WorkerScopeLike } from "./types.js";
 
@@ -297,5 +297,83 @@ describe("log config handshake", () => {
         expect(loggingConfig()).toEqual({ level: "debug", namespaces: ["lelantos:a:*"] });
         // A control message must not be mistaken for an RPC request.
         expect(echo).not.toHaveBeenCalled();
+    });
+});
+
+describe("createWorkerRpc abort", () => {
+    it("rejects an already-aborted call without posting to the worker", async () => {
+        const w = new FakeWorker();
+        const rpc = createWorkerRpc<TestMethods>(w, { name: "t" });
+
+        // `addEventListener("abort", …)` does not fire for a signal that has
+        // already aborted, so this used to be posted and left pending forever
+        // whenever the method had no timeout configured.
+        await expect(
+            rpc.call("echo", { v: 1 }, { signal: AbortSignal.abort(new Error("gone")) }),
+        ).rejects.toThrow("gone");
+
+        expect(w.sent).toHaveLength(0);
+    });
+
+    it("still settles a call aborted after it was posted", async () => {
+        const w = new FakeWorker();
+        const rpc = createWorkerRpc<TestMethods>(w, { name: "t" });
+        const ctrl = new AbortController();
+
+        const call = rpc.call("echo", { v: 1 }, { signal: ctrl.signal });
+        expect(w.sent).toHaveLength(1);
+
+        ctrl.abort(new Error("cancelled"));
+        await expect(call).rejects.toThrow("cancelled");
+    });
+
+    it("stops accepting work once a response could not be deserialised", async () => {
+        const w = new FakeWorker();
+        const rpc = createWorkerRpc<TestMethods>(w, { name: "t" });
+
+        const inFlight = rpc.call("echo", { v: 1 });
+        w.onmessageerror?.({});
+
+        await expect(inFlight).rejects.toThrow(/deserialised/);
+        // The id of the dropped reply is unrecoverable, so the transport has
+        // proved it can silently lose replies — it must not take new work.
+        expect(rpc.alive).toBe(false);
+        await expect(rpc.call("echo", { v: 2 })).rejects.toThrow(/no longer running/);
+    });
+});
+
+describe("worker error wire", () => {
+    it("carries a typed error's own fields across the boundary", async () => {
+        // `isWalletError(e, code)` is duck-typed on `code`, so it narrowed
+        // even before — but the narrowed type was a lie: every field a
+        // subclass adds read back `undefined`.
+        const rich = new WalletConfigError(["`relayerUrl`"]);
+        const wire = toWireError(rich);
+        const back = fromWireError(wire);
+
+        expect(isWalletError(back)).toBe(true);
+        expect((back as unknown as { missing?: string[] }).missing).toEqual(["`relayerUrl`"]);
+    });
+
+    it("keeps code and context alongside the fields", async () => {
+        const err = new WalletConfigError(["`chainId`"]);
+        err.context.opId = "op-1";
+
+        const back = fromWireError(toWireError(err));
+
+        expect((back as unknown as { code?: string }).code).toBe("WALLET_CONFIG");
+        expect((back as unknown as { context?: { opId?: string } }).context?.opId).toBe("op-1");
+    });
+
+    it("drops values structured clone would reject", async () => {
+        // A function on the error would throw at `postMessage` and cost the
+        // whole reply — the failure this wire format exists to avoid.
+        const err = new WalletConfigError(["`x`"]);
+        (err as unknown as { retry: () => void }).retry = () => {};
+
+        const wire = toWireError(err);
+
+        expect(wire.fields?.retry).toBeUndefined();
+        expect(wire.fields?.missing).toEqual(["`x`"]);
     });
 });

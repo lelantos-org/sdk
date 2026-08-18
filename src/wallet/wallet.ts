@@ -3,6 +3,7 @@
 // is injected via `cfg`. Per-tx logic lives in `./{deposit,transfer,
 // withdraw,swap}.ts`; cache + persistence in `./note-cache.ts`.
 
+import { createMutex } from "../core/async.js";
 import {
     type AssetId,
     type AssetIdLike,
@@ -17,6 +18,7 @@ import { buildNullifierFromNsk, type Field, type Jubjub, Poseidon } from "../cry
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { type KeySource, resolveNsk } from "../keys/key-source.js";
 import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../keys/keys.js";
+import { getLogger } from "../log/logger.js";
 import type { Prover } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
 import type {
@@ -40,7 +42,6 @@ import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { resolveConfig, validateConfig } from "./defaults/index.js";
 import { executeDeposit } from "./deposit.js";
-import { toWalletNote } from "./internal.js";
 import {
     type AwaitCommitmentsOpts,
     type AwaitCommitmentsResult,
@@ -55,13 +56,16 @@ import {
     withinReservation,
 } from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
+import { toWalletNote } from "./result-builder.js";
 import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import { executeSwap } from "./swap.js";
-import { type SyncProgress, type SyncResult, syncWallet } from "./sync.js";
+import { type SyncOpts, type SyncResult, syncWallet } from "./sync.js";
 import { executeTransfer } from "./transfer.js";
 import type { TreeStore } from "./tree-store.js";
 import { executeWithdraw } from "./withdraw.js";
+
+const log = getLogger("lelantos:wallet");
 
 export class Wallet implements WalletApi, SpendContext {
     readonly P: Poseidon;
@@ -85,6 +89,10 @@ export class Wallet implements WalletApi, SpendContext {
      * objects, while ids are persisted and stable.
      */
     private readonly nullifierCache = new Map<string, Field>();
+    /** Set by {@link Wallet.dispose}, so a second call is a no-op. */
+    private disposed = false;
+    /** Serialises `sync` / `syncNotes`. See {@link Wallet.syncExclusive}. */
+    private readonly syncs = createMutex();
 
     /** @internal — exposed for per-tx helper modules. */
     get file(): NotesFile {
@@ -170,20 +178,33 @@ export class Wallet implements WalletApi, SpendContext {
         return new Wallet({ P, J, keys, address, cfg: resolved, cache });
     }
 
-    private async _syncNotes(opts?: {
-        limit?: number;
-        onProgress?: (p: SyncProgress) => void;
-    }): Promise<SyncResult> {
+    private async _syncNotes(opts?: SyncOpts): Promise<SyncResult> {
         return syncWallet(
             {
                 J: this.J,
                 ivk: this.keys.ivk,
                 source: this.noteSource,
-                store: this.cache.store,
+                sink: this.cache,
                 scanner: this.scanner,
             },
             opts ?? {},
         );
+    }
+
+    /**
+     * Run `op` after any sync already in progress.
+     *
+     * A sync is `load` → scan → `save` over shared state, so two overlapping
+     * ones — a poll timer and a user-initiated `sync()`, or `awaitCommitments`
+     * polling while the app refreshes — interleave, and the later save wins.
+     * `NoteCache` serialises its own writes, but not the scan between them.
+     *
+     * Serialising rather than rejecting: a caller that asked to sync should
+     * get a sync, and the second one is cheap because the first has already
+     * advanced the cursor.
+     */
+    private syncExclusive<T>(op: () => Promise<T>): Promise<T> {
+        return this.syncs.run(op);
     }
 
     /**
@@ -194,14 +215,19 @@ export class Wallet implements WalletApi, SpendContext {
      * re-scanning a note already stored is dropped by `cm`. Does not sync the
      * tree. `limit` is the page size, not a ceiling on notes fetched.
      */
-    async syncNotes(opts?: {
-        limit?: number;
-        onProgress?: (p: SyncProgress) => void;
-    }): Promise<SyncResult> {
+    async syncNotes(opts?: SyncOpts): Promise<SyncResult> {
+        return this.syncExclusive(() => this._syncNotesAndReconcile(opts));
+    }
+
+    private async _syncNotesAndReconcile(opts?: SyncOpts): Promise<SyncResult> {
         const result = await this._syncNotes(opts);
         await this.syncNullifiers();
+        // No `refresh()`: `syncWallet` writes through `this.cache`, so the
+        // snapshot reconciliation is about to read already holds the new
+        // notes. Reloading here would have re-read the store instead — and
+        // reconciliation would then persist whichever copy it happened to
+        // hold, erasing the other's writes.
         await this.reconcileSpentOnChain();
-        await this.cache.refresh();
         return result;
     }
 
@@ -228,17 +254,19 @@ export class Wallet implements WalletApi, SpendContext {
      * then reconcile which local notes are now spent. Convenience wrapper
      * around `syncNotes` + `syncTree` + `syncNullifiers`.
      */
-    async sync(opts?: {
-        limit?: number;
-        onProgress?: (p: SyncProgress) => void;
-    }): Promise<SyncResult> {
+    async sync(opts?: SyncOpts): Promise<SyncResult> {
+        return this.syncExclusive(() => this._syncAll(opts));
+    }
+
+    private async _syncAll(opts?: SyncOpts): Promise<SyncResult> {
+        const signal = opts?.signal;
         const [result] = await Promise.all([
             this._syncNotes(opts),
-            this.treeStore.sync(),
-            this.nullifierStore.sync(),
+            this.treeStore.sync(signal ? { signal } : {}),
+            this.nullifierStore.sync(signal ? { signal } : {}),
         ]);
+        // See `syncNotes` for why there is no `refresh()` here.
         await this.reconcileSpentOnChain();
-        await this.cache.refresh();
         return result;
     }
 
@@ -447,6 +475,32 @@ export class Wallet implements WalletApi, SpendContext {
      */
     async markPendingSpend(noteIds: string[]): Promise<void> {
         await this.cache.markPendingSpend(noteIds);
+    }
+
+    /**
+     * Release everything this wallet holds: scanner workers and, if one was
+     * built, the prover's.
+     *
+     * `WorkerPoolScanner` spawns 2–8 workers per wallet, each with its own
+     * wasm heap, and `Scanner.dispose` existed with no caller — so an app that
+     * rebuilds its wallet on an account or network switch leaked a whole pool
+     * every time.
+     *
+     * Idempotent, and safe on a wallet that never synced or proved. The wallet
+     * must not be used afterwards.
+     */
+    async dispose(): Promise<void> {
+        if (this.disposed) return;
+        this.disposed = true;
+        // Settled, not raced: one backend failing to shut down must not leave
+        // the other running.
+        const outcomes = await Promise.allSettled([
+            this.cfg.scanner.dispose?.(),
+            this.cfg.prover?.dispose?.(),
+        ]);
+        for (const o of outcomes) {
+            if (o.status === "rejected") log.warn("dispose failed", { err: o.reason });
+        }
     }
 
     /**

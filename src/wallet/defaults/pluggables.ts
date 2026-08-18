@@ -26,8 +26,11 @@ export function defaultTreeStore(
     fmd: FmdClient,
     P: Poseidon,
     persistence?: TreePersistence,
+    treeDepth?: number,
 ): Promise<TreeStore> | TreeStore {
-    return persistence ? TreeStore.withPersistence(P, fmd, persistence) : new TreeStore(P, fmd);
+    return persistence
+        ? TreeStore.withPersistence(P, fmd, persistence, treeDepth)
+        : new TreeStore(P, fmd, treeDepth);
 }
 
 export function defaultNullifierStore(

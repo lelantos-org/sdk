@@ -14,6 +14,7 @@ import {
     fmdExpandFlagKey,
     fmdFlag,
     fmdFlagKeyFromDetection,
+    fmdGenDetectionKey,
     fmdTest,
 } from "./fmd.js";
 
@@ -295,4 +296,40 @@ describe("cross-language vectors (tests/vectors/fmd.json)", () => {
             });
         });
     }
+});
+
+describe("clue wire format", () => {
+    const clue = (gamma: number) => ({
+        gamma,
+        R: new Uint8Array(32),
+        bits: new Uint8Array(Math.ceil(gamma / 8)),
+    });
+
+    it("round-trips a well-formed clue", () => {
+        expect(decodeClue(encodeClue(clue(5)))).toEqual(clue(5));
+    });
+
+    it("rejects trailing bytes rather than accepting a second spelling", () => {
+        // A tolerant length made the encoding non-canonical: two distinct byte
+        // strings decoded to one clue, so anything deduping or hashing clue
+        // bytes disagreed with anything comparing decoded clues.
+        const padded = new Uint8Array([...encodeClue(clue(5)), 0, 0]);
+        expect(() => decodeClue(padded)).toThrow(/exactly/);
+    });
+
+    it("rejects gamma 0, which fmdTest accepts against any empty key", () => {
+        const buf = encodeClue(clue(5));
+        buf[0] = 0;
+        expect(() => decodeClue(buf)).toThrow(/1\.\.255/);
+    });
+
+    it("refuses to encode a gamma that does not fit its byte", () => {
+        // 256 truncated to 0 on the wire.
+        expect(() => encodeClue(clue(256))).toThrow(/1\.\.255/);
+    });
+
+    it("validates gamma when generating a detection key", () => {
+        expect(() => fmdGenDetectionKey(() => 1n, 0)).toThrow();
+        expect(() => fmdGenDetectionKey(() => 1n, -1)).toThrow();
+    });
 });

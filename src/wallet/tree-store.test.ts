@@ -146,3 +146,28 @@ describe("TreeStore chunk validation", () => {
         expect(persistence.saved.at(-1)?.leaves).toHaveLength(CHUNK_SIZE);
     });
 });
+
+describe("TreeStore depth", () => {
+    it("builds the tree at the configured depth, not the module default", async () => {
+        // The spend path hands `cfg.treeDepth` to the circuit while this used
+        // to hardcode 10. A custom preset therefore got depth-10 paths and a
+        // depth-12 proof: no error anywhere, the proof simply fails on chain.
+        const shallow = new TreeStore(stubP, clientOf([chunk(0, 0, 4)]), 4);
+        const deep = new TreeStore(stubP, clientOf([chunk(0, 0, 4)]), 6);
+
+        await shallow.sync();
+        await deep.sync();
+
+        // Same leaves, different depth — so a different root, and the path has
+        // one entry per level.
+        expect(shallow.root()).not.toBe(deep.root());
+        expect(shallow.getPath(0).pathIndices).toHaveLength(4);
+        expect(deep.getPath(0).pathIndices).toHaveLength(6);
+    });
+
+    it("defaults to the deployed depth when none is given", async () => {
+        const store = new TreeStore(stubP, clientOf([chunk(0, 0, 4)]));
+        await store.sync();
+        expect(store.getPath(0).pathIndices).toHaveLength(10);
+    });
+});

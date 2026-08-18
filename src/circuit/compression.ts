@@ -69,16 +69,20 @@ export function flatten(input: FlattenInput): Field[] {
         coeffs.push(BigInt(y));
     }
 
-    const Rx = input.out_clue_Rx ?? [];
-    const Ry = input.out_clue_Ry ?? [];
-    const cb = input.out_clue_bits ?? [];
-    if (Rx.length !== Ry.length || Rx.length !== cb.length) {
-        throw new Error("flatten: out_clue_{Rx,Ry,bits} length mismatch");
-    }
-    for (let j = 0; j < Rx.length; j++) {
-        coeffs.push(BigInt(Rx[j]!));
-        coeffs.push(BigInt(Ry[j]!));
-        coeffs.push(BigInt(cb[j]!));
+    // Checked against `nOut`, like every other slot group. Checking the three
+    // only against each other — and defaulting them to `[]` — meant a caller
+    // that omitted them got a short coefficient vector with no error at all.
+    //
+    // That is not hypothetical: `SubmitTransactPayload.pubInputs` deliberately
+    // omits the clue slots, because the relayer derives them from `aux` (see
+    // `protocol/transact.ts`). Anything reconstructing a `FlattenInput` from
+    // that wire shape produced 33 coefficients instead of 42 at 3x3, hence a
+    // completely different Fiat-Shamir `z` — surfacing only as an on-chain
+    // verifier revert, with nothing local to point at.
+    for (const [rx, ry, bits] of clueSlots(input, nOut)) {
+        coeffs.push(BigInt(rx));
+        coeffs.push(BigInt(ry));
+        coeffs.push(BigInt(bits));
     }
     coeffs.push(BigInt(input.out_aux_digest));
     return coeffs;
@@ -93,6 +97,58 @@ function requirePoint(
         throw new Error(`flatten: ${field} entry has ${value?.length} coordinates, expected 2`);
     }
     return [value[0] as string | bigint, value[1] as string | bigint];
+}
+
+/** One output's three clue coefficients, in `PubInputs.compress` order. */
+type ClueSlot = readonly [Loose<string>, Loose<string>, Loose<string>];
+
+/**
+ * The `nOut` clue triples, validated and zipped.
+ *
+ * Zipping is what makes the caller's reads total — destructuring a tuple needs
+ * no non-null assertion, where three parallel indexed lookups would.
+ *
+ * The three are checked against `nOut` like every other slot group. Checking
+ * them only against each other — and defaulting them to `[]` — meant a caller
+ * that omitted them got a short coefficient vector with no error at all. That
+ * is not hypothetical: `SubmitTransactPayload.pubInputs` deliberately omits
+ * the clue slots because the relayer derives them from `aux` (see
+ * `protocol/transact.ts`), so anything reconstructing a `FlattenInput` from
+ * that wire shape produced 33 coefficients instead of 42 at 3x3 — a completely
+ * different Fiat-Shamir `z`, surfacing only as an on-chain verifier revert.
+ */
+function clueSlots(input: FlattenInput, nOut: number): ClueSlot[] {
+    const rx = requirePresent("out_clue_Rx", input.out_clue_Rx, nOut);
+    const ry = requirePresent("out_clue_Ry", input.out_clue_Ry, nOut);
+    const bits = requirePresent("out_clue_bits", input.out_clue_bits, nOut);
+
+    const slots: ClueSlot[] = [];
+    for (let j = 0; j < nOut; j++) {
+        const x = rx[j];
+        const y = ry[j];
+        const b = bits[j];
+        // Unreachable given the length checks above, but written out rather
+        // than asserted away: a cast here would be the one place this function
+        // could silently emit `undefined` into the coefficient vector.
+        if (x === undefined || y === undefined || b === undefined) {
+            throw new Error(`flatten: clue slot ${j} is incomplete`);
+        }
+        slots.push([x, y, b]);
+    }
+    return slots;
+}
+
+/** A slot group that must be present and exactly `want` long. */
+function requirePresent(
+    field: string,
+    value: readonly Loose<string>[] | undefined,
+    want: number,
+): Loose<string>[] {
+    if (value === undefined) {
+        throw new Error(`flatten: ${field} is absent, expected ${want} entries`);
+    }
+    requireLength(field, value, want);
+    return [...value];
 }
 
 function requireLength(field: string, value: { length: number }, want: number): void {

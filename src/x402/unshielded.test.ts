@@ -272,3 +272,83 @@ describe("unshieldedExact.quote", () => {
     it("refuses a non-integer amount", () =>
         rejects({ amount: "1.5" }, /amount must be a decimal integer/));
 });
+
+describe("unshieldedExact funding concurrency", () => {
+    it("tops a payer up once for concurrent payments to the same slot", async () => {
+        // Both read the balance before either withdrew, so both saw the
+        // pre-top-up figure and both unshielded: two proofs, two withdrawals,
+        // for one shortfall.
+        let funded = false;
+        const tokenBalanceOf = vi.fn(async () => (funded ? 10_000_000n : 0n));
+        const withdraw = vi.fn(async () => {
+            funded = true;
+            return {} as never;
+        });
+        const wallet = {
+            keys: { nsk: NSK },
+            chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
+            asset: async () => USDC,
+            withdraw,
+        } as unknown as WalletApi;
+
+        const mechanism = unshieldedExact(wallet, { pollMs: 1 });
+        await Promise.all([
+            mechanism.createPaymentPayload(2, requirements()),
+            mechanism.createPaymentPayload(2, requirements()),
+            mechanism.createPaymentPayload(2, requirements()),
+        ]);
+
+        expect(withdraw).toHaveBeenCalledTimes(1);
+    });
+
+    it("funds distinct payer slots in parallel", async () => {
+        // Slots are separate addresses, so the lock is per slot rather than
+        // global — two hosts must not queue behind each other.
+        let inFlight = 0;
+        let peak = 0;
+        const balances = new Map<string, bigint>();
+        const tokenBalanceOf = vi.fn(
+            async (_token: unknown, payer: string) => balances.get(payer) ?? 0n,
+        );
+        const withdraw = vi.fn(async (args: { to: string }) => {
+            inFlight++;
+            peak = Math.max(peak, inFlight);
+            await new Promise((r) => setTimeout(r, 5));
+            balances.set(args.to, 10_000_000n);
+            inFlight--;
+            return {} as never;
+        });
+        const wallet = {
+            keys: { nsk: NSK },
+            chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
+            asset: async () => USDC,
+            withdraw,
+        } as unknown as WalletApi;
+
+        const mechanism = unshieldedExact(wallet, { pollMs: 1 });
+        await Promise.all([
+            mechanism.createPaymentPayload(2, requirements(), { host: "a.example" }),
+            mechanism.createPaymentPayload(2, requirements(), { host: "b.example" }),
+        ]);
+
+        expect(peak).toBe(2);
+    });
+
+    it("reports a top-up before the value leaves the pool", async () => {
+        // `topUpMultiple` moves far more than one payment costs, and if the
+        // poll times out it has left with nothing recorded anywhere.
+        const seen: Array<{ amount: bigint }> = [];
+        const { wallet } = stubWallet({ balances: [0n, 0n, 0n] });
+
+        await expect(
+            unshieldedExact(wallet, {
+                pollMs: 1,
+                maxPolls: 1,
+                onTopUp: (info) => seen.push(info),
+            }).createPaymentPayload(2, requirements()),
+        ).rejects.toThrow(/did not land within/);
+
+        expect(seen).toHaveLength(1);
+        expect(seen[0]?.amount).toBeGreaterThan(0n);
+    });
+});

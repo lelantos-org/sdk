@@ -2,6 +2,8 @@
 // injected-loader branch + lazy init-once promise. Specifiers passed to `defaultImport()` are
 // package subpath imports (`#wasm/<name>`) declared in package.json `imports`.
 
+import { memoAsync } from "../core/async.js";
+
 export interface WasmModuleBase {
     default: (input?: { module_or_path?: BufferSource | string | URL }) => Promise<unknown>;
 }
@@ -43,6 +45,14 @@ export interface WasmLoaderHandle<M extends WasmModuleBase> {
     load(): Promise<M>;
     /** Last Node `pkg/` JS-module URL (set after `load()` on Node). */
     getNodePkgUrl(): string | null;
+    /**
+     * Forget the memoised module so the next `load()` runs `postInit` again.
+     *
+     * For teardown that invalidates what `postInit` established — tearing down
+     * a rayon thread pool leaves the module loaded but unusable, and a
+     * memoised handle would never rebuild the pool.
+     */
+    reset(): void;
 }
 
 const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
@@ -55,7 +65,6 @@ export function createWasmLoader<M extends WasmModuleBase>(
     cfg: WasmLoaderConfig<M>,
 ): WasmLoaderHandle<M> {
     let injected: WasmLoaderOverride<M> | null = null;
-    let promise: Promise<M> | null = null;
     let nodePkgUrl: string | null = null;
 
     async function init(): Promise<M> {
@@ -79,18 +88,20 @@ export function createWasmLoader<M extends WasmModuleBase>(
         return mod;
     }
 
+    // Evicted on rejection — see `memoAsync`. One EMFILE on the Node wasm
+    // read, one 502 on the browser fetch, or one `postInit` timeout would
+    // otherwise be replayed to every later caller in this realm, including
+    // after a working loader override is installed.
+    const memo = memoAsync(init);
+
     return {
         configure(loader: WasmLoaderOverride<M>): void {
             injected = loader;
-            promise = null;
+            memo.reset();
             nodePkgUrl = null;
         },
-        load(): Promise<M> {
-            if (!promise) promise = init();
-            return promise;
-        },
-        getNodePkgUrl(): string | null {
-            return nodePkgUrl;
-        },
+        load: () => memo.get(),
+        getNodePkgUrl: () => nodePkgUrl,
+        reset: () => memo.reset(),
     };
 }
