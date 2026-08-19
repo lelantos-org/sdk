@@ -37,14 +37,19 @@ jobs:
       # upstream releases rather than apt — see ci.yml for why.
       - name: Install binaryen (provides wasm-opt)
         env:
-          BINARYEN_VERSION: "123"
+          BINARYEN_VERSION: "132"
+          BINARYEN_SHA256: "195ddc94f9bc89f45abdabb0b9eea86023d727ba90eac8b35b80f2544fc30572"
         run: |
           set -euo pipefail
-          url="https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 "$url" \
-            | tar -xz -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/binaryen-version_${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/binaryen-version_${BINARYEN_VERSION}/bin/wasm-opt" --version
+          tag="version_${BINARYEN_VERSION}"
+          tarball="binaryen-${tag}-x86_64-linux.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 \
+            -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/WebAssembly/binaryen/releases/download/${tag}/${tarball}"
+          echo "${BINARYEN_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-${tag}/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/binaryen-${tag}/bin/wasm-opt" --version
 
       - uses: extractions/setup-just@v2
 
