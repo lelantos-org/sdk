@@ -47,7 +47,6 @@ export { type AwaitCommitmentsOpts, awaitCommitments, NoteCache } from "./note-c
 export {
     FmdMatchesNoteSource,
     FmdNoteSource,
-    type JubjubPacker,
     type ListNotesOpts,
     type NotePage,
     type NoteSource,

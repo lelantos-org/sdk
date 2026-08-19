@@ -30,9 +30,6 @@ export interface NotePage {
     resumeAfter: number;
 }
 
-/** Minimal Jubjub interface needed by note sources. */
-export type JubjubPacker = { packPoint: (p: [bigint, bigint]) => Uint8Array };
-
 /**
  * Source of encrypted notes. Merkle paths are computed locally via
  * `TreeStore`, and the spent set via `NullifierStore` — neither is a query a
@@ -46,10 +43,11 @@ export type { MerkleProof };
 
 // ─── internal helpers ────────────────────────────────────────────────────────
 
-function toScanInput(J: JubjubPacker, n: FmdNoteOut): ScanInput {
+function toScanInput(n: FmdNoteOut): ScanInput {
     return {
         ciphertext: n.ciphertext,
-        epk: J.packPoint(n.ephPub),
+        // Already packed by the server; nothing to do but carry it across.
+        epk: n.epk,
         cm: n.cm,
         leafIndex: n.leafIndex,
         blockNumber: n.blockNumber,
@@ -72,10 +70,7 @@ function maxId(rows: FmdNoteOut[], after: number): number {
 
 /** Default `NoteSource` against fmd-webserver — pulls the full note firehose. */
 export class FmdNoteSource implements NoteSource {
-    constructor(
-        private readonly fmd: FmdClient,
-        private readonly J: JubjubPacker,
-    ) {}
+    constructor(private readonly fmd: FmdClient) {}
 
     async listNotes(opts: ListNotesOpts = {}): Promise<NotePage> {
         const after = opts.after ?? 0;
@@ -84,7 +79,7 @@ export class FmdNoteSource implements NoteSource {
         // so nothing can ever land below the highest id already returned.
         const hi = maxId(rows, after);
         return {
-            inputs: rows.map((n) => toScanInput(this.J, n)),
+            inputs: rows.map(toScanInput),
             nextAfter: hi,
             resumeAfter: hi,
         };
@@ -105,7 +100,6 @@ export class FmdNoteSource implements NoteSource {
 export class FmdMatchesNoteSource implements NoteSource {
     constructor(
         private readonly fmd: FmdClient,
-        private readonly J: JubjubPacker,
         private readonly token: string,
     ) {}
 
@@ -117,7 +111,7 @@ export class FmdMatchesNoteSource implements NoteSource {
         // continues past it. See `FmdMatchesPage`.
         const hi = maxId(page.matches, after);
         return {
-            inputs: page.matches.map((n) => toScanInput(this.J, n)),
+            inputs: page.matches.map(toScanInput),
             nextAfter: hi,
             resumeAfter: Math.min(hi, page.backfilledThroughNoteId),
         };

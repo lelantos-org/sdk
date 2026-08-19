@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hexToBytes } from "../../core/hex.js";
 import { FMD_SENDER_GAMMA } from "../../fmd/fmd.js";
 import { FmdClient } from "./client.js";
 
@@ -24,16 +25,22 @@ afterEach(() => vi.unstubAllGlobals());
 /** A 32-byte bare-hex commitment made only of decimal digits. */
 const DIGITS_ONLY_CM = "1234".padStart(64, "0");
 
+/**
+ * `babyJub.packPoint(Base8)`. Shares its value with the Rust test
+ * `services::field::tests::packs_a_point_as_little_endian_y`, which is what
+ * pins the two implementations to the same byte order.
+ */
+const PACKED_BASE8 = "8b7d2d877a253c4b7733e1b91f05e0fcedf96bd11c2e572549b2a0f703727925";
+
 const NOTE_ROW = {
     id: 7,
     chainId: 31337,
     blockNumber: 100,
     leafIndex: 3,
     commitmentHex: DIGITS_ONLY_CM,
-    clueBitsHex: "0x00ff",
     ciphertextHex: "dead",
-    ephPubX: `0x${"5".padStart(64, "0")}`,
-    ephPubY: `0x${"6".padStart(64, "0")}`,
+    // Packed Base8: 32 bytes of `y` little-endian, sign bit of `x` clear.
+    ephPubPackedHex: PACKED_BASE8,
 };
 
 describe("listNotes", () => {
@@ -44,21 +51,11 @@ describe("listNotes", () => {
         if (!n) throw new Error("expected one note");
 
         expect(n.id).toBe(7);
-        expect(n.clueBits).toBe(255);
         expect(n.ciphertext).toEqual(new Uint8Array([0xde, 0xad]));
-        expect(n.ephPub).toEqual([5n, 6n]);
-    });
-
-    it("reads ephPub coordinates as hex, not decimal", async () => {
-        // fmd-webserver serves coordinates as `0x`-hex. "12345678" is also a
-        // valid decimal literal for a different number, so a decoder that
-        // accepted both forms would be one dropped prefix away from silently
-        // returning the wrong point.
-        respondWith([{ ...NOTE_ROW, ephPubX: "0x12345678", ephPubY: "0x06" }]);
-
-        const [n] = await client().listNotes();
-        expect(n?.ephPub).toEqual([0x12345678n, 6n]);
-        expect(n?.ephPub[0]).not.toBe(12345678n);
+        // Byte-for-byte, in order: `epk` goes straight to `decryptNote`, and
+        // decoding it as a big-endian integer would silently reverse it — the
+        // packed form is little-endian `y` with the sign bit in the last byte.
+        expect(n.epk).toEqual(hexToBytes(PACKED_BASE8));
     });
 
     it("reads a bare-hex commitment as hex even when it is all digits", async () => {
@@ -74,10 +71,20 @@ describe("listNotes", () => {
     });
 
     it("names the offending field when the server sends a bad row", async () => {
-        respondWith([{ ...NOTE_ROW, ephPubY: "not-a-number" }]);
+        respondWith([{ ...NOTE_ROW, ephPubPackedHex: "not-hex" }]);
 
         await expect(client().listNotes()).rejects.toMatchObject({
-            path: "$[0].ephPubY",
+            path: "$[0].ephPubPackedHex",
+        });
+    });
+
+    it("rejects a packed point that is not 32 bytes", async () => {
+        // Well-formed hex, wrong width. `epk` goes straight to `decryptNote`,
+        // so an unchecked short value fails far from its cause.
+        respondWith([{ ...NOTE_ROW, ephPubPackedHex: "8b7d" }]);
+
+        await expect(client().listNotes()).rejects.toMatchObject({
+            path: "$[0].ephPubPackedHex",
         });
     });
 

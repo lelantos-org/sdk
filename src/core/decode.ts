@@ -103,6 +103,20 @@ export function hexBytes(v: unknown, path: string): Uint8Array {
     return out;
 }
 
+/**
+ * Hex bytes of an exactly-known width, e.g. a packed curve point or a digest.
+ *
+ * Separate from `hexBytes` for the same reason `arrN` is separate from `arr`:
+ * where the width is part of the wire contract, a value of the wrong length is
+ * a malformed response, and catching it here names the field that carried it
+ * instead of failing much later against whatever consumed the bytes.
+ */
+export function hexBytesN(v: unknown, path: string, n: number): Uint8Array {
+    const b = hexBytes(v, path);
+    if (b.length !== n) fail(path, `${n} hex-encoded bytes`, v);
+    return b;
+}
+
 /** Exactly-two tuple, e.g. an (x, y) curve point. */
 export function tuple2<T>(v: unknown, path: string, f: (x: unknown, p: string) => T): [T, T] {
     const a = arrN(v, path, 2);

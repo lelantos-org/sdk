@@ -8,26 +8,25 @@
 // `NullifierStore`.
 //
 // Wire encoding stops here. Every response is validated through `core/decode`
-// and returned as domain values (`Field`, `Point`, `Uint8Array`), so a
-// malformed response raises a `WireFormatError` naming the offending JSON path
-// instead of a `TypeError` surfacing later inside a store.
+// and returned as domain values (`Field`, `Uint8Array`), so a malformed
+// response raises a `WireFormatError` naming the offending JSON path instead
+// of a `TypeError` surfacing later inside a store.
 //
 // That validation is not cosmetic. The backend is inconsistent about the `0x`
-// prefix — tree state, nullifiers, clue bits and curve coordinates carry it;
-// note/match commitments and ciphertexts and chunk commitments do not. Every
-// one of them is hex, so every one goes through `hexInt`/`hexBytes` and none
-// through `bigintFrom`: that decoder also accepts decimal, and a bare-hex
-// value whose digits happen to all be decimal would decode as the wrong
-// number, silently.
+// prefix — tree state, nullifiers and chunk leaf hashes carry it; note/match
+// commitments, ciphertexts and packed points do not. Every one of them is hex,
+// so every one goes through `hexInt`/`hexBytes` and none through `bigintFrom`:
+// that decoder also accepts decimal, and a bare-hex value whose digits happen
+// to all be decimal would decode as the wrong number, silently.
 
-import { bool, hexBytes, hexInt, int, mapArr, obj } from "../../core/decode.js";
+import { bool, hexBytes, hexBytesN, hexInt, int, mapArr, obj } from "../../core/decode.js";
 import {
     bearerAuth,
     createJsonClient,
     type HttpClientOptions,
     type JsonClient,
 } from "../../core/http.js";
-import type { Field, Point } from "../../crypto/index.js";
+import type { Field } from "../../crypto/index.js";
 import { assertDetectionGamma } from "../../fmd/fmd.js";
 
 export interface FmdTreeState {
@@ -43,11 +42,16 @@ export interface FmdNoteOut {
     blockNumber: number;
     leafIndex: number;
     cm: Field;
-    /** First 2 ciphertext bytes as a big-endian u16. FMD bucket tag. */
-    clueBits: number;
     ciphertext: Uint8Array;
-    /** Sender's ECDH ephemeral public point; feeds `decryptNote`. */
-    ephPub: Point;
+    /**
+     * Sender's ECDH ephemeral public point, already packed by the server the
+     * way `babyJub.packPoint` packs one: 32 bytes of `y` little-endian with
+     * the high bit of the last byte carrying `sign(x)`.
+     *
+     * Bytes, not a `Point`: this is exactly what `decryptNote` wants as `epk`,
+     * so nothing on this path ever unpacks it.
+     */
+    epk: Uint8Array;
 }
 
 /** Server-side FMD-filtered note. Wire field `noteId` normalised to `id`. */
@@ -164,13 +168,8 @@ export interface CreateSubscriptionInput {
 
 // ─── decoders ────────────────────────────────────────────────────────────────
 
-/** Curve points arrive as sibling hex fields, `<prefix>X` and `<prefix>Y`. */
-function point(d: Record<string, unknown>, prefix: string, path: string): Point {
-    return [
-        hexInt(d[`${prefix}X`], `${path}.${prefix}X`),
-        hexInt(d[`${prefix}Y`], `${path}.${prefix}Y`),
-    ];
-}
+/** Bytes in a packed Baby-Jubjub point: `y` plus one sign bit. */
+const PACKED_POINT_BYTES = 32;
 
 /** Shared by `/v1/notes` and `/v1/matches`, which differ only in the id field. */
 function note(raw: unknown, idField: "id" | "noteId", path: string): FmdNoteOut {
@@ -181,10 +180,11 @@ function note(raw: unknown, idField: "id" | "noteId", path: string): FmdNoteOut 
         blockNumber: int(d.blockNumber, `${path}.blockNumber`),
         leafIndex: int(d.leafIndex, `${path}.leafIndex`),
         cm: hexInt(d.commitmentHex, `${path}.commitmentHex`),
-        // A u16 bucket tag, so it always fits a JS number.
-        clueBits: Number(hexInt(d.clueBitsHex, `${path}.clueBitsHex`)),
         ciphertext: hexBytes(d.ciphertextHex, `${path}.ciphertextHex`),
-        ephPub: point(d, "ephPub", path),
+        // Width-checked here because `epk` reaches `decryptNote` untouched: a
+        // short or over-long value would otherwise surface as a decryption
+        // failure with nothing pointing back at the response that caused it.
+        epk: hexBytesN(d.ephPubPackedHex, `${path}.ephPubPackedHex`, PACKED_POINT_BYTES),
     };
 }
 

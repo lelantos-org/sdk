@@ -38,7 +38,7 @@ export async function resolveConfig(
         ...cfg,
         shape: cfg.shape ?? DEFAULT_SHAPE,
         noteStore: cfg.noteStore ?? new InMemoryNoteStore(),
-        noteSource: cfg.noteSource ?? defaultNoteSource(fmd, cfg, deps.J),
+        noteSource: cfg.noteSource ?? defaultNoteSource(fmd, cfg),
         treeStore:
             cfg.treeStore ??
             (await defaultTreeStore(fmd, deps.P, cfg.treePersistence, cfg.treeDepth)),

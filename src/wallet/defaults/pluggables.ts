@@ -3,7 +3,6 @@
 
 import { httpOptionsFor } from "../../core/http.js";
 import type { Poseidon } from "../../crypto/index.js";
-import type { Jubjub } from "../../crypto/jubjub.js";
 import { FmdClient } from "../../services/fmd-server/client.js";
 import type { WalletConfig } from "../config.js";
 import { FmdMatchesNoteSource, FmdNoteSource, type NoteSource } from "../note-source.js";
@@ -15,11 +14,11 @@ export function defaultFmdClient(cfg: WalletConfig): FmdClient {
     return new FmdClient(cfg.fmdUrl as string, cfg.chainId, httpOptionsFor(cfg.fetchImpl));
 }
 
-export function defaultNoteSource(fmd: FmdClient, cfg: WalletConfig, J: Jubjub): NoteSource {
+export function defaultNoteSource(fmd: FmdClient, cfg: WalletConfig): NoteSource {
     if (cfg.syncStrategy?.kind === "matches") {
-        return new FmdMatchesNoteSource(fmd, J, cfg.syncStrategy.token);
+        return new FmdMatchesNoteSource(fmd, cfg.syncStrategy.token);
     }
-    return new FmdNoteSource(fmd, J);
+    return new FmdNoteSource(fmd);
 }
 
 export function defaultTreeStore(
