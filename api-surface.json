@@ -686,7 +686,6 @@
     "FmdNoteSource",
     "HttpRelayerSubmitter",
     "InMemoryNoteStore",
-    "JubjubPacker",
     "ListNotesOpts",
     "MerkleNode",
     "NoteCache",
