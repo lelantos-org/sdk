@@ -20,11 +20,11 @@ export interface PoseidonWasmMod extends WasmModuleBase {
  */
 export type PoseidonWasmLoader = WasmLoaderOverride<PoseidonWasmMod>;
 
-// `new URL(..., import.meta.url)` resolves against *this* file, so it stays
-// here rather than moving into the shared factory.
+// The import thunk and both URLs stay here, not in the shared factory: they
+// resolve against *this* file. See the bundler contract in `wasm/module-loader.ts`.
 const loader = createModuleLoader<PoseidonWasmMod>({
     owner: "Poseidon",
-    subpath: "#wasm/poseidon",
+    importModule: () => import("#wasm/poseidon"),
     pkgJsUrl: new URL("../../../wasm/poseidon/pkg/poseidon_wasm.js", import.meta.url),
     pkgWasmUrl: new URL("../../../wasm/poseidon/pkg/poseidon_wasm_bg.wasm", import.meta.url),
 });

@@ -31,11 +31,11 @@ export interface JubWasmMod extends WasmModuleBase {
  */
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
-// `new URL(..., import.meta.url)` resolves against *this* file, so it stays
-// here rather than moving into the shared factory.
+// The import thunk and both URLs stay here, not in the shared factory: they
+// resolve against *this* file. See the bundler contract in `wasm/module-loader.ts`.
 const loader = createModuleLoader<JubWasmMod>({
     owner: "WasmJubjub",
-    subpath: "#wasm/jubjub",
+    importModule: () => import("#wasm/jubjub"),
     pkgJsUrl: new URL("../../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url),
     pkgWasmUrl: new URL("../../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url),
 });

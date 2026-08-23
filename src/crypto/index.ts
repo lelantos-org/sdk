@@ -25,8 +25,8 @@ export {
 } from "./jubjub-wasm/index.js";
 export { type MerkleProof, MerkleTree } from "./merkle.js";
 export { buildNullifier, buildNullifierFromNsk } from "./nullifier.js";
-export type { Field, PoseidonBackend } from "./poseidon.js";
-export { Poseidon } from "./poseidon.js";
+export type { Field, PoseidonBackend, PoseidonWasmLoader } from "./poseidon.js";
+export { configurePoseidonWasm, Poseidon } from "./poseidon.js";
 export { buildRho } from "./rho.js";
 export { fmdLegendreWitness, legendreSymbol, modInverse, modSqrt } from "./sqrt.js";
 export {

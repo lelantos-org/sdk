@@ -1,6 +1,6 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.19.1",
+    "version": "0.19.2",
     "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
     "license": "MIT",
     "author": "Lelantos",
@@ -175,6 +175,7 @@
         "check": "biome check .",
         "check:browser-safe": "node scripts/check-browser-safe.mjs",
         "check:layers": "node scripts/check-layers.mjs",
+        "check:wasm-imports": "node scripts/check-wasm-imports.mjs",
         "check:api": "node scripts/check-public-api.mjs",
         "check:docs": "node scripts/check-docs.mjs",
         "check:bundle-size": "node scripts/check-bundle-size.mjs",

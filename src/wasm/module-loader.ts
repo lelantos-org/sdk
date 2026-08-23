@@ -4,30 +4,39 @@
 // the init-once memo. What is left around it is identical for every consumer:
 // a subpath import, the Node `file://` hop, a `configure*` entry point, and a
 // module singleton whose accessor throws before init. `jubjub` and `poseidon`
-// differ only in three strings and their module interface, so they share this.
+// differ only in two strings, an import thunk, and their module interface, so
+// they share this.
 //
 // `prover` does not: it needs a `postInit` rayon hook and its own thread-count
 // configuration, so it calls `createWasmLoader` directly.
 //
 // Bundler contract, inherited by every caller:
 //
-//   - The subpath specifier reaches `import()` as a *variable*, and the call
-//     carries `@vite-ignore`, so Vite leaves it for the runtime to resolve.
-//   - `new URL(..., import.meta.url)` stays in the caller. It resolves against
-//     the importing module's own URL, so moving it here would silently rebase
-//     every path onto this file.
+//   - `importModule` stays in the caller so the `#wasm/<name>` specifier is a
+//     literal at the `import()` call site. Bundlers only follow a dynamic
+//     import they can read statically; behind a variable the specifier survives
+//     into the output as a bare `#wasm/...`, which no browser can resolve, and
+//     the wasm-pack glue never gets its `new URL(...)` rewritten to the emitted
+//     asset. See `wasm/loader.ts`'s `defaultImport` contract.
+//   - `new URL(..., import.meta.url)` likewise stays in the caller. It resolves
+//     against the importing module's own URL, so moving it here would silently
+//     rebase every path onto this file.
 
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "./loader.js";
 import { nodeFileUrlToPath } from "./node-path.js";
 
-export interface ModuleLoaderConfig {
+export interface ModuleLoaderConfig<M extends WasmModuleBase> {
     /**
      * The type that owns this module's lifecycle, e.g. `"Poseidon"`. Names the
      * module in diagnostics and points an early caller at `<owner>.build()`.
      */
     owner: string;
-    /** Package subpath import (`#wasm/<name>`), declared in package.json `imports`. */
-    subpath: string;
+    /**
+     * Imports the wasm-pack JS module via its package subpath (`#wasm/<name>`,
+     * declared in package.json `imports`). Must call `import()` with a literal
+     * specifier — see the bundler contract above.
+     */
+    importModule: () => Promise<M>;
     /** `pkg/<name>.js`, resolved against the *caller's* `import.meta.url`. */
     pkgJsUrl: URL;
     /** `pkg/<name>_bg.wasm`, resolved against the *caller's* `import.meta.url`. */
@@ -48,13 +57,11 @@ export interface ModuleLoader<M extends WasmModuleBase> {
 }
 
 export function createModuleLoader<M extends WasmModuleBase>(
-    cfg: ModuleLoaderConfig,
+    cfg: ModuleLoaderConfig<M>,
 ): ModuleLoader<M> {
     const loader = createWasmLoader<M>({
         name: cfg.owner,
-        // `cfg.subpath` is a variable, so Vite cannot statically resolve it;
-        // `@vite-ignore` stops it warning about that.
-        defaultImport: () => import(/* @vite-ignore */ cfg.subpath) as Promise<M>,
+        defaultImport: () => cfg.importModule(),
         nodeJsUrl: async () => cfg.pkgJsUrl.href,
         nodeWasmPath: () => nodeFileUrlToPath(cfg.pkgWasmUrl),
     });

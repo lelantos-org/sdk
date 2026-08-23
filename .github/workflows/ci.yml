@@ -103,6 +103,9 @@ jobs:
       - name: "Layer lint (tier ladder + no export *)"
         run: npm run check:layers
 
+      - name: "WASM subpath lint (literal #wasm/* specifiers)"
+        run: npm run check:wasm-imports
+
       - name: Sync version
         run: node scripts/sync-version.mjs
 
