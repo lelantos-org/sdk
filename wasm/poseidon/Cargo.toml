@@ -1,0 +1,25 @@
+[package]
+name = "poseidon-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Constants only: `src/poseidon/circom.rs` sources the `bn254_x5` round
+# constants and MDS matrix from here and evaluates the permutation itself.
+light-poseidon = "0.2"
+ark-ed-on-bn254 = "0.4"
+ark-ff = "0.4"
+num-bigint = "0.4"
+thiserror = "1"
+wasm-bindgen = "0.2"
+# `ark-std 0.4` -> `rand 0.8` -> `getrandom 0.2`, which is a hard
+# `compile_error!` on wasm32 without the `js` feature. Same line as the
+# sibling crates.
+getrandom = { version = "0.2", features = ["js"] }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext", "--enable-mutable-globals"]

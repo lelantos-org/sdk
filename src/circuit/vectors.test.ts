@@ -232,7 +232,7 @@ function loadJson<T>(name: string): T {
 const index = loadJson<VectorIndex>("index.json");
 const transact2x2 = loadJson<VectorFile<TransactVector>>("transact-2x2.json");
 const transact3x3 = loadJson<VectorFile<TransactVector>>("transact-3x3.json");
-const treeUpdate = loadJson<VectorFile<TreeUpdateVector>>("tree-update-batch-8.json");
+const treeUpdate = loadJson<VectorFile<TreeUpdateVector>>("tree-update-batch-4.json");
 
 const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
     peerDependencies: Record<string, string>;

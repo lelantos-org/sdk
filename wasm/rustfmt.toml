@@ -1,0 +1,6 @@
+# `poseidon/src/poseidon/` is vendored byte-for-byte from
+# `backend/crates/fmd-crypto/src/poseidon/`. rustfmt here runs under a
+# different style edition than the backend's and reorders its imports, which
+# silently breaks the `diff` that makes drift detectable. Leave it alone; the
+# backend formats it.
+ignore = ["poseidon/src/poseidon"]

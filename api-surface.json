@@ -359,6 +359,7 @@
     "POW_2_64",
     "Point",
     "Poseidon",
+    "PoseidonBackend",
     "TAG_ASSET",
     "TAG_CM",
     "TAG_DK",

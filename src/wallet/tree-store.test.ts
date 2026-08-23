@@ -12,6 +12,7 @@ import { type TreePersistence, TreeStore, type TreeStoreState } from "./tree-sto
 // Deterministic stub: output depends only on inputs, never on call order.
 const MOD = 2n ** 254n;
 const stubP: Poseidon = {
+    backend: "js",
     hash: (xs: Field[]) => xs.reduce((a, b) => (a * 1000003n + b) % MOD, 1n),
 };
 
@@ -117,7 +118,7 @@ describe("TreeStore chunk validation", () => {
         const saved = persistence.saved.at(-1)!;
         const want = first.root();
 
-        const counting = { hash: vi.fn(stubP.hash) } as Poseidon;
+        const counting = { backend: "js", hash: vi.fn(stubP.hash) } as Poseidon;
         const restored = new TreeStore(counting, clientOf([]));
         restored.loadState(saved);
         // The zero-ladder is built in the MerkleTree constructor; only the

@@ -12,15 +12,16 @@ set shell := ["bash", "-ceuo", "pipefail"]
 
 PROVER := "prover"
 JUBJUB := "jubjub"
+POSEIDON := "poseidon"
 
 default:
     @just --list
 
 # Build all WASM crates (release).
-build: prover-build jubjub-build
+build: prover-build jubjub-build poseidon-build
 
 # Faster dev build (no wasm-opt).
-build-dev: prover-build-dev jubjub-build-dev
+build-dev: prover-build-dev jubjub-build-dev poseidon-build-dev
 
 # One wasm-pack invocation. `wasm-pack` writes a `pkg/.gitignore` that would
 # hide the build output from `npm pack`, so every build drops it.
@@ -41,6 +42,51 @@ jubjub-build: (wasm-build JUBJUB "release")
 
 jubjub-build-dev: (wasm-build JUBJUB "dev")
 
+# Poseidon is single-threaded, so it is built WITHOUT `+atomics` — overriding
+# the workspace `.cargo/config.toml`, whose shared-memory flags are what make
+# `jubjub`/`prover` require cross-origin isolation. RUSTFLAGS in the
+# environment replaces the config value rather than appending to it, so this
+# recipe carries the features the crate does still want.
+[private]
+poseidon-wasm-build profile:
+    ( command -v wasm-pack >/dev/null || cargo install wasm-pack )
+    cd {{POSEIDON}} && RUSTFLAGS="-C target-feature=+bulk-memory,+mutable-globals" \
+        wasm-pack build --target web --{{profile}} --out-dir pkg
+    rm -f {{POSEIDON}}/pkg/.gitignore
+
+poseidon-build: (poseidon-wasm-build "release")
+
+poseidon-build-dev: (poseidon-wasm-build "dev")
+
+# Vendored-source drift check.
+#
+# `poseidon/src/poseidon/` is a byte-for-byte copy of the backend's
+# implementation, so a plain `diff` catches an edit to either side. The shared
+# `tests/vectors/poseidon.json` catches semantic drift across repos; this
+# catches it here, immediately, and names the file.
+#
+# Skipped when the backend is not checked out alongside.
+drift:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    be="../../backend/crates/fmd-crypto/src/poseidon"
+    if [ ! -d "$be" ]; then echo "drift: backend not checked out, skipping"; exit 0; fi
+    rc=0
+    for f in circom.rs sparse.rs; do
+        if diff -q "$be/$f" "poseidon/src/poseidon/$f" >/dev/null; then
+            echo "  ok       $f"
+        else
+            echo "  DRIFTED  $f"; diff "$be/$f" "poseidon/src/poseidon/$f" || true; rc=1
+        fi
+    done
+    # mod.rs differs only by the `#[cfg(test)] mod tests;` block, which is not
+    # vendored: 2 removed lines and nothing else.
+    d=$(diff "$be/mod.rs" "poseidon/src/poseidon/mod.rs" | grep -c '^[<>]' || true)
+    if [ "$d" = "2" ]; then echo "  ok       mod.rs (only the cfg(test) block)"; else
+        echo "  DRIFTED  mod.rs: $d changed lines, expected 2"; diff "$be/mod.rs" "poseidon/src/poseidon/mod.rs" || true; rc=1
+    fi
+    exit $rc
+
 check:
     cargo check --workspace --release --target wasm32-unknown-unknown
 
@@ -55,10 +101,10 @@ fmt-check:
 
 clean:
     cargo clean
-    rm -rf {{PROVER}}/pkg {{JUBJUB}}/pkg
+    rm -rf {{PROVER}}/pkg {{JUBJUB}}/pkg {{POSEIDON}}/pkg
 
 size: build
-    @ls -lh {{PROVER}}/pkg/*_bg.wasm {{JUBJUB}}/pkg/*_bg.wasm | awk '{print $5, $9}'
+    @ls -lh {{PROVER}}/pkg/*_bg.wasm {{JUBJUB}}/pkg/*_bg.wasm {{POSEIDON}}/pkg/*_bg.wasm | awk '{print $5, $9}'
 
 # Run wasm benchmarks via Node. Builds first if pkg/ stale.
 # Set PROVER_DIR=/path/to/2x2 to also bench prover (zkey + wtns).

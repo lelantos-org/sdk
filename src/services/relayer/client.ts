@@ -3,7 +3,7 @@
 // Spends (transfer/withdraw/withdrawNative): wallet builds the transact
 // SNARK + pubInputs + per-output aux. Relayer assembles the matching
 // tree_update_batch SNARK (owns the multi-hundred-MB zkey + tree state) and
-// batches escrowed deposits, up to `MAX_L_BATCH = 8` leaves, under it.
+// batches escrowed deposits, up to `MAX_L_BATCH = 4` leaves, under it.
 //
 // Deposits do not go through here: `Wallet.deposit` broadcasts
 // `MASP.deposit` / `depositAuthorized` / `NativeAdapter.depositNative`

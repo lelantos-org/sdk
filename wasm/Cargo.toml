@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["prover", "jubjub"]
+members = ["prover", "jubjub", "poseidon"]
 
 [profile.release]
 opt-level = 3

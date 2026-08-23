@@ -6,6 +6,7 @@ import { TAG_MERKLE } from "./tags.js";
 // Deterministic stub — output depends only on inputs, never on call order.
 const MOD = 2n ** 254n;
 const stubP: Poseidon = {
+    backend: "js",
     hash: (arr: Field[]) => arr.reduce((a, b) => (a * 1000003n + b) % MOD, 1n),
 };
 
@@ -246,6 +247,7 @@ describe("node cache export/import", () => {
         // rebuilds would return the right root and look fine.
         let hashes = 0;
         const countingP: Poseidon = {
+            backend: "js",
             hash: (arr: Field[]) => {
                 hashes++;
                 return stubP.hash(arr);

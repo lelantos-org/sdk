@@ -3,12 +3,17 @@
 // review surfaces the cost. Sizes measured 2026-05-03:
 //   jubjub_wasm_bg.wasm   149 KB
 //   prover_bg.wasm        356 KB
+// Sizes measured 2026-08-23:
+//   poseidon_wasm_bg.wasm 188 KB — arity 5 only. Every extra arity costs
+//   ~200 KB, because light-poseidon emits round constants as code, one
+//   construction per width. See wasm/poseidon/src/lib.rs.
 
 import { statSync } from "node:fs";
 
 const BUDGETS = [
     { path: "wasm/jubjub/pkg/jubjub_wasm_bg.wasm", maxKB: 200 },
     { path: "wasm/prover/pkg/prover_bg.wasm", maxKB: 500 },
+    { path: "wasm/poseidon/pkg/poseidon_wasm_bg.wasm", maxKB: 200 },
 ];
 
 let failed = false;

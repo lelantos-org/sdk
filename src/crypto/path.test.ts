@@ -6,6 +6,7 @@ import type { Field, Poseidon } from "./poseidon.js";
 // Deterministic stub — output depends only on inputs, never on call order.
 const MOD = 2n ** 254n;
 const stubP: Poseidon = {
+    backend: "js",
     hash: (arr: Field[]) => arr.reduce((a, b) => (a * 1000003n + b) % MOD, 1n),
 };
 
