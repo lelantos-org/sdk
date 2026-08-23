@@ -1,14 +1,11 @@
 // WASM module loading for Poseidon-5.
 //
-// Isolates bundler handling (variable specifiers, `@vite-ignore`, the
-// Node-only `node:url` hop) from the hashing. Mirrors
-// `../jubjub-wasm/loader.ts`; the shared machinery is `wasm/loader.ts`.
+// Isolates bundler handling from the hashing. The boilerplate is
+// `wasm/module-loader.ts`, shared with `../jubjub-wasm/loader.ts`; the
+// Node/browser/injected branch under it is `wasm/loader.ts`.
 
-import {
-    createWasmLoader,
-    type WasmLoaderOverride,
-    type WasmModuleBase,
-} from "../../wasm/loader.js";
+import type { WasmLoaderOverride, WasmModuleBase } from "../../wasm/loader.js";
+import { createModuleLoader } from "../../wasm/module-loader.js";
 
 export interface PoseidonWasmMod extends WasmModuleBase {
     /** 5 x 32B big-endian in, 32B big-endian out. Throws on non-canonical input. */
@@ -23,24 +20,13 @@ export interface PoseidonWasmMod extends WasmModuleBase {
  */
 export type PoseidonWasmLoader = WasmLoaderOverride<PoseidonWasmMod>;
 
-const PKG_JS_URL = new URL("../../../wasm/poseidon/pkg/poseidon_wasm.js", import.meta.url);
-const PKG_WASM_URL = new URL("../../../wasm/poseidon/pkg/poseidon_wasm_bg.wasm", import.meta.url);
-
-// Specifiers held in variables (+ `@vite-ignore` below) so Vite skips static
-// resolution. `node:url` is Node-only; `#wasm/poseidon` requires either a Node
-// runtime or an injected loader.
-const NODE_URL = "node:url";
-const WASM_POSEIDON_SUBPATH = "#wasm/poseidon";
-
-const loader = createWasmLoader<PoseidonWasmMod>({
-    name: "poseidon",
-    defaultImport: () =>
-        import(/* @vite-ignore */ WASM_POSEIDON_SUBPATH) as Promise<PoseidonWasmMod>,
-    nodeJsUrl: async () => PKG_JS_URL.href,
-    nodeWasmPath: async () => {
-        const { fileURLToPath } = await import(/* @vite-ignore */ NODE_URL);
-        return fileURLToPath(PKG_WASM_URL);
-    },
+// `new URL(..., import.meta.url)` resolves against *this* file, so it stays
+// here rather than moving into the shared factory.
+const loader = createModuleLoader<PoseidonWasmMod>({
+    owner: "Poseidon",
+    subpath: "#wasm/poseidon",
+    pkgJsUrl: new URL("../../../wasm/poseidon/pkg/poseidon_wasm.js", import.meta.url),
+    pkgWasmUrl: new URL("../../../wasm/poseidon/pkg/poseidon_wasm_bg.wasm", import.meta.url),
 });
 
 /** Call once at app boot, before `Poseidon.build()`. */
@@ -48,14 +34,11 @@ export function configurePoseidonWasm(override: PoseidonWasmLoader): void {
     loader.configure(override);
 }
 
-let mod: PoseidonWasmMod | null = null;
-
-export async function ensureInit(): Promise<void> {
-    mod = await loader.load();
+export function ensureInit(): Promise<void> {
+    return loader.ensureInit();
 }
 
 /** The loaded module. Throws if `Poseidon.build()` has not run. */
 export function w(): PoseidonWasmMod {
-    if (!mod) throw new Error("Poseidon wasm not initialized; call Poseidon.build() first");
-    return mod;
+    return loader.w();
 }

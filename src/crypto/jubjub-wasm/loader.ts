@@ -1,13 +1,11 @@
 // WASM module loading for Baby-Jubjub.
 //
-// Isolates the bundler handling (variable specifiers, `@vite-ignore`, the
-// Node-only `node:url` hop) from the curve arithmetic.
+// Isolates bundler handling from the curve arithmetic. The boilerplate is
+// `wasm/module-loader.ts`, shared with `../poseidon-wasm/loader.ts`; the
+// Node/browser/injected branch under it is `wasm/loader.ts`.
 
-import {
-    createWasmLoader,
-    type WasmLoaderOverride,
-    type WasmModuleBase,
-} from "../../wasm/loader.js";
+import type { WasmLoaderOverride, WasmModuleBase } from "../../wasm/loader.js";
+import { createModuleLoader } from "../../wasm/module-loader.js";
 
 export interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
@@ -33,23 +31,13 @@ export interface JubWasmMod extends WasmModuleBase {
  */
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
-const PKG_JS_URL = new URL("../../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url);
-const PKG_WASM_URL = new URL("../../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url);
-
-// Specifiers held in variables (+ `@vite-ignore` below) so Vite skips static
-// resolution. `node:url` is Node-only; `#wasm/jubjub` requires either a Node
-// runtime or an injected loader.
-const NODE_URL = "node:url";
-const WASM_JUBJUB_SUBPATH = "#wasm/jubjub";
-
-const loader = createWasmLoader<JubWasmMod>({
-    name: "jubjub",
-    defaultImport: () => import(/* @vite-ignore */ WASM_JUBJUB_SUBPATH) as Promise<JubWasmMod>,
-    nodeJsUrl: async () => PKG_JS_URL.href,
-    nodeWasmPath: async () => {
-        const { fileURLToPath } = await import(/* @vite-ignore */ NODE_URL);
-        return fileURLToPath(PKG_WASM_URL);
-    },
+// `new URL(..., import.meta.url)` resolves against *this* file, so it stays
+// here rather than moving into the shared factory.
+const loader = createModuleLoader<JubWasmMod>({
+    owner: "WasmJubjub",
+    subpath: "#wasm/jubjub",
+    pkgJsUrl: new URL("../../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url),
+    pkgWasmUrl: new URL("../../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url),
 });
 
 /** Call once at app boot, before `WasmJubjub.build()`. */
@@ -57,14 +45,11 @@ export function configureJubjubWasm(override: JubjubWasmLoader): void {
     loader.configure(override);
 }
 
-let jubWasm: JubWasmMod | null = null;
-
-export async function ensureInit(): Promise<void> {
-    jubWasm = await loader.load();
+export function ensureInit(): Promise<void> {
+    return loader.ensureInit();
 }
 
 /** The loaded module. Throws if `WasmJubjub.build()` has not run. */
 export function w(): JubWasmMod {
-    if (!jubWasm) throw new Error("WasmJubjub not initialized; call WasmJubjub.build() first");
-    return jubWasm;
+    return loader.w();
 }

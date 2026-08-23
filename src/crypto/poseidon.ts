@@ -27,10 +27,10 @@ import { poseidon6 } from "poseidon-lite/poseidon6";
 import { poseidon7 } from "poseidon-lite/poseidon7";
 import { poseidon8 } from "poseidon-lite/poseidon8";
 
-import { FIELD_BYTES } from "../core/bytes.js";
+import { FIELD_BYTES, fromBeBytes, writeBeInto } from "../core/bytes.js";
 import { assertField } from "../core/field.js";
 import { getLogger } from "../log/logger.js";
-import { ensureInit, w } from "./poseidon-wasm/loader.js";
+import { ensureInit, type PoseidonWasmMod, w } from "./poseidon-wasm/loader.js";
 
 export { configurePoseidonWasm, type PoseidonWasmLoader } from "./poseidon-wasm/loader.js";
 
@@ -47,41 +47,34 @@ const WASM_ARITY = 5;
 // poseidon-lite exports a fixed-arity function per input width. Parity with
 // circomlibjs `buildPoseidon` (BN254, iden3 constants) is verified by
 // `poseidon.test.ts`. Arity ceiling 8 covers all in-tree callers.
-const TABLE: Record<number, (xs: Field[]) => bigint> = {
-    1: poseidon1 as (xs: Field[]) => bigint,
-    2: poseidon2 as (xs: Field[]) => bigint,
-    3: poseidon3 as (xs: Field[]) => bigint,
-    4: poseidon4 as (xs: Field[]) => bigint,
-    5: poseidon5 as (xs: Field[]) => bigint,
-    6: poseidon6 as (xs: Field[]) => bigint,
-    7: poseidon7 as (xs: Field[]) => bigint,
-    8: poseidon8 as (xs: Field[]) => bigint,
+//
+// The JS backend for every arity, and the fallback for `WASM_ARITY`.
+const JS_TABLE: Record<number, (xs: Field[]) => Field> = {
+    1: poseidon1 as (xs: Field[]) => Field,
+    2: poseidon2 as (xs: Field[]) => Field,
+    3: poseidon3 as (xs: Field[]) => Field,
+    4: poseidon4 as (xs: Field[]) => Field,
+    5: poseidon5 as (xs: Field[]) => Field,
+    6: poseidon6 as (xs: Field[]) => Field,
+    7: poseidon7 as (xs: Field[]) => Field,
+    8: poseidon8 as (xs: Field[]) => Field,
 };
 
 /**
- * Scratch for the wasm boundary, reused across calls — a full tree build is
- * ~350K hashes and allocating per call would dominate the saving.
+ * Bind arity-5 hashing to the wasm module.
  *
- * Safe to share despite being module state: `hash` is synchronous and contains
- * no `await`, so it runs to completion before any other caller can enter. A
- * future async variant must not reuse this.
+ * The scratch buffer is per-instance and reused across calls: a full tree
+ * build is ~350K hashes, and allocating 160 bytes each time would eat the
+ * saving. Safe to reuse because `hash` is synchronous and has no `await`, so
+ * one call completes before another can enter — a future async variant must
+ * allocate its own.
  */
-const wasmInput = new Uint8Array(WASM_ARITY * FIELD_BYTES);
-
-// Big-endian, matching `poseidon_hash`'s wire contract. `core/bytes.ts` is
-// little-endian (on-chain serialisation) and allocates per call, so neither of
-// its helpers fits here.
-function writeBe(dst: Uint8Array, offset: number, x: Field): void {
-    for (let i = FIELD_BYTES - 1; i >= 0; i--) {
-        dst[offset + i] = Number(x & 0xffn);
-        x >>= 8n;
-    }
-}
-
-function readBe(src: Uint8Array): Field {
-    let out = 0n;
-    for (const b of src) out = (out << 8n) | BigInt(b);
-    return out;
+function wasmHash5(mod: PoseidonWasmMod): (xs: Field[]) => Field {
+    const scratch = new Uint8Array(WASM_ARITY * FIELD_BYTES);
+    return (xs) => {
+        for (const [i, x] of xs.entries()) writeBeInto(scratch, i * FIELD_BYTES, x);
+        return fromBeBytes(mod.poseidon5(scratch));
+    };
 }
 
 export class Poseidon {
@@ -91,32 +84,6 @@ export class Poseidon {
      * benchmarks and worth checking first when a sync is unexpectedly slow.
      */
     readonly backend: PoseidonBackend;
-
-    private constructor(backend: PoseidonBackend) {
-        this.backend = backend;
-    }
-
-    /**
-     * Initialises the wasm backend. Already `async` before it did anything, so
-     * no caller changes.
-     *
-     * A failure here is not fatal: the JS tables cover every arity, so an
-     * environment that cannot load wasm degrades to the slower backend rather
-     * than to a broken wallet. It is logged rather than swallowed — silently
-     * losing 2.5x is the kind of regression nobody notices until a cold sync
-     * takes a minute.
-     */
-    static async build(): Promise<Poseidon> {
-        try {
-            await ensureInit();
-            return new Poseidon("wasm");
-        } catch (error) {
-            log.warn("wasm unavailable; arity-5 hashing falls back to poseidon-lite", {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return new Poseidon("js");
-        }
-    }
 
     /**
      * Inputs must already be canonical field elements, i.e. in `[0, r)`.
@@ -134,16 +101,47 @@ export class Poseidon {
      * whichever backend is live.
      *
      * One comparison per input against a full permutation: not measurable.
+     *
+     * A bound property rather than a prototype method, so the class stays
+     * structurally `{ backend, hash }` and the arity table can be captured per
+     * instance — the backend is a property of the instance, not of the call,
+     * so it must not be branched on per hash.
      */
-    hash(xs: Field[]): Field {
-        const fn = TABLE[xs.length];
-        if (!fn) throw new Error(`Poseidon arity ${xs.length} not supported (1..8)`);
-        for (const [i, x] of xs.entries()) assertField(x, `Poseidon input ${i}`);
+    readonly hash: (xs: Field[]) => Field;
 
-        if (this.backend === "wasm" && xs.length === WASM_ARITY) {
-            for (const [i, x] of xs.entries()) writeBe(wasmInput, i * FIELD_BYTES, x);
-            return readBe(w().poseidon5(wasmInput));
+    private constructor(backend: PoseidonBackend, hash5: (xs: Field[]) => Field) {
+        this.backend = backend;
+        const table: Record<number, (xs: Field[]) => Field> = {
+            ...JS_TABLE,
+            [WASM_ARITY]: hash5,
+        };
+        this.hash = (xs) => {
+            const fn = table[xs.length];
+            if (!fn) throw new Error(`Poseidon arity ${xs.length} not supported (1..8)`);
+            for (const [i, x] of xs.entries()) assertField(x, `Poseidon input ${i}`);
+            return fn(xs);
+        };
+    }
+
+    /**
+     * Initialises the wasm backend. Already `async` before it did anything, so
+     * no caller changes.
+     *
+     * A failure here is not fatal: the JS tables cover every arity, so an
+     * environment that cannot load wasm degrades to the slower backend rather
+     * than to a broken wallet. It is logged rather than swallowed — silently
+     * losing 2.5x is the kind of regression nobody notices until a cold sync
+     * takes a minute.
+     */
+    static async build(): Promise<Poseidon> {
+        try {
+            await ensureInit();
+            return new Poseidon("wasm", wasmHash5(w()));
+        } catch (error) {
+            log.warn("wasm unavailable; arity-5 hashing falls back to poseidon-lite", {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return new Poseidon("js", poseidon5 as (xs: Field[]) => Field);
         }
-        return fn(xs);
     }
 }
