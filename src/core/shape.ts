@@ -26,7 +26,7 @@ export const TRANSACT_2X2: CircuitShape = { nIn: 2, nOut: 2 };
 
 /**
  * The default shape. `@lelantos-org/circuits` ships its proving and
- * verification keys from 0.9.2, and `circuit/shape-proving.test.ts` proves and
+ * verification keys from 0.10.0, and `circuit/shape-proving.test.ts` proves and
  * verifies a golden witness against them.
  */
 export const TRANSACT_3X3: CircuitShape = { nIn: 3, nOut: 3 };

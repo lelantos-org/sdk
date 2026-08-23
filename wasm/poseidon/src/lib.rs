@@ -37,23 +37,15 @@ const ARITY: usize = 5;
 /// than reduced, so two distinct byte strings cannot be made to collide by
 /// wrapping. Errors surface as JS exceptions rather than traps.
 ///
-/// # Why the arity is fixed, and why `(0..ARITY)` is load-bearing
+/// # Why the arity is fixed
 ///
-/// `light-poseidon` emits its round constants as *code*, one construction per
-/// width, so every width reachable from here lands in the binary at roughly
-/// 200 KB apiece. Building the input slice from a constant range lets the
-/// optimiser fold `Circom::new(5)` and drop the other eleven.
+/// The round constants are a build-time table, and `poseidon-params` builds
+/// one width: 6, this arity plus the domain tag. Exposing another arity means
+/// another table, so add arities by adding a function here *and* a width
+/// there — not by taking the arity as an argument.
 ///
-/// Measured, same source, only the exposed arities differing:
-///
-/// | exposed | raw wasm |
-/// |---|---|
-/// | this (arity 5) | 220 KB |
-/// | arities 2..=6 | 564 KB |
-/// | a runtime `arity` parameter | 1924 KB |
-///
-/// So a "tidy-up" that takes the arity as an argument, or builds the slice
-/// from a runtime length, costs about 1.7 MB. Add arities by adding functions.
+/// Deriving the width at run time is what the crate did until it cost 12
+/// minutes a build; `poseidon-params` carries that measurement.
 #[wasm_bindgen]
 pub fn poseidon5(inputs_be: &[u8]) -> Result<Vec<u8>, JsValue> {
     if inputs_be.len() != ARITY * FE {

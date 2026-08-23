@@ -1,0 +1,17 @@
+[package]
+name = "poseidon-bn254-params"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ark-ff = "0.4"
+
+# Build-time only, and the whole point of this crate: `light-poseidon` emits
+# the `bn254_x5` round constants as code, one arm per width from 2 to 13, and
+# picks an arm from a runtime `t`. `build.rs` runs it once on the host and
+# writes out the single width `poseidon-wasm` uses, as data.
+[build-dependencies]
+light-poseidon = "0.2"
+ark-ed-on-bn254 = "0.4"
+ark-ff = "0.4"

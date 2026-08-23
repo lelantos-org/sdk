@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["prover", "jubjub", "poseidon"]
+members = ["prover", "jubjub", "poseidon", "poseidon-params"]
 
 [profile.release]
 opt-level = 3

@@ -861,14 +861,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "poseidon-bn254-params"
+version = "0.1.0"
+dependencies = [
+ "ark-ed-on-bn254",
+ "ark-ff 0.4.2",
+ "light-poseidon",
+]
+
+[[package]]
 name = "poseidon-wasm"
 version = "0.1.0"
 dependencies = [
  "ark-ed-on-bn254",
  "ark-ff 0.4.2",
  "getrandom",
- "light-poseidon",
  "num-bigint 0.4.6",
+ "poseidon-bn254-params",
  "thiserror",
  "wasm-bindgen",
 ]

@@ -20,6 +20,11 @@ concurrency:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    env:
+      # Pinned here rather than on the install step: the WASM package cache key
+      # below names the same version, and the two must not drift.
+      BINARYEN_VERSION: "132"
+      BINARYEN_SHA256: "195ddc94f9bc89f45abdabb0b9eea86023d727ba90eac8b35b80f2544fc30572"
     steps:
       - uses: actions/checkout@v4
 
@@ -47,8 +52,9 @@ jobs:
 
       # wasm-pack uses `wasm-opt` from PATH when it can find one, and otherwise
       # downloads a pinned binaryen from GitHub releases — a fetch that is not
-      # reliable from hosted runners and has no retry. Both crates set
-      # load-bearing `wasm-opt` flags (`-O4`, SIMD, threads) and the build is
+      # reliable from hosted runners and has no retry. All three crates set
+      # load-bearing `wasm-opt` flags (`-O4`, and SIMD/threads where the crate
+      # uses them) and the build is
       # size-budgeted, so skipping the optimiser is not an option; installing it
       # is. Keep this before any `just build`.
       #
@@ -57,9 +63,6 @@ jobs:
       # with no retry cap, and noble ships binaryen 116. Fetch the upstream
       # release tarball instead — pinned by version and sha256, retried, ~2s.
       - name: Install binaryen (provides wasm-opt)
-        env:
-          BINARYEN_VERSION: "132"
-          BINARYEN_SHA256: "195ddc94f9bc89f45abdabb0b9eea86023d727ba90eac8b35b80f2544fc30572"
         run: |
           set -euo pipefail
           tag="version_${BINARYEN_VERSION}"
@@ -88,7 +91,33 @@ jobs:
       - name: Audit npm package signatures
         run: npm audit signatures --omit=dev
 
+      # Git already hashes the tree: `HEAD:wasm` is the id of the `wasm/`
+      # directory as committed, so it changes exactly when a tracked file under
+      # it does. `hashFiles('wasm/**')` would instead walk `wasm/target/`, which
+      # `Swatinem/rust-cache` restores above and whose build-script output is not
+      # reproducible run to run.
+      - name: Identify the WASM source tree
+        id: wasm-tree
+        run: echo "id=$(git rev-parse HEAD:wasm)" >> "$GITHUB_OUTPUT"
+
+      # The three `pkg/` directories are a pure function of that tree plus the
+      # toolchain and binaryen — both pinned by files inside it, bar the version
+      # in the key — and nothing else in this job writes to them. So on a run
+      # that touches no Rust, restoring them skips the build outright.
+      # `Swatinem/rust-cache` covers `target/`, but not `wasm-bindgen` or
+      # `wasm-opt`, which is the rest of the wall clock.
+      - name: Cache built WASM packages
+        id: wasm-pkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            wasm/prover/pkg
+            wasm/jubjub/pkg
+            wasm/poseidon/pkg
+          key: wasm-pkg-${{ runner.os }}-binaryen${{ env.BINARYEN_VERSION }}-${{ steps.wasm-tree.outputs.id }}
+
       - name: Build WASM crates
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
         run: cd wasm && just build
 
       - name: Format check

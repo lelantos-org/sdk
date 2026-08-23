@@ -8,9 +8,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Constants only: `src/poseidon/circom.rs` sources the `bn254_x5` round
-# constants and MDS matrix from here and evaluates the permutation itself.
-light-poseidon = "0.2"
+# Renamed on purpose: `src/poseidon/circom.rs` is vendored byte-for-byte from
+# the backend and says `use light_poseidon::..`. In the backend that is the
+# crate; here it is this table, which costs ~1.8 MB less pre-optimiser wasm.
+light-poseidon = { package = "poseidon-bn254-params", path = "../poseidon-params" }
 ark-ed-on-bn254 = "0.4"
 ark-ff = "0.4"
 num-bigint = "0.4"
