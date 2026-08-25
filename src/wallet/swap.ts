@@ -13,6 +13,7 @@ import { resolveAmount } from "./amount.js";
 import type { SwapOptions, SwapResult } from "./api.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
+import { resolveDepositFee } from "./tx/deposit-fee.js";
 import { feeSlots, resolveFee } from "./tx/fee.js";
 import { changeSlots, finalizeSlots } from "./tx/outputs.js";
 import { freshDepositSlots, prepareSpend, submitSpend } from "./tx/steps.js";
@@ -61,7 +62,8 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             autoConsolidate: args.autoConsolidate,
             onPhase: args.onPhase,
         });
-    const bRecipient = decodeAddress(ctx.J, args.bRecipient ?? ctx.address);
+    const bRecipientAddress = args.bRecipient ?? ctx.address;
+    const bRecipient = decodeAddress(ctx.J, bRecipientAddress);
 
     const remainder = branded<CircuitAmount>(selection.sum - covered);
     // Every slot the fee does not need is change back to self. `finalizeSlots`
@@ -82,7 +84,20 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         ctx.cfg.chain.fetchAsset(assetOut),
     ]);
 
-    const bValue = sizeBNote(quote.minOut, entryOut.scale, feeBps);
+    // The B-note deposit is flushed later, by a relayer, and that flush is not
+    // covered by leg 1's fee — leg 1 pays `EntryPoint::Swap` (relaying this
+    // transaction), while the flush is priced separately per deposit. Left
+    // unpaid, the deposit is escrowed and then skipped forever with "fee note
+    // is not addressed to this relayer", and the B-note never materialises.
+    //
+    // Resolved against the *out* asset, because that is what the deposit mints
+    // and a payer can only pay in the asset being deposited.
+    const bFee = await resolveDepositFee(ctx, {
+        asset: assetOut,
+        recipient: bRecipientAddress,
+    });
+
+    const bValue = sizeBNote(quote.minOut, entryOut.scale, feeBps, bFee.value);
     if (bValue <= 0n) {
         throw new InvalidArgumentError(
             `swap: minOut ${quote.minOut} below scaleOut*(1+fee) (zero B-note)`,
@@ -144,12 +159,14 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             rcvDep: o0.rcvDep,
             aux: o0.aux,
         },
-        // Leg 1 already pays the relayer a shielded fee, so the B-note deposit
-        // adds no second charge. The leaf is still minted — the contract mints
-        // two unconditionally — as a zero-value pad every scanner discards.
+        // Pays for the flush that commits this deposit. Funded from the swap's
+        // own output — `sizeBNote` sized `publicIn` to leave room in the same
+        // Permit2 pull — so it is not a second charge to the user. Zero on a
+        // chain that subsidises deposits, where it is a pad addressed to the
+        // B-note recipient.
         fee: {
-            recipient: bRecipient,
-            value: 0n,
+            recipient: bFee.recipient,
+            value: bFee.value,
             rho: feeSlot.rho,
             rcm: feeSlot.rcm,
             rcv: feeSlot.rcv,
@@ -207,10 +224,16 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
  * upper bound — the closed form `minOut * BPS / (scale * (BPS + feeBps))` —
  * lands *below* `minOut` whenever the division is inexact, and reverts.
  *
- * `pulled` is principal plus fee, and the pool floors the fee, so it advances
- * in steps no closed form always hits. Start from the floor-div estimate (a
- * lower bound) and walk up. Minimality is what keeps the answer under
- * `actualOut`; any overshoot is wrapper-side dust forwarded to the treasury.
+ * `pulled` is principal, the pool's fee, and the note paying whoever flushes
+ * the deposit — and the pool floors its fee, so the pull advances in steps no
+ * closed form always hits. Start from the floor-div estimate and walk to the
+ * smallest `v` that still covers `minOut`. Minimality is what keeps the answer
+ * under `actualOut`; any overshoot is wrapper-side dust forwarded to the
+ * treasury.
+ *
+ * `relayerFee` is in circuit units of the *out* asset and rides in the same
+ * pull, so a non-zero one makes the B-note smaller: the flush is paid for out
+ * of the swap's own output rather than by a second charge to the user.
  *
  * Public because it is the only correct answer to "how much will this swap
  * credit me?", and that is a question every caller showing a quote has to
@@ -221,12 +244,20 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
  * reach for the closed form above and get a figure that is both wrong on
  * screen and, if used to size a transaction, reverting on chain.
  */
-export function sizeBNote(minOut: bigint, scaleOut: bigint, feeBps: bigint): bigint {
+export function sizeBNote(
+    minOut: bigint,
+    scaleOut: bigint,
+    feeBps: bigint,
+    relayerFee: bigint = 0n,
+): bigint {
     const pullFor = (v: bigint): bigint => {
         const inAmt = v * scaleOut;
-        return inAmt + applyFee(inAmt, feeBps);
+        return inAmt + applyFee(inAmt, feeBps) + relayerFee * scaleOut;
     };
     let v = (minOut * BPS_DENOMINATOR) / (scaleOut * (BPS_DENOMINATOR + feeBps));
+    // Guard the floor-div estimate: with a relayer fee the pull can already
+    // cover `minOut` at a smaller `v`, and the walk below only moves up.
+    while (v > 0n && pullFor(v - 1n) >= minOut) v -= 1n;
     // `pullFor` is strictly increasing in `v`, so this terminates.
     while (pullFor(v) < minOut) v += 1n;
     return v;

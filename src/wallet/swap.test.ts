@@ -9,10 +9,13 @@ import { sizeBNote } from "./swap.js";
 // only the upper half — it floor-divides, so the pull comes out one unit short
 // and the swap reverts on-chain after a full Groth16.
 
-/** What `MASP.deposit*` pulls for a B note of `v`: principal + floored fee. */
-const pullFor = (v: bigint, scale: bigint, feeBps: bigint): bigint => {
+/**
+ * What `MASP.deposit*` pulls for a B note of `v`: principal, the pool's
+ * floored fee, and the note paying whoever flushes the deposit.
+ */
+const pullFor = (v: bigint, scale: bigint, feeBps: bigint, relayerFee = 0n): bigint => {
     const inAmt = v * scale;
-    return inAmt + applyFee(inAmt, feeBps);
+    return inAmt + applyFee(inAmt, feeBps) + relayerFee * scale;
 };
 
 const FEE_BPS = 500n; // 5%, as deployed in the e2e stack
@@ -67,5 +70,49 @@ describe("sizeBNote", () => {
     /// this into an `InvalidArgumentError` rather than escrowing nothing.
     it("returns zero when minOut is below one scaled unit", () => {
         expect(sizeBNote(0n, 10n, FEE_BPS)).toBe(0n);
+    });
+
+    /// The flush that commits the B-note deposit is not covered by the swap's
+    /// own relayer fee — that one pays for relaying the swap transaction. Left
+    /// unpaid the deposit is escrowed and never flushed, so the fee rides in
+    /// the same Permit2 pull and the B-note shrinks to make room.
+    it("funds the relayer fee out of the pull, shrinking the note", () => {
+        const minOut = 105n;
+        const withoutFee = sizeBNote(minOut, 1n, FEE_BPS);
+        const withFee = sizeBNote(minOut, 1n, FEE_BPS, 5n);
+
+        expect(withFee).toBeLessThan(withoutFee);
+        // Still inside the wrapper's window: the pull covers `minOut`...
+        expect(pullFor(withFee, 1n, FEE_BPS, 5n)).toBeGreaterThanOrEqual(minOut);
+        // ...and is minimal, which is what keeps it under `actualOut`.
+        expect(pullFor(withFee - 1n, 1n, FEE_BPS, 5n)).toBeLessThan(minOut);
+    });
+
+    /// Same two-sided property as above, with a fee in the pull.
+    it("stays inside the wrapper's window at every relayer fee", () => {
+        for (const relayerFee of [0n, 1n, 7n, 50n]) {
+            for (const scale of [1n, 10n, 10_000_000_000n]) {
+                for (let minOut = 1n; minOut <= 200n; minOut += 1n) {
+                    const v = sizeBNote(minOut, scale, FEE_BPS, relayerFee);
+                    const label = `minOut=${minOut} scale=${scale} fee=${relayerFee}`;
+                    expect(pullFor(v, scale, FEE_BPS, relayerFee), label).toBeGreaterThanOrEqual(
+                        minOut,
+                    );
+                    if (v > 0n) {
+                        expect(
+                            pullFor(v - 1n, scale, FEE_BPS, relayerFee),
+                            `not minimal: ${label}`,
+                        ).toBeLessThan(minOut);
+                    }
+                }
+            }
+        }
+    });
+
+    /// A fee large enough to cover `minOut` on its own leaves nothing to
+    /// deposit. `executeSwap` rejects that as a zero B-note rather than
+    /// escrowing a note the recipient would never see.
+    it("returns zero when the fee alone covers minOut", () => {
+        expect(sizeBNote(10n, 1n, FEE_BPS, 50n)).toBe(0n);
     });
 });

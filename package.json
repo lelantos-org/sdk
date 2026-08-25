@@ -1,7 +1,7 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.23.0",
-    "description": "Lelantos MASP client SDK \u2014 keys, notes, FMD, prover.",
+    "version": "0.24.0",
+    "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
     "license": "MIT",
     "author": "Lelantos",
     "type": "module",
