@@ -9,7 +9,13 @@ import { encodeAbiParameters, keccak256 } from "viem";
 import { branded, type Hex32 } from "../core/brand.js";
 import { BN254_FR, type Field } from "../core/field.js";
 import { bytesToHex } from "../core/hex.js";
-import { AUX_OUTPUT_COMPONENTS, type AuxOutput, type DepositRequest } from "./deposit-request.js";
+import {
+    AUX_OUTPUT_COMPONENTS,
+    type AuxOutput,
+    auxTuple,
+    type DepositRequest,
+    depositTuple,
+} from "./deposit-request.js";
 
 /**
  * Component list of `PubInputs.DepositRequest`, in declaration order.
@@ -42,25 +48,9 @@ export function computePiHash(deposit: DepositRequest, aux: AuxOutput): Hex32 {
             { type: "tuple", components: [...DEPOSIT_REQUEST_COMPONENTS] },
             { type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
         ],
-        [
-            {
-                chainId: deposit.chainId,
-                publicAssetId: deposit.publicAssetId,
-                publicIn: deposit.publicIn,
-                payer: deposit.payer as `0x${string}`,
-                recipient: deposit.recipient as `0x${string}`,
-                outCm: deposit.outCm as `0x${string}`,
-                cvDep: deposit.cvDep,
-                rcv: deposit.rcv,
-            },
-            {
-                clueRx: aux.clueRx,
-                clueRy: aux.clueRy,
-                ephPubX: aux.ephPubX,
-                ephPubY: aux.ephPubY,
-                ciphertext: bytesToHex(aux.ciphertext) as `0x${string}`,
-            },
-        ] as never,
+        // The same builders the calldata path uses, so the witness this hash
+        // signs and the struct actually submitted cannot disagree.
+        [depositTuple(deposit), auxTuple(aux)] as never,
     );
     return branded<Hex32>(keccak256(encoded));
 }

@@ -14,12 +14,17 @@ import { encodeFunctionData, type Hex, parseEventLogs } from "viem";
 import type { EvmAddress, Hex32 } from "../../core/brand.js";
 import { safeCall } from "../../core/callbacks.js";
 import { TxMiningError, WalletConfigError } from "../../core/errors.js";
-import type { AuxOutput, DepositRequest, Permit2Sig } from "../../protocol/deposit-request.js";
+import {
+    type AuxOutput,
+    auxTuple,
+    type DepositRequest,
+    depositTuple,
+    type Permit2Sig,
+} from "../../protocol/deposit-request.js";
 import type { CancelDepositInputs } from "../types.js";
 import { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
 import { hex, type ViemCtx } from "./ctx.js";
 import { waitTxReceipt } from "./token.js";
-import { auxTuple, depositTuple } from "./tuples.js";
 
 export interface SubmitBase {
     deposit: DepositRequest;

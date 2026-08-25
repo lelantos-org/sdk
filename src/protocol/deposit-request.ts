@@ -3,6 +3,17 @@
 // These mirror `PubInputs.sol` field-for-field. They live in `protocol/`
 // because the chain adapter, the relayer codec, and the aux digest all consume
 // them; none of those should depend on the Permit2 signer.
+//
+// The ABI component lists and the functions that map a struct onto them sit
+// together deliberately. The two consumers are a hash (`computePiHash`) and
+// calldata (`chain/viem/deposits.ts`), and they must agree field-for-field —
+// the hash is a Permit2 witness over the very struct the calldata carries. The
+// mapping used to be written out twice, once per consumer, on either side of a
+// tier boundary that stopped `protocol/` from reusing `chain/`'s copy. Adding
+// a field to `DepositRequest` and updating only one of them produced a
+// signature the contract rejects, with nothing local to point at.
+
+import { bytesToHex } from "../core/hex.js";
 
 /**
  * Canonical Uniswap Permit2 deployment (deterministic CREATE2).
@@ -120,4 +131,43 @@ export interface PermitSingle {
      * from `details.expiration` which gates each future pull).
      */
     sigDeadline: bigint;
+}
+
+// ─── struct → ABI tuple ──────────────────────────────────────────────────────
+//
+// The `as` casts narrow `string` to viem's `0x${string}`. The values are
+// already branded `EvmAddress` / `Hex32` at their source, so this is a
+// representation change, not an unchecked assertion.
+
+/**
+ * `DepositRequest` as the tuple `DEPOSIT_REQUEST_COMPONENTS` describes.
+ *
+ * @internal
+ */
+export function depositTuple(deposit: DepositRequest) {
+    return {
+        chainId: deposit.chainId,
+        publicAssetId: deposit.publicAssetId,
+        publicIn: deposit.publicIn,
+        payer: deposit.payer as `0x${string}`,
+        recipient: deposit.recipient as `0x${string}`,
+        outCm: deposit.outCm as `0x${string}`,
+        cvDep: deposit.cvDep,
+        rcv: deposit.rcv,
+    };
+}
+
+/**
+ * `AuxOutput` as the tuple `AUX_OUTPUT_COMPONENTS` describes.
+ *
+ * @internal
+ */
+export function auxTuple(aux: AuxOutput) {
+    return {
+        clueRx: aux.clueRx,
+        clueRy: aux.clueRy,
+        ephPubX: aux.ephPubX,
+        ephPubY: aux.ephPubY,
+        ciphertext: bytesToHex(aux.ciphertext) as `0x${string}`,
+    };
 }
