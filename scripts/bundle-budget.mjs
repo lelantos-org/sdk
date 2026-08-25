@@ -34,9 +34,18 @@ const ROOT = resolve(__dirname, "..");
  */
 const ENTRIES = [
     {
+        // Raised from 640_000 in the 0.22 line, where the entry had been sitting
+        // 33 bytes under the ceiling and a selector fix (nesting `FeeNote` as a
+        // tuple in the two `cancel*` signatures) cost 61 bytes and tipped it.
+        //
+        // The ~10 KB of headroom is slack to absorb changes like that one
+        // without a budget edit per commit — not room to grow into. ~300 KB of
+        // this entry is viem retained by the root barrel with nothing reachable
+        // using it (see the note above); that is where the next move should be,
+        // and it is worth thirty times this headroom.
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/index.js";`,
-        max: 640_000,
+        max: 650_000,
     },
     {
         name: "root: errors only",
