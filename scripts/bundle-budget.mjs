@@ -26,11 +26,28 @@ const ROOT = resolve(__dirname, "..");
  *
  * The subpath entries are the ones to keep honest — they are what a
  * cost-sensitive consumer should import, and they shake down to almost
- * nothing. The root-barrel entries are deliberately generous: pulling any
- * symbol through `dist/index.js` currently retains viem's client stack
- * (~306 KB) even when nothing reachable uses it, and the cause is not yet
- * pinned down. Treat those two numbers as a ceiling to drive down, not as a
- * target that has been met.
+ * nothing.
+ *
+ * The root-barrel numbers are large for a reason that is *this harness*, not
+ * the package. `splitting: true` makes esbuild preserve symbols across chunk
+ * boundaries, which inhibits its own tree-shaking; the entry chunk then
+ * statically imports shared chunks holding code only the lazy paths use.
+ * Measured both ways, `export { isWalletError } from "@lelantos-org/sdk"` is:
+ *
+ *     splitting: true   340,693 B   (what this script reports)
+ *     splitting: false      664 B   (what the static graph actually costs)
+ *
+ * 664 bytes is the honest figure — the barrel is 11 lines of pure re-exports
+ * and shakes fine. So the root entries do *not* retain ~306 KB of viem for
+ * nothing, and there is no architectural bug to chase there. What they measure
+ * is an upper bound under a bundler configuration that shakes worse than the
+ * vite/rollup pipeline a consumer actually uses.
+ *
+ * Splitting is still the right mode here: it is what separates eager from
+ * lazy, and dropping it would inline every dynamic import instead (`connect`
+ * measures 1,151,206 B that way — worse, and no longer a statement about what
+ * loads first). Keep the budgets as a ratchet against *relative* growth; do
+ * not read them as bytes a browser downloads.
  */
 const ENTRIES = [
     {
@@ -39,10 +56,10 @@ const ENTRIES = [
         // tuple in the two `cancel*` signatures) cost 61 bytes and tipped it.
         //
         // The ~10 KB of headroom is slack to absorb changes like that one
-        // without a budget edit per commit — not room to grow into. ~300 KB of
-        // this entry is viem retained by the root barrel with nothing reachable
-        // using it (see the note above); that is where the next move should be,
-        // and it is worth thirty times this headroom.
+        // without a budget edit per commit, not room to grow into. Note this
+        // number is inflated by the harness (see the header) — treat a rise in
+        // it as a signal to compare against the previous commit, not as a
+        // literal download size.
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/index.js";`,
         max: 650_000,
@@ -87,18 +104,29 @@ try {
         const file = join(tmp, `${entry.name.replace(/\W+/g, "-")}.js`);
         writeFileSync(file, entry.source);
 
-        const result = await build({
-            entryPoints: [file],
-            bundle: true,
-            format: "esm",
-            platform: "browser",
-            minify: true,
-            splitting: true,
-            outdir: join(tmp, "out", entry.name.replace(/\W+/g, "-")),
-            external: ["node:*"],
-            metafile: true,
-            logLevel: "error",
-        });
+        const bundleOnce = (splitting, tag) =>
+            build({
+                entryPoints: [file],
+                bundle: true,
+                format: "esm",
+                platform: "browser",
+                minify: true,
+                splitting,
+                outdir: join(tmp, "out", `${entry.name.replace(/\W+/g, "-")}-${tag}`),
+                external: ["node:*"],
+                metafile: true,
+                logLevel: "error",
+            });
+
+        const result = await bundleOnce(true, "split");
+        // Same graph without splitting: esbuild shakes at the symbol level and
+        // the result is the true static cost. Reported, never gated — for an
+        // entry that reaches a dynamic import it inlines that code instead, so
+        // it is a floor for some entries and a ceiling for others.
+        const flatBytes = Object.values((await bundleOnce(false, "flat")).metafile.outputs).reduce(
+            (n, o) => n + o.bytes,
+            0,
+        );
 
         const outs = result.metafile.outputs;
         // esbuild reports `entryPoint` relative to cwd, and a dynamic import
@@ -117,7 +145,8 @@ try {
         console.log(
             `${ok ? "ok  " : "FAIL"}  ${entry.name.padEnd(24)} ` +
                 `eager ${kb(eagerBytes).padStart(9)} / ${kb(entry.max).padStart(9)}` +
-                `   lazy ${kb(lazyBytes)}`,
+                `   lazy ${kb(lazyBytes).padStart(9)}` +
+                `   unsplit ${kb(flatBytes).padStart(9)}`,
         );
     }
 } finally {
