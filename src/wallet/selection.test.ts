@@ -183,7 +183,7 @@ describe("selectNotes", () => {
 
     it("returns consolidate-first when sum sufficient but no 2-cover", () => {
         // max pair=90, total=120, target=100 → consolidate. Pinned to two
-        // inputs: at the default 3×3 arity, 30+40+50 covers 100 directly.
+        // inputs: at the default 4×4 arity, 30+40+50 covers 100 directly.
         const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
         const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts({ maxInputs: 2 }));
         expect(r.plan).toBe("consolidate-first");
@@ -246,7 +246,7 @@ describe("maxInputs", () => {
     // per round.
     it("defaults to the default shape's arity, so a third note is reachable", () => {
         // 30+40+50 = 120 covers 115; the best 2-cover is 40+50 = 90, which
-        // does not. With no `maxInputs` the default 3×3 arity applies, so this
+        // does not. With no `maxInputs` the default 4×4 arity applies, so this
         // resolves directly instead of consolidating.
         const notes = [note("a", 30n), note("b", 40n), note("c", 50n)];
         const r = selectNotes(notes, assetId(1n), circuitAmount(115n), baseOpts());

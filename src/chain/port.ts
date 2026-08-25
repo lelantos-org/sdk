@@ -51,6 +51,8 @@ export interface ChainAdapter {
         deposit: DepositRequest;
         permit2: Permit2Sig;
         aux: AuxOutput;
+        /** The relayer fee note payload; a deposit mints two leaves. */
+        feeAux: AuxOutput;
         /**
          * Fired after the wallet signs and the tx hash is known, before
          * receipt-wait.
@@ -67,6 +69,8 @@ export interface ChainAdapter {
     submitDepositNative?(args: {
         deposit: DepositRequest;
         aux: AuxOutput;
+        /** The relayer fee note payload; a deposit mints two leaves. */
+        feeAux: AuxOutput;
         value: bigint;
         onSent?: (txHash: Hex32) => void;
     }): Promise<{ txHash: Hex32; depositId: bigint }>;
@@ -77,6 +81,8 @@ export interface ChainAdapter {
     submitDepositAuthorized?(args: {
         deposit: DepositRequest;
         aux: AuxOutput;
+        /** The relayer fee note payload; a deposit mints two leaves. */
+        feeAux: AuxOutput;
         onSent?: (txHash: Hex32) => void;
     }): Promise<{ txHash: Hex32; depositId: bigint }>;
     /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */

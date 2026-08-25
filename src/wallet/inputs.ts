@@ -16,11 +16,16 @@ export interface InputsCtx {
     nIn: number;
 }
 
-export async function buildInputSlots(
-    ctx: InputsCtx,
-    selected: StoredNote[],
-    asset: bigint,
-): Promise<InputSlots> {
+/**
+ * Build the input slots for `selected`.
+ *
+ * Each slot takes its asset from its own stored note rather than from one
+ * argument applied to all of them. A spend may legitimately draw on two assets
+ * — the one being moved and the one paying the relayer — and stamping a single
+ * asset over the selection would silently rewrite the fee notes into the wrong
+ * asset, producing a witness whose Merkle membership no longer holds.
+ */
+export async function buildInputSlots(ctx: InputsCtx, selected: StoredNote[]): Promise<InputSlots> {
     if (selected.length === 0 || selected.length > ctx.nIn) {
         throw new Error(`buildInputSlots: expected 1..${ctx.nIn} notes, got ${selected.length}`);
     }
@@ -29,7 +34,7 @@ export async function buildInputSlots(
         const path = ctx.treeStore.getPath(n.leafIndex);
         const cached: SpendableCachedNote = {
             note: {
-                asset,
+                asset: n.asset,
                 value: n.value,
                 pk: ctx.pk,
                 rho: n.rho,

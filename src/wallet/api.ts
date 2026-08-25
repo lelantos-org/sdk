@@ -7,7 +7,9 @@ import type { AssetId, AssetIdLike, CircuitAmount, Hex32, ShieldedAddress } from
 import type { SpendingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
+import type { AssetRef } from "./asset-ref.js";
 import type { AssetInfo } from "./assets.js";
+import type { FeeQuoteResult, QuoteFeeArgs } from "./fee-quote.js";
 import type { AwaitCommitmentsOpts, AwaitCommitmentsResult } from "./note-cache.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
@@ -97,7 +99,14 @@ export interface WalletApi {
      * Registry entry for `id` plus ERC-20 symbol/decimals when the adapter
      * exposes them. Cached per wallet; pass `{ refresh: true }` to re-read.
      */
-    asset(id: AssetIdLike, opts?: { refresh?: boolean }): Promise<AssetInfo>;
+    asset(ref: AssetRef, opts?: { refresh?: boolean }): Promise<AssetInfo>;
+    /** Every asset registered on this chain, lowest id first. */
+    assets(): Promise<AssetInfo[]>;
+    /**
+     * What relaying `kind` costs and which assets can pay for it, checked
+     * against this wallet's balances. Empty when the relayer charges nothing.
+     */
+    quoteFee(args: QuoteFeeArgs): Promise<FeeQuoteResult>;
     selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult;
 
     // --- spend ---------------------------------------------------------------

@@ -61,12 +61,7 @@ export async function buildSpend(a: SpendArgs): Promise<BuiltBundle> {
         );
     }
 
-    const sumIn = a.inputs.reduce((acc, s) => acc + (s?.cached.note.value ?? 0n), 0n);
-    const sumOut = a.outputs.reduce((acc, o) => acc + o.value, 0n);
-    if (sumIn !== publicOut + sumOut) {
-        throw new Error(`${kind} balance: in=${sumIn} publicOut=${publicOut} out=${sumOut}`);
-    }
-
+    assertBalance(a, publicOut);
     assertProvable(a, publicOut);
 
     const realIns = buildInputs(P, a.inputs, a.treeDepth);
@@ -132,27 +127,59 @@ function assertArity({ kind, shape, inputs, outputs }: SpendArgs): void {
 function assertInputSlot(a: SpendArgs, slot: InputSlots[number], i: number): void {
     if (!slot) return;
     const { note } = slot.cached;
-    assertAsset(a, note.asset, `input slot ${i}`);
     assertU64(note.value, `${a.kind}: input slot ${i} value`);
     assertPathShape(a.kind, i, a.treeDepth, slot.pathElements, slot.pathIndices);
 }
 
 function assertOutputSlot(a: SpendArgs, note: Note, i: number): void {
-    assertAsset(a, note.asset, `output slot ${i}`);
     assertU64(note.value, `${a.kind}: output slot ${i} value`);
 }
 
+/** Running total per asset id. */
+function tally(into: Map<bigint, bigint>, asset: bigint, value: bigint): void {
+    into.set(asset, (into.get(asset) ?? 0n) + value);
+}
+
 /**
- * Every slot is bound to the spend's one asset.
+ * Value conservation, checked per asset.
  *
- * The balance check sums values across slots without regard to `asset`, so a
- * mixed-asset selection passes it and fails inside the circuit instead.
+ * This mirrors `PerAssetValueBalance` in `circuits/src/lib/balance.circom`,
+ * which is what the proof will actually be held to: the circuit places no
+ * constraint linking one slot's asset to another's, and instead requires
+ *
+ *     Σ in[asset] + public_in[asset]  ==  Σ out[asset] + public_out[asset]
+ *
+ * independently for every asset present. That is what lets one spend carry the
+ * asset being moved alongside a second asset paying the relayer's fee.
+ *
+ * A single sum across every slot — which is what this used to be — is not the
+ * same check. It accepts a spend that mints one asset and burns another in
+ * equal measure, which is precisely the forgery `PerAssetValueBalance` exists
+ * to reject, and hands it to the prover to fail seconds later inside circom.
+ *
+ * `publicOut` counts against {@link SpendArgs.asset} alone: the transparent
+ * bucket is one `public_asset_id` signal in the circuit, so it belongs to
+ * exactly one asset no matter how many the shielded slots carry.
  */
-function assertAsset({ kind, asset }: SpendArgs, slotAsset: bigint, where: string): void {
-    if (slotAsset !== asset) {
-        throw new Error(
-            `${kind}: ${where} holds asset ${slotAsset}, but the spend is for asset ${asset}`,
-        );
+function assertBalance(a: SpendArgs, publicOut: bigint): void {
+    const ins = new Map<bigint, bigint>();
+    const outs = new Map<bigint, bigint>();
+
+    for (const slot of a.inputs) {
+        if (slot) tally(ins, slot.cached.note.asset, slot.cached.note.value);
+    }
+    for (const note of a.outputs) tally(outs, note.asset, note.value);
+    tally(outs, a.asset, publicOut);
+
+    for (const asset of new Set([...ins.keys(), ...outs.keys()])) {
+        const inSum = ins.get(asset) ?? 0n;
+        const outSum = outs.get(asset) ?? 0n;
+        if (inSum === outSum) continue;
+        // `publicOut` is named separately from the output total it is folded
+        // into: the two have different causes, and a withdraw that is short by
+        // exactly the fee reads very differently from one whose change is wrong.
+        const bucket = asset === a.asset ? ` publicOut=${publicOut}` : "";
+        throw new Error(`${a.kind} balance for asset ${asset}: in=${inSum} out=${outSum}${bucket}`);
     }
 }
 

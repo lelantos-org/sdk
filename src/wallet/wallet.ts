@@ -7,7 +7,6 @@ import { createMutex } from "../core/async.js";
 import {
     type AssetId,
     type AssetIdLike,
-    assetId,
     branded,
     type CircuitAmount,
     type Hex32,
@@ -35,6 +34,8 @@ import type {
     WithdrawOptions,
     WithdrawResult,
 } from "./api.js";
+import type { AssetRef } from "./asset-ref.js";
+import { AssetRegistry } from "./asset-registry.js";
 import type { AssetInfo } from "./assets.js";
 import { fetchAssetInfo } from "./assets.js";
 import type { ResolvedWalletConfig, WalletConfig } from "./config.js";
@@ -42,6 +43,7 @@ import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { resolveConfig, validateConfig } from "./defaults/index.js";
 import { executeDeposit } from "./deposit.js";
+import { type FeeQuoteResult, type QuoteFeeArgs, quoteFee } from "./fee-quote.js";
 import {
     type AwaitCommitmentsOpts,
     type AwaitCommitmentsResult,
@@ -77,7 +79,13 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
     readonly cfg: ResolvedWalletConfig;
     /** @internal — cache + persistence. Use `wallet.file` for read access. */
     readonly cache: NoteCache;
-    private readonly assetCache = new Map<bigint, AssetInfo>();
+    /**
+     * Asset lookup by id, token address or symbol.
+     *
+     * Lazily built: the token list costs a `/chains` call, which a wallet that
+     * only ever names assets by id never has to make.
+     */
+    private assetRegistry: AssetRegistry | undefined;
     /** @internal — read by `./sync-ops.ts` through `SyncContext`. */
     readonly nullifiers: NullifierMemo;
     /** Set by {@link Wallet.dispose}, so a second call is a no-op. */
@@ -128,6 +136,11 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
     /** {@link SpendContext} — config override, else the chain's fee. */
     async feeBps(): Promise<bigint> {
         return this.cfg.feeBps ?? (await this.cfg.chain.fetchFeeBps());
+    }
+
+    /** {@link SpendContext} — id, token address or symbol to a registry entry. */
+    resolveAsset(ref: AssetRef): Promise<AssetInfo> {
+        return this.assets_().resolve(ref);
     }
 
     private constructor(args: {
@@ -307,13 +320,42 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      * immutable apart from the `disabled` flag; `{ refresh: true }` re-reads
      * it.
      */
-    async asset(id: AssetIdLike, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
-        const key = assetId(id);
-        const hit = this.assetCache.get(key);
-        if (hit && !opts.refresh) return hit;
-        const info = await fetchAssetInfo(this.cfg.chain, key);
-        this.assetCache.set(key, info);
-        return info;
+    async asset(ref: AssetRef, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
+        if (opts.refresh) {
+            // A refresh is only meaningful against the chain registry, which
+            // is the authority on `scale` and `disabled`.
+            const { id } = await this.assets_().resolve(ref);
+            const info = await fetchAssetInfo(this.cfg.chain, id);
+            this.assets_().put(info);
+            return info;
+        }
+        return this.assets_().resolve(ref);
+    }
+
+    /** Every asset this chain has registered, lowest id first. */
+    assets(): Promise<AssetInfo[]> {
+        return this.assets_().list();
+    }
+
+    /**
+     * What relaying `kind` costs and what it may be paid in, before building
+     * anything.
+     *
+     * `options[].affordable` is checked against this wallet's own balances, so
+     * a UI can offer only the assets the holder can actually pay with.
+     */
+    quoteFee(args: QuoteFeeArgs): Promise<FeeQuoteResult> {
+        return quoteFee(this, args);
+    }
+
+    private assets_(): AssetRegistry {
+        this.assetRegistry ??= new AssetRegistry({
+            chain: this.cfg.chain,
+            ...(this.cfg.submitter.assets
+                ? { tokens: () => this.cfg.submitter.assets!(this.cfg.chainId) }
+                : {}),
+        });
+        return this.assetRegistry;
     }
 
     selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult {

@@ -30,10 +30,14 @@
 //
 //     Those three arrays are positional and `buildSpend` only checks their
 //     lengths match, so the fee's entry has to land last in all three.
-//   * **One asset per spend.** `buildSpend` requires every slot to share an
-//     asset, so the fee is paid in whatever is being moved. A relayer that
-//     does not accept that asset cannot relay the spend at all — which is why
-//     `/chains` publishes the accepted list.
+//   * **The fee's asset need not be the spend's.** The circuit conserves value
+//     per asset rather than in aggregate (`PerAssetValueBalance`), so one proof
+//     may carry the asset being moved alongside a second asset paying the
+//     relayer. It costs two more slots than paying in the asset already moving
+//     — an input note of the fee asset, and an output for its change — so it
+//     needs a shape wide enough to hold them. The relayer still has to accept
+//     the asset: `/chains` publishes the list, and `feeOutputFromEstimate`
+//     throws on one it did not quote.
 
 import type { Jubjub } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
@@ -48,7 +52,10 @@ export interface FeeOutputArgs {
     J: Jubjub;
     /** The relayer's bech32m address, from `/chains` or `/v1/spend/estimate`. */
     relayerAddress: string;
-    /** MASP asset id. Must be the asset the rest of the spend is in. */
+    /**
+     * MASP asset id of the fee note. Need not be the asset the rest of the
+     * spend is moving — see the note on asset choice at the top of this file.
+     */
     asset: Field;
     /**
      * Note value in **circuit** units — `FeeQuote.circuitAmount`, which the
@@ -111,7 +118,7 @@ export interface FeeOutputFromEstimateArgs {
     J: Jubjub;
     /** The response from `RelayerClient.estimateSpend` / `estimateSwap`. */
     estimate: EstimateResponse;
-    /** MASP asset id of the spend. The fee is paid in the same asset. */
+    /** MASP asset id to pay the fee in. The relayer must have quoted it. */
     asset: Field;
 }
 
@@ -129,6 +136,33 @@ export interface FeeOutputFromEstimateArgs {
  * is a spend which cannot be relayed, and silently omitting the fee would turn
  * it into a 402 from the submit call instead.
  */
+/**
+ * Why this asset cannot pay, and what could.
+ *
+ * Names the payable assets rather than the raw quote list: the caller's next
+ * move is to pick a different `feeAsset`, and an asset the relayer quoted
+ * without a `circuitAmount` is not one of them.
+ */
+function unpayable(estimate: EstimateResponse, asset: Field): string {
+    const payable = estimate.fees
+        .filter((f) => f.assetId !== undefined && f.circuitAmount !== undefined)
+        .map((f) => `${f.tokenSymbol ?? "?"} (id ${f.assetId})`);
+    const unresolved = estimate.fees
+        .filter((f) => f.assetId === undefined)
+        .map((f) => f.tokenSymbol ?? "?");
+
+    const tail = payable.length
+        ? `It will take: ${payable.join(", ")}.`
+        : "It quoted no payable asset at all, so this spend cannot be relayed.";
+    const note = unresolved.length
+        ? ` (${unresolved.join(", ")} are unregistered on this chain and cannot be paid in.)`
+        : "";
+    return (
+        `the relayer charges a shielded fee but quoted no payable amount for asset ${asset}. ` +
+        `${tail}${note}`
+    );
+}
+
 export function feeOutputFromEstimate({
     J,
     estimate,
@@ -139,16 +173,11 @@ export function feeOutputFromEstimate({
 
     // Compared as `bigint`, not by narrowing `asset` to `number`: an asset id
     // is a `u64` in circuit, and `Number()` would silently round one past 2^53.
+    // Compared as `bigint`, not by narrowing `asset` to `number`: an asset id
+    // is a `u64` in circuit, and `Number()` would silently round one past 2^53.
     const quote = estimate.fees.find((f) => f.assetId !== undefined && BigInt(f.assetId) === asset);
     if (quote?.circuitAmount === undefined) {
-        const offered = estimate.fees
-            .map((f) => (f.assetId === undefined ? `${f.tokenSymbol}(unregistered)` : f.assetId))
-            .join(", ");
-        throw new Error(
-            `feeOutputFromEstimate: the relayer charges a shielded fee but quoted no payable ` +
-                `amount for asset ${asset}, so this spend cannot be relayed. It quoted: ` +
-                `${offered || "nothing"}`,
-        );
+        throw new Error(unpayable(estimate, asset));
     }
     return feeOutput({ J, relayerAddress, asset, circuitAmount: BigInt(quote.circuitAmount) });
 }

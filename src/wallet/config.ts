@@ -26,8 +26,8 @@ export interface WalletConfig {
     treeDepth: number;
     /**
      * Input/output arity of the transact circuit. Defaults to
-     * `DEFAULT_SHAPE` (3×3). A 2×2 pool must pass `TRANSACT_2X2` explicitly —
-     * see `core/shape.ts`.
+     * `DEFAULT_SHAPE` (4×4). A narrower pool must pass `TRANSACT_3X3` or
+     * `TRANSACT_2X2` explicitly — see `core/shape.ts`.
      */
     shape?: CircuitShape | undefined;
     /** SNARK-bound; must equal relayer pipeline signer or contract reverts. */

@@ -1,6 +1,6 @@
 // Persistent storage for the proving artifacts.
 //
-// The default shape is 3x3, whose zkey is ~29 MB. Without persistence that
+// The default shape is 4x4, whose zkey is ~40 MB. Without persistence that
 // download repeats on every page load *and* every worker spawn: the in-memory
 // map in `./artifacts.ts` is per-JS-realm, and the prover worker has its own
 // realm, so it never shares with the main thread.

@@ -55,6 +55,17 @@ export interface DepositRequest {
      * independent of value/asset/identity, so it leaks nothing useful.
      */
     rcv: bigint;
+    /**
+     * The relayer's fee note, in the deposit's own asset.
+     *
+     * A deposit mints two leaves: the depositor's note and this one. `feeIn`
+     * may be zero — a chain that subsidises deposits still mints the leaf, so
+     * there is one code path rather than two.
+     */
+    feeIn: bigint;
+    feeCm: string;
+    feeCvDep: [bigint, bigint];
+    feeRcv: bigint;
 }
 
 /**
@@ -154,6 +165,10 @@ export function depositTuple(deposit: DepositRequest) {
         outCm: deposit.outCm as `0x${string}`,
         cvDep: deposit.cvDep,
         rcv: deposit.rcv,
+        feeIn: deposit.feeIn,
+        feeCm: deposit.feeCm as `0x${string}`,
+        feeCvDep: deposit.feeCvDep,
+        feeRcv: deposit.feeRcv,
     };
 }
 

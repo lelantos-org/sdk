@@ -89,8 +89,15 @@ function serializeSwapBlob(s: SwapBlob): unknown {
             outCm: s.depositD.outCm,
             cvDep: [decStr(s.depositD.cvDep[0]), decStr(s.depositD.cvDep[1])],
             rcv: decStr(s.depositD.rcv),
+            // The B-note deposit mints a fee leaf too, though the swap pays
+            // the relayer on its spend leg, so this one is a zero-value pad.
+            feeIn: u64Num(s.depositD.feeIn, "$.swap.depositD.feeIn"),
+            feeCm: s.depositD.feeCm,
+            feeCvDep: [decStr(s.depositD.feeCvDep[0]), decStr(s.depositD.feeCvDep[1])],
+            feeRcv: decStr(s.depositD.feeRcv),
         },
         auxD: serializeAux(s.auxD),
+        feeAuxD: serializeAux(s.feeAuxD),
         tokenIn: s.tokenIn,
         tokenOut: s.tokenOut,
         // Decimal strings so U256 values >2^53 round-trip safely.
@@ -118,6 +125,13 @@ export function serializeSubmitDeposit(p: SubmitDepositPayload): unknown {
             // it has no other way to learn.
             cvDep: [decStr(p.deposit.cvDep[0]), decStr(p.deposit.cvDep[1])],
             rcv: decStr(p.deposit.rcv),
+            // The relayer's own fee note. It needs every field to rebuild the
+            // escrow digest, and `feeRcv` to build the batch witness for that
+            // leaf.
+            feeIn: decStr(p.deposit.feeIn),
+            feeCm: p.deposit.feeCm,
+            feeCvDep: [decStr(p.deposit.feeCvDep[0]), decStr(p.deposit.feeCvDep[1])],
+            feeRcv: decStr(p.deposit.feeRcv),
         },
         permit2: {
             nonce: decStr(p.permit2.nonce),
@@ -126,6 +140,7 @@ export function serializeSubmitDeposit(p: SubmitDepositPayload): unknown {
             signature: p.permit2.signature,
         },
         aux: serializeAuxOutput(p.aux),
+        feeAux: serializeAuxOutput(p.feeAux),
     };
 }
 

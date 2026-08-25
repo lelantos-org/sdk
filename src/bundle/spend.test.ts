@@ -221,24 +221,28 @@ describe("buildSpend pre-flight", () => {
         await expect(buildSpend(args())).resolves.toBeDefined();
     });
 
-    it("rejects a mixed-asset input, which the balance check cannot see", async () => {
-        // `sumIn` adds values across slots with no regard for `asset`, so this
-        // balances perfectly and fails inside the circuit.
+    // Mixing assets is legal — see the "buildSpend, multi-asset" block below.
+    // What is not legal is an asset that fails to conserve, and these two are
+    // the shapes a mis-built selection actually takes: an input nothing spends,
+    // and an output nothing funds.
+
+    it("rejects an input whose asset no output accounts for", async () => {
         const { J, pk, slot, args } = await fixture();
         const foreign = slot();
         foreign.cached.note = { ...note(J, 100n, pk), asset: 7n };
 
+        // Asset 7 enters and never leaves; asset 1 leaves without entering.
         await expect(buildSpend(args({ inputs: [foreign, null] }))).rejects.toThrow(
-            /input slot 0 holds asset 7/,
+            /balance for asset 7: in=100 out=0/,
         );
     });
 
-    it("rejects a mixed-asset output", async () => {
+    it("rejects an output minting an asset no input supplied", async () => {
         const { J, pk, args } = await fixture();
         const outs = [{ ...note(J, 100n, pk), asset: 9n }, note(J, 0n, pk)];
 
         await expect(buildSpend(args({ outputs: outs }))).rejects.toThrow(
-            /output slot 0 holds asset 9/,
+            /balance for asset 1: in=100 out=0/,
         );
     });
 
@@ -299,5 +303,111 @@ describe("buildSpend pre-flight", () => {
                 args({ inputs: [huge, null], outputs: [note(J, 1n << 64n, pk), note(J, 0n, pk)] }),
             ),
         ).rejects.toThrow(/64-bit unsigned integer/);
+    });
+});
+
+// Cross-asset fees: the circuit conserves value per asset (PerAssetValueBalance
+// in circuits/src/lib/balance.circom), so one proof may carry the asset being
+// moved alongside a second asset that pays the relayer. These pin that the SDK
+// agrees with the circuit rather than being stricter than it.
+describe("buildSpend, multi-asset", () => {
+    const ZERO = "0x0000000000000000000000000000000000000000";
+
+    async function fixture() {
+        const P = await Poseidon.build();
+        const J = await WasmJubjub.build();
+        const pk = randomFr();
+        const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
+        const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
+        const treeDepth = 4;
+
+        const slot = (asset: bigint, value: bigint, leafIndex: number): InputSlot => ({
+            cached: {
+                note: { ...note(J, value, pk), asset },
+                nsk: randomJubjubScalar(),
+                leafIndex,
+            },
+            pathElements: Array.from({ length: treeDepth }, () => [0n, 0n, 0n]),
+            pathIndices: Array.from({ length: treeDepth }, () => 0),
+        });
+
+        const out = (asset: bigint, value: bigint): Note => ({ ...note(J, value, pk), asset });
+
+        const args = (inputs: SpendArgs["inputs"], outputs: Note[], publicOut = 0n): SpendArgs => ({
+            P,
+            J,
+            kind: "transfer",
+            chainId: 31337n,
+            asset: 1n,
+            payerAddress: ZERO,
+            relayerAddress: ZERO,
+            recipientAddress: ZERO,
+            prover: recordingProver(),
+            treeDepth,
+            inputs,
+            merkleRoot: 0n,
+            outputs,
+            outputRecipients: outputs.map(() => recipient),
+            outputRandomness: outputs.map(() => ({
+                esk: randomJubjubScalar(),
+                fmdR: randomJubjubScalar(),
+            })),
+            publicOut,
+        });
+
+        return { slot, out, args };
+    }
+
+    /// The feature this exists for: move asset 1, pay the relayer in asset 2.
+    it("accepts a spend whose fee is paid in a second asset", async () => {
+        const { slot, out, args } = await fixture();
+        const built = await buildSpend(
+            args(
+                [slot(1n, 100n, 0), slot(2n, 30n, 1)],
+                // send 1, change 1, fee 2, change 2
+                [out(1n, 70n), out(1n, 30n), out(2n, 25n), out(2n, 5n)],
+            ),
+        );
+        expect(built.cm).toHaveLength(4);
+    });
+
+    /// Per-asset, not in aggregate. Asset 1 burns 5 and asset 2 mints 5, so the
+    /// totals match exactly — this is the cross-asset forgery
+    /// `PerAssetValueBalance` exists to reject, and the single global sum this
+    /// check replaced would have waved it through to the prover.
+    it("rejects an imbalance that a global sum would miss", async () => {
+        const { slot, out, args } = await fixture();
+        const inputs = [slot(1n, 100n, 0), slot(2n, 30n, 1)];
+        const outputs = [out(1n, 65n), out(1n, 30n), out(2n, 30n), out(2n, 5n)];
+
+        // The premise: a global sum cannot tell these apart.
+        const sumIn = inputs.reduce((t, s) => t + s.cached.note.value, 0n);
+        const sumOut = outputs.reduce((t, o) => t + o.value, 0n);
+        expect(sumIn).toBe(sumOut);
+
+        await expect(buildSpend(args(inputs, outputs))).rejects.toThrow(/balance for asset/);
+    });
+
+    /// `publicOut` leaves the pool in the transparent bucket, which the circuit
+    /// hard-wires to a single `public_asset_id`. It must count against that
+    /// asset only — charged to the fee asset instead, a withdraw would appear
+    /// to balance while stealing from the fee.
+    it("attributes publicOut to the transparent bucket's asset alone", async () => {
+        const { slot, out, args } = await fixture();
+        const ok = args(
+            [slot(1n, 100n, 0), slot(2n, 30n, 1)],
+            // asset 1: 100 in = 40 publicOut + 60 out. asset 2: 30 = 25 + 5.
+            [out(1n, 60n), out(2n, 25n), out(2n, 5n)],
+            40n,
+        );
+        expect((await buildSpend({ ...ok, kind: "withdraw" })).cm).toHaveLength(3);
+
+        // Same numbers, but asset 2 tries to absorb the publicOut.
+        const bad = args(
+            [slot(1n, 100n, 0), slot(2n, 30n, 1)],
+            [out(1n, 100n), out(2n, 25n), out(2n, 5n)],
+            40n,
+        );
+        await expect(buildSpend({ ...bad, kind: "withdraw" })).rejects.toThrow(/asset 1/);
     });
 });

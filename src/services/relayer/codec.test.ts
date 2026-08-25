@@ -64,6 +64,10 @@ const deposit: DepositRequest = {
     outCm: "0xcm0",
     cvDep: [23n, 24n],
     rcv: 27n,
+    feeIn: 5n,
+    feeCm: "0xfeecm",
+    feeCvDep: [25n, 26n],
+    feeRcv: 28n,
 };
 
 const proof = { piA: ["1"], piB: [["2"]], piC: ["3"] };
@@ -75,6 +79,13 @@ describe("outbound encoding (golden)", () => {
             deposit,
             permit2: { nonce: 1n, deadline: 2n, maxTotal: 3n, signature: "0xsig" },
             aux: { clueRx: 1n, clueRy: 2n, ephPubX: 3n, ephPubY: 4n, ciphertext: new Uint8Array() },
+            feeAux: {
+                clueRx: 5n,
+                clueRy: 6n,
+                ephPubX: 7n,
+                ephPubY: 8n,
+                ciphertext: new Uint8Array(),
+            },
         };
         const out = serializeSubmitDeposit(payload) as {
             chainId: unknown;
@@ -88,15 +99,24 @@ describe("outbound encoding (golden)", () => {
         expect(out.deposit.publicIn).toBe("250");
     });
 
-    it("/v1/deposit carries the whole DepositRequest, cvDep and rcv included", () => {
+    it("/v1/deposit carries the whole DepositRequest, both notes included", () => {
         // A relayer rebuilds `PubInputs.DepositRequest` from this payload and
-        // broadcasts it; dropping either field leaves it unable to, and `rcv`
-        // is a private witness it can learn no other way.
+        // broadcasts it; dropping any field leaves it unable to, and `rcv` /
+        // `feeRcv` are private witnesses it can learn no other way. The `fee*`
+        // group is the leaf that pays the relayer, and it is digest preimage:
+        // a payload missing it cannot be flushed at all.
         const payload: SubmitDepositPayload = {
             chainId: 31337n,
             deposit,
             permit2: { nonce: 1n, deadline: 2n, maxTotal: 3n, signature: "0xsig" },
             aux: { clueRx: 1n, clueRy: 2n, ephPubX: 3n, ephPubY: 4n, ciphertext: new Uint8Array() },
+            feeAux: {
+                clueRx: 5n,
+                clueRy: 6n,
+                ephPubX: 7n,
+                ephPubY: 8n,
+                ciphertext: new Uint8Array(),
+            },
         };
         const out = serializeSubmitDeposit(payload) as { deposit: Record<string, unknown> };
 
@@ -110,10 +130,18 @@ describe("outbound encoding (golden)", () => {
                 "publicIn",
                 "recipient",
                 "rcv",
+                "feeIn",
+                "feeCm",
+                "feeCvDep",
+                "feeRcv",
             ].sort(),
         );
         expect(out.deposit.cvDep).toEqual(["23", "24"]);
         expect(out.deposit.rcv).toBe("27");
+        // Decimal strings, like the rest of /v1/deposit's request body.
+        expect(out.deposit.feeIn).toBe("5");
+        expect(out.deposit.feeCvDep).toEqual(["25", "26"]);
+        expect(out.deposit.feeRcv).toBe("28");
     });
 
     it("/v1/swap sends the SAME three deposit fields as JSON NUMBERS", () => {
@@ -127,6 +155,7 @@ describe("outbound encoding (golden)", () => {
                 route: "0xroute",
                 depositD: deposit,
                 auxD: aux,
+                feeAuxD: aux,
                 tokenIn: "0xin",
                 tokenOut: "0xout",
                 amountIn: 10n ** 30n,
@@ -138,6 +167,8 @@ describe("outbound encoding (golden)", () => {
         };
 
         expect(out.swap.depositD.chainId).toBe(31337);
+        // `feeIn` is a u64 in the swap DTO too, so it follows the same rule.
+        expect(out.swap.depositD.feeIn).toBe(5);
         expect(out.swap.depositD.publicAssetId).toBe(1);
         expect(out.swap.depositD.publicIn).toBe(250);
         // U256 amounts stay strings — they exceed 2^53 routinely.

@@ -29,8 +29,24 @@ export interface DepositArgs {
      * the note-binding `pk` via the address payload.
      */
     recipient: OutputRecipient;
-    /** Randomness for the single output. */
+    /** Randomness for the depositor's output. */
     output0: { rho: Field; rcm: Field; rcv: Field; rcvDep: Field; aux: OutputRandomness };
+    /**
+     * The relayer's fee note: who it pays, how much, and its randomness.
+     *
+     * A deposit mints two leaves. `value` may be zero on a chain that
+     * subsidises deposits — the leaf is still minted, so there is one shape
+     * rather than two.
+     */
+    fee: {
+        recipient: OutputRecipient;
+        value: bigint;
+        rho: Field;
+        rcm: Field;
+        rcv: Field;
+        rcvDep: Field;
+        aux: OutputRandomness;
+    };
 }
 
 /** @internal */
@@ -42,7 +58,14 @@ export interface BuiltDeposit {
     deposit: DepositRequest;
     /** FMD clue + ECDH + ciphertext for the output. Bound into `piHash`. */
     aux: AuxOutput;
+    /** The same, for the relayer's fee note. Also bound into `piHash`. */
+    feeAux: AuxOutput;
     cm: Field;
+    /**
+     * Only the depositor's note. The fee note belongs to the relayer, so it is
+     * deliberately absent — counting it would inflate the wallet's balance
+     * with value it cannot spend.
+     */
     producedNotes: [Note];
 }
 
@@ -69,6 +92,23 @@ export function buildDeposit(a: DepositArgs): BuiltDeposit {
     const assetGen = J.hashToAssetGen(a.asset);
     const cvDep = J.valueCommit(realOut.value, assetGen, realOut.rcvDep);
 
+    // The relayer's leaf, built exactly like the depositor's — same asset, its
+    // own value and blinders, addressed to the relayer's shielded address. The
+    // batch circuit binds each leaf's `cvDep` to its own value independently,
+    // which is what lets one deposit carry both.
+    const feeOut: Note = {
+        asset: a.asset,
+        value: a.fee.value,
+        pk: a.fee.recipient.pk,
+        rho: a.fee.rho,
+        rcm: a.fee.rcm,
+        rcv: a.fee.rcv,
+        rcvDep: a.fee.rcvDep,
+    };
+    const feeAux0 = buildAuxForReal(J, P, feeOut, a.fee.recipient, a.fee.aux);
+    const feeCm = buildNoteCommitment(P, feeOut);
+    const feeCvDep = J.valueCommit(feeOut.value, assetGen, feeOut.rcvDep);
+
     const deposit: DepositRequest = {
         chainId: a.chainId,
         publicAssetId: a.asset,
@@ -78,11 +118,16 @@ export function buildDeposit(a: DepositArgs): BuiltDeposit {
         outCm: fieldToBytes32(cm0),
         cvDep: [cvDep[0], cvDep[1]],
         rcv: realOut.rcvDep,
+        feeIn: a.fee.value,
+        feeCm: fieldToBytes32(feeCm),
+        feeCvDep: [feeCvDep[0], feeCvDep[1]],
+        feeRcv: feeOut.rcvDep,
     };
 
     return {
         deposit,
         aux: auxOutputToWire(aux0.aux),
+        feeAux: auxOutputToWire(feeAux0.aux),
         cm: cm0,
         producedNotes: [realOut],
     };

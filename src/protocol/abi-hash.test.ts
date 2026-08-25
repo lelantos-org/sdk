@@ -109,7 +109,7 @@ describe("flatten", () => {
 // ─── piHash vs the deployed contract ─────────────────────────────────────────
 //
 // `piHash` is the Permit2 witness: the contract recomputes
-// `keccak256(abi.encode(d, aux))` and rejects the signature if it disagrees, so
+// `keccak256(abi.encode(d, aux, feeAux))` and rejects the signature if it disagrees, so
 // a wrong field order or width breaks every deposit with no local symptom.
 // These derive the encoding from the canonical Foundry ABI rather than trusting
 // the hand-written component list.
@@ -121,7 +121,7 @@ describe("computePiHash vs the canonical ABI", () => {
         (i) => i.type === "function" && i.name === "depositAuthorized",
     );
     if (!submit?.inputs) throw new Error("depositAuthorized missing from the canonical ABI");
-    const [depositParam, auxParam] = submit.inputs;
+    const [depositParam, auxParam, feeAuxParam] = submit.inputs;
 
     /** Names and types only; `internalType` is Foundry bookkeeping. */
     const layout = (params: readonly AbiParam[] = []) =>
@@ -132,9 +132,12 @@ describe("computePiHash vs the canonical ABI", () => {
     });
 
     it("declares AuxValidation.Output exactly as the contract does", () => {
-        // A single struct, not an array — the second output is gone.
+        // Two structs, not an array: one per leaf a deposit mints — the
+        // depositor's note and the note paying whoever flushes it.
         expect(auxParam?.type).toBe("tuple");
         expect(layout(auxParam?.components)).toEqual(layout(AUX_OUTPUT_COMPONENTS));
+        expect(feeAuxParam?.type).toBe("tuple");
+        expect(layout(feeAuxParam?.components)).toEqual(layout(AUX_OUTPUT_COMPONENTS));
     });
 
     it("matches a hash encoded straight from the canonical components", () => {
@@ -147,14 +150,21 @@ describe("computePiHash vs the canonical ABI", () => {
             outCm: `0x${"33".repeat(32)}`,
             cvDep: [7n, 8n] as [bigint, bigint],
             rcv: 99n,
+            feeIn: 5n,
+            feeCm: `0x${"44".repeat(32)}`,
+            feeCvDep: [9n, 10n] as [bigint, bigint],
+            feeRcv: 98n,
         };
         const a = aux();
         const wire = { ...a, ciphertext: bytesToHex(a.ciphertext) };
 
         const fromCanonical = keccak256(
-            encodeAbiParameters([depositParam, auxParam] as never, [request, wire] as never),
+            encodeAbiParameters(
+                [depositParam, auxParam, auxParam] as never,
+                [request, wire, wire] as never,
+            ),
         );
 
-        expect(computePiHash(request, a)).toBe(fromCanonical);
+        expect(computePiHash(request, a, a)).toBe(fromCanonical);
     });
 });

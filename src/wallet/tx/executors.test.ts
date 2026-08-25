@@ -118,6 +118,15 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
         },
         autoConsolidate: async () => undefined,
         feeBps: async () => 0n,
+        // Registry stand-in: these tests name assets by id, and `scale`/
+        // `decimals` are what human amounts would resolve against.
+        resolveAsset: async (ref: unknown) => ({
+            id: BigInt(ref as bigint),
+            token: "0x0000000000000000000000000000000000000000",
+            scale: 1n,
+            disabled: false,
+            decimals: 18,
+        }),
     } as unknown as SpendContext;
 
     return { ctx, prover, submitted, submit, markedSpent, reserved, treeStore, address };

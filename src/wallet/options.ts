@@ -2,12 +2,13 @@
 
 import type {
     AssetIdLike,
-    CircuitAmountLike,
     EvmAddressLike,
     ShieldedAddress,
     ShieldedAddressLike,
 } from "../core/brand.js";
 import type { SwapQuote } from "../services/quoter/client.js";
+import type { AmountLike } from "./amount.js";
+import type { AssetRef } from "./asset-ref.js";
 import type { SelectOpts } from "./selection.js";
 
 export type DepositPhase = "signing" | "submitting" | "broadcast" | "mined";
@@ -18,10 +19,13 @@ export type OnPhase<P extends string> = (phase: P) => void;
 
 /** Shield ERC-20 into the MASP. For native ETH, set `asEth: true`. */
 export interface DepositOptions {
-    /** Amount in circuit units (post-scale-down). */
-    amount: CircuitAmountLike;
-    /** Default asset 1. */
-    asset?: AssetIdLike | undefined;
+    /**
+     * `bigint` is exact circuit units; a string is a human amount of the
+     * token, e.g. `"0.25"`. See {@link AmountLike}.
+     */
+    amount: AmountLike;
+    /** Id, token address or symbol. Default asset 1. */
+    asset?: AssetRef | undefined;
     /** Shielded recipient. Defaults to own address. */
     to?: ShieldedAddressLike | undefined;
     /** Unix-seconds. Default `now + 3600`. */
@@ -43,9 +47,9 @@ export interface DepositOptions {
 export interface WithdrawEthOptions {
     /** L1 recipient of the unwrapped ETH. */
     to: EvmAddressLike;
-    amount: CircuitAmountLike;
-    /** Asset id of WETH in the MASP registry. */
-    asset: AssetIdLike;
+    amount: AmountLike;
+    /** WETH in the MASP registry, by id, token address or symbol. */
+    asset: AssetRef;
     selectOpts?: SelectOpts | undefined;
     /** Self-spend then retry on `InsufficientCoverError`. */
     autoConsolidate?: boolean | undefined;
@@ -59,9 +63,21 @@ export interface WithdrawEthOptions {
 export interface TransferOptions {
     /** Recipient shielded address. */
     to: ShieldedAddressLike;
-    amount: CircuitAmountLike;
-    /** Default asset 1. */
-    asset?: AssetIdLike | undefined;
+    amount: AmountLike;
+    /** Id, token address or symbol. Default asset 1. */
+    asset?: AssetRef | undefined;
+    /**
+     * Asset to pay the relayer's shielded fee in. Defaults to the asset being
+     * moved.
+     *
+     * A different asset costs two extra slots — an input note of that asset and
+     * an output for its change — so it needs a circuit shape wide enough to
+     * hold them: `nOut >= 4`, which the default 4×4 satisfies and a narrower
+     * pool on `TRANSACT_3X3` does not. The relayer must also accept it:
+     * `/chains` publishes the list, and one it does not quote is rejected
+     * before any proving starts.
+     */
+    feeAsset?: AssetRef | undefined;
     selectOpts?: SelectOpts | undefined;
     autoConsolidate?: boolean | undefined;
     onPhase?: OnPhase<SpendPhase> | undefined;
@@ -74,9 +90,21 @@ export interface TransferOptions {
 export interface WithdrawOptions {
     /** L1 ERC-20 recipient. */
     to: EvmAddressLike;
-    amount: CircuitAmountLike;
-    /** Default asset 1. */
-    asset?: AssetIdLike | undefined;
+    amount: AmountLike;
+    /** Id, token address or symbol. Default asset 1. */
+    asset?: AssetRef | undefined;
+    /**
+     * Asset to pay the relayer's shielded fee in. Defaults to the asset being
+     * moved.
+     *
+     * A different asset costs two extra slots — an input note of that asset and
+     * an output for its change — so it needs a circuit shape wide enough to
+     * hold them: `nOut >= 4`, which the default 4×4 satisfies and a narrower
+     * pool on `TRANSACT_3X3` does not. The relayer must also accept it:
+     * `/chains` publishes the list, and one it does not quote is rejected
+     * before any proving starts.
+     */
+    feeAsset?: AssetRef | undefined;
     selectOpts?: SelectOpts | undefined;
     autoConsolidate?: boolean | undefined;
     onPhase?: OnPhase<SpendPhase> | undefined;
@@ -84,19 +112,31 @@ export interface WithdrawOptions {
 
 /** Atomic shielded swap via SwapWrapper. */
 export interface SwapOptions {
-    assetIn: AssetIdLike;
-    assetOut: AssetIdLike;
+    assetIn: AssetRef;
+    assetOut: AssetRef;
     /**
-     * Gross publicOut in circuit units of `assetIn`. MASP transfers
-     * `amount * scaleIn` minus protocol fee to the wrapper.
+     * Gross publicOut in `assetIn`. MASP transfers `amount * scaleIn` minus
+     * the protocol fee to the wrapper.
      */
-    amount: CircuitAmountLike;
+    amount: AmountLike;
     /** Pre-fetched MetaQuoter quote pinning route + minOut. */
     quote: SwapQuote;
     /** SwapWrapper address; bound as leg-1 recipient+relayer and leg-2 payer. */
     wrapperAddress: EvmAddressLike;
     /** Shielded recipient for B note. Defaults to own. */
     bRecipient?: ShieldedAddress | undefined;
+    /**
+     * Asset to pay the relayer's shielded fee in. Defaults to the asset being
+     * moved.
+     *
+     * A different asset costs two extra slots — an input note of that asset and
+     * an output for its change — so it needs a circuit shape wide enough to
+     * hold them: `nOut >= 4`, which the default 4×4 satisfies and a narrower
+     * pool on `TRANSACT_3X3` does not. The relayer must also accept it:
+     * `/chains` publishes the list, and one it does not quote is rejected
+     * before any proving starts.
+     */
+    feeAsset?: AssetRef | undefined;
     selectOpts?: SelectOpts | undefined;
     autoConsolidate?: boolean | undefined;
     onPhase?: OnPhase<SpendPhase> | undefined;

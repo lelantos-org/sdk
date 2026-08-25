@@ -8,33 +8,43 @@
 
 import type { InputSlots } from "../../bundle/common.js";
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
+import { branded } from "../../core/brand.js";
 import { safePhase } from "../../core/callbacks.js";
 import { NetworkError, WireFormatError } from "../../core/errors.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import { decodeAddress } from "../../keys/address.js";
 import { getLogger } from "../../log/logger.js";
-import type { Note } from "../../notes/note.js";
-import {
-    freshNoteRandomness,
-    freshOutput,
-    type NoteOutputRandomness,
-} from "../../notes/randomness.js";
+import { freshOutput, type NoteOutputRandomness } from "../../notes/randomness.js";
 import type { OnPhase, SpendPhase } from "../api.js";
 import type { SpendContext } from "../context.js";
 import { inputsCtx } from "../context.js";
 import { ensureCover } from "../cover.js";
 import { buildInputSlots } from "../inputs.js";
 import type { DirectSelection, SelectOpts } from "../selection.js";
+import type { ResolvedFee } from "./fee.js";
 
 const log = getLogger("lelantos:wallet:spend");
 
 export interface PreparedSpend {
     /** Already narrowed: `ensureCover` resolves the consolidate case. */
     selection: DirectSelection;
+    /**
+     * Cover for the fee asset, present only when the fee is paid in an asset
+     * the spend is not otherwise moving. A same-asset fee is folded into
+     * `target` by the caller and comes out of `selection`.
+     */
+    feeSelection?: DirectSelection;
     /** Own decoded shielded address — the change recipient. */
     ownAddr: DecodedAddress;
     inputs: InputSlots;
     merkleRoot: bigint;
+    /** Every note this spend consumes, across both assets. */
+    spentIds: string[];
+    /**
+     * What the spend asset actually had to cover — the caller's `target` plus a
+     * same-asset fee. Change is `selection.sum - covered`.
+     */
+    covered: CircuitAmount;
 }
 
 /**
@@ -48,6 +58,15 @@ export async function prepareSpend(
     args: {
         asset: AssetId;
         target: CircuitAmount;
+        /**
+         * The relayer's fee, if it charges one.
+         *
+         * Handled here rather than by each caller because the two cases pull in
+         * opposite directions and every flow got them subtly differently: a
+         * same-asset fee raises the target the spend must cover, while a
+         * cross-asset one leaves the target alone and takes cover of its own.
+         */
+        fee?: ResolvedFee | null | undefined;
         selectOpts?: SelectOpts | undefined;
         autoConsolidate?: boolean | undefined;
         onPhase?: OnPhase<SpendPhase> | undefined;
@@ -58,29 +77,67 @@ export async function prepareSpend(
     // spendable in the block it arrived in, linking a change note to the spend
     // that produced it.
     const tipBlock = await ctx.cfg.chain.blockNumber?.();
-    const selection = await ensureCover(
-        ctx.selector,
-        () => ctx.storedNotes(),
-        {
-            asset: args.asset,
-            target: args.target,
-            // The circuit's arity is the ceiling; a caller may lower it but
-            // not raise it past what the proof can consume.
-            selectOpts: {
-                maxInputs: ctx.cfg.shape.nIn,
-                ...(tipBlock !== undefined ? { tipBlock } : {}),
-                ...args.selectOpts,
+    const nIn = ctx.cfg.shape.nIn;
+    const cover = (asset: AssetId, target: CircuitAmount, maxInputs: number) =>
+        ensureCover(
+            ctx.selector,
+            () => ctx.storedNotes(),
+            {
+                asset,
+                target,
+                // The circuit's arity is the ceiling; a caller may lower it but
+                // not raise it past what the proof can consume.
+                selectOpts: {
+                    maxInputs,
+                    ...(tipBlock !== undefined ? { tipBlock } : {}),
+                    ...args.selectOpts,
+                },
+                autoConsolidate: args.autoConsolidate,
             },
-            autoConsolidate: args.autoConsolidate,
-        },
-        (a, sel) => ctx.autoConsolidate(a, sel),
+            (a, sel) => ctx.autoConsolidate(a, sel),
+        );
+
+    // A same-asset fee comes out of the same notes as the spend, so it has to
+    // be covered alongside it.
+    const feeCover = args.fee?.cover;
+    const covered = branded<CircuitAmount>(
+        args.target + (args.fee && !args.fee.crossAsset ? args.fee.value : 0n),
     );
 
+    // A cross-asset fee needs at least one input slot of its own, so the spend
+    // cannot be allowed to fill every slot first and leave the fee unpayable.
+    // Reserving one up front turns "no slot left for the fee" into an ordinary
+    // insufficient-cover error against the asset being moved, which is both
+    // actionable and what the caller can do something about.
+    const selection = await cover(args.asset, covered, feeCover ? nIn - 1 : nIn);
+
+    let feeSelection: DirectSelection | undefined;
+    if (feeCover) {
+        const remaining = nIn - selection.notes.length;
+        if (remaining < 1) {
+            throw new Error(
+                `spend needs ${selection.notes.length} of ${nIn} input slots for asset ` +
+                    `${args.asset}, leaving none for a fee in asset ${feeCover.asset}; ` +
+                    "consolidate that asset or pay the fee in the asset being moved",
+            );
+        }
+        feeSelection = await cover(feeCover.asset, feeCover.value, remaining);
+    }
+
+    const notes = [...selection.notes, ...(feeSelection?.notes ?? [])];
     const ownAddr = decodeAddress(ctx.J, ctx.address);
     await syncTreeToVerifiedRoot(ctx);
-    const inputs = await buildInputSlots(inputsCtx(ctx), selection.notes, args.asset);
+    const inputs = await buildInputSlots(inputsCtx(ctx), notes);
 
-    return { selection, ownAddr, inputs, merkleRoot: ctx.treeStore.root() };
+    return {
+        selection,
+        ...(feeSelection ? { feeSelection } : {}),
+        ownAddr,
+        inputs,
+        merkleRoot: ctx.treeStore.root(),
+        spentIds: notes.map((n) => n.id),
+        covered,
+    };
 }
 
 /**
@@ -177,29 +234,15 @@ export async function submitSpend<T>(
 }
 
 /**
- * Split a change remainder evenly across `slots` output notes.
+ * Fresh randomness for a deposit's two output slots.
  *
- * Every slot is used: an unused one would be a zero-value pad, and several
- * roughly equal notes preserve a multi-note cover for the next spend.
- *
- * An indivisible remainder goes to the *last* slots, so at two slots this
- * emits `[floor(r/2), ceil(r/2)]` — the same pair, in the same order, as the
- * two-slot-only version this replaced.
+ * A deposit mints the depositor's note and the relayer's fee note, and each
+ * needs its own blinders — sharing them would let anyone who can open one leaf
+ * open the other.
  */
-export function splitChange(pk: bigint, asset: bigint, remainder: bigint, slots: number): Note[] {
-    if (slots < 1) throw new Error(`splitChange: need at least one slot, got ${slots}`);
-    const n = BigInt(slots);
-    const base = remainder / n;
-    const extra = remainder % n;
-    return Array.from({ length: slots }, (_, i) => ({
-        asset,
-        value: base + (BigInt(i) >= n - extra ? 1n : 0n),
-        pk,
-        ...freshNoteRandomness(),
-    }));
-}
-
-/** Fresh randomness for a deposit request's single output slot. */
-export function freshDepositSlots(): { output0: NoteOutputRandomness } {
-    return { output0: freshOutput() };
+export function freshDepositSlots(): {
+    output0: NoteOutputRandomness;
+    fee: NoteOutputRandomness;
+} {
+    return { output0: freshOutput(), fee: freshOutput() };
 }

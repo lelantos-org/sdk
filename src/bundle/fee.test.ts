@@ -93,8 +93,18 @@ describe("feeOutput", () => {
 
         // Omitting the fee here would just move the failure to the submit
         // call, where it costs a proof.
-        it("throws when the relayer charges but cannot take this asset", () => {
+        // The useful part of the failure is what to pay with instead: this
+        // spend *is* relayable, just not in the asset that was asked for.
+        it("names the assets it will take when this one is refused", () => {
             const est = estimate({ fees: [quote({ assetId: 9 })] });
+            expect(() => feeOutputFromEstimate({ J, estimate: est, asset: 1n })).toThrow(
+                /no payable amount for asset 1\..*It will take:.*id 9/s,
+            );
+        });
+
+        it("says the spend cannot be relayed when nothing at all is payable", () => {
+            const { assetId: _a, circuitAmount: _c, ...unpayable } = quote();
+            const est = estimate({ fees: [unpayable] });
             expect(() => feeOutputFromEstimate({ J, estimate: est, asset: 1n })).toThrow(
                 /cannot be relayed/,
             );

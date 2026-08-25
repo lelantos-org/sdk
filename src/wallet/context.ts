@@ -8,6 +8,8 @@
 import type { Field, Jubjub, Poseidon } from "../crypto/index.js";
 import type { SpendingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
+import type { AssetRef } from "./asset-ref.js";
+import type { AssetInfo } from "./assets.js";
 import type { ResolvedWalletConfig } from "./config.js";
 import type { StoredNote } from "./note-store.js";
 import type { CoinSelector, SelectionResult } from "./selection.js";
@@ -45,6 +47,13 @@ export interface SpendContext {
     autoConsolidate(asset: bigint, selection: SelectionResult): Promise<void>;
     /** Config override, else the chain's current fee. */
     feeBps(): Promise<bigint>;
+    /**
+     * Resolve an asset named by id, token address or symbol.
+     *
+     * On the context rather than reached through the registry directly so an
+     * executor test can satisfy it with a literal, like everything else here.
+     */
+    resolveAsset(ref: AssetRef): Promise<AssetInfo>;
 }
 
 /** Inputs `buildInputSlots` needs. Derived, so callers cannot get it wrong. */

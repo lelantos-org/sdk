@@ -58,11 +58,16 @@ export interface SubmitDepositPayload {
     deposit: DepositRequest;
     permit2: Permit2Sig;
     /**
-     * One: `MASP.deposit` takes a single `aux` and `bytes32 outCm`, so
-     * the deposit path is one-output on chain regardless of the transact
-     * circuit's shape.
+     * The depositor's note payload.
+     *
+     * A deposit mints two leaves — this one and the note paying whoever
+     * flushes it — so `MASP.deposit` takes an `aux` for each. That is
+     * independent of the transact circuit's shape; the batch circuit binds
+     * each leaf on its own.
      */
     aux: AuxOutput;
+    /** The relayer's fee note payload. */
+    feeAux: AuxOutput;
 }
 
 /**
@@ -108,6 +113,13 @@ export interface SwapBlob {
      * `AuxValidation.Output` struct, which the deposit path takes singly.
      */
     auxD: TransactAux;
+    /**
+     * FMD + ciphertext for the B-side deposit's fee leaf. Every deposit mints
+     * two leaves, and both need an aux payload. The swap already pays the
+     * relayer on its withdraw leg, so this one carries a zero-value note —
+     * but it is still a real leaf and still escrow digest preimage.
+     */
+    feeAuxD: TransactAux;
     /** 0x-hex ERC20 addresses. */
     tokenIn: string;
     tokenOut: string;

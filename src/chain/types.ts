@@ -62,6 +62,13 @@ export interface CancelDepositInputs {
     feeBpsAtSubmit: number;
     payer: EvmAddress;
     submittedAt: number;
+    /**
+     * The relayer's fee leaf, also part of the escrow digest. Comes off the
+     * same `DepositEscrowed` log as everything else here.
+     */
+    feeIn: bigint;
+    feeCm: Hex32;
+    feeCvDep: [bigint, bigint];
 }
 
 /**

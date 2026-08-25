@@ -88,6 +88,17 @@ export class RelayerClient {
         return this.json.post("/v1/swap/estimate", { chainId: Number(chainId) });
     }
 
+    /**
+     * What the relayer charges to flush a deposit.
+     *
+     * Priced against `flushBatch` rather than a spend: a deposit is not relayed
+     * at submit time, and the cost the relayer is recovering is the batch it
+     * will later prove and broadcast.
+     */
+    async estimateDeposit(chainId: bigint | number): Promise<EstimateResponse> {
+        return this.json.post("/v1/deposit/estimate", { chainId: Number(chainId) });
+    }
+
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
         return this.json.post("/v1/spend", serializeSubmitTransact(payload));
     }

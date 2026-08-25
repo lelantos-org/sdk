@@ -1,3 +1,7 @@
+export { type AmountLike, resolveAmount } from "./amount.js";
+export { type AssetRef, classifyRef, matchRef } from "./asset-ref.js";
+export { AssetRegistry, type AssetRegistrySource } from "./asset-registry.js";
+export { type FeeOption, type FeeQuoteResult, type QuoteFeeArgs, quoteFee } from "./fee-quote.js";
 // The wallet: the orchestration layer most callers use directly.
 //
 // Every pluggable dependency (ChainAdapter, NoteSource, Submitter, Prover,

@@ -25,20 +25,24 @@ export interface CircuitShape {
 export const TRANSACT_2X2: CircuitShape = { nIn: 2, nOut: 2 };
 
 /**
- * The default shape. `@lelantos-org/circuits` ships its proving and
+ * The middle shape. `@lelantos-org/circuits` ships its proving and
  * verification keys from 0.10.0, and `circuit/shape-proving.test.ts` proves and
  * verifies a golden witness against them.
+ *
+ * No longer the default. A pool whose verifier is 3×3 must say so —
+ * `connect({ shape: TRANSACT_3X3 })` — because a 4×4 proof carries 53 public
+ * inputs and four commitments, which a 3×3 verifier rejects.
  */
 export const TRANSACT_3X3: CircuitShape = { nIn: 3, nOut: 3 };
 
 /**
- * The widest shape. `@lelantos-org/circuits` ships its proving and
- * verification keys from 0.11.2, and `circuit/shape-proving.test.ts` proves and
- * verifies a golden witness against them.
+ * The widest shape, and the default. `@lelantos-org/circuits` ships its proving
+ * and verification keys from 0.11.2, and `circuit/shape-proving.test.ts` proves
+ * and verifies a golden witness against them.
  *
- * Not the default: its zkey is ~40 MB against ~29 MB at 3×3, and a pool whose
- * verifier is 2×2 or 3×3 rejects its 53-coefficient public input. Select it
- * with `connect({ shape: TRANSACT_4X4 })` once the wider verifier is deployed.
+ * Four inputs and four outputs is what the deployed verifier accepts. It costs
+ * a larger proving key — ~40 MB against ~29 MB at 3×3 — which is the price of
+ * consuming four notes in one spend rather than three.
  */
 export const TRANSACT_4X4: CircuitShape = { nIn: 4, nOut: 4 };
 
@@ -64,11 +68,17 @@ export const TRANSACT_SHAPES = [
 /**
  * Shape used when a caller does not choose one.
  *
- * A pool whose verifier and relayer are still 2×2 must say so explicitly —
- * `connect({ shape: TRANSACT_2X2 })` — because a 3×3 proof carries 42 public
- * inputs and three commitments, which a 2×2 verifier rejects.
+ * A pool on a narrower verifier must say so explicitly —
+ * `connect({ shape: TRANSACT_3X3 })` or `TRANSACT_2X2` — because a 4×4 proof
+ * carries 53 public inputs and four commitments, which neither accepts. The
+ * mismatch surfaces as a rejected proof at submit time, not at connect: the
+ * SDK cannot see which verifier a pool deployed.
+ *
+ * This also decides which artifacts resolve by default, since `artifact-paths`
+ * names them after the shape — so changing it changes which zkey a Node caller
+ * loads without asking.
  */
-export const DEFAULT_SHAPE = TRANSACT_3X3;
+export const DEFAULT_SHAPE = TRANSACT_4X4;
 
 /**
  * Coefficients `PubInputs.compress` emits for `shape`.

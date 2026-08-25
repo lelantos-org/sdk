@@ -147,6 +147,7 @@ export class ViemChainAdapter implements ChainAdapter {
         deposit: DepositRequest;
         permit2: Permit2Sig;
         aux: AuxOutput;
+        feeAux: AuxOutput;
         onSent?: ((txHash: Hex32) => void) | undefined;
     }): Promise<{ txHash: Hex32; depositId: bigint }> {
         return deposits.submitDeposit(this.ctx, args);
@@ -154,6 +155,7 @@ export class ViemChainAdapter implements ChainAdapter {
     submitDepositNative(args: {
         deposit: DepositRequest;
         aux: AuxOutput;
+        feeAux: AuxOutput;
         value: bigint;
         onSent?: ((txHash: Hex32) => void) | undefined;
     }): Promise<{ txHash: Hex32; depositId: bigint }> {
@@ -162,6 +164,7 @@ export class ViemChainAdapter implements ChainAdapter {
     submitDepositAuthorized(args: {
         deposit: DepositRequest;
         aux: AuxOutput;
+        feeAux: AuxOutput;
         onSent?: ((txHash: Hex32) => void) | undefined;
     }): Promise<{ txHash: Hex32; depositId: bigint }> {
         return deposits.submitDepositAuthorized(this.ctx, args);

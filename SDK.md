@@ -48,7 +48,7 @@ await wallet.withdraw({ to: "0xf39…", amount: 200n, asset: 1n });
 
 - Prover artifacts auto-resolve on Node when `@lelantos-org/circuits` is installed. Browser callers pass `proverArtifacts: { circuit, zkey }` to `connect()`.
 - `autoConsolidate: true` self-spends two smallest notes and retries instead of throwing `InsufficientCoverError`.
-- `network: "sepolia" | "mainnet"` are placeholder presets; throw `NetworkNotDeployedError` until contracts ship.
+- `mainnet`, `base` and `arbitrum` are deployed; `sepolia` is still a placeholder and throws `NetworkNotDeployedError`.
 - Every `amount` is in **circuit units**. See [Amounts](#amounts) before hard-coding a literal.
 
 `Wallet.create(source, cfg)` takes explicit `WalletConfig` for full pluggable control. `connect()` wraps it.
@@ -404,6 +404,52 @@ the server "is nullifier N spent?" would name a note you own. Pass
 `nullifierPersistence` (alongside `treePersistence`) to keep both mirrors
 across page loads.
 
+#### Polling for new activity
+
+`sync()` is expensive — it pages the note feed, folds the tree and mirrors the
+spent set. `FmdClient.fetchHead()` is the cheap question that says whether any
+of that is worth doing: two indexed `MAX()`s, uncached on both sides, small
+enough to poll every few seconds.
+
+```ts
+import { FmdClient } from "@lelantos-org/sdk/fmd-server";
+
+const fmd = new FmdClient(fmdUrl, chainId);
+let lastSeen: string | undefined;
+
+const head = await fmd.fetchHead();
+// { chainId, maxNoteId, maxNullifierSeq }
+
+const token = `${head.maxNoteId}:${head.maxNullifierSeq}`;
+if (token !== lastSeen) {
+    lastSeen = token;
+    await wallet.sync();
+}
+```
+
+Both fields are **monotonic row cursors scoped to one chain**, not counts and
+not block heights:
+
+- `maxNoteId` is the newest indexed note. It moves when a note arrives, and it
+  is exactly the cursor the note feed pages from.
+- `maxNullifierSeq` is the newest observed spend. It moves when *anyone* spends,
+  which is what makes a note of yours turn out to be already spent.
+
+Compare them to what you last saw and skip the expensive reads when neither
+moved. `0` means "nothing yet" and is a valid starting value — an empty chain
+answers `200` with zeros rather than 404, so the comparison works before the
+chain has any history.
+
+Two things it deliberately does not cover. It carries **no tree watermark** —
+no `leafCount`, no root — so there is nothing here to gate `syncTree()` on;
+`fetchTreeState()` is what reports those. And it is per-chain: a multi-chain
+client polls it once per chain id, because a shared counter would make one
+chain's activity trigger syncs on every other.
+
+Requires an fmd-webserver new enough to serve `/v1/head`; an older one answers
+404 and `fetchHead` throws, so treat a failure as "poll again later" and keep
+whatever slower interval you had rather than treating it as no activity.
+
 Related methods:
 - `wallet.refresh()` — re-derive balances from store without network fetch.
 - `wallet.awaitCommitments(cms, opts?)` — block until commitments appear in chain index.
@@ -717,8 +763,15 @@ Built-in presets. Unknown names throw at `connect` time.
 |--------|---------|--------|
 | `anvil` | 31337 | local |
 | `localnet` | 31337 | local (anvil alias) |
+| `mainnet` | 1 | deployed |
+| `base` | 8453 | deployed |
+| `arbitrum` | 42161 | deployed |
 | `sepolia` | 11155111 | placeholder → `NetworkNotDeployedError` |
-| `mainnet` | 1 | placeholder → `NetworkNotDeployedError` |
+
+The three deployed chains share one relayer and one fmd server; only the
+chainId differs. A preset is a placeholder when its `maspAddress` or
+`relayerAddress` is `null`, which is what `connect()` refuses on — `sepolia`
+carries service URLs and a `deploymentStatusUrl` but no contracts yet.
 
 ### Custom network
 
@@ -769,9 +822,11 @@ const wallet = await Wallet.create(
 Companion `@lelantos-org/circuits` ships prover artifacts as static `.wasm` + `.zkey`. Resolve URLs via bundler asset pipeline and pass to `connect()`:
 
 ```ts
-// Vite / Next.js
-import wasmUrl from "@lelantos-org/circuits/2x2/2x2.wasm?url";
-import zkeyUrl from "@lelantos-org/circuits/2x2/2x2_final.zkey?url";
+// Vite / Next.js. The artifacts must match the shape the wallet proves with —
+// these are the default 4x4 pair; a pool on `TRANSACT_3X3` loads `3x3/…`
+// instead, and mismatching the two produces proofs the verifier rejects.
+import wasmUrl from "@lelantos-org/circuits/4x4/4x4.wasm?url";
+import zkeyUrl from "@lelantos-org/circuits/4x4/4x4_final.zkey?url";
 
 const wallet = await connect({
     network: "mainnet",
@@ -803,19 +858,25 @@ const wallet = await connect({ network: "mainnet", signer, rpcUrl, prover });
 
 #### Where the time goes
 
-`prove()` splits into witness generation and the Groth16 proof. Both are logged at `debug` on `lelantos:prover:wasm`; `npm run test:bench` prints them. Measured on a 16-core Mac (Node), warm:
+`prove()` splits into witness generation and the Groth16 proof. Both are logged at `debug` on `lelantos:prover:wasm`; `npm run test:bench` prints them. Measured on an Apple M3 Max (16 threads, Node), median of three warm runs:
 
 | shape | witness | groth16 | total |
 |---|---|---|---|
-| 2x2 | 177 ms | 560 ms | ~740 ms |
-| 3x3 | 259 ms | 665 ms | ~925 ms |
+| 2x2 | 94 ms | 427 ms | ~521 ms |
+| 3x3 | 142 ms | 513 ms | ~656 ms |
+| **4x4** (default) | 190 ms | 735 ms | ~925 ms |
 
-`@lelantos-org/circuits` 0.11.2 adds a 4x4 shape (`TRANSACT_4X4`, ~40 MB zkey,
-53 public-input coefficients). It is not the default — select it with
-`connect({ shape: TRANSACT_4X4 })`, and only against a verifier and relayer
-that accept the wider layout.
+Cost scales with arity rather than jumping at the default: 4x4 is ~1.4× a 3x3
+proof, for a spend that consumes four notes instead of three.
 
-Witness generation is single-threaded and unaffected by thread count. Groth16 is the part rayon parallelises — 3x3 on the same machine:
+4x4 (`TRANSACT_4X4`, ~40 MB zkey, 53 public-input coefficients) is **the
+default**, and is what the deployed verifier accepts. A pool on a narrower
+verifier must say so — `connect({ shape: TRANSACT_3X3 })` or `TRANSACT_2X2` —
+because a 4x4 proof carries four commitments and 53 coefficients, which neither
+accepts. The mismatch shows up as a rejected proof at submit time, not at
+connect: the SDK cannot see which verifier a pool deployed.
+
+Witness generation is single-threaded and unaffected by thread count. Groth16 is the part rayon parallelises — 3x3, measured separately on a 16-core Mac:
 
 | threads | 4 | 8 | 16 |
 |---|---|---|---|
@@ -825,7 +886,7 @@ Returns fall off sharply past 8 but have not vanished by 16, which is why the po
 
 #### Artifact caching
 
-The default shape is 3x3, whose zkey is ~29 MB; 4x4 is ~40 MB. Downloaded artifacts are persisted to the **Cache API** automatically in any browser that has it — nothing to configure. Because the Cache API is origin-scoped rather than per-realm, this covers both a page reload and the prover worker, which previously re-downloaded everything the main thread had already fetched.
+The default shape is 4x4, whose zkey is ~40 MB; 3x3 is ~29 MB. Downloaded artifacts are persisted to the **Cache API** automatically in any browser that has it — nothing to configure. Because the Cache API is origin-scoped rather than per-realm, this covers both a page reload and the prover worker, which previously re-downloaded everything the main thread had already fetched.
 
 The URL is the cache key, so **serve new proving keys under a new path**. There is no revalidation request — a round-trip on every load would defeat the point.
 
@@ -928,11 +989,12 @@ Three constraints decide how it fits:
   `feeValue` has to come off the change — as above. Forgetting it fails the
   balance check, which is the good outcome; taking it off the recipient's note
   instead would quietly short-pay them.
-- **The fee is paid in the asset being spent.** `buildSpend` requires every
-  slot to share one asset, and per-asset conservation means a fee in a second
-  asset would need a second asset's input note too. An asset missing from
-  `shieldedFee.tokens` therefore cannot be relayed at all — not merely cannot
-  pay.
+- **The fee's asset need not be the spend's.** `buildSpend` conserves value per
+  asset, the same rule the circuit applies, so one proof may move asset A while
+  paying the relayer in asset B. It costs two further slots — an input note of
+  B, and an output for B's change — so a cross-asset transfer needs `nOut >= 4`.
+  The relayer must still have quoted the asset; one missing from
+  `shieldedFee.tokens` cannot pay.
 
 The quote is advisory: it is neither signed nor stored, and the relayer
 re-derives what it requires when the spend arrives. `shieldedFee.graceBps` is
@@ -942,6 +1004,74 @@ fix is to re-estimate and rebuild, not to resubmit. See
 
 `feeOutput` is the same thing one level down, for a caller that already has the
 address and a circuit-unit amount and does not want the estimate joined for it.
+
+### Naming assets and amounts
+
+Every `asset` / `feeAsset` takes whichever name is to hand — the MASP id, the
+token address, or the symbol:
+
+<!-- typecheck: skip -->
+```ts
+await wallet.transfer({ to, amount: "12.50", asset: "USDC", feeAsset: "WETH" });
+await wallet.transfer({ to, amount: 1250n,   asset: 2n });      // same asset
+```
+
+Resolution is syntactic, so a ref always means the same thing whatever is
+registered: `0x…` is a token address, digits are an id, anything else is a
+symbol (case-insensitive). An ambiguous symbol is refused rather than guessed.
+The list comes from the relayer's `/chains`; `wallet.assets()` returns it, and
+a wallet without a relayer still resolves numeric ids off the chain registry.
+
+Amounts split by **type**, not by magnitude:
+
+| | means |
+|---|---|
+| `1250n` | exact circuit units |
+| `"12.50"` | 12.50 of the token, via its `decimals` |
+
+A `number` is refused: `0.1` has no exact binary representation, and silently
+rounding a transfer is worse than asking for `"0.1"`.
+
+### Knowing the fee before you build
+
+`quoteFee` prices a relay and says what can pay for it, checked against your
+own balances — so a UI can offer the choice instead of discovering it from a
+thrown error:
+
+<!-- typecheck: skip -->
+```ts
+const { charged, options } = await wallet.quoteFee({ kind: "transfer" });
+// options: [{ asset, amount, balance, affordable }, …]
+const payable = options.filter((o) => o.affordable);
+```
+
+`charged: false` means this relayer subsidises gas and `feeAsset` is moot.
+`affordable` is necessary but not sufficient — the notes still have to fit the
+circuit's input slots, which only coin selection settles.
+
+**Deposits pay no relayer fee.** Only spends and swaps carry the shielded fee
+note; a deposit pays the on-chain protocol `feeBps`, skimmed in the token being
+shielded, which is not selectable.
+
+### Letting the wallet do it
+
+`wallet.transfer`, `wallet.withdraw` and `wallet.swap` do all of the above
+themselves when the submitter can quote — `HttpRelayerSubmitter` can. They
+estimate, build the fee slot, size the change around it, and cover a
+cross-asset fee from its own notes. Nothing above is needed unless you are
+assembling a spend by hand.
+
+`feeAsset` chooses what pays; it defaults to the asset being moved:
+
+<!-- typecheck: skip -->
+```ts
+// Move USDC, pay the relayer in WETH.
+await wallet.transfer({ to, amount, asset: USDC, feeAsset: WETH });
+```
+
+A cross-asset fee needs a note of `feeAsset` to spend and a slot for its
+change, so it fails with an insufficient-cover error against `feeAsset` when
+there is none — and refuses before proving if the relayer never quoted it.
 
 Circuit-encoding and note-store-format helpers (`toCircomInput`,
 `dummyInputAt`, `auxDigest`, `hornerEval`, `encodeNotePayload`,
@@ -1135,7 +1265,7 @@ try {
 |---|---|---|
 | `InsufficientCoverError` | `INSUFFICIENT_COVER` | No 1/2-note cover. Pass `autoConsolidate` or read `consolidate: StoredNote[]`. |
 | `WalletConfigError` | `WALLET_CONFIG` | `missing: string[]` lists all problems. |
-| `NetworkError` | `RELAYER_*` / `FMD_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `body?`, `cause?`. HTTP clients retry 5xx + network errors twice (exp backoff); `402` is not retried. See `isShieldedFeeRejection` above. |
+| `NetworkError` | `RELAYER_*` / `FMD_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `body?`, `cause?`. HTTP clients retry 5xx, 408, 429 and network errors 3 times (exp backoff); `402` is not retried. See `isShieldedFeeRejection` above. |
 | `ProverError` | `PROVER_FAILED` | Proof generation failed. |
 | `ProverArtifactsMissingError` | `PROVER_ARTIFACTS_MISSING` | Field `tried: string[]`. Fix: pass `proverArtifacts`, install companion, or set `LELANTOS_PROVER_ARTIFACTS_DIR`. |
 | `PermitRejectedError` | `PERMIT_REJECTED` | User rejected EIP-2612 sig. |
@@ -1145,6 +1275,13 @@ try {
 | `NetworkNotDeployedError` | `NETWORK_NOT_DEPLOYED` | Field `network: string`. Pick deployed preset or pass `NetworkPreset` literal. |
 | `X402PaymentError` | `X402_PAYMENT` | Field `reason`: `budget-exceeded`, `per-request-limit`, `host-not-allowed`, `no-acceptable-requirements`, `unsupported-requirements`, `payment-rejected`. Every reason except `payment-rejected` means no funds moved. |
 
-`HttpClientOptions` (`{ timeoutMs, retries }`) is passed to `FmdClient` or
-`RelayerClient` at construction; inject the configured client through
-`noteSource` / `submitter` to change it. Defaults: timeout 30 000 ms, retries 2.
+`HttpClientOptions` (`{ timeoutMs, retries, backoffMs }`) is passed to
+`FmdClient` or `RelayerClient` at construction; inject the configured client
+through `noteSource` / `submitter` to change it.
+
+Defaults: **3** retries after the first attempt, 250 ms backoff doubling with
+±25% jitter, and a per-attempt timeout of **15 000 ms for idempotent requests
+(GET/HEAD/OPTIONS)** or **30 000 ms for submits**. The timeout is per attempt,
+not per call, so a fully retried request can outlive it several times over —
+set `timeoutMs` *and* `retries` when a call sits on a latency budget, as a poll
+does.

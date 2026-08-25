@@ -2,14 +2,7 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { supportsAllowanceTransfer, supportsNativeEth } from "../chain/port.js";
-import {
-    assetId,
-    branded,
-    circuitAmount,
-    type EvmAddress,
-    type Hex32,
-    type TokenAmount,
-} from "../core/brand.js";
+import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { DepositAdapterError, type DepositStrategy, InvalidArgumentError } from "../core/errors.js";
 import { applyFee, assertPublicInFits } from "../core/fees.js";
@@ -17,6 +10,7 @@ import { randomU256 } from "../core/random.js";
 import { decodeAddress } from "../keys/address.js";
 import { getLogger } from "../log/logger.js";
 import { computePiHash } from "../protocol/abi-hash.js";
+import { resolveAmount } from "./amount.js";
 import type { DepositOptions, DepositResult } from "./api.js";
 import {
     ALLOWANCE_BUFFER_SECS,
@@ -25,6 +19,7 @@ import {
 } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
+import { resolveDepositFee } from "./tx/deposit-fee.js";
 import { freshDepositSlots } from "./tx/steps.js";
 
 const log = getLogger("lelantos:wallet:deposit");
@@ -33,10 +28,11 @@ export async function executeDeposit(
     ctx: SpendContext,
     args: DepositOptions,
 ): Promise<DepositResult> {
-    // Brand at the boundary: the option type takes a plain bigint, and
-    // `assetId` is what enforces the uint64 range.
-    const asset = args.asset === undefined ? DEFAULT_ASSET : assetId(args.asset);
-    const amount = circuitAmount(args.amount);
+    // Resolve at the boundary: the option type takes a name (id, token address
+    // or symbol) and a human-or-exact amount.
+    const info = await ctx.resolveAsset(args.asset ?? DEFAULT_ASSET);
+    const asset = info.id;
+    const amount = resolveAmount(args.amount, info);
     const recipient = decodeAddress(ctx.J, args.to ?? ctx.address);
     const payer = await ctx.cfg.chain.payerAddress();
     const assetEntry = await ctx.cfg.chain.fetchAsset(asset);
@@ -46,14 +42,28 @@ export async function executeDeposit(
             argument: "amount",
         });
     }
-    assertPublicInFits(args.amount, {
+    assertPublicInFits(amount, {
         what: "deposit amount",
         asset,
         scale: assetEntry.scale,
     });
-    const inAmt = args.amount * assetEntry.scale;
+    const inAmt = amount * assetEntry.scale;
     const fee = applyFee(inAmt, feeBps);
-    const total = branded<TokenAmount>(inAmt + fee);
+
+    // The relayer is paid with a note minted alongside the depositor's, so its
+    // value has to be funded here too: the payer is pulled all three parts and
+    // `maxTotal` must cover them or Permit2 refuses the transfer.
+    const relayerFee = await resolveDepositFee(ctx, {
+        asset,
+        recipient: args.to as string | undefined,
+    });
+    assertPublicInFits(relayerFee.value, {
+        what: "deposit relayer fee",
+        asset,
+        scale: assetEntry.scale,
+    });
+    const relayerAmt = relayerFee.value * assetEntry.scale;
+    const total = branded<TokenAmount>(inAmt + fee + relayerAmt);
 
     // Strategy first: it decides who the on-chain escrow belongs to, and the
     // request is signed and digest-bound over that address. A native deposit
@@ -67,7 +77,7 @@ export async function executeDeposit(
     });
     const escrowPayer = strategy === "native" ? ctx.cfg.chain.nativeAdapterAddress!()! : payer;
 
-    const { output0: o0 } = freshDepositSlots();
+    const { output0: o0, fee: feeSlot } = freshDepositSlots();
     const built = buildDeposit({
         P: ctx.P,
         J: ctx.J,
@@ -77,7 +87,7 @@ export async function executeDeposit(
         // The depositor either way: `recipient` is the refund-side identity
         // the note is bound to, and the adapter is only the escrow's owner.
         recipientAddress: payer,
-        publicIn: args.amount,
+        publicIn: amount,
         recipient,
         output0: {
             rho: o0.rho,
@@ -85,6 +95,15 @@ export async function executeDeposit(
             rcv: o0.rcv,
             rcvDep: o0.rcvDep,
             aux: o0.aux,
+        },
+        fee: {
+            recipient: relayerFee.recipient,
+            value: relayerFee.value,
+            rho: feeSlot.rho,
+            rcm: feeSlot.rcm,
+            rcv: feeSlot.rcv,
+            rcvDep: feeSlot.rcvDep,
+            aux: feeSlot.aux,
         },
     });
     const { txHash, depositId } = await runDepositStrategy(ctx, strategy, {
@@ -169,6 +188,7 @@ async function runDepositStrategy(
         return chain.submitDepositNative!({
             deposit: built.deposit,
             aux: built.aux,
+            feeAux: built.feeAux,
             value: total,
             onSent,
         }).then(emitMined);
@@ -178,13 +198,14 @@ async function runDepositStrategy(
         return chain.submitDepositAuthorized!({
             deposit: built.deposit,
             aux: built.aux,
+            feeAux: built.feeAux,
             onSent,
         }).then(emitMined);
     }
     // witness path
     const deadline =
         args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT2_DEFAULT_DEADLINE_SECS);
-    const piHash = computePiHash(built.deposit, built.aux);
+    const piHash = computePiHash(built.deposit, built.aux, built.feeAux);
     // Random, not a clock. Permit2 nonces index an unordered bitmap, so two
     // deposits within the same millisecond collided and the second reverted
     // `InvalidNonce` — and a timestamp is predictable besides. Matches what
@@ -208,12 +229,17 @@ async function runDepositStrategy(
             deposit: built.deposit,
             permit2,
             aux: built.aux,
+            feeAux: built.feeAux,
         });
         safePhase(args.onPhase, "broadcast");
         safePhase(args.onPhase, "mined");
         return r;
     }
-    return chain.submitDeposit!({ deposit: built.deposit, permit2, aux: built.aux, onSent }).then(
-        emitMined,
-    );
+    return chain.submitDeposit!({
+        deposit: built.deposit,
+        permit2,
+        aux: built.aux,
+        feeAux: built.feeAux,
+        onSent,
+    }).then(emitMined);
 }

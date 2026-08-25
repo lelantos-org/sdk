@@ -62,6 +62,10 @@ const request = (payer: EvmAddress): DepositRequest => ({
     outCm: `0x${"22".repeat(32)}`,
     cvDep: [23n, 24n],
     rcv: 27n,
+    feeIn: 5n,
+    feeCm: `0x${"44".repeat(32)}`,
+    feeCvDep: [25n, 26n],
+    feeRcv: 28n,
 });
 
 const aux: AuxOutput = {
@@ -90,7 +94,7 @@ describe("deposit submission", () => {
     it("sends the Permit2-witness deposit to the pool as `deposit`", async () => {
         const { ctx, sent } = stubCtx();
         const tx = await capture(
-            submitDeposit(ctx, { deposit: request(MASP), aux, permit2 }),
+            submitDeposit(ctx, { deposit: request(MASP), aux, feeAux: aux, permit2 }),
             sent,
         );
 
@@ -102,7 +106,7 @@ describe("deposit submission", () => {
     it("sends the allowance deposit to the pool as `depositAuthorized`", async () => {
         const { ctx, sent } = stubCtx();
         const tx = await capture(
-            submitDepositAuthorized(ctx, { deposit: request(MASP), aux }),
+            submitDepositAuthorized(ctx, { deposit: request(MASP), aux, feeAux: aux }),
             sent,
         );
 
@@ -116,7 +120,12 @@ describe("deposit submission", () => {
     it("sends the native deposit to the adapter, with the value attached", async () => {
         const { ctx, sent } = stubCtx(ADAPTER);
         const tx = await capture(
-            submitDepositNative(ctx, { deposit: request(ADAPTER), aux, value: 1_000n }),
+            submitDepositNative(ctx, {
+                deposit: request(ADAPTER),
+                aux,
+                feeAux: aux,
+                value: 1_000n,
+            }),
             sent,
         );
 
@@ -128,14 +137,19 @@ describe("deposit submission", () => {
         // `AdapterNotPayer` otherwise: the adapter wraps the coin, so the pool
         // pulls against its allowance, not the sender's. viem checksums what
         // it decodes, so compare case-insensitively.
-        const payer = (call.args as readonly [{ payer: string }, unknown])[0].payer;
+        const payer = (call.args as readonly unknown[] as readonly [{ payer: string }])[0].payer;
         expect(payer.toLowerCase()).toBe(ADAPTER.toLowerCase());
     });
 
     it("refuses a native deposit when no adapter is configured", async () => {
         const { ctx, sent } = stubCtx();
         await expect(
-            submitDepositNative(ctx, { deposit: request(ADAPTER), aux, value: 1_000n }),
+            submitDepositNative(ctx, {
+                deposit: request(ADAPTER),
+                aux,
+                feeAux: aux,
+                value: 1_000n,
+            }),
         ).rejects.toBeInstanceOf(WalletConfigError);
         expect(sent, "nothing should be broadcast").toHaveLength(0);
     });

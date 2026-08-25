@@ -10,7 +10,7 @@ interface TxResultBase {
     txHash: Hex32;
     /**
      * Commitments created by the tx, in output-slot order. One per output
-     * slot of the transact circuit: three at the default 3×3 shape.
+     * slot of the transact circuit: four at the default 4×4 shape.
      */
     commitments: Hex32[];
     /**

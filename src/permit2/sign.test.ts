@@ -88,6 +88,10 @@ describe("permit2", () => {
             outCm: "0x0000000000000000000000000000000000000000000000000000000000000003",
             cvDep: [11n, 12n],
             rcv: 99n,
+            feeIn: 7n,
+            feeCm: "0x0000000000000000000000000000000000000000000000000000000000000004",
+            feeCvDep: [13n, 14n],
+            feeRcv: 98n,
         };
         const aux: AuxOutput = {
             clueRx: 1n,
@@ -96,13 +100,18 @@ describe("permit2", () => {
             ephPubY: 4n,
             ciphertext: new Uint8Array([0xab, 0xcd, 0xef]),
         };
-        const h1 = computePiHash(deposit, aux);
-        const h2 = computePiHash(deposit, aux);
+        const h1 = computePiHash(deposit, aux, aux);
+        const h2 = computePiHash(deposit, aux, aux);
         expect(h1).toBe(h2);
         expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
         const other = { ...deposit, publicIn: 1001n };
-        expect(computePiHash(other, aux)).not.toBe(h1);
+        expect(computePiHash(other, aux, aux)).not.toBe(h1);
+
+        // The fee note is inside the witness too, so a relayer cannot swap in
+        // a different one and reuse the payer's signature.
+        const otherFee = { ...deposit, feeIn: 8n };
+        expect(computePiHash(otherFee, aux, aux)).not.toBe(h1);
     });
 });
 

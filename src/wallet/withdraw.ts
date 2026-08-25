@@ -2,15 +2,18 @@
 // the `kind` discriminator routes between the ERC-20 and native-ETH builders.
 
 import { buildSpend } from "../bundle/spend.js";
-import { assetId, branded, type CircuitAmount } from "../core/brand.js";
+import { branded, type CircuitAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { WalletConfigError } from "../core/errors.js";
 import { applyFee } from "../core/fees.js";
-import { freshOutputAuxRandomness } from "../notes/randomness.js";
+import { resolveAmount } from "./amount.js";
 import type { WithdrawOptions, WithdrawResult } from "./api.js";
+import type { AssetRef } from "./asset-ref.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
-import { prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
+import { feeSlots, resolveFee } from "./tx/fee.js";
+import { changeSlots, ownIndices, spendOutputs } from "./tx/outputs.js";
+import { prepareSpend, submitSpend } from "./tx/steps.js";
 
 export type WithdrawKind = "withdraw" | "withdrawNative";
 
@@ -31,27 +34,45 @@ function requireNativeAdapter(ctx: SpendContext): string {
 
 export async function executeWithdraw(
     ctx: SpendContext,
-    args: WithdrawOptions & { asset: bigint },
+    args: WithdrawOptions & { asset: AssetRef },
     kind: WithdrawKind,
 ): Promise<WithdrawResult> {
-    // Brand at the boundary; `assetId` enforces the uint64 range.
-    const asset = assetId(args.asset);
+    // Resolve at the boundary; below here everything is ids and circuit units.
+    const info = await ctx.resolveAsset(args.asset);
+    const asset = info.id;
+    const amount = resolveAmount(args.amount, info);
     const feeBps = await ctx.feeBps();
-    const fee = applyFee(args.amount, feeBps);
-    const publicOut = branded<CircuitAmount>(args.amount + fee);
+    // The protocol fee is skimmed on chain from the amount leaving the pool;
+    // the relayer's fee below is a separate charge, paid as a shielded note.
+    const protocolFee = applyFee(amount, feeBps);
+    const publicOut = branded<CircuitAmount>(amount + protocolFee);
 
-    const { selection, ownAddr, inputs, merkleRoot } = await prepareSpend(ctx, {
-        asset,
-        target: publicOut,
-        selectOpts: args.selectOpts,
-        autoConsolidate: args.autoConsolidate,
-        onPhase: args.onPhase,
-    });
+    const feeAsset =
+        args.feeAsset === undefined ? undefined : (await ctx.resolveAsset(args.feeAsset)).id;
+    const relayerFee = await resolveFee(ctx, { kind, spendAsset: asset, feeAsset });
 
-    const remainder = branded<CircuitAmount>(selection.sum - publicOut);
-    // All output slots are change back to self.
-    const nOut = ctx.cfg.shape.nOut;
-    const change = splitChange(ctx.keys.pk, asset, remainder, nOut);
+    const { selection, feeSelection, ownAddr, inputs, merkleRoot, spentIds, covered } =
+        await prepareSpend(ctx, {
+            asset,
+            target: publicOut,
+            fee: relayerFee,
+            selectOpts: args.selectOpts,
+            autoConsolidate: args.autoConsolidate,
+            onPhase: args.onPhase,
+        });
+
+    const remainder = branded<CircuitAmount>(selection.sum - covered);
+    // Every slot the fee does not need is change back to self.
+    const slots = [
+        ...changeSlots(
+            ctx.keys.pk,
+            ownAddr,
+            asset,
+            remainder,
+            ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
+        ),
+        ...feeSlots(relayerFee, feeSelection, ctx.keys.pk, ownAddr),
+    ];
 
     // Who the proof names depends on which contract will call the pool.
     //
@@ -91,13 +112,11 @@ export async function executeWithdraw(
         inputs,
         merkleRoot,
         publicOut,
-        outputs: change,
-        outputRecipients: change.map(() => ownAddr),
-        outputRandomness: change.map(() => freshOutputAuxRandomness()),
+        ...spendOutputs(slots),
     });
 
     safePhase(args.onPhase, "submitting");
-    const spent = selection.notes.map((n) => n.id);
+    const spent = spentIds;
     const { txHash } = await submitSpend(ctx, spent, () => ctx.submitter.submit(built.payload));
     return makeTransactionResult({
         kind: "withdraw",
@@ -107,7 +126,6 @@ export async function executeWithdraw(
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
-        // Every output slot is change-to-self.
-        ownIndices: change.map((_, i) => i),
+        ownIndices: ownIndices(slots),
     });
 }

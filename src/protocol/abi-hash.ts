@@ -36,21 +36,30 @@ export const DEPOSIT_REQUEST_COMPONENTS = [
     { name: "outCm", type: "bytes32" },
     { name: "cvDep", type: "uint256[2]" },
     { name: "rcv", type: "uint256" },
+    { name: "feeIn", type: "uint64" },
+    { name: "feeCm", type: "bytes32" },
+    { name: "feeCvDep", type: "uint256[2]" },
+    { name: "feeRcv", type: "uint256" },
 ] as const;
 
 /**
- * Compute `piHash = keccak256(abi.encode(DepositRequest, AuxValidation.Output))`.
- * Mirrors MASP.deposit line `keccak256(abi.encode(d, aux))`.
+ * Compute `piHash = keccak256(abi.encode(DepositRequest, aux, feeAux))`.
+ * Mirrors `MASP.deposit`'s `keccak256(abi.encode(d, aux, feeAux))`.
+ *
+ * `feeAux` is the encrypted payload of the note paying the relayer — a deposit
+ * mints two leaves, and both are covered by the payer's Permit2 witness so
+ * neither can be swapped after signing.
  */
-export function computePiHash(deposit: DepositRequest, aux: AuxOutput): Hex32 {
+export function computePiHash(deposit: DepositRequest, aux: AuxOutput, feeAux: AuxOutput): Hex32 {
     const encoded = encodeAbiParameters(
         [
             { type: "tuple", components: [...DEPOSIT_REQUEST_COMPONENTS] },
             { type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
+            { type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
         ],
         // The same builders the calldata path uses, so the witness this hash
         // signs and the struct actually submitted cannot disagree.
-        [depositTuple(deposit), auxTuple(aux)] as never,
+        [depositTuple(deposit), auxTuple(aux), auxTuple(feeAux)] as never,
     );
     return branded<Hex32>(keccak256(encoded));
 }

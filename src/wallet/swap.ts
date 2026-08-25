@@ -2,18 +2,20 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { buildSpend } from "../bundle/spend.js";
-import { assetId, branded, type CircuitAmount, evmAddress } from "../core/brand.js";
+import { branded, type CircuitAmount, evmAddress } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { InvalidArgumentError, WalletConfigError } from "../core/errors.js";
 import { applyFee, assertPublicInFits, BPS_DENOMINATOR } from "../core/fees.js";
 import { decodeAddress } from "../keys/address.js";
-import { freshOutputAuxRandomness } from "../notes/randomness.js";
 import { auxOutputFromWire } from "../protocol/aux-wire.js";
 import type { SubmitSwapPayload } from "../protocol/transact.js";
+import { resolveAmount } from "./amount.js";
 import type { SwapOptions, SwapResult } from "./api.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
-import { freshDepositSlots, prepareSpend, splitChange, submitSpend } from "./tx/steps.js";
+import { feeSlots, resolveFee } from "./tx/fee.js";
+import { changeSlots, ownIndices, spendOutputs } from "./tx/outputs.js";
+import { freshDepositSlots, prepareSpend, submitSpend } from "./tx/steps.js";
 
 export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise<SwapResult> {
     // Bound here rather than read at the call site: `submitSwap` is optional
@@ -32,28 +34,47 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         });
     }
 
-    // Brand at the boundary; the constructors validate as they brand.
-    const assetIn = assetId(args.assetIn);
-    const assetOut = assetId(args.assetOut);
+    // Resolve at the boundary; the constructors validate as they brand.
+    const infoIn = await ctx.resolveAsset(args.assetIn);
+    const assetIn = infoIn.id;
+    const assetOut = (await ctx.resolveAsset(args.assetOut)).id;
+    const amount = resolveAmount(args.amount, infoIn);
     const wrapperAddress = evmAddress(args.wrapperAddress);
     const { quote } = args;
     const feeBps = await ctx.feeBps();
-    const fee = applyFee(args.amount, feeBps);
-    const publicOut = branded<CircuitAmount>(args.amount + fee);
+    const protocolFee = applyFee(amount, feeBps);
+    const publicOut = branded<CircuitAmount>(amount + protocolFee);
 
-    const { selection, ownAddr, inputs, merkleRoot } = await prepareSpend(ctx, {
-        asset: assetIn,
-        target: publicOut,
-        selectOpts: args.selectOpts,
-        autoConsolidate: args.autoConsolidate,
-        onPhase: args.onPhase,
-    });
+    // The relayer's fee rides on leg 1, which is the only leg that spends
+    // shielded notes. Quoted as a swap: its gas covers both legs plus the
+    // on-chain swap, so a spend estimate would under-quote it.
+    const feeAsset =
+        args.feeAsset === undefined ? undefined : (await ctx.resolveAsset(args.feeAsset)).id;
+    const relayerFee = await resolveFee(ctx, { kind: "swap", spendAsset: assetIn, feeAsset });
+
+    const { selection, feeSelection, ownAddr, inputs, merkleRoot, spentIds, covered } =
+        await prepareSpend(ctx, {
+            asset: assetIn,
+            target: publicOut,
+            fee: relayerFee,
+            selectOpts: args.selectOpts,
+            autoConsolidate: args.autoConsolidate,
+            onPhase: args.onPhase,
+        });
     const bRecipient = decodeAddress(ctx.J, args.bRecipient ?? ctx.address);
 
-    const remainder = branded<CircuitAmount>(selection.sum - publicOut);
-    // All output slots are change back to self.
-    const nOut = ctx.cfg.shape.nOut;
-    const change = splitChange(ctx.keys.pk, assetIn, remainder, nOut);
+    const remainder = branded<CircuitAmount>(selection.sum - covered);
+    // Every slot the fee does not need is change back to self.
+    const slots = [
+        ...changeSlots(
+            ctx.keys.pk,
+            ownAddr,
+            assetIn,
+            remainder,
+            ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
+        ),
+        ...feeSlots(relayerFee, feeSelection, ctx.keys.pk, ownAddr),
+    ];
 
     const [entryIn, entryOut] = await Promise.all([
         ctx.cfg.chain.fetchAsset(assetIn),
@@ -101,13 +122,11 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         inputs,
         merkleRoot,
         publicOut,
-        outputs: change,
-        outputRecipients: change.map(() => ownAddr),
-        outputRandomness: change.map(() => freshOutputAuxRandomness()),
+        ...spendOutputs(slots),
     });
 
     // Leg 2: B-note deposit. One leaf, so there is no pad slot.
-    const { output0: o0 } = freshDepositSlots();
+    const { output0: o0, fee: feeSlot } = freshDepositSlots();
     const depositBundle = buildDeposit({
         P: ctx.P,
         J: ctx.J,
@@ -123,6 +142,18 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             rcv: o0.rcv,
             rcvDep: o0.rcvDep,
             aux: o0.aux,
+        },
+        // Leg 1 already pays the relayer a shielded fee, so the B-note deposit
+        // adds no second charge. The leaf is still minted — the contract mints
+        // two unconditionally — as a zero-value pad every scanner discards.
+        fee: {
+            recipient: bRecipient,
+            value: 0n,
+            rho: feeSlot.rho,
+            rcm: feeSlot.rcm,
+            rcv: feeSlot.rcv,
+            rcvDep: feeSlot.rcvDep,
+            aux: feeSlot.aux,
         },
     });
 
@@ -141,6 +172,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             route: quote.route,
             depositD: depositBundle.deposit,
             auxD: auxOutputFromWire(depositBundle.aux),
+            feeAuxD: auxOutputFromWire(depositBundle.feeAux),
             tokenIn: entryIn.token,
             tokenOut: entryOut.token,
             amountIn: amountInUnits,
@@ -149,7 +181,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     };
 
     safePhase(args.onPhase, "submitting");
-    const spent = selection.notes.map((n) => n.id);
+    const spent = spentIds;
     const { txHash } = await submitSpend(ctx, spent, () => submitSwap(payload));
 
     // B note materialises asynchronously via the relayer's flushBatch;
@@ -162,7 +194,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
-        ownIndices: change.map((_, i) => i),
+        ownIndices: ownIndices(slots),
     });
 }
 

@@ -29,6 +29,8 @@ import { waitTxReceipt } from "./token.js";
 export interface SubmitBase {
     deposit: DepositRequest;
     aux: AuxOutput;
+    /** The relayer's fee note payload; the second leaf a deposit mints. */
+    feeAux: AuxOutput;
     onSent?: ((txHash: Hex32) => void) | undefined;
 }
 
@@ -49,6 +51,7 @@ export function submitDeposit(
                 signature: hex(args.permit2.signature),
             },
             auxTuple(args.aux),
+            auxTuple(args.feeAux),
         ],
     });
     return sendAndExtractDepositId(ctx, ctx.maspAddress, data, args.onSent);
@@ -76,7 +79,7 @@ export async function submitDepositNative(
     const data = encodeFunctionData({
         abi: NATIVE_ADAPTER_ABI,
         functionName: "depositNative",
-        args: [depositTuple(args.deposit), auxTuple(args.aux)],
+        args: [depositTuple(args.deposit), auxTuple(args.aux), auxTuple(args.feeAux)],
     });
     return sendAndExtractDepositId(ctx, adapter, data, args.onSent, args.value);
 }
@@ -89,7 +92,7 @@ export function submitDepositAuthorized(
     const data = encodeFunctionData({
         abi: MASP_ABI,
         functionName: "depositAuthorized",
-        args: [depositTuple(args.deposit), auxTuple(args.aux)],
+        args: [depositTuple(args.deposit), auxTuple(args.aux), auxTuple(args.feeAux)],
     });
     return sendAndExtractDepositId(ctx, ctx.maspAddress, data, args.onSent);
 }
@@ -156,6 +159,11 @@ export async function cancelDeposit(
             inputs.feeBpsAtSubmit,
             hex(inputs.payer),
             inputs.submittedAt,
+            // The relayer's leaf is bound into the same digest, so cancel has
+            // to resupply it too.
+            Number(inputs.feeIn),
+            hex(inputs.feeCm),
+            [inputs.feeCvDep[0], inputs.feeCvDep[1]],
         ],
     });
     const hash = await ctx.signer.sendTransaction({ to: ctx.maspAddress, data });
@@ -187,6 +195,11 @@ export async function cancelDepositNative(
             inputs.publicAssetId,
             inputs.feeBpsAtSubmit,
             inputs.submittedAt,
+            // The relayer's leaf is bound into the same digest, so cancel has
+            // to resupply it too.
+            Number(inputs.feeIn),
+            hex(inputs.feeCm),
+            [inputs.feeCvDep[0], inputs.feeCvDep[1]],
         ],
     });
     const hash = await ctx.signer.sendTransaction({ to: adapter, data });
