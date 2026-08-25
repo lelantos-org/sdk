@@ -160,10 +160,15 @@ export async function cancelDeposit(
             hex(inputs.payer),
             inputs.submittedAt,
             // The relayer's leaf is bound into the same digest, so cancel has
-            // to resupply it too.
-            Number(inputs.feeIn),
-            hex(inputs.feeCm),
-            [inputs.feeCvDep[0], inputs.feeCvDep[1]],
+            // to resupply it too. One struct, not three flattened fields: a
+            // `FeeNote` of static members encodes identically either way, but
+            // the selector does not, so a flattened signature calls a function
+            // that does not exist.
+            {
+                feeIn: Number(inputs.feeIn),
+                feeCm: hex(inputs.feeCm),
+                feeCvDep: [inputs.feeCvDep[0], inputs.feeCvDep[1]],
+            },
         ],
     });
     const hash = await ctx.signer.sendTransaction({ to: ctx.maspAddress, data });
@@ -196,10 +201,15 @@ export async function cancelDepositNative(
             inputs.feeBpsAtSubmit,
             inputs.submittedAt,
             // The relayer's leaf is bound into the same digest, so cancel has
-            // to resupply it too.
-            Number(inputs.feeIn),
-            hex(inputs.feeCm),
-            [inputs.feeCvDep[0], inputs.feeCvDep[1]],
+            // to resupply it too. One struct, not three flattened fields: a
+            // `FeeNote` of static members encodes identically either way, but
+            // the selector does not, so a flattened signature calls a function
+            // that does not exist.
+            {
+                feeIn: Number(inputs.feeIn),
+                feeCm: hex(inputs.feeCm),
+                feeCvDep: [inputs.feeCvDep[0], inputs.feeCvDep[1]],
+            },
         ],
     });
     const hash = await ctx.signer.sendTransaction({ to: adapter, data });

@@ -23,7 +23,7 @@ export const MASP_ABI = /* @__PURE__ */ parseAbi([
     "function escrowed(uint256 id) view returns (bytes32 digest)",
     "function deposit((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv, uint64 feeIn, bytes32 feeCm, uint256[2] feeCvDep, uint256 feeRcv) d, (uint256 nonce, uint256 deadline, uint256 maxTotal, bytes signature) sig, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) feeAux) returns (uint256 id)",
     "function depositAuthorized((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv, uint64 feeIn, bytes32 feeCm, uint256[2] feeCvDep, uint256 feeRcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) feeAux) returns (uint256 id)",
-    "function cancelDeposit(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, address payer, uint32 submittedAt, uint48 feeIn, bytes32 feeCm, uint256[2] feeCvDep)",
+    "function cancelDeposit(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, address payer, uint32 submittedAt, (uint48 feeIn, bytes32 feeCm, uint256[2] feeCvDep) feeNote)",
     "event DepositEscrowed(uint256 indexed id, address indexed payer, address indexed recipient, uint64 publicAssetId, uint64 publicIn, uint16 feeBpsAtSubmit, bytes32 cm, uint256 cvDepX, uint256 cvDepY, uint256 rcv, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext, uint64 feeIn, bytes32 feeCm, uint256 feeCvDepX, uint256 feeCvDepY, uint256 feeRcv, uint256 feeClueRx, uint256 feeClueRy, uint256 feeEphPubX, uint256 feeEphPubY, bytes feeCiphertext)",
     "event NotePayload(bytes32 indexed cm, uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext, uint256 cvDepX, uint256 cvDepY)",
 ]);
@@ -48,7 +48,7 @@ export const NATIVE_ADAPTER_ABI = /* @__PURE__ */ parseAbi([
     "function WRAPPED_NATIVE() view returns (address)",
     "function escrows(uint256 id) view returns (address refundTo, uint256 amount)",
     "function depositNative((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv, uint64 feeIn, bytes32 feeCm, uint256[2] feeCvDep, uint256 feeRcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) feeAux) payable returns (uint256 id)",
-    "function cancelNative(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, uint32 submittedAt, uint48 feeIn, bytes32 feeCm, uint256[2] feeCvDep)",
+    "function cancelNative(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, uint32 submittedAt, (uint48 feeIn, bytes32 feeCm, uint256[2] feeCvDep) feeNote)",
     "event NativeDeposited(uint256 indexed id, address indexed refundTo, uint256 escrowed, uint256 returned)",
     "event NativeRefunded(uint256 indexed id, address indexed refundTo, uint256 amount)",
 ]);
