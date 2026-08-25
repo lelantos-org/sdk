@@ -12,7 +12,7 @@ import type { AssetRef } from "./asset-ref.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
 import { feeSlots, resolveFee } from "./tx/fee.js";
-import { changeSlots, ownIndices, spendOutputs } from "./tx/outputs.js";
+import { changeSlots, finalizeSlots } from "./tx/outputs.js";
 import { prepareSpend, submitSpend } from "./tx/steps.js";
 
 export type WithdrawKind = "withdraw" | "withdrawNative";
@@ -62,8 +62,9 @@ export async function executeWithdraw(
         });
 
     const remainder = branded<CircuitAmount>(selection.sum - covered);
-    // Every slot the fee does not need is change back to self.
-    const slots = [
+    // Every slot the fee does not need is change back to self. `finalizeSlots`
+    // shuffles them, so the fee is at no fixed index — see `tx/outputs.ts`.
+    const { args: outputs, ownIndices } = finalizeSlots([
         ...changeSlots(
             ctx.keys.pk,
             ownAddr,
@@ -72,7 +73,7 @@ export async function executeWithdraw(
             ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
         ),
         ...feeSlots(relayerFee, feeSelection, ctx.keys.pk, ownAddr),
-    ];
+    ]);
 
     // Who the proof names depends on which contract will call the pool.
     //
@@ -112,7 +113,7 @@ export async function executeWithdraw(
         inputs,
         merkleRoot,
         publicOut,
-        ...spendOutputs(slots),
+        ...outputs,
     });
 
     safePhase(args.onPhase, "submitting");
@@ -126,6 +127,6 @@ export async function executeWithdraw(
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
-        ownIndices: ownIndices(slots),
+        ownIndices,
     });
 }

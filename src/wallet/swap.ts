@@ -14,7 +14,7 @@ import type { SwapOptions, SwapResult } from "./api.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
 import { feeSlots, resolveFee } from "./tx/fee.js";
-import { changeSlots, ownIndices, spendOutputs } from "./tx/outputs.js";
+import { changeSlots, finalizeSlots } from "./tx/outputs.js";
 import { freshDepositSlots, prepareSpend, submitSpend } from "./tx/steps.js";
 
 export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise<SwapResult> {
@@ -64,8 +64,9 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     const bRecipient = decodeAddress(ctx.J, args.bRecipient ?? ctx.address);
 
     const remainder = branded<CircuitAmount>(selection.sum - covered);
-    // Every slot the fee does not need is change back to self.
-    const slots = [
+    // Every slot the fee does not need is change back to self. `finalizeSlots`
+    // shuffles them, so the fee is at no fixed index — see `tx/outputs.ts`.
+    const { args: outputs, ownIndices } = finalizeSlots([
         ...changeSlots(
             ctx.keys.pk,
             ownAddr,
@@ -74,7 +75,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
         ),
         ...feeSlots(relayerFee, feeSelection, ctx.keys.pk, ownAddr),
-    ];
+    ]);
 
     const [entryIn, entryOut] = await Promise.all([
         ctx.cfg.chain.fetchAsset(assetIn),
@@ -122,7 +123,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         inputs,
         merkleRoot,
         publicOut,
-        ...spendOutputs(slots),
+        ...outputs,
     });
 
     // Leg 2: B-note deposit. One leaf, so there is no pad slot.
@@ -194,7 +195,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
-        ownIndices: ownIndices(slots),
+        ownIndices,
     });
 }
 

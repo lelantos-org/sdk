@@ -27,6 +27,7 @@ function stubWallet(overrides: Partial<WalletApi> = {}): WalletApi {
             commitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
             nonZeroCommitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
             ownCommitments: [hex32(`0x${"22".repeat(32)}`)],
+            recipientCommitment: hex32(`0x${"11".repeat(32)}`),
             ownInflow: circuitAmount(0n),
             spent: ["n1"],
             inputSum: circuitAmount(10_000n),

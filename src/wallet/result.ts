@@ -43,8 +43,10 @@ export interface DepositResult extends TxResultBase {
 }
 
 /**
- * Result of `wallet.transfer`. Spends 1-2 input notes; outputs are
- * `[recipientNote, changeNote]` (or `[selfA, selfB]` on self-transfer).
+ * Result of `wallet.transfer`. Spends 1-2 input notes; the outputs are the
+ * recipient's note, change back to self, and the relayer's fee note if one was
+ * charged — in a random order, so read {@link TransferResult.recipientCommitment}
+ * rather than indexing `commitments`.
  */
 export interface TransferResult extends TxResultBase {
     kind: "transfer";
@@ -52,6 +54,15 @@ export interface TransferResult extends TxResultBase {
     inputSum: CircuitAmount;
     sent: CircuitAmount;
     change: CircuitAmount;
+    /**
+     * The commitment holding the recipient's note.
+     *
+     * Output slots are shuffled — their order is what would otherwise publish
+     * which commitment is the payee's — so there is no fixed index to read this
+     * off. Handing it to the payee is not a leak: they recover the same note by
+     * scanning.
+     */
+    recipientCommitment: Hex32;
 }
 
 /**

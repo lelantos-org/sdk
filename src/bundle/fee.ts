@@ -14,8 +14,8 @@
 //
 //   * **A fee consumes an output slot.** Arity is fixed by the circuit
 //     (`nOut`), so the fee replaces a change slot rather than extending the
-//     transaction. A transfer that used `[recipient, change, change]` becomes
-//     `[recipient, change, fee]`.
+//     transaction. A transfer that used three change-and-recipient slots gives
+//     one of them up to the fee.
 //   * **The fee comes out of change, not out of nowhere.** `buildSpend`
 //     enforces `sumIn === publicOut + sumOut`, and the fee note is part of
 //     `sumOut`. Splicing one in without taking its value off the change
@@ -24,12 +24,20 @@
 //
 //         const changeValue = selection.sum - sendValue - feeValue;
 //         const change = splitChange(pk, asset, changeValue, nOut - 2);
-//         const outputs          = [sendNote, ...change, fee.note];
-//         const outputRecipients = [to, ...change.map(() => own), fee.recipient];
-//         const outputRandomness = [...perOutput, fee.randomness];
 //
 //     Those three arrays are positional and `buildSpend` only checks their
-//     lengths match, so the fee's entry has to land last in all three.
+//     lengths match, so the fee's entry has to land at the *same* index in all
+//     three — not at any particular one. The wallet paths describe each slot as
+//     a single `OutputSlotSpec` (`wallet/tx/outputs.ts`) and unzip at the
+//     `buildSpend` boundary precisely so that index cannot drift.
+//
+//     **The fee does not go last.** Slot order is the only thing left in the
+//     output vector that distinguishes one output from another — every other
+//     per-slot public signal is a commitment or a blinded point — so the wallet
+//     shuffles the slots, and a fee at a fixed index would publish which
+//     commitment is the relayer's on every spend. A caller driving `buildSpend`
+//     by hand should shuffle too. The relayer does not care: it trial-decrypts
+//     every output slot to find its payment.
 //   * **The fee's asset need not be the spend's.** The circuit conserves value
 //     per asset rather than in aggregate (`PerAssetValueBalance`), so one proof
 //     may carry the asset being moved alongside a second asset paying the

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DecodedAddress } from "../../keys/address.js";
-import { changeSlots, ownIndices, splitChange } from "./outputs.js";
+import { changeSlots, finalizeSlots, payTo, splitChange } from "./outputs.js";
 
 // Change goes out as real notes, so the split is part of what an observer
 // sees. These pin the two properties that matter: the notes sum to the
@@ -62,16 +62,66 @@ describe("changeSlots", () => {
     });
 });
 
-describe("ownIndices", () => {
-    it("reports the positions of our own slots, skipping the rest", () => {
-        const mine = changeSlots(PK, OWN, ASSET, 10n, 2);
-        const theirs = { ...mine[0]!, own: false };
-        // [ours, theirs, ours] — a fee note sitting between two change slots.
-        expect(ownIndices([mine[0]!, theirs, mine[1]!])).toEqual([0, 2]);
+// `finalizeSlots` shuffles, so the interesting property is that the arrays,
+// `ownIndices` and `payeeIndex` all describe the *same* permutation. `pick` is
+// the seam that lets a test name the permutation it is asserting about.
+
+const THEIRS = { pk: 99n } as unknown as DecodedAddress;
+
+/** `pick` replaying a fixed queue of draws. */
+const pinned = (draws: number[]) => {
+    let i = 0;
+    return () => draws[i++]!;
+};
+
+/** [ours, ours, theirs] — two change slots and a relayer's fee note. */
+const changeAndFee = () => {
+    const mine = changeSlots(PK, OWN, ASSET, 10n, 2);
+    return [mine[0]!, mine[1]!, payTo(splitChange(99n, ASSET, 3n, 1)[0]!, THEIRS, false)];
+};
+
+describe("finalizeSlots", () => {
+    it("moves note, recipient and ownership together", () => {
+        // pick(3) = 0 then pick(2) = 0 swaps 2<->0 and then 1<->0, taking
+        // [ours, ours, theirs] to [ours, theirs, ours].
+        const slots = changeAndFee();
+        const { args, ownIndices } = finalizeSlots(slots, pinned([0, 0]));
+
+        expect(args.outputs).toEqual([slots[1]!.note, slots[2]!.note, slots[0]!.note]);
+        expect(args.outputRecipients).toEqual([OWN, THEIRS, OWN]);
+        expect(ownIndices).toEqual([0, 2]);
+    });
+
+    it("keeps the three arrays aligned per slot under any permutation", () => {
+        // The failure this file exists to prevent: a fee note carrying another
+        // slot's randomness balances, proves, and is undecryptable by the only
+        // party that needed to read it.
+        const { args } = finalizeSlots(changeAndFee());
+        for (const [j, note] of args.outputs.entries()) {
+            const own = note.pk === PK;
+            expect(args.outputRecipients[j]).toBe(own ? OWN : THEIRS);
+            expect(args.outputRandomness[j]).toBeDefined();
+        }
+    });
+
+    it("puts the fee anywhere, not last", () => {
+        const seen = new Set<number>();
+        for (let i = 0; i < 200; i++) {
+            seen.add(finalizeSlots(changeAndFee()).args.outputs.findIndex((n) => n.pk !== PK));
+        }
+        expect([...seen].sort()).toEqual([0, 1, 2]);
+    });
+
+    it("reports where the payee's slot landed, and omits it when there is none", () => {
+        const mine = changeSlots(PK, OWN, ASSET, 10n, 1);
+        const payee = { ...payTo(mine[0]!.note, THEIRS, false), payee: true };
+        // pick(2) = 0 swaps 1<->0, so the payee moves off slot 0.
+        expect(finalizeSlots([payee, mine[0]!], pinned([0])).payeeIndex).toBe(1);
+        expect(finalizeSlots(mine).payeeIndex).toBeUndefined();
     });
 
     it("is empty when nothing is ours", () => {
         const mine = changeSlots(PK, OWN, ASSET, 10n, 1);
-        expect(ownIndices([{ ...mine[0]!, own: false }])).toEqual([]);
+        expect(finalizeSlots([{ ...mine[0]!, own: false }]).ownIndices).toEqual([]);
     });
 });

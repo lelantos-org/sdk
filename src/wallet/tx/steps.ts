@@ -2,9 +2,10 @@
 //
 // The cover-selection preamble, the change-note split, the submit-and-finalize
 // tail, and the deposit-request randomness block, shared by transfer, withdraw
-// and swap. Each is parameterised rather than assumed identical: transfer
-// computes `ownIndices` from a self-transfer check, while withdraw and swap
-// pass `[0, 1]`.
+// and swap. Output slots are not shared: each path builds its own list and
+// hands it to `finalizeSlots` (`tx/outputs.ts`), which shuffles it and derives
+// every index from that one permutation. A path that needs the payee's slot
+// back marks it rather than remembering where it put it.
 
 import type { InputSlots } from "../../bundle/common.js";
 import type { AssetId, CircuitAmount } from "../../core/brand.js";

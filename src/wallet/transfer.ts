@@ -3,6 +3,7 @@
 import { buildSpend } from "../bundle/spend.js";
 import { branded, type CircuitAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
+import { InvalidArgumentError } from "../core/errors.js";
 import { decodeAddress } from "../keys/address.js";
 import type { Note } from "../notes/note.js";
 import { freshNoteRandomness } from "../notes/randomness.js";
@@ -12,7 +13,7 @@ import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
 import { feeSlots, resolveFee } from "./tx/fee.js";
-import { changeSlots, ownIndices, payTo, spendOutputs } from "./tx/outputs.js";
+import { changeSlots, finalizeSlots, payTo } from "./tx/outputs.js";
 import { prepareSpend, submitSpend } from "./tx/steps.js";
 
 export async function executeTransfer(
@@ -27,6 +28,15 @@ export async function executeTransfer(
     const sendValue = resolveAmount(args.amount, info);
     const feeAsset =
         args.feeAsset === undefined ? undefined : (await ctx.resolveAsset(args.feeAsset)).id;
+
+    // Rejected here rather than proved: a zero-value output is a self-pad that
+    // every scanner discards, so the spend would cost a proof and a fee to
+    // deliver a note the payee can never see.
+    if (sendValue <= 0n) {
+        throw new InvalidArgumentError(`transfer: amount must be positive, got ${sendValue}`, {
+            argument: "amount",
+        });
+    }
 
     const fee = await resolveFee(ctx, { kind: "transfer", spendAsset: asset, feeAsset });
 
@@ -49,16 +59,21 @@ export async function executeTransfer(
         ...freshNoteRandomness(),
     };
 
-    // Slot 0 is the recipient's, the fee takes what it needs, and the rest is
-    // change back to self. Ownership is carried on each slot rather than
-    // recomputed as indices afterwards — on a self-transfer slot 0 is ours too.
+    // One slot pays the recipient, the fee takes what it needs, and the rest is
+    // change back to self. Roles ride on the slots rather than on their
+    // positions, because `finalizeSlots` shuffles them — see `tx/outputs.ts`.
     //
-    // Compared on the decoded `pk`, not on the address string: bech32m permits
-    // an all-uppercase spelling and a re-encode is not guaranteed byte-identical
-    // either, so a string compare would read as "not self" and under-report a
-    // note the caller does own.
-    const slots = [
-        payTo(sendNote, recipient, recipient.pk === ctx.keys.pk),
+    // `own` is compared on the decoded `pk`, not on the address string: bech32m
+    // permits an all-uppercase spelling and a re-encode is not guaranteed
+    // byte-identical either, so a string compare would read as "not self" and
+    // under-report a note the caller does own. On a self-transfer the payee slot
+    // is ours as well.
+    const {
+        args: outputs,
+        ownIndices,
+        payeeIndex,
+    } = finalizeSlots([
+        { ...payTo(sendNote, recipient, recipient.pk === ctx.keys.pk), payee: true },
         ...changeSlots(
             ctx.keys.pk,
             ownAddr,
@@ -67,7 +82,7 @@ export async function executeTransfer(
             ctx.cfg.shape.nOut - 1 - (fee?.slots ?? 0),
         ),
         ...feeSlots(fee, feeSelection, ctx.keys.pk, ownAddr),
-    ];
+    ]);
 
     safePhase(args.onPhase, "proving");
     const built = await buildSpend({
@@ -84,7 +99,7 @@ export async function executeTransfer(
         shape: ctx.cfg.shape,
         inputs,
         merkleRoot,
-        ...spendOutputs(slots),
+        ...outputs,
     });
 
     safePhase(args.onPhase, "submitting");
@@ -98,6 +113,7 @@ export async function executeTransfer(
         inputSum: selection.sum,
         sent: sendValue,
         change: changeValue,
-        ownIndices: ownIndices(slots),
+        ownIndices,
+        payeeIndex,
     });
 }

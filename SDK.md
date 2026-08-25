@@ -293,8 +293,12 @@ const tx = await wallet.transfer({
     autoConsolidate: true,
 });
 // TransferResult: { kind: "transfer", txHash, commitments, nonZeroCommitments,
-//                   ownCommitments, ownInflow, spent, inputSum, sent, change }
+//                   ownCommitments, ownInflow, recipientCommitment, spent,
+//                   inputSum, sent, change }
 ```
+
+Output slots are shuffled, so read `recipientCommitment` for the payee's note
+rather than indexing `commitments`.
 
 Auto-selects up to 2 unspent notes; change returns to self. Without `autoConsolidate`, throws `InsufficientCoverError` when no 2-note cover exists:
 
@@ -959,9 +963,10 @@ const estimate = await relayer.estimateSpend(chainId, "transfer");
 const fee = feeOutputFromEstimate({ J, estimate, asset });
 ```
 
-`fee` is one slot's `{ note, recipient, randomness }`, appended to the three
-parallel arrays `buildSpend` takes — and they are positional, so its entry has
-to land last in all three:
+`fee` is one slot's `{ note, recipient, randomness }`, spliced into the three
+parallel arrays `buildSpend` takes. They are positional, so its entry has to
+land at the *same* index in all three — but not at any particular index, and
+deliberately not at a fixed one:
 
 <!-- typecheck: skip -->
 ```ts
@@ -969,21 +974,50 @@ const feeValue = fee ? fee.note.value : 0n;
 const changeValue = selection.sum - sendValue - feeValue;
 const change = splitChange(ownPk, asset, changeValue, shape.nOut - (fee ? 2 : 1));
 
+// One object per slot, shuffled once, then unzipped — so the three arrays
+// cannot disagree about where the fee went. `shuffled` is exported from
+// `@lelantos-org/sdk/core`; the wallet paths use `finalizeSlots`, which wraps
+// this and derives `ownIndices` from the same permutation.
+const slots = shuffled([
+    { note: sendNote, recipient: to, randomness: perOutput[0] },
+    ...change.map((note, i) => ({ note, recipient: own, randomness: perOutput[i + 1] })),
+    ...(fee ? [fee] : []),
+]);
+
 await buildSpend({
     kind: "transfer",
-    outputs:          [sendNote, ...change, ...(fee ? [fee.note] : [])],
-    outputRecipients: [to, ...change.map(() => own), ...(fee ? [fee.recipient] : [])],
-    outputRandomness: [...perOutput, ...(fee ? [fee.randomness] : [])],
+    outputs:          slots.map((s) => s.note),
+    outputRecipients: slots.map((s) => s.recipient),
+    outputRandomness: slots.map((s) => s.randomness),
     // …inputs, merkleRoot, prover
 });
 ```
 
-Three constraints decide how it fits:
+**Shuffle the slots.** The slot index is the only thing left in the output
+vector that distinguishes one output from another: `out_cm` is a commitment,
+`out_cv` and `out_cv_dep` are blinded with fresh `rcv`, and asset, value and pk
+are private. A fixed `[recipient, change, fee]` layout therefore publishes which
+commitment is the payee's and which is the relayer's, on every spend, to anyone
+reading the chain — and with `nOut = 3` that labels up to a third of the leaves
+in the commitment tree as relayer-owned, shrinking the cover set every future
+spend draws from. `wallet.transfer` / `withdraw` / `swap` already do this; a
+caller driving `buildSpend` by hand should too.
+
+Nothing downstream minds: the circuit's per-slot constraints are independent and
+its value balance is per-asset and order-free, and the relayer trial-decrypts
+every output slot to find its payment. The one ordering rule is that the shuffle
+must happen *before* `buildSpend`, which re-derives each output's `rho` from its
+final index.
+
+Because there is no fixed recipient slot, `TransferResult.recipientCommitment`
+names the payee's commitment; do not read `commitments[0]`.
+
+Three constraints decide how the fee fits:
 
 - **A fee consumes an output slot.** Arity is fixed by the circuit, so the fee
-  replaces a change slot rather than extending the transaction: a transfer goes
-  from `[recipient, change, change]` to `[recipient, change, fee]`. Hence
-  `nOut - 2` above.
+  replaces a change slot rather than extending the transaction: a transfer with
+  a recipient and two change slots gives one of the change slots up to the fee.
+  Hence `nOut - 2` above.
 - **The fee comes out of change.** `buildSpend` enforces
   `sumIn === publicOut + sumOut` and the fee note is part of `sumOut`, so
   `feeValue` has to come off the change — as above. Forgetting it fails the

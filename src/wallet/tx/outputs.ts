@@ -12,9 +12,25 @@
 // So a slot is described once, here, and unzipped at the `buildSpend` boundary.
 // Ownership rides along for the same reason: `ownIndices` is otherwise index
 // arithmetic over an order defined somewhere else.
+//
+// That shape is also what makes the order safe to randomize, which is the other
+// half of this file's job. Slot index is the only thing left in the output
+// vector that distinguishes one output from another — every other per-slot
+// public signal is a commitment or a blinded point — so a fixed layout would
+// publish which commitment is the payee's and which is the relayer's on every
+// spend, to anyone reading the chain. With `nOut = 3` that labels up to a third
+// of the tree's leaves as relayer-owned, shrinking the cover set every later
+// spend draws from.
+//
+// So `finalizeSlots` shuffles, and it is the only way out of this module: the
+// three arrays, `ownIndices` and the payee's index all come back derived from
+// one permutation. Exporting the unzip on its own would let a caller shuffle
+// for `buildSpend` and read `ownIndices` off the unshuffled list — which type
+// checks, proves, submits, and misreports which notes are ours.
 
 import type { OutputRandomness, OutputRecipient } from "../../bundle/common.js";
 import type { SpendArgs } from "../../bundle/spend.js";
+import { shuffled } from "../../core/random.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import type { Note } from "../../notes/note.js";
 import { freshNoteRandomness, freshOutputAuxRandomness } from "../../notes/randomness.js";
@@ -27,6 +43,15 @@ export interface OutputSlotSpec {
     randomness: OutputRandomness;
     /** Ours, and so counted in `ownIndices` / `ownInflow`. */
     own: boolean;
+    /**
+     * The transfer payee's slot — at most one, and only on a transfer.
+     *
+     * Carried on the slot for the same reason `own` is: after the shuffle there
+     * is no index to recover it from, and tracking it alongside would be the
+     * drift this file exists to prevent. Both are true at once on a
+     * self-transfer.
+     */
+    payee?: boolean;
 }
 
 /** A slot paying `recipient`, with fresh randomness. */
@@ -68,18 +93,42 @@ export function changeSlots(
     return splitChange(pk, asset, remainder, count).map((note) => payTo(note, ownAddr, true));
 }
 
-/** The three positional arrays `buildSpend` takes, from one ordered list. */
-export function spendOutputs(
-    slots: readonly OutputSlotSpec[],
-): Pick<SpendArgs, "outputs" | "outputRecipients" | "outputRandomness"> {
-    return {
-        outputs: slots.map((s) => s.note),
-        outputRecipients: slots.map((s) => s.recipient),
-        outputRandomness: slots.map((s) => s.randomness),
-    };
+/** Everything downstream needs about a spend's outputs, in their final order. */
+export interface FinalSlots {
+    /** The three positional arrays `buildSpend` takes. Spread into its args. */
+    args: Pick<SpendArgs, "outputs" | "outputRecipients" | "outputRandomness">;
+    /** Indices of the slots that are ours, in slot order. */
+    ownIndices: OutputSlot[];
+    /** Where the payee's slot landed, on a transfer. */
+    payeeIndex?: OutputSlot;
 }
 
-/** Indices of the slots that are ours, in slot order. */
-export function ownIndices(slots: readonly OutputSlotSpec[]): OutputSlot[] {
-    return slots.flatMap((s, i) => (s.own ? [i] : []));
+/**
+ * Shuffle a spend's output slots and unzip them, in that order.
+ *
+ * The single exit from this module, so that the shuffle cannot be forgotten by
+ * a new spend path and the three arrays, `ownIndices` and `payeeIndex` cannot
+ * disagree about where anything went — see the note at the top of this file.
+ *
+ * Must run before `buildSpend`, which re-derives each output's `rho` from its
+ * final index; nothing may reorder the outputs after this.
+ *
+ * `pick` is the shuffle's randomness, injectable so a test can pin an exact
+ * permutation.
+ */
+export function finalizeSlots(
+    slots: readonly OutputSlotSpec[],
+    pick?: (n: number) => number,
+): FinalSlots {
+    const order = shuffled(slots, pick);
+    const payeeIndex = order.findIndex((s) => s.payee);
+    return {
+        args: {
+            outputs: order.map((s) => s.note),
+            outputRecipients: order.map((s) => s.recipient),
+            outputRandomness: order.map((s) => s.randomness),
+        },
+        ownIndices: order.flatMap((s, i) => (s.own ? [i] : [])),
+        ...(payeeIndex >= 0 ? { payeeIndex } : {}),
+    };
 }

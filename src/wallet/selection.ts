@@ -2,7 +2,7 @@
 
 import { type AssetId, branded, type CircuitAmount } from "../core/brand.js";
 import { SelectionError } from "../core/errors.js";
-import { randomFloat01 } from "../core/random.js";
+import { randomBelow } from "../core/random.js";
 import { DEFAULT_SHAPE } from "../core/shape.js";
 import { getLogger } from "../log/logger.js";
 import { type StoredNote, withinReservation } from "./note-store.js";
@@ -42,8 +42,15 @@ export interface SelectOpts {
      * `DEFAULT_SHAPE.nIn`; `prepareSpend` passes the configured shape's arity.
      */
     maxInputs?: number | undefined;
-    /** Injectable rng for tests. Returns float in [0, 1). */
-    rng?: (() => number) | undefined;
+    /**
+     * Injectable randomness for tests: returns a uniform integer in `[0, n)`.
+     *
+     * An integer picker rather than a float, because the tiebreak's whole job
+     * is to be uniform — scaling a float over `n` buckets makes them unequal
+     * unless `n` is a power of two, and the fingerprint this defends against is
+     * exactly a skew in which note gets picked. Defaults to {@link randomBelow}.
+     */
+    pick?: ((n: number) => number) | undefined;
 }
 
 export interface DirectSelection {
@@ -168,7 +175,7 @@ export function selectNotes(
     const tip = opts.tipBlock;
     const bucketPct = opts.bucketPct ?? 0.05;
     const maxInputs = opts.maxInputs ?? DEFAULT_SHAPE.nIn;
-    const rng = opts.rng ?? randomFloat01;
+    const pick = opts.pick ?? randomBelow;
     const threshold = target + fee;
 
     const { candidates, rejected } = partitionSpendable(all, asset, {
@@ -203,9 +210,9 @@ export function selectNotes(
 
     if (bestSum !== null) {
         const tied = coverBucket(values, threshold, bestSum, bucketPct, bestSize);
-        // `coverBucket` always contains the cover that produced `bestSum`, and
-        // `rng()` is in [0, 1), so the index is in range.
-        const chosen = tied[Math.floor(rng() * tied.length)]!;
+        // `coverBucket` always contains the cover that produced `bestSum`, so
+        // it is never empty and `pick` is never asked for a bound of zero.
+        const chosen = tied[pick(tied.length)]!;
         const notes = chosen.map((i) => asc[i]!);
         return {
             plan: "direct",

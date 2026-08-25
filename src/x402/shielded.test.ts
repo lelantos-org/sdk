@@ -28,9 +28,12 @@ function stubWallet() {
         async (): Promise<TransferResult> => ({
             kind: "transfer",
             txHash: hex32(`0x${"fe".repeat(32)}`),
-            commitments: [RECIPIENT_CM, CHANGE_CM],
-            nonZeroCommitments: [RECIPIENT_CM, CHANGE_CM],
+            // Payee off slot 0, because output slots are shuffled: a fixture
+            // that put it first would pass under a `commitments[0]` read.
+            commitments: [CHANGE_CM, RECIPIENT_CM],
+            nonZeroCommitments: [CHANGE_CM, RECIPIENT_CM],
             ownCommitments: [CHANGE_CM],
+            recipientCommitment: RECIPIENT_CM,
             ownInflow: circuitAmount(0n),
             spent: ["n1"],
             inputSum: circuitAmount(10_000n),
@@ -84,8 +87,8 @@ describe("shieldedExact", () => {
             payload: {
                 pool: LELANTOS_POOL,
                 txHash: hex32(`0x${"fe".repeat(32)}`),
-                // Output 0 is the recipient's note; output 1 is the sender's change,
-                // and quoting it would make the payment unverifiable.
+                // The receipt's own `recipientCommitment`; quoting the sender's
+                // change instead would make the payment unverifiable.
                 commitment: RECIPIENT_CM,
                 asset: "1",
                 amount: "1500",

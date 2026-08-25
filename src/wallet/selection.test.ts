@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assetId, circuitAmount } from "../core/brand.js";
+import { randomBelow } from "../core/random.js";
 import { SPEND_RESERVATION_MS } from "./constants.js";
 import type { StoredNote } from "./note-store.js";
 import { type SelectOpts, selectNotes } from "./selection.js";
@@ -44,8 +45,19 @@ function seededRng(seed: number): () => number {
     };
 }
 
+/**
+ * A seeded `SelectOpts.pick`, driving the real {@link randomBelow} off a seeded
+ * byte stream rather than reimplementing its rejection sampling — so a test
+ * exercises the same index derivation production does.
+ */
+function seededPick(seed: number): (n: number) => number {
+    const r = seededRng(seed);
+    const bytes = (k: number) => Uint8Array.from({ length: k }, () => Math.floor(r() * 256));
+    return (n) => randomBelow(n, bytes);
+}
+
 const baseOpts = (extra: SelectOpts = {}): SelectOpts => ({
-    rng: seededRng(1),
+    pick: seededPick(1),
     bucketPct: 0, // deterministic: disable shuffle
     ...extra,
 });
@@ -206,12 +218,15 @@ describe("selectNotes", () => {
         const picks = new Set<string>();
         for (let s = 1; s < 200; s++) {
             const r = selectNotes(notes, assetId(1n), circuitAmount(90n), {
-                rng: seededRng(s),
+                pick: seededPick(s),
                 bucketPct: 0.05,
             });
             if (r.plan === "direct") picks.add(r.notes[0]!.id);
         }
-        expect(picks.size).toBeGreaterThan(1);
+        // All three, not merely "more than one": 98 is the smallest qualifying
+        // cover and ±5% of it reaches 100 and 102, so a tiebreak that leaves
+        // any of them unreachable is the value-ordering fingerprint returning.
+        expect([...picks].sort()).toEqual(["a", "b", "c"]);
     });
 
     it("privacy regression: no monotone preference for largest-rank notes", () => {
@@ -225,7 +240,7 @@ describe("selectNotes", () => {
             const notes = values.map((v, i) => note(i.toString(16), v));
             const target = BigInt(50 + Math.floor(rng() * 200));
             const r = selectNotes(notes, assetId(1n), circuitAmount(target), {
-                rng,
+                pick: seededPick(trial),
                 bucketPct: 0.05,
             });
             if (r.plan !== "direct") continue;

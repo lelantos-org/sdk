@@ -183,6 +183,31 @@ function netByAsset(w: Record<string, unknown>): Map<bigint, bigint> {
     return net;
 }
 
+/**
+ * The slot a party's note landed in, and its plaintext, by trial decryption.
+ *
+ * Exactly what a relayer does to find its payment: every slot is tried, and one
+ * that fails at any step is simply not ours. Asserts there is exactly one, since
+ * every caller here builds a spend with a single note for the given key.
+ */
+function noteFor(payload: SubmitTransactPayload, J: SpendContext["J"], ivk: bigint) {
+    const hits = payload.aux.flatMap((a, slot) => {
+        const plain = decryptNote({
+            J,
+            ivk,
+            note: {
+                epk: J.packPoint(a.ephPub),
+                // The wire ciphertext carries a 2B clueBits prefix that the
+                // ChaCha body does not include.
+                ciphertext: stripClueBitsPrefix(a.ciphertext).body,
+            },
+        });
+        return plain ? [{ slot, payload: decodeNotePayload(plain) }] : [];
+    });
+    expect(hits).toHaveLength(1);
+    return hits[0]!;
+}
+
 describe("cross-asset relayer fee", () => {
     it("pays a transfer's fee from a second asset and conserves both", async () => {
         const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
@@ -318,26 +343,63 @@ describe("cross-asset relayer fee", () => {
         });
 
         // Exactly one output decrypts to the relayer, and it is the fee.
-        const J = ctx.J;
-        const paid = submitted.payload!.aux.flatMap((a, slot) => {
-            const plain = decryptNote({
-                J,
-                ivk: relayer.ivk,
-                note: {
-                    epk: J.packPoint(a.ephPub),
-                    // The wire ciphertext carries a 2B clueBits prefix that
-                    // the ChaCha body does not include.
-                    ciphertext: stripClueBitsPrefix(a.ciphertext).body,
-                },
-            });
-            return plain ? [{ slot, payload: decodeNotePayload(plain) }] : [];
-        });
-
-        expect(paid).toHaveLength(1);
-        expect(paid[0]!.payload?.asset).toBe(ASSET_B);
-        expect(paid[0]!.payload?.value).toBe(7n);
+        const paid = noteFor(submitted.payload!, ctx.J, relayer.ivk);
+        expect(paid.payload?.asset).toBe(ASSET_B);
+        expect(paid.payload?.value).toBe(7n);
 
         // And the wallet must not book the relayer's note as income.
-        expect(res.ownCommitments).not.toContain(res.commitments[paid[0]!.slot]);
+        expect(res.ownCommitments).not.toContain(res.commitments[paid.slot]);
+    });
+});
+
+// Slot order is the only thing left in the output vector that separates one
+// output from another — everything else is a commitment or a blinded point — so
+// a fixed layout would publish which commitment is the relayer's and which is
+// the payee's on every spend. This pins that the wallet shuffles, and that the
+// receipt still names the payee's note without an index to read it off.
+
+describe("output slot order", () => {
+    it("puts the fee at no fixed slot, and still names the payee's", async () => {
+        const relayer = await relayerIdentity();
+        const payee = await relayerIdentity();
+        const feeSlots = new Set<number>();
+
+        // 4x4 shape: four slots, so the old fixed layout would return {3} every
+        // time. At 40 draws a fair shuffle misses a slot with probability
+        // (3/4)^40 < 1e-5.
+        for (let i = 0; i < 40; i++) {
+            const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
+            const { ctx, submitted } = await makeCtx(notes, estimate(relayer.address, { "2": 7n }));
+            const res = await executeTransfer(ctx, {
+                to: payee.address,
+                amount: circuitAmount(30n),
+                asset: ASSET_A,
+                feeAsset: ASSET_B,
+            });
+
+            feeSlots.add(noteFor(submitted.payload!, ctx.J, relayer.ivk).slot);
+            // Wherever the payee's note landed, the receipt names it — and a
+            // transfer out is never booked as our own income.
+            const paid = noteFor(submitted.payload!, ctx.J, payee.ivk);
+            expect(res.recipientCommitment).toBe(res.commitments[paid.slot]);
+            expect(res.ownCommitments).not.toContain(res.recipientCommitment);
+        }
+
+        expect([...feeSlots].sort()).toEqual([0, 1, 2, 3]);
+    });
+
+    it("refuses a zero-value transfer rather than padding the payee's slot", async () => {
+        // A zero-value output is a self-pad every scanner discards, so there
+        // would be no payee note for the receipt to name.
+        const { ctx } = await makeCtx([storedNote("01", 100n, ASSET_A)]);
+        const { address: recipient } = await makeCtx([]);
+
+        await expect(
+            executeTransfer(ctx, {
+                to: recipient,
+                amount: circuitAmount(0n),
+                asset: ASSET_A,
+            }),
+        ).rejects.toThrow(/amount must be positive/);
     });
 });

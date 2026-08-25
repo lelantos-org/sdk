@@ -96,6 +96,7 @@ export {
 } from "./json-client.js";
 export { decodeStoredNote, type NoteRecord, type StoredNote } from "./note-record.js";
 export {
+    randomBelow,
     randomBytes,
     randomFloat01,
     randomFr,
@@ -103,6 +104,7 @@ export {
     randomU256,
     requireWebCrypto,
     shortId,
+    shuffled,
 } from "./random.js";
 export {
     type CircuitShape,

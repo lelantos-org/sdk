@@ -69,10 +69,16 @@ export interface MakeTransactionResultArgs {
     change?: CircuitAmount | undefined;
     depositId?: bigint | undefined;
     /**
-     * Slots of `built.cm` holding own commitments. Deposit/withdraw: `[0, 1]`;
-     * transfer: `[1]`; self-transfer: `[0, 1]`.
+     * Slots of `built.cm` holding own commitments.
+     *
+     * Spend output slots are shuffled, so these are whatever indices the
+     * shuffle landed the caller's own slots on rather than a fixed set. Only
+     * the deposit path, whose slots are pinned by the contract ABI, has a
+     * constant answer (`[0]`).
      */
     ownIndices?: OutputSlot[] | undefined;
+    /** Transfer only: the shuffled slot holding the payee's note. */
+    payeeIndex?: OutputSlot | undefined;
     /** Deposit only: which adapter path was taken. */
     strategy?: DepositStrategy | undefined;
 }
@@ -124,6 +130,12 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 ...(args.depositId !== undefined ? { depositId: args.depositId } : {}),
             };
         case "transfer": {
+            // `executeTransfer` rejects a non-positive amount, so the payee's
+            // slot always exists and always carries value — unlike change,
+            // which legitimately lands on zero.
+            if (args.payeeIndex === undefined) {
+                throw new InternalError("a transfer receipt needs the payee's slot");
+            }
             const r: TransferResult = {
                 kind: "transfer",
                 txHash: args.txHash,
@@ -135,6 +147,7 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 change: args.change ?? ZERO,
                 ownCommitments,
                 ownInflow,
+                recipientCommitment: commitments[args.payeeIndex]!,
             };
             return r;
         }

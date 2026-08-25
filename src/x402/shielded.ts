@@ -143,14 +143,16 @@ export function shieldedExact(
                 autoConsolidate: opts.autoConsolidate ?? true,
             });
 
+            // Named by the receipt, not read off a fixed index: output slots
+            // are shuffled, so the payee's note is not at slot 0 and the other
+            // slots are the payer's change and the relayer's fee, neither of
+            // which the server can verify.
             return {
                 x402Version,
                 payload: {
                     pool: LELANTOS_POOL,
                     txHash: result.txHash,
-                    // Output 0 is the recipient note; output 1 is the payer's
-                    // change, which the server could not verify.
-                    commitment: result.commitments[0],
+                    commitment: result.recipientCommitment,
                     asset: req.asset,
                     amount: req.amount,
                 },
