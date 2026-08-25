@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { NetworkError } from "../../core/errors.js";
 import { randomFr, randomJubjubScalar } from "../../core/random.js";
-import { type CircuitShape, DEFAULT_SHAPE, TRANSACT_2X2, TRANSACT_3X3 } from "../../core/shape.js";
+import { type CircuitShape, DEFAULT_SHAPE, shapeId, TRANSACT_SHAPES } from "../../core/shape.js";
 import { WasmJubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
 import { addressFromSpendingKey, buildSpendingKey } from "../../keys/keys.js";
@@ -14,6 +14,9 @@ import { executeWithdraw } from "../withdraw.js";
 
 // The executors depend on `SpendContext`, not on `Wallet`, so the fixture
 // below is an object literal — no wasm, chain adapter, prover or note store.
+
+/** Every published shape, tagged with the id that names its `describe` block. */
+const SHAPES = TRANSACT_SHAPES.map((shape) => ({ id: shapeId(shape), shape }));
 
 function storedNote(id: string, value: bigint, asset = 1n): StoredNote {
     return {
@@ -266,105 +269,75 @@ describe("executeWithdraw", () => {
     });
 });
 
-// The 3×3 shape has no proving key yet, but everything up to the prover is
-// shape-driven and the recording prover stands in for it. These assert the
-// generalisation actually holds: three input slots, three outputs, change
-// split across the slots the recipient does not take, and a balanced witness.
-describe("shape 3x3", () => {
-    it("transfers with three inputs and splits change over the two spare slots", async () => {
-        const notes = [storedNote("01", 30n), storedNote("02", 40n), storedNote("03", 50n)];
-        const { ctx, submitted } = await makeCtx(notes, TRANSACT_3X3);
+// Arity is meant to be a parameter, not a shape of the code: nothing between
+// the executors and the prover is written against a fixed slot count. So every
+// published shape runs the same three assertions rather than each getting a
+// hand-written copy — a new shape in `TRANSACT_SHAPES` is covered the day it
+// lands, and an arity that leaked into supposedly shape-driven code fails at
+// the shape it leaked for instead of going unnoticed.
+//
+// The recording prover stands in for the real one, so this needs no zkey.
+describe.each(SHAPES)("shape $id", ({ shape }) => {
+    const { nIn, nOut } = shape;
+
+    // The fixture selector takes at most two notes, so two cover any arity;
+    // the remaining input slots are dummies, which is itself the point.
+    const FUNDED = [storedNote("01", 100n), storedNote("02", 200n)];
+
+    const WITHDRAW_TO = evmAddress("0x0000000000000000000000000000000000000002");
+    const withdrawArgs = {
+        to: WITHDRAW_TO,
+        amount: circuitAmount(40n),
+        asset: assetId(1n),
+    };
+
+    it("fills every output slot, one for the recipient and the rest as change", async () => {
+        const { ctx, submitted } = await makeCtx(FUNDED, shape);
         const { address: recipient } = await makeCtx([]);
 
         const res = await executeTransfer(ctx, {
             to: recipient,
-            amount: circuitAmount(60n),
-            selectOpts: { maxInputs: 3 },
+            amount: circuitAmount(30n),
+            selectOpts: { maxInputs: nIn },
         });
 
-        expect(res.commitments).toHaveLength(3);
-        // Slot 0 is the recipient's; slots 1 and 2 are change back to self.
-        expect(res.ownCommitments).toHaveLength(2);
-        expect(res.change).toBe(res.inputSum - 60n);
+        expect(res.commitments).toHaveLength(nOut);
+        // Slot 0 is the recipient's; the rest are change back to self.
+        expect(res.ownCommitments).toHaveLength(nOut - 1);
+        expect(res.change).toBe(res.inputSum - 30n);
         expect(res.ownInflow).toBe(res.change);
 
         // The payload the relayer receives carries one slot per arity.
         const pi = (submitted[0] as { pubInputs: Record<string, unknown[]> }).pubInputs;
-        expect(pi.nullifier).toHaveLength(3);
-        expect(pi.outCm).toHaveLength(3);
-        expect(pi.inCv).toHaveLength(3);
-        expect(pi.outCv).toHaveLength(3);
-        expect(pi.outCvDep).toHaveLength(3);
-        expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(3);
+        expect(pi.nullifier).toHaveLength(nIn);
+        expect(pi.inCv).toHaveLength(nIn);
+        expect(pi.outCm).toHaveLength(nOut);
+        expect(pi.outCv).toHaveLength(nOut);
+        expect(pi.outCvDep).toHaveLength(nOut);
+        expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(nOut);
     });
 
     it("withdraws with every output slot as change", async () => {
-        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], TRANSACT_3X3);
-        const res = await executeWithdraw(
-            ctx,
-            {
-                to: evmAddress("0x0000000000000000000000000000000000000002"),
-                amount: circuitAmount(40n),
-                asset: assetId(1n),
-            },
-            "withdraw",
-        );
-        expect(res.commitments).toHaveLength(3);
-        expect(res.ownCommitments).toHaveLength(3);
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], shape);
+        const res = await executeWithdraw(ctx, withdrawArgs, "withdraw");
+
+        // Nothing is shielded to a recipient, so every slot comes back to self.
+        expect(res.commitments).toHaveLength(nOut);
+        expect(res.ownCommitments).toHaveLength(nOut);
         expect(res.ownInflow).toBe(60n);
-        expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(3);
+        expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(nOut);
     });
 
     it("pads unused input slots so a one-note spend still fills the arity", async () => {
-        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], TRANSACT_3X3);
-        await executeWithdraw(
-            ctx,
-            {
-                to: evmAddress("0x0000000000000000000000000000000000000002"),
-                amount: circuitAmount(40n),
-                asset: assetId(1n),
-            },
-            "withdraw",
-        );
-        // Two dummies pad the slots the single real note does not fill.
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], shape);
+        await executeWithdraw(ctx, withdrawArgs, "withdraw");
+
+        // Dummies pad the slots the single real note does not fill, and each
+        // carries a distinct nullifier — a repeat would be a double-spend the
+        // chain rejects.
         const pi = (submitted[0] as { pubInputs: { nullifier: unknown[] } }).pubInputs;
-        expect(pi.nullifier).toHaveLength(3);
-        expect(new Set(pi.nullifier.map(String)).size).toBe(3);
-    });
-});
-
-// 2×2 is not the default shape, so it needs its own coverage: a pool whose
-// verifier predates the wider circuit passes `shape: TRANSACT_2X2` and must
-// still get exactly two slots.
-describe("shape 2x2", () => {
-    it("transfers with one change slot", async () => {
-        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], TRANSACT_2X2);
-        const { address: recipient } = await makeCtx([]);
-        const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
-
-        expect(res.commitments).toHaveLength(2);
-        expect(res.ownCommitments).toHaveLength(1);
-        expect(res.change).toBe(70n);
-        const pi = (submitted[0] as { pubInputs: { nullifier: unknown[]; outCm: unknown[] } })
-            .pubInputs;
-        expect(pi.nullifier).toHaveLength(2);
-        expect(pi.outCm).toHaveLength(2);
-    });
-
-    it("withdraws with two change slots", async () => {
-        const { ctx } = await makeCtx([storedNote("01", 100n)], TRANSACT_2X2);
-        const res = await executeWithdraw(
-            ctx,
-            {
-                to: evmAddress("0x0000000000000000000000000000000000000002"),
-                amount: circuitAmount(40n),
-                asset: assetId(1n),
-            },
-            "withdraw",
-        );
-        expect(res.commitments).toHaveLength(2);
-        expect(res.ownCommitments).toHaveLength(2);
-        expect(res.ownInflow).toBe(60n);
+        expect(pi.nullifier).toHaveLength(nIn);
+        expect(new Set(pi.nullifier.map(String)).size).toBe(nIn);
     });
 });
 

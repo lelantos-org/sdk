@@ -37,10 +37,9 @@ export type ConnectOptionsLoose = ConnectExtraOptions & {
     rpcUrl?: string;
 };
 
-export function detectRuntime(): "node" | "browser" {
-    const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
-    return isBrowser ? "browser" : "node";
-}
+// Re-exported rather than redeclared: `connect()` reaches for it here, and a
+// second identical body is how the two answers drift apart.
+export { detectRuntime } from "../../core/runtime.js";
 
 /**
  * Resolve the shielded key source.

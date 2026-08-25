@@ -10,9 +10,9 @@
 //
 // Covered: the tag table, the empty-subtree ladder, key derivation, note
 // commitments, nullifiers, output rho, value commitments, leaf hashing, the
-// quaternary Merkle tree, FMD clue derivation, the PolyEval coefficient layout
-// (2×2 and 3×3), Fiat-Shamir z, and the full 2×2 witness built by
-// `toCircomInput`.
+// quaternary Merkle tree, FMD clue derivation, the PolyEval coefficient
+// layout, Fiat-Shamir z, and the full witness built by `toCircomInput` — at
+// every shape in `TRANSACT_SHAPES`.
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -22,7 +22,7 @@ import { keccak256, toBytes } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bitAt } from "../core/bits.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "../core/field.js";
-import { coeffCount } from "../core/shape.js";
+import { coeffCount, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
@@ -230,9 +230,34 @@ function loadJson<T>(name: string): T {
 }
 
 const index = loadJson<VectorIndex>("index.json");
-const transact2x2 = loadJson<VectorFile<TransactVector>>("transact-2x2.json");
-const transact3x3 = loadJson<VectorFile<TransactVector>>("transact-3x3.json");
 const treeUpdate = loadJson<VectorFile<TreeUpdateVector>>("tree-update-batch-4.json");
+
+/** One published transact shape and the vector file that pins it. */
+interface TransactSet {
+    /** `"2x2"`, `"3x3"`, … — names the `describe` block so a failure says which. */
+    readonly id: string;
+    readonly file: VectorFile<TransactVector>;
+}
+
+// Driven off `TRANSACT_SHAPES` rather than a hand-written list, so a shape the
+// SDK knows about but the package does not publish a vector file for fails
+// loudly at load time instead of going quietly uncovered.
+const TRANSACT: readonly TransactSet[] = TRANSACT_SHAPES.map((shape) => {
+    const id = shapeId(shape);
+    return { id, file: loadJson<VectorFile<TransactVector>>(`transact-${id}.json`) };
+});
+
+// The constants block is byte-identical across every file — `every vector file
+// agrees on the constants` below is what proves it — so one file stands in for
+// all of them wherever a test needs a constant rather than a witness.
+const BASELINE = TRANSACT[0]?.file;
+if (!BASELINE) throw new Error("vectors.test: TRANSACT_SHAPES is empty");
+
+/** Every file this suite parses, transact and tree-update alike. */
+const ALL_FILES: readonly VectorFile<TransactVector | TreeUpdateVector>[] = [
+    ...TRANSACT.map((t) => t.file),
+    treeUpdate,
+];
 
 const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
     peerDependencies: Record<string, string>;
@@ -274,7 +299,7 @@ describe("installed circuit vectors", () => {
 
     it("carries the schema this suite parses", () => {
         expect(index.schema).toBe("lelantos.circuits.vectors/1");
-        for (const file of [transact2x2, transact3x3, treeUpdate]) {
+        for (const file of ALL_FILES) {
             expect(file.schema).toBe(index.schema);
         }
     });
@@ -300,10 +325,7 @@ function slotLabels(nIn: number, nOut: number): string[] {
     return labels;
 }
 
-describe.each([
-    ["2x2", transact2x2],
-    ["3x3", transact3x3],
-])("transact %s public-input layout", (_shape, file) => {
+describe.each(TRANSACT)("transact $id public-input layout", ({ file }) => {
     const { nIn = 0, nOut = 0 } = file.circuit.shape;
 
     it("emits the circuit's slot order", () => {
@@ -325,7 +347,7 @@ describe.each([
 // ── consensus constants ──────────────────────────────────────────────────
 
 describe("consensus constants", () => {
-    const c = transact2x2.constants;
+    const c = BASELINE.constants;
 
     it("shares the field moduli", () => {
         expect(BN254_FR).toBe(f(c.bn254Fr));
@@ -353,7 +375,7 @@ describe("consensus constants", () => {
     });
 
     it("every vector file agrees on the constants", () => {
-        for (const file of [transact3x3, treeUpdate]) {
+        for (const file of ALL_FILES) {
             expect(file.constants).toEqual(c);
         }
     });
@@ -383,14 +405,11 @@ wasmDescribe("transact vectors", () => {
     });
 
     it("shares the Baby-Jubjub base point", () => {
-        expect(J.base8).toEqual(pt(transact2x2.constants.babyjubBase8));
+        expect(J.base8).toEqual(pt(BASELINE.constants.babyjubBase8));
     });
 
-    for (const [shape, file] of [
-        ["2x2", transact2x2],
-        ["3x3", transact3x3],
-    ] as const) {
-        describe(`${shape}`, () => {
+    for (const { id, file } of TRANSACT) {
+        describe(id, () => {
             for (const v of file.vectors) {
                 describe(v.name, () => {
                     const w = v.witness;

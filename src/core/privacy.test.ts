@@ -6,7 +6,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InsufficientCoverError, NetworkError } from "./errors.js";
-import { createHttpClient, createJsonClient } from "./http.js";
+import { createHttpClient } from "./http.js";
+import { createJsonClient } from "./json-client.js";
 
 function fetchMock(body = "{}", status = 200): ReturnType<typeof vi.fn> {
     const mock = vi.fn(async () => new Response(body, { status }));

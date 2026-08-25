@@ -19,10 +19,16 @@ export {
     type PermitSingle,
 } from "./deposit-request.js";
 export type {
+    ChainInfo,
+    ChainsResponse,
+    ChainToken,
+    EstimateResponse,
+    FeeQuote,
     MerkleProofResponse,
     RelayerDepositResponse,
     RelayerSubmitResponse,
     ScannedNote,
+    ShieldedFeeTerms,
 } from "./responses.js";
 export type {
     SpendKind,

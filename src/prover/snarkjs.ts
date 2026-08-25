@@ -32,7 +32,7 @@ export async function prove(
     const snarkjs = await loadSnarkjs();
     // Bytes are cached across proofs; snarkjs (via fastfile) treats a
     // Uint8Array as an in-memory file, skipping the per-proof fs read /
-    // network fetch of the ~49 MB zkey.
+    // network fetch of the ~29 MB zkey.
     const [wasmBytes, zkeyBytes] = await Promise.all([
         loadArtifactBytes(paths.wasmPath),
         loadArtifactBytes(paths.zkeyPath),

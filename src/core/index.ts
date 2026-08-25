@@ -87,15 +87,13 @@ export {
     hexToBigint,
     hexToBytes,
 } from "./hex.js";
+export { createHttpClient, type HttpClient, type HttpClientOptions } from "./http.js";
 export {
-    createHttpClient,
     createJsonClient,
-    type HttpClient,
-    type HttpClientOptions,
     type JsonClient,
     type JsonClientOptions,
     type QueryParams,
-} from "./http.js";
+} from "./json-client.js";
 export { decodeStoredNote, type NoteRecord, type StoredNote } from "./note-record.js";
 export {
     randomBytes,
@@ -113,6 +111,7 @@ export {
     shapeId,
     TRANSACT_2X2,
     TRANSACT_3X3,
+    TRANSACT_4X4,
 } from "./shape.js";
 export type { Eip1193ProviderLike, EthSigner } from "./signer.js";
 export { requestPersistentStorage } from "./storage.js";

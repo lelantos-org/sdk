@@ -30,9 +30,16 @@ const DIST = join(ROOT, "dist");
 // the bump to make room should be a deliberate re-baseline rather than
 // another few KB.
 //
+// 300 KB → 350 KB: the re-baseline the previous note asked for. The 1.4%
+// headroom did exactly what it predicted — `dist/` reached 302.9 KB and
+// tripped this on ordinary feature work (relayer + fmd-server clients,
+// the 4x4 circuit shape, the `artifacts.ts` split). ~15% headroom restores
+// the margin the earlier ceilings carried, so this is a tripwire again
+// rather than a thing every change has to step over.
+//
 // Still a coarse "did something unexpected land in dist" tripwire —
 // `bundle-budget.mjs` is the gate for what users actually download.
-const MAX_BYTES = 307_200; // 300 KiB, as reported by `kb()` below.
+const MAX_BYTES = 358_400; // 350 KiB, as reported by `kb()` below.
 
 let total = 0;
 let count = 0;

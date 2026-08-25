@@ -1,6 +1,6 @@
 // Persistent storage for the proving artifacts.
 //
-// The default shape is 3x3, whose zkey is ~49 MB. Without persistence that
+// The default shape is 3x3, whose zkey is ~29 MB. Without persistence that
 // download repeats on every page load *and* every worker spawn: the in-memory
 // map in `./artifacts.ts` is per-JS-realm, and the prover worker has its own
 // realm, so it never shares with the main thread.
@@ -93,7 +93,7 @@ export function cacheApiArtifactCache(): ArtifactCache | null {
                     }),
                 );
             } catch (err) {
-                // QuotaExceededError is the expected one at ~49 MB per shape.
+                // QuotaExceededError is the expected one at tens of MB per shape.
                 log.warn("artifact cache write failed", { url, bytes: bytes.length, err });
             }
         },
@@ -102,7 +102,7 @@ export function cacheApiArtifactCache(): ArtifactCache | null {
 
 /**
  * Drop every cached artifact. Use after publishing new proving keys under
- * URLs that did not change, or to reclaim the ~85 MB both shapes occupy.
+ * URLs that did not change, or to reclaim the ~90 MB all three shapes occupy.
  *
  * Resolves to `false` when there was nothing to delete or the Cache API is
  * unavailable.

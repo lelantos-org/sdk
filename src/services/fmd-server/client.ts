@@ -20,12 +20,8 @@
 // to all be decimal would decode as the wrong number, silently.
 
 import { bool, hexBytes, hexBytesN, hexInt, int, mapArr, obj } from "../../core/decode.js";
-import {
-    bearerAuth,
-    createJsonClient,
-    type HttpClientOptions,
-    type JsonClient,
-} from "../../core/http.js";
+import { bearerAuth, type HttpClientOptions } from "../../core/http.js";
+import { createJsonClient, type JsonClient } from "../../core/json-client.js";
 import type { Field } from "../../crypto/index.js";
 import { assertDetectionGamma } from "../../fmd/fmd.js";
 
@@ -34,6 +30,18 @@ export interface FmdTreeState {
     leafCount: number;
     root: Field;
     frontier: Field[][];
+}
+
+/**
+ * The two watermarks a wallet syncs against.
+ *
+ * Polled far more often than anything else, so it carries only what a client
+ * needs to decide whether the expensive reads are worth making.
+ */
+export interface FmdHead {
+    chainId: number;
+    maxNoteId: number;
+    maxNullifierSeq: number;
 }
 
 export interface FmdNoteOut {
@@ -188,6 +196,15 @@ function note(raw: unknown, idField: "id" | "noteId", path: string): FmdNoteOut 
     };
 }
 
+function head(raw: unknown): FmdHead {
+    const d = obj(raw, "$");
+    return {
+        chainId: int(d.chainId, "$.chainId"),
+        maxNoteId: int(d.maxNoteId, "$.maxNoteId"),
+        maxNullifierSeq: int(d.maxNullifierSeq, "$.maxNullifierSeq"),
+    };
+}
+
 function treeState(raw: unknown): FmdTreeState {
     const d = obj(raw, "$");
     return {
@@ -244,6 +261,19 @@ export class FmdClient {
             baseUrl,
             { timeout: "FMD_TIMEOUT", failure: "FMD_FAILED" },
             opts,
+        );
+    }
+
+    /**
+     * Current sync watermarks. Cheap enough to poll several times a minute:
+     * two indexed `MAX()`s, uncached on both sides.
+     *
+     * The point is to gate the expensive reads — `listNotes`, `listMatches`
+     * and the chunk feeds — on whether anything actually moved.
+     */
+    async fetchHead(): Promise<FmdHead> {
+        return head(
+            await this.json.get<unknown>("/v1/head", { params: { chainId: this.chainId } }),
         );
     }
 

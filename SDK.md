@@ -810,6 +810,11 @@ const wallet = await connect({ network: "mainnet", signer, rpcUrl, prover });
 | 2x2 | 177 ms | 560 ms | ~740 ms |
 | 3x3 | 259 ms | 665 ms | ~925 ms |
 
+`@lelantos-org/circuits` 0.11.2 adds a 4x4 shape (`TRANSACT_4X4`, ~40 MB zkey,
+53 public-input coefficients). It is not the default — select it with
+`connect({ shape: TRANSACT_4X4 })`, and only against a verifier and relayer
+that accept the wider layout.
+
 Witness generation is single-threaded and unaffected by thread count. Groth16 is the part rayon parallelises — 3x3 on the same machine:
 
 | threads | 4 | 8 | 16 |
@@ -820,7 +825,7 @@ Returns fall off sharply past 8 but have not vanished by 16, which is why the po
 
 #### Artifact caching
 
-The default shape is 3x3, whose zkey is ~49 MB. Downloaded artifacts are persisted to the **Cache API** automatically in any browser that has it — nothing to configure. Because the Cache API is origin-scoped rather than per-realm, this covers both a page reload and the prover worker, which previously re-downloaded everything the main thread had already fetched.
+The default shape is 3x3, whose zkey is ~29 MB; 4x4 is ~40 MB. Downloaded artifacts are persisted to the **Cache API** automatically in any browser that has it — nothing to configure. Because the Cache API is origin-scoped rather than per-realm, this covers both a page reload and the prover worker, which previously re-downloaded everything the main thread had already fetched.
 
 The URL is the cache key, so **serve new proving keys under a new path**. There is no revalidation request — a round-trip on every load would defeat the point.
 
@@ -833,7 +838,7 @@ import { clearArtifactCache, configureArtifactCache } from "@lelantos-org/sdk/pr
 // store the origin owns, so a persisted note or tree store benefits too.
 await requestPersistentStorage();
 
-await clearArtifactCache();        // reclaim ~85 MB, or force a re-download
+await clearArtifactCache();        // reclaim ~90 MB, or force a re-download
 configureArtifactCache(false);     // opt out entirely
 configureArtifactCache(myCache);   // or store them in IndexedDB / OPFS / disk
 ```
@@ -870,6 +875,74 @@ public inputs, so there is one builder rather than three. Prover configuration
 
 `e2e/runner` consumes these directly without `Wallet`.
 
+### Paying a relayer's shielded fee
+
+A relayer may charge for relaying, and charges privately: the fee is an output
+note addressed to the relayer, built into the spend it pays for. There is no
+on-chain transfer, and so nothing linking the payer to the transaction.
+
+`GET /chains` says whether a relayer charges. **The presence of `shieldedFee`
+is the contract** — where it appears, every spend and swap on that chain must
+carry a fee output, and one that does not is refused `402`.
+
+<!-- typecheck: skip -->
+```ts
+import { RelayerClient } from "@lelantos-org/sdk/relayer";
+import { buildSpend, feeOutputFromEstimate } from "@lelantos-org/sdk/bundle";
+
+const relayer = new RelayerClient(relayerUrl);
+const estimate = await relayer.estimateSpend(chainId, "transfer");
+
+// null when this relayer charges nothing; throws when it charges but cannot
+// take `asset` — that spend cannot be relayed at all.
+const fee = feeOutputFromEstimate({ J, estimate, asset });
+```
+
+`fee` is one slot's `{ note, recipient, randomness }`, appended to the three
+parallel arrays `buildSpend` takes — and they are positional, so its entry has
+to land last in all three:
+
+<!-- typecheck: skip -->
+```ts
+const feeValue = fee ? fee.note.value : 0n;
+const changeValue = selection.sum - sendValue - feeValue;
+const change = splitChange(ownPk, asset, changeValue, shape.nOut - (fee ? 2 : 1));
+
+await buildSpend({
+    kind: "transfer",
+    outputs:          [sendNote, ...change, ...(fee ? [fee.note] : [])],
+    outputRecipients: [to, ...change.map(() => own), ...(fee ? [fee.recipient] : [])],
+    outputRandomness: [...perOutput, ...(fee ? [fee.randomness] : [])],
+    // …inputs, merkleRoot, prover
+});
+```
+
+Three constraints decide how it fits:
+
+- **A fee consumes an output slot.** Arity is fixed by the circuit, so the fee
+  replaces a change slot rather than extending the transaction: a transfer goes
+  from `[recipient, change, change]` to `[recipient, change, fee]`. Hence
+  `nOut - 2` above.
+- **The fee comes out of change.** `buildSpend` enforces
+  `sumIn === publicOut + sumOut` and the fee note is part of `sumOut`, so
+  `feeValue` has to come off the change — as above. Forgetting it fails the
+  balance check, which is the good outcome; taking it off the recipient's note
+  instead would quietly short-pay them.
+- **The fee is paid in the asset being spent.** `buildSpend` requires every
+  slot to share one asset, and per-asset conservation means a fee in a second
+  asset would need a second asset's input note too. An asset missing from
+  `shieldedFee.tokens` therefore cannot be relayed at all — not merely cannot
+  pay.
+
+The quote is advisory: it is neither signed nor stored, and the relayer
+re-derives what it requires when the spend arrives. `shieldedFee.graceBps` is
+the drift it will absorb in between; past that the submit answers `402` and the
+fix is to re-estimate and rebuild, not to resubmit. See
+[`isShieldedFeeRejection`](#errors).
+
+`feeOutput` is the same thing one level down, for a caller that already has the
+address and a circuit-unit amount and does not want the estimate joined for it.
+
 Circuit-encoding and note-store-format helpers (`toCircomInput`,
 `dummyInputAt`, `auxDigest`, `hornerEval`, `encodeNotePayload`,
 `encodeStoredNote`, …) moved off the root barrel to
@@ -886,9 +959,12 @@ These primitives are pinned to the circuits release named in
 `@lelantos-org/circuits` (same exact version, also a devDependency) and checks
 tags, key derivation, note commitments, nullifiers, `rho`, value commitments,
 leaf hashing, the Merkle tree, FMD clues, and the PolyEval public-input layout
-for both the deployed 2×2 shape and the not-yet-deployed 3×3 one. Their `y`
-values come from witnesses the compiled circuit produced, so a mismatch means
-the SDK would build a witness the on-chain verifier rejects.
+for every published shape — 2×2, 3×3 and 4×4. Their `y` values come from
+witnesses the compiled circuit produced, so a mismatch means the SDK would
+build a witness the on-chain verifier rejects.
+`src/circuit/shape-proving.test.ts` closes the loop for each shape by proving a
+golden witness with that shape's zkey and verifying it against its
+verification key.
 
 The package lives on GitHub Packages, so `npm install` needs `NODE_AUTH_TOKEN`
 set to a token with `read:packages` (see `.npmrc`).
@@ -1033,11 +1109,33 @@ try {
 `WALLET_ERROR_CODES` is the runtime list of every code; `AnyWalletError` is
 the union of every class, discriminated on `code`.
 
+A relayer that refuses a submission over its
+[shielded fee](#paying-a-relayers-shielded-fee) answers `402`, which arrives as
+a `NetworkError`. `isShieldedFeeRejection` is the guard — the status alone is
+decisive, because the relayer returns `402` for nothing else, but a named
+predicate says which `402` a call site means (x402 uses the same status for a
+payment *challenge*, handled separately by `onPaymentRequired`).
+
+<!-- typecheck: skip -->
+```ts
+import { isShieldedFeeRejection } from "@lelantos-org/sdk/relayer";
+
+try {
+    await relayer.submitTransact(payload);
+} catch (e) {
+    if (!isShieldedFeeRejection(e)) throw e;
+    // e.body carries the relayer's reason in prose: which asset, what was
+    // paid, what was required, and the grace band.
+    // The quote went stale — re-estimate and rebuild. Resubmitting the same
+    // payload is refused again.
+}
+```
+
 | Class | Code | Notes |
 |---|---|---|
 | `InsufficientCoverError` | `INSUFFICIENT_COVER` | No 1/2-note cover. Pass `autoConsolidate` or read `consolidate: StoredNote[]`. |
 | `WalletConfigError` | `WALLET_CONFIG` | `missing: string[]` lists all problems. |
-| `NetworkError` | `RELAYER_*` / `FMD_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `cause?`. HTTP clients retry 5xx + network errors twice (exp backoff). |
+| `NetworkError` | `RELAYER_*` / `FMD_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `body?`, `cause?`. HTTP clients retry 5xx + network errors twice (exp backoff); `402` is not retried. See `isShieldedFeeRejection` above. |
 | `ProverError` | `PROVER_FAILED` | Proof generation failed. |
 | `ProverArtifactsMissingError` | `PROVER_ARTIFACTS_MISSING` | Field `tried: string[]`. Fix: pass `proverArtifacts`, install companion, or set `LELANTOS_PROVER_ARTIFACTS_DIR`. |
 | `PermitRejectedError` | `PERMIT_REJECTED` | User rejected EIP-2612 sig. |

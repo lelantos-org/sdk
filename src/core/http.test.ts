@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHttpClient, createJsonClient, type HttpClientOptions, redactUrl } from "./http.js";
+import { createHttpClient, type HttpClientOptions, redactUrl } from "./http.js";
+import { createJsonClient } from "./json-client.js";
 
 describe("redactUrl", () => {
     it("redacts the subscription bearer token in a query string", () => {

@@ -19,14 +19,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { type CircuitShape, shapeId, TRANSACT_2X2, TRANSACT_3X3 } from "../core/shape.js";
+import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import { configureLogging } from "../log/logger.js";
 import { bundledProverArtifacts, resolveArtifacts } from "./artifacts.js";
 import { SnarkjsProver, verify } from "./snarkjs.js";
 import type { ProveResult, ProverPaths } from "./types.js";
 import { WasmProver } from "./wasm-prover.js";
 
-const SHAPES = [TRANSACT_2X2, TRANSACT_3X3];
 const WARM_ITERS = 3;
 
 /** Resolve a JSON file exported by the companion package. */
@@ -66,7 +65,7 @@ function inputFor(shape: CircuitShape): Record<string, unknown> | null {
 }
 
 const CASES = await Promise.all(
-    SHAPES.map(async (shape) => {
+    TRANSACT_SHAPES.map(async (shape) => {
         const id = shapeId(shape);
         return {
             id,

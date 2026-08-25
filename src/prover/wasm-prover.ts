@@ -35,7 +35,7 @@ const _buildCache = new Map<string, Promise<WasmProver>>();
  * `memorySize: 1` is load-bearing. Left to its default, `circom_runtime`
  * allocates a **2 GiB** `WebAssembly.Memory` (32767 pages), and on failure
  * halves and retries — 1 GiB, 512 MB, … — logging a warning each round. On a
- * phone already holding a ~49 MB proving key that is a plausible cause of the
+ * phone already holding a ~29 MB proving key that is a plausible cause of the
  * tab being killed.
  *
  * The allocation is pure waste here: it is handed to the module as `env.memory`,
@@ -58,7 +58,7 @@ export class WasmProver implements Prover {
      * Build (or return the in-flight build for) a prover over `paths`.
      *
      * `opts` reaches the artifact fetch, so a caller can observe or abort the
-     * ~49 MB zkey download. It applies only to the call that starts the
+     * ~29 MB zkey download. It applies only to the call that starts the
      * build: a second caller for the same paths joins the existing promise and
      * sees neither its progress nor its `signal`.
      */
@@ -66,7 +66,7 @@ export class WasmProver implements Prover {
         assertUsable();
         // Canonicalised before it is used as a key or passed on. Two spellings
         // of one artifact pair — `"artifacts/x.zkey"`, `"/artifacts/x.zkey"`,
-        // the absolute href — otherwise build two sessions, i.e. two ~49 MB
+        // the absolute href — otherwise build two sessions, i.e. two ~29 MB
         // proving keys parsed into wasm memory, even though `loadArtifactBytes`
         // correctly serves both from a single download.
         const canonical: ProverPaths = {

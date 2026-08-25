@@ -12,7 +12,7 @@ import type { ProveResult, Prover, ProverArtifacts, ProverPaths } from "./types.
 import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
 
 /**
- * Proving is minutes-long by design and the artifact fetch is ~49 MB at
+ * Proving is minutes-long by design and the artifact fetch is ~29 MB at
  * `DEFAULT_SHAPE`, so these are generous. Neither is retried: a retried
  * three-minute prove is a six-minute frozen UI.
  */

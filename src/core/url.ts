@@ -26,7 +26,7 @@ export function isHttpUrl(u: string): boolean {
  *
  * Self-hosted apps naturally pass a relative artifact base (`"/artifacts"`).
  * That reference fetches fine but is not an `http(s)` URL, so without this it
- * fails {@link isHttpUrl} and silently loses artifact persistence — a ~49 MB
+ * fails {@link isHttpUrl} and silently loses artifact persistence — a ~29 MB
  * re-download on every page load. Resolving it also gives the byte cache a
  * single canonical key, so two spellings of one artifact cannot produce two
  * downloads and two prover sessions.

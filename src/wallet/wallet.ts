@@ -14,7 +14,7 @@ import {
     type ShieldedAddress,
 } from "../core/brand.js";
 import { DepositAdapterError } from "../core/errors.js";
-import { buildNullifierFromNsk, type Field, type Jubjub, Poseidon } from "../crypto/index.js";
+import { type Jubjub, Poseidon } from "../crypto/index.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { type KeySource, resolveNsk } from "../keys/key-source.js";
 import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../keys/keys.js";
@@ -49,25 +49,27 @@ import {
     NoteCache,
 } from "./note-cache.js";
 import type { NoteSource } from "./note-source.js";
-import {
-    type NoteStore,
-    type NotesFile,
-    type StoredNote,
-    withinReservation,
-} from "./note-store.js";
+import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
 import { toWalletNote } from "./result-builder.js";
 import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import { executeSwap } from "./swap.js";
-import { type SyncOpts, type SyncResult, syncWallet } from "./sync.js";
+import type { SyncOpts, SyncResult } from "./sync.js";
+import {
+    NullifierMemo,
+    reconcileSpentOnChain,
+    type SyncContext,
+    syncAll,
+    syncNotesAndReconcile,
+} from "./sync-ops.js";
 import { executeTransfer } from "./transfer.js";
 import type { TreeStore } from "./tree-store.js";
 import { executeWithdraw } from "./withdraw.js";
 
 const log = getLogger("lelantos:wallet");
 
-export class Wallet implements WalletApi, SpendContext {
+export class Wallet implements WalletApi, SpendContext, SyncContext {
     readonly P: Poseidon;
     readonly J: Jubjub;
     readonly keys: SpendingKey;
@@ -76,19 +78,8 @@ export class Wallet implements WalletApi, SpendContext {
     /** @internal — cache + persistence. Use `wallet.file` for read access. */
     readonly cache: NoteCache;
     private readonly assetCache = new Map<bigint, AssetInfo>();
-    /**
-     * Memoised note id → nullifier, so a reconcile pass costs one Poseidon per
-     * *newly seen* note rather than one per unspent note per sync.
-     *
-     * In memory only, deliberately. `StoredNote` is the persisted schema, and
-     * the notes file carries no `nsk` — so a leaked or backed-up file today
-     * links its holder to the user's on-chain commitments but not to their
-     * spends. Nullifiers are exactly the on-chain spend identifiers; writing
-     * them into the file would hand over that second half. Keyed by `id`
-     * rather than the note object because `cache.refresh()` may rehydrate new
-     * objects, while ids are persisted and stable.
-     */
-    private readonly nullifierCache = new Map<string, Field>();
+    /** @internal — read by `./sync-ops.ts` through `SyncContext`. */
+    readonly nullifiers: NullifierMemo;
     /** Set by {@link Wallet.dispose}, so a second call is a no-op. */
     private disposed = false;
     /** Serialises `sync` / `syncNotes`. See {@link Wallet.syncExclusive}. */
@@ -153,6 +144,7 @@ export class Wallet implements WalletApi, SpendContext {
         this.address = args.address;
         this.cfg = args.cfg;
         this.cache = args.cache;
+        this.nullifiers = new NullifierMemo(args.P, args.keys.nsk);
     }
 
     // Convenience constructors live on `connect()`; import it directly. A
@@ -178,19 +170,6 @@ export class Wallet implements WalletApi, SpendContext {
         return new Wallet({ P, J, keys, address, cfg: resolved, cache });
     }
 
-    private async _syncNotes(opts?: SyncOpts): Promise<SyncResult> {
-        return syncWallet(
-            {
-                J: this.J,
-                ivk: this.keys.ivk,
-                source: this.noteSource,
-                sink: this.cache,
-                scanner: this.scanner,
-            },
-            opts ?? {},
-        );
-    }
-
     /**
      * Run `op` after any sync already in progress.
      *
@@ -202,6 +181,9 @@ export class Wallet implements WalletApi, SpendContext {
      * Serialising rather than rejecting: a caller that asked to sync should
      * get a sync, and the second one is cheap because the first has already
      * advanced the cursor.
+     *
+     * The mutex stays here rather than in `./sync-ops.ts` because it guards
+     * *this wallet's* state; the operations themselves are stateless.
      */
     private syncExclusive<T>(op: () => Promise<T>): Promise<T> {
         return this.syncs.run(op);
@@ -216,19 +198,7 @@ export class Wallet implements WalletApi, SpendContext {
      * tree. `limit` is the page size, not a ceiling on notes fetched.
      */
     async syncNotes(opts?: SyncOpts): Promise<SyncResult> {
-        return this.syncExclusive(() => this._syncNotesAndReconcile(opts));
-    }
-
-    private async _syncNotesAndReconcile(opts?: SyncOpts): Promise<SyncResult> {
-        const result = await this._syncNotes(opts);
-        await this.syncNullifiers();
-        // No `refresh()`: `syncWallet` writes through `this.cache`, so the
-        // snapshot reconciliation is about to read already holds the new
-        // notes. Reloading here would have re-read the store instead — and
-        // reconciliation would then persist whichever copy it happened to
-        // hold, erasing the other's writes.
-        await this.reconcileSpentOnChain();
-        return result;
+        return this.syncExclusive(() => syncNotesAndReconcile(this, opts));
     }
 
     /**
@@ -255,61 +225,16 @@ export class Wallet implements WalletApi, SpendContext {
      * around `syncNotes` + `syncTree` + `syncNullifiers`.
      */
     async sync(opts?: SyncOpts): Promise<SyncResult> {
-        return this.syncExclusive(() => this._syncAll(opts));
-    }
-
-    private async _syncAll(opts?: SyncOpts): Promise<SyncResult> {
-        const signal = opts?.signal;
-        const [result] = await Promise.all([
-            this._syncNotes(opts),
-            this.treeStore.sync(signal ? { signal } : {}),
-            this.nullifierStore.sync(signal ? { signal } : {}),
-        ]);
-        // See `syncNotes` for why there is no `refresh()` here.
-        await this.reconcileSpentOnChain();
-        return result;
+        return this.syncExclusive(() => syncAll(this, opts));
     }
 
     /**
      * Mark locally-unspent notes whose nullifiers are already consumed on
-     * chain, against the locally mirrored spent set. Purely local: querying
-     * the server per nullifier would name the caller's own notes.
+     * chain, against the locally mirrored spent set.
      * @internal
      */
     async reconcileSpentOnChain(): Promise<void> {
-        const candidates = this.cache.notes.filter((n) => !n.spent);
-        const spentIds = new Set(
-            candidates.filter((n) => this.nullifierStore.has(this.nullifierOf(n))).map((n) => n.id),
-        );
-
-        // Retire memo entries the next pass will never ask for again: the
-        // notes just found spent, plus anything `markSpent` or `compact`
-        // retired since the last pass. Only unspent notes are ever looked up.
-        const keep = new Set(candidates.map((n) => n.id));
-        for (const id of this.nullifierCache.keys()) {
-            if (!keep.has(id) || spentIds.has(id)) this.nullifierCache.delete(id);
-        }
-
-        // A reservation stands in for exactly the answer this pass just
-        // fetched, so it is released either way: a note found spent no longer
-        // needs one, and one that outlived `SPEND_RESERVATION_MS` without its
-        // nullifier appearing describes a spend that never landed — releasing
-        // it returns the balance without a rescan.
-        const now = Date.now();
-        await this.cache.reconcile({
-            spent: (n) => spentIds.has(n.id),
-            release: (n) => spentIds.has(n.id) || !withinReservation(n.pendingSpendAt, now),
-        });
-    }
-
-    /** This note's nullifier, deriving it only the first time it is asked for. */
-    private nullifierOf(n: StoredNote): Field {
-        let nf = this.nullifierCache.get(n.id);
-        if (nf === undefined) {
-            nf = buildNullifierFromNsk(this.P, this.keys.nsk, BigInt(n.rho), BigInt(n.cm));
-            this.nullifierCache.set(n.id, nf);
-        }
-        return nf;
+        await reconcileSpentOnChain(this);
     }
 
     /** Reload in-memory cache from `NoteStore` after external mutation. */

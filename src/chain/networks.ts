@@ -21,7 +21,7 @@ export interface NetworkPreset {
 // stays a pure declaration and `sideEffects: false` holds. `networks.test.ts`
 // validates every literal.
 
-/** `sepolia`/`mainnet` are placeholders pending public deployment. */
+/** `sepolia` is a placeholder pending public deployment. */
 export const NETWORKS = {
     anvil: {
         chainId: 31337n,
@@ -49,14 +49,29 @@ export const NETWORKS = {
         treeDepth: 10,
         deploymentStatusUrl: "https://docs.lelantos.org/deployments",
     },
+    base: {
+        chainId: 8453n,
+        maspAddress: "0x2887cDe0763178e199A99289dbA9b46DB4d9DB2e" as EvmAddress,
+        relayerAddress: "0x5Fde731cD64f4D22BD0Ab6Fe690C8a19E5fA4BC8" as EvmAddress,
+        relayerUrl: "https://relayer.lelantos.xyz",
+        fmdUrl: "https://fmd.lelantos.xyz",
+        treeDepth: 10,
+    },
+    arbitrum: {
+        chainId: 42161n,
+        maspAddress: "0x2887cDe0763178e199A99289dbA9b46DB4d9DB2e" as EvmAddress,
+        relayerAddress: "0x5Fde731cD64f4D22BD0Ab6Fe690C8a19E5fA4BC8" as EvmAddress,
+        relayerUrl: "https://relayer.lelantos.xyz",
+        fmdUrl: "https://fmd.lelantos.xyz",
+        treeDepth: 10,
+    },
     mainnet: {
         chainId: 1n,
-        maspAddress: null,
-        relayerAddress: null,
-        relayerUrl: "https://relayer.lelantos.org",
-        fmdUrl: "https://fmd.lelantos.org",
+        maspAddress: "0x2887cDe0763178e199A99289dbA9b46DB4d9DB2e" as EvmAddress,
+        relayerAddress: "0x5Fde731cD64f4D22BD0Ab6Fe690C8a19E5fA4BC8" as EvmAddress,
+        relayerUrl: "https://relayer.lelantos.xyz",
+        fmdUrl: "https://fmd.lelantos.xyz",
         treeDepth: 10,
-        deploymentStatusUrl: "https://docs.lelantos.org/deployments",
     },
 } as const satisfies Record<string, NetworkPreset>;
 

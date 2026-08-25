@@ -1,7 +1,7 @@
 // Origin storage durability.
 //
 // Not artifact- or prover-specific despite being introduced for the prover's
-// ~49 MB zkey: `navigator.storage.persist()` covers every store the origin
+// ~29 MB zkey: `navigator.storage.persist()` covers every store the origin
 // owns — Cache API, IndexedDB, OPFS — so a wallet-tier `NoteStore` or
 // `TreePersistence` backed by IndexedDB wants the same call.
 

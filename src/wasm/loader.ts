@@ -3,6 +3,7 @@
 // package subpath imports (`#wasm/<name>`) declared in package.json `imports`.
 
 import { memoAsync } from "../core/async.js";
+import { IS_NODE } from "../core/runtime.js";
 
 export interface WasmModuleBase {
     default: (input?: { module_or_path?: BufferSource | string | URL }) => Promise<unknown>;
@@ -54,8 +55,6 @@ export interface WasmLoaderHandle<M extends WasmModuleBase> {
      */
     reset(): void;
 }
-
-const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
 
 // `node:*` specifier held in a variable so Vite stops statically resolving it in browser
 // bundles. Reachable only on Node (gated by `IS_NODE`).

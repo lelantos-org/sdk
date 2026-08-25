@@ -4,7 +4,7 @@
 // codec. Exports are explicit: the serializers in `codec.ts` are internal and
 // stay off the `./relayer` subpath.
 
-export { RelayerClient } from "./client.js";
+export { isShieldedFeeRejection, RelayerClient } from "./client.js";
 // The wire encoder for the optional `Submitter.submitDeposit` seam. No
 // bundled submitter implements it — the reference relayer serves no deposit
 // route — so it is exported for anyone wiring their own.

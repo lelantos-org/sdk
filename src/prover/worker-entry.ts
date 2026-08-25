@@ -46,7 +46,7 @@ serveWorkerRpc<ProverMethods>(
         },
 
         async prove({ paths, input, ...setup }) {
-            // Before `getProver`, which fetches and parses ~49 MB of
+            // Before `getProver`, which fetches and parses ~29 MB of
             // artifacts. Rejecting a malformed request after that work is
             // pure waste.
             if (!input) throw new Error("prove request missing input");

@@ -93,6 +93,7 @@
     "SyncStrategy",
     "TRANSACT_2X2",
     "TRANSACT_3X3",
+    "TRANSACT_4X4",
     "TokenAmount",
     "TokenMeta",
     "TransactionResult",
@@ -210,6 +211,7 @@
     "StoredNote",
     "TRANSACT_2X2",
     "TRANSACT_3X3",
+    "TRANSACT_4X4",
     "TokenAmount",
     "TxMiningError",
     "Url",
@@ -480,7 +482,12 @@
   "./protocol": [
     "AUX_OUTPUT_COMPONENTS",
     "AuxOutput",
+    "ChainInfo",
+    "ChainToken",
+    "ChainsResponse",
     "DepositRequest",
+    "EstimateResponse",
+    "FeeQuote",
     "MerkleProofResponse",
     "PERMIT2_ADDRESS",
     "Permit2Sig",
@@ -489,6 +496,7 @@
     "RelayerDepositResponse",
     "RelayerSubmitResponse",
     "ScannedNote",
+    "ShieldedFeeTerms",
     "SpendKind",
     "SubmitDepositPayload",
     "SubmitSwapPayload",
@@ -524,6 +532,9 @@
     "BuiltDeposit",
     "BundleCommon",
     "DepositArgs",
+    "FeeOutput",
+    "FeeOutputArgs",
+    "FeeOutputFromEstimateArgs",
     "InputSlot",
     "InputSlots",
     "OutputRandomness",
@@ -534,6 +545,8 @@
     "buildInputs",
     "buildSpend",
     "deriveOutputRho",
+    "feeOutput",
+    "feeOutputFromEstimate",
     "finalize"
   ],
   "./chain": [
@@ -620,6 +633,7 @@
     "FlushWait",
     "RelayerClient",
     "RelayerDepositEvent",
+    "isShieldedFeeRejection",
     "serializeSubmitDeposit"
   ],
   "./fmd-server": [

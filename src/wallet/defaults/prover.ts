@@ -1,10 +1,11 @@
 // Prover selection: WASM by default, snarkjs on wasm-load failure.
 //
-// `LazyProver` defers the build until the first proof — ~49 MB of artifacts at
+// `LazyProver` defers the build until the first proof — ~29 MB of artifacts at
 // `DEFAULT_SHAPE`, minus whatever `configureArtifactCache` already persisted —
 // so `connect()` stays fast for apps that only read balances.
 
 import { type AsyncMemo, memoAsync } from "../../core/async.js";
+import { detectRuntime, isCrossOriginIsolated } from "../../core/runtime.js";
 import type { CircuitShape } from "../../core/shape.js";
 import { getLogger } from "../../log/logger.js";
 import {
@@ -25,8 +26,7 @@ async function wasmProverWithFallback(
     // Without cross-origin isolation the wasm prover runs single-threaded,
     // which benches ~2x slower than snarkjs (snarkjs parallelizes
     // internally). Prefer snarkjs there unless wasm was forced explicitly.
-    const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
-    if (!opts.force && isBrowser && globalThis.crossOriginIsolated !== true) {
+    if (!opts.force && detectRuntime() === "browser" && !isCrossOriginIsolated()) {
         return new SnarkjsProver(paths);
     }
     try {

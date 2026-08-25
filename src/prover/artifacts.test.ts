@@ -8,7 +8,7 @@ import {
     resolveArtifacts,
 } from "./artifacts.js";
 
-// The zkey is ~49 MB at the default 3x3 shape and was re-downloaded on every
+// The zkey is ~29 MB at the default 3x3 shape and was re-downloaded on every
 // page load *and* every worker spawn before persistence existed. These pin the
 // two properties that make it worth having: a hit never touches the network,
 // and no storage failure can turn into a failed proof.
@@ -193,7 +193,7 @@ describe("releaseArtifactBytes", () => {
         const fetchMock = respondWith(BYTES);
 
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
-        // The wasm prover parses the ~49 MB zkey into linear memory and never
+        // The wasm prover parses the ~29 MB zkey into linear memory and never
         // reads the Uint8Array again; without this the realm holds it twice.
         releaseArtifactBytes(ZKEY);
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
@@ -206,7 +206,7 @@ describe("releaseArtifactBytes", () => {
         // without passing them through `resolveArtifacts`, so a browser app
         // passing "/artifacts/3x3_final.zkey" is the ordinary case — and the
         // one where deleting the raw string matched no entry at all, pinning
-        // ~49 MB for the lifetime of the realm. Every other test here uses an
+        // ~29 MB for the lifetime of the realm. Every other test here uses an
         // already-absolute URL, where the mismatch cannot show.
         //
         // With persistence off, the memo is the only thing that can serve a

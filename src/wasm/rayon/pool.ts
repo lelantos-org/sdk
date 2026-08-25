@@ -5,6 +5,7 @@
 // is logged with its cause, on both paths.
 
 import { withTimeout } from "../../core/async.js";
+import { isCrossOriginIsolated } from "../../core/runtime.js";
 import { envProverThreads } from "../../log/env.js";
 import { getLogger } from "../../log/logger.js";
 import { installNodeRayonWorker, terminateRayonWorkers } from "./node-worker.js";
@@ -52,8 +53,7 @@ export async function initBrowserThreadPool(
 
     // Needs `crossOriginIsolated` (COOP+COEP). Without it SharedArrayBuffer
     // is unavailable and rayon falls back to the calling thread.
-    const coi = (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated;
-    if (!coi) {
+    if (!isCrossOriginIsolated()) {
         return singleThreaded(
             opts.label,
             "not-isolated",

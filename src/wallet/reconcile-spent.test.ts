@@ -56,8 +56,11 @@ describe("reconcileSpentOnChain", () => {
         await wallet.markSpent(["a"]);
         await wallet.reconcileSpentOnChain();
 
-        const memo = (wallet as unknown as { nullifierCache: Map<string, bigint> }).nullifierCache;
-        expect([...memo.keys()]).toEqual(["b"]);
+        // No cast: the memo is its own object on the wallet, so the bound it
+        // promises is assertable directly.
+        expect(wallet.nullifiers.has("a")).toBe(false);
+        expect(wallet.nullifiers.has("b")).toBe(true);
+        expect(wallet.nullifiers.size).toBe(1);
     });
 });
 

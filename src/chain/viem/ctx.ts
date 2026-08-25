@@ -8,7 +8,7 @@
 // argument.
 
 import type { PublicClient } from "viem";
-import { branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
+import { branded, type EvmAddress } from "../../core/brand.js";
 import type { EthSigner } from "../../core/signer.js";
 
 export interface ViemCtx {
@@ -34,9 +34,4 @@ export function addr(s: string): EvmAddress {
 /** Narrow a caller-supplied hex string (tx data, signature). */
 export function hex(s: string): `0x${string}` {
     return s as `0x${string}`;
-}
-
-/** Brand a 32-byte hex word read off the chain or built for calldata. */
-export function hash32(s: string): Hex32 {
-    return branded<Hex32>(s);
 }

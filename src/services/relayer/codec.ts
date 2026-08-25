@@ -30,23 +30,6 @@ import type {
     TransactPubInputs,
 } from "../../protocol/transact.js";
 
-/** @internal */
-export interface SerializedScannedNote {
-    ciphertext: string; // hex
-    clueR: [string, string];
-    ephPub: [string, string];
-    cm: string;
-    leafIndex: number;
-}
-
-/** @internal */
-export interface SerializedMerkleProof {
-    leafIndex: number;
-    pathElements: string[][];
-    pathIndices: number[];
-    root: string;
-}
-
 /**
  * Encode as a JSON number, for a field whose Rust DTO is `u64`.
  *

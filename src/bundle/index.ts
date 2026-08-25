@@ -17,4 +17,11 @@ export {
     type OutputRecipient,
 } from "./common.js";
 export { type BuiltDeposit, buildDeposit, type DepositArgs } from "./deposit.js";
+export {
+    type FeeOutput,
+    type FeeOutputArgs,
+    type FeeOutputFromEstimateArgs,
+    feeOutput,
+    feeOutputFromEstimate,
+} from "./fee.js";
 export { buildSpend, type SpendArgs } from "./spend.js";

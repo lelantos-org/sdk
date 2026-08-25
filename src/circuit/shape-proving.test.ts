@@ -14,7 +14,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { type CircuitShape, shapeId, TRANSACT_2X2, TRANSACT_3X3 } from "../core/shape.js";
+import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import { bundledProverArtifacts, resolveArtifacts } from "../prover/artifacts.js";
 import { prove, verify } from "../prover/snarkjs.js";
 
@@ -24,27 +24,46 @@ interface Vector {
     compression?: { y?: string };
 }
 
-/** The companion publishes `verification_key.json` per shape. */
-function vkeyFor(shape: CircuitShape): unknown | null {
-    const id = shapeId(shape);
-    for (const spec of [`@lelantos-org/circuits/${id}/verification_key.json`]) {
-        try {
-            const resolved = (import.meta as { resolve?: (s: string) => string }).resolve?.(spec);
-            if (resolved) return JSON.parse(readFileSync(fileURLToPath(resolved), "utf8"));
-        } catch {
-            // fall through to "unavailable"
-        }
+/**
+ * Resolve a companion-package subpath to a filesystem path, or `null` when the
+ * package is absent or does not export it.
+ *
+ * `import.meta.resolve` is typed as optional here for the same reason
+ * `prover/artifacts.ts` casts it: the DOM lib does not declare it, and it is
+ * only guaranteed synchronous from Node 20.6.
+ */
+function resolvePackageFile(spec: string): string | null {
+    try {
+        const href = (import.meta as { resolve?: (s: string) => string }).resolve?.(spec);
+        return href ? fileURLToPath(href) : null;
+    } catch {
+        return null;
     }
-    return null;
 }
 
-function vectorsFor(shape: CircuitShape): Vector[] {
-    const spec = `@lelantos-org/circuits/vectors/transact-${shapeId(shape)}.json`;
-    const resolved = (import.meta as { resolve?: (s: string) => string }).resolve?.(spec);
-    if (!resolved) throw new Error(`cannot resolve ${spec}`);
-    return JSON.parse(readFileSync(fileURLToPath(resolved), "utf8")).vectors as Vector[];
+function readJson(path: string): unknown {
+    return JSON.parse(readFileSync(path, "utf8"));
 }
 
+/** The companion publishes one `verification_key.json` per shape. */
+function vkeyFor(id: string): unknown | null {
+    const path = resolvePackageFile(`@lelantos-org/circuits/${id}/verification_key.json`);
+    return path ? readJson(path) : null;
+}
+
+/**
+ * The shape's golden vectors. Unlike the artifacts these are not optional —
+ * `vectors.test.ts` fails hard without them — so an unresolvable spec throws
+ * rather than silently skipping this suite too.
+ */
+function vectorsFor(id: string): Vector[] {
+    const spec = `@lelantos-org/circuits/vectors/transact-${id}.json`;
+    const path = resolvePackageFile(spec);
+    if (!path) throw new Error(`cannot resolve ${spec}`);
+    return (readJson(path) as { vectors: Vector[] }).vectors;
+}
+
+/** The shape's wasm/zkey pair, or `null` when either is not on disk. */
 async function pathsFor(shape: CircuitShape) {
     try {
         const paths = resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape }));
@@ -57,18 +76,18 @@ async function pathsFor(shape: CircuitShape) {
     }
 }
 
-for (const shape of [TRANSACT_2X2, TRANSACT_3X3]) {
+for (const shape of TRANSACT_SHAPES) {
     const id = shapeId(shape);
 
     describe(`transact ${id}`, async () => {
         const paths = await pathsFor(shape);
-        const vkey = vkeyFor(shape);
+        const vkey = vkeyFor(id);
 
         it.skipIf(!paths || !vkey)(
             "proves a golden witness and emits the vector's compressed y",
             async () => {
                 if (!paths || !vkey) return;
-                const vector = vectorsFor(shape)[0];
+                const vector = vectorsFor(id)[0];
                 if (!vector) throw new Error(`no vectors for ${id}`);
 
                 const { proof, publicSignals } = await prove(vector.witness, paths);

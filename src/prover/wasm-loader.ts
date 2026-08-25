@@ -7,6 +7,7 @@
 // touches the barrel carries the witness calculator whether or not it ever
 // proves anything.
 
+import { IS_NODE } from "../core/runtime.js";
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
 import { nodeFileUrlToPath } from "../wasm/node-path.js";
 import {
@@ -14,8 +15,6 @@ import {
     initNodeThreadPool,
     withWorkerGlobals,
 } from "../wasm/rayon/index.js";
-
-const IS_NODE = typeof process !== "undefined" && !!process.versions?.node;
 
 /** @internal */
 export interface ProverSession {

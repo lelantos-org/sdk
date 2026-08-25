@@ -43,7 +43,7 @@ describe("DeployedNetworkName", () => {
     // The type is derived from the `maspAddress: null` literals, so it tracks
     // the table automatically. This pins the runtime side of that agreement:
     // every name the type admits resolves to a deployed preset.
-    const deployed: DeployedNetworkName[] = ["anvil", "localnet"];
+    const deployed: DeployedNetworkName[] = ["anvil", "localnet", "base", "arbitrum", "mainnet"];
 
     it.each(deployed)("%s resolves to a deployed preset", (name) => {
         expect(isNetworkDeployed(resolveNetwork(name))).toBe(true);

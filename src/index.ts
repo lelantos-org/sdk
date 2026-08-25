@@ -76,6 +76,7 @@ export {
     DEFAULT_SHAPE,
     TRANSACT_2X2,
     TRANSACT_3X3,
+    TRANSACT_4X4,
 } from "./core/shape.js";
 
 // ── amounts + HTTP options ───────────────────────────────────────────────
