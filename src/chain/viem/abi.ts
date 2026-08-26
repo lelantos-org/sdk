@@ -70,3 +70,14 @@ export const PERMIT2_VIEW_ABI = /* @__PURE__ */ parseAbi([
 export const PERMIT2_PERMIT_ABI = /* @__PURE__ */ parseAbi([
     "function permit(address owner,((address token,uint160 amount,uint48 expiration,uint48 nonce) details,address spender,uint256 sigDeadline) permitSingle,bytes signature)",
 ]);
+
+/**
+ * The `PermitBatch` overload of `permit`, kept in its own ABI rather than
+ * appended to `PERMIT2_PERMIT_ABI`. `permit` is overloaded on Permit2, and two
+ * entries of the same name in one ABI force every `encodeFunctionData` call to
+ * disambiguate by argument shape — a silent footgun. One overload per const
+ * keeps `functionName: "permit"` unambiguous at both call sites.
+ */
+export const PERMIT2_PERMIT_BATCH_ABI = /* @__PURE__ */ parseAbi([
+    "function permit(address owner,((address token,uint160 amount,uint48 expiration,uint48 nonce)[] details,address spender,uint256 sigDeadline) permitBatch,bytes signature)",
+]);

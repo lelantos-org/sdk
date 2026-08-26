@@ -22,19 +22,37 @@ import { InMemoryNoteStore, type NoteStore, type StoredNote } from "./note-store
 import type { NullifierStore } from "./nullifier-store.js";
 import { Wallet } from "./wallet.js";
 
-/** A stored note with deterministic id and fresh randomness. */
-export function storedNote(id: string, value = 100n): StoredNote {
+/** The spendability knobs the selector reads. All optional. */
+export interface StoredNoteOpts {
+    asset?: bigint;
+    spent?: boolean;
+    /** Drives the selector's spend cooldown, against a `tipBlock`. */
+    firstSeenBlock?: number;
+    /** ISO stamp; withholds the note while an earlier spend may still land. */
+    pendingSpendAt?: string;
+}
+
+/**
+ * A stored note with deterministic id and fresh randomness.
+ *
+ * The opts bag exists because the selection suites need to drive the
+ * spendability rules, and each had grown its own copy of this to do it — the
+ * same drift this module was created to stop.
+ */
+export function storedNote(id: string, value = 100n, opts: StoredNoteOpts = {}): StoredNote {
     return {
         id,
-        asset: "1",
+        asset: (opts.asset ?? 1n).toString(),
         value: value.toString(),
         rho: randomFr().toString(),
         rcm: randomFr().toString(),
         rcvDep: randomJubjubScalar().toString(),
         cm: `0x${id.padStart(64, "0")}`,
-        leafIndex: 0,
-        spent: false,
+        leafIndex: Number.parseInt(id, 16) || 0,
+        spent: opts.spent ?? false,
         discoveredAt: "1970-01-01T00:00:00Z",
+        ...(opts.firstSeenBlock !== undefined ? { firstSeenBlock: opts.firstSeenBlock } : {}),
+        ...(opts.pendingSpendAt !== undefined ? { pendingSpendAt: opts.pendingSpendAt } : {}),
     };
 }
 

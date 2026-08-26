@@ -5,7 +5,9 @@
 
 export {
     type SignPermit2AllowanceArgs,
+    type SignPermit2AllowanceBatchArgs,
     type SignPermit2Args,
     signPermit2Allowance,
+    signPermit2AllowanceBatch,
     signPermit2Witness,
 } from "./sign.js";

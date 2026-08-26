@@ -156,6 +156,7 @@
     "resolveNetwork",
     "resolveNsk",
     "shieldedAddress",
+    "supportsAllowanceBatch",
     "supportsAllowanceTransfer",
     "supportsNativeEth",
     "syncWallet",
@@ -493,6 +494,7 @@
     "MerkleProofResponse",
     "PERMIT2_ADDRESS",
     "Permit2Sig",
+    "PermitBatch",
     "PermitDetails",
     "PermitSingle",
     "RelayerDepositResponse",
@@ -525,8 +527,10 @@
   ],
   "./permit2": [
     "SignPermit2AllowanceArgs",
+    "SignPermit2AllowanceBatchArgs",
     "SignPermit2Args",
     "signPermit2Allowance",
+    "signPermit2AllowanceBatch",
     "signPermit2Witness"
   ],
   "./bundle": [
@@ -552,6 +556,7 @@
     "finalize"
   ],
   "./chain": [
+    "AllowanceBatchChain",
     "AllowanceTransferChain",
     "AssetEntry",
     "CancelDepositInputs",
@@ -577,6 +582,7 @@
     "ViemChainAdapterOpts",
     "isNetworkDeployed",
     "resolveNetwork",
+    "supportsAllowanceBatch",
     "supportsAllowanceTransfer",
     "supportsNativeEth"
   ],
@@ -733,6 +739,7 @@
     "SelectionResult",
     "SfrtCoinSelector",
     "SpendPhase",
+    "SpendableMax",
     "StoredNote",
     "Submitter",
     "SwapOptions",
@@ -756,6 +763,7 @@
     "WithdrawEthOptions",
     "WithdrawOptions",
     "WithdrawResult",
+    "WithheldValue",
     "addHits",
     "awaitCommitments",
     "classifyRef",

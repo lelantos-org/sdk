@@ -299,15 +299,25 @@ export class WorkerRpcError extends WalletError<WorkerErrorCode> {
 // --- Tx construction / selection / submission -------------------------------
 
 /**
- * No 1- or 2-note cover, but total balance is sufficient. Caller should
- * self-spend `consolidate` first, re-sync, then retry — or pass
- * `autoConsolidate: true`.
+ * The balance covers `target`, but no combination within the circuit's input
+ * arity does. Merging the notes in `consolidate` into one fixes it.
+ *
+ * `consolidationAttempted` distinguishes the two ways this is reached, which a
+ * caller has to tell apart to say anything useful:
+ *
+ *   * `false` — the caller did not ask for consolidation. Self-spend
+ *     `consolidate`, re-sync, and retry, or pass `{ autoConsolidate: true }`.
+ *   * `true` — consolidation ran and the cover still did not appear. Repeating
+ *     the same call will not help; suggesting `autoConsolidate` here is what
+ *     the old single-message version wrongly did.
  */
 export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
     readonly target: bigint;
     readonly asset: bigint;
     readonly consolidate: ConsolidateHint[];
     readonly consolidateSum: bigint;
+    /** Whether consolidation ran before this was thrown. */
+    readonly consolidationAttempted: boolean;
 
     constructor(
         args: {
@@ -315,22 +325,30 @@ export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
             asset: bigint;
             consolidate: ConsolidateHint[];
             consolidateSum: bigint;
+            consolidationAttempted?: boolean | undefined;
         },
         opts?: WalletErrorOptions,
     ) {
+        // Counted off the hint list rather than hardcoded: the message said
+        // "2-note cover ... two smallest" long after the deployed shape moved
+        // to four inputs, so it named a rule the selector was not applying.
+        const n = args.consolidate.length;
+        const notes = `${n} smallest note${n === 1 ? "" : "s"}`;
+        const attempted = args.consolidationAttempted ?? false;
         // Amounts, asset ids and note ids are exposed as fields and excluded
         // from the message, which reaches application logs verbatim.
-        super(
-            "INSUFFICIENT_COVER",
-            "insufficient 2-note cover; consolidate the two smallest notes first " +
-                "(see `consolidate`), then re-run — or pass { autoConsolidate: true }",
-            opts,
-        );
+        const detail = attempted
+            ? ` after consolidating; the ${notes} (see \`consolidate\`) still do not combine ` +
+              "to reach the target"
+            : `; consolidate the ${notes} (see \`consolidate\`), then re-run — or pass ` +
+              "{ autoConsolidate: true }";
+        super("INSUFFICIENT_COVER", `no cover within the circuit's input arity${detail}`, opts);
         this.name = "InsufficientCoverError";
         this.target = args.target;
         this.asset = args.asset;
         this.consolidate = args.consolidate;
         this.consolidateSum = args.consolidateSum;
+        this.consolidationAttempted = attempted;
     }
 }
 

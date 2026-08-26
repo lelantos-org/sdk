@@ -144,6 +144,25 @@ export interface PermitSingle {
     sigDeadline: bigint;
 }
 
+/**
+ * Mirror of `IAllowanceTransfer.PermitBatch` — one signature covering N
+ * token allowances.
+ *
+ * `spender` is shared across every entry, which is fine: it is always the MASP
+ * address. `details[i].nonce` is NOT shared — Permit2 keys nonces by
+ * `(owner, token, spender)`, so each entry carries its own, read from
+ * `IAllowanceTransfer.allowance(owner, token, spender)`.
+ *
+ * @internal
+ */
+export interface PermitBatch {
+    details: PermitDetails[];
+    /** MASP contract address. */
+    spender: string;
+    /** Outer EIP-712 deadline for the `permit()` call itself. */
+    sigDeadline: bigint;
+}
+
 // ─── struct → ABI tuple ──────────────────────────────────────────────────────
 //
 // The `as` casts narrow `string` to viem's `0x${string}`. The values are

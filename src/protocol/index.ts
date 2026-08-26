@@ -15,6 +15,7 @@ export {
     type DepositRequest,
     PERMIT2_ADDRESS,
     type Permit2Sig,
+    type PermitBatch,
     type PermitDetails,
     type PermitSingle,
 } from "./deposit-request.js";

@@ -43,6 +43,20 @@ export interface SelectOpts {
      */
     maxInputs?: number | undefined;
     /**
+     * Restrict candidates to these note ids.
+     *
+     * Consolidation is what needs it. Asking by *amount* does not name the
+     * notes: SFRT returns the smallest-*sum* cover of that amount, and any
+     * single note whose value falls between the target and the dust set's
+     * total is a cheaper cover than the dust set itself. When one exists the
+     * merge silently does nothing, and the retry fails for the same reason as
+     * the first attempt. Naming the ids removes the ambiguity.
+     *
+     * Applied alongside the other spendability rules, not instead of them: an
+     * id named here that is spent, reserved or cooling down stays excluded.
+     */
+    only?: readonly string[] | undefined;
+    /**
      * Injectable randomness for tests: returns a uniform integer in `[0, n)`.
      *
      * An integer picker rather than a float, because the tiebreak's whole job
@@ -84,41 +98,108 @@ interface RejectionCounts {
     otherAsset: number;
     dust: number;
     cooldown: number;
+    /** Excluded by `SelectOpts.only`. Zero unless a caller passed one. */
+    notNamed: number;
+}
+
+/**
+ * Value held back from a spend, by the rule that held it.
+ *
+ * Plain `bigint`, not `CircuitAmount`: the branded type is a subtype of
+ * `bigint`, so a `CircuitAmount | bigint` union erases the brand and buys
+ * nothing.
+ */
+export interface WithheldValue {
+    /** Reserved by a submit whose outcome was never confirmed. */
+    reserved: bigint;
+    /** Below the dust threshold. */
+    dust: bigint;
+    /** Too recently seen to have cleared the spend cooldown. */
+    cooldown: bigint;
+    /**
+     * Spendable, but beyond the circuit's input arity.
+     *
+     * The odd one out: the other three need time, this one needs a
+     * consolidation. `partitionSpendable` cannot see it — it depends on
+     * `maxInputs` — so it stays `0n` until {@link spendableMax} fills it in.
+     */
+    slots: bigint;
 }
 
 /** Notes that survive every spendability rule, plus a tally of what did not. */
 function partitionSpendable(
     all: readonly StoredNote[],
     asset: AssetId,
-    rules: { dust: bigint; cooldown: number; tip: number | undefined; now: number },
-): { candidates: StoredNote[]; rejected: RejectionCounts } {
+    rules: {
+        dust: bigint;
+        cooldown: number;
+        tip: number | undefined;
+        now: number;
+        only?: ReadonlySet<string> | undefined;
+    },
+): { candidates: StoredNote[]; rejected: RejectionCounts; withheld: WithheldValue } {
     const rejected: RejectionCounts = {
         spent: 0,
         reserved: 0,
         otherAsset: 0,
         dust: 0,
         cooldown: 0,
+        notNamed: 0,
     };
+    // Value, not counts. A caller explaining why a max sits below the balance
+    // needs the amount each rule held back, and the tally above cannot say.
+    const withheld: WithheldValue = { reserved: 0n, dust: 0n, cooldown: 0n, slots: 0n };
     const candidates: StoredNote[] = [];
 
     for (const n of all) {
+        const value = BigInt(n.value);
         if (n.spent) {
             rejected.spent++;
+        } else if (rules.only !== undefined && !rules.only.has(n.id)) {
+            rejected.notNamed++;
+        } else if (BigInt(n.asset) !== asset) {
+            // Ordered before the value rules so a note of another asset is not
+            // counted into this asset's withheld totals.
+            rejected.otherAsset++;
         } else if (withinReservation(n.pendingSpendAt, rules.now)) {
             // A spend of this note is outstanding: it may already be spent,
             // and offering it again earns a duplicate rejection, not a tx.
             rejected.reserved++;
-        } else if (BigInt(n.asset) !== asset) {
-            rejected.otherAsset++;
-        } else if (BigInt(n.value) < rules.dust) {
+            withheld.reserved += value;
+        } else if (value < rules.dust) {
             rejected.dust++;
+            withheld.dust += value;
         } else if (inCooldown(n, rules)) {
             rejected.cooldown++;
+            withheld.cooldown += value;
         } else {
             candidates.push(n);
         }
     }
-    return { candidates, rejected };
+    return { candidates, rejected, withheld };
+}
+
+/**
+ * The spendability rules `opts` asks for, with every default resolved.
+ *
+ * Shared by `selectNotes` and `spendableMax` because the second exists to
+ * predict the first: two independent statements of what "spendable" defaults
+ * to would let the prediction drift from the answer, which is the whole failure
+ * `spendableMax` was added to prevent.
+ */
+function spendRules(opts: SelectOpts) {
+    return {
+        dust: opts.dustThreshold ?? 0n,
+        cooldown: opts.cooldownBlocks ?? DEFAULT_COOLDOWN_BLOCKS,
+        tip: opts.tipBlock,
+        now: Date.now(),
+        ...(opts.only ? { only: new Set(opts.only) } : {}),
+    };
+}
+
+/** Total of a bigint list. */
+function sum(vs: readonly bigint[]): bigint {
+    return vs.reduce((a, v) => a + v, 0n);
 }
 
 /**
@@ -141,6 +222,7 @@ function describeRejections(r: RejectionCounts): string {
         [r.otherAsset, "other asset"],
         [r.dust, "below dust threshold"],
         [r.cooldown, "in spend cooldown"],
+        [r.notNamed, "not named by `only`"],
     ];
     const held = reasons
         .filter(([count]) => count > 0)
@@ -169,21 +251,12 @@ export function selectNotes(
     target: CircuitAmount,
     opts: SelectOpts = {},
 ): SelectionResult {
-    const fee = opts.fee ?? 0n;
-    const dust = opts.dustThreshold ?? 0n;
-    const cooldown = opts.cooldownBlocks ?? DEFAULT_COOLDOWN_BLOCKS;
-    const tip = opts.tipBlock;
     const bucketPct = opts.bucketPct ?? 0.05;
     const maxInputs = opts.maxInputs ?? DEFAULT_SHAPE.nIn;
     const pick = opts.pick ?? randomBelow;
-    const threshold = target + fee;
+    const threshold = target + (opts.fee ?? 0n);
 
-    const { candidates, rejected } = partitionSpendable(all, asset, {
-        dust,
-        cooldown,
-        tip,
-        now: Date.now(),
-    });
+    const { candidates, rejected } = partitionSpendable(all, asset, spendRules(opts));
 
     if (candidates.length === 0) {
         throw new SelectionError(
@@ -378,4 +451,55 @@ export class SfrtCoinSelector implements CoinSelector {
     ): SelectionResult {
         return selectNotes(all, asset, target, opts);
     }
+}
+
+/** What one spend of an asset can reach, and what is holding the rest back. */
+export interface SpendableMax {
+    /** Largest amount a single spend can cover, after `reserve`. */
+    max: CircuitAmount;
+    /**
+     * Value the balance counts but this spend cannot reach, by cause.
+     *
+     * `slots` is the one that surprises: even fully spendable notes are capped
+     * at the circuit's input arity, so a balance spread across more notes than
+     * `maxInputs` has a remainder no single spend can touch. It is not stuck —
+     * consolidating merges it — where the other three simply need time.
+     */
+    withheld: WithheldValue;
+}
+
+/**
+ * The largest amount of `asset` one spend can cover.
+ *
+ * The sum of the largest `maxInputs` selectable notes, less `reserve` (a fee
+ * taken from this same asset). Exists so a UI's "max" is the selector's own
+ * answer rather than a balance the selector will then refuse — the two differ
+ * by every rule in `partitionSpendable`, and a max built on the balance
+ * produces `InsufficientCoverError` against a figure the UI itself wrote.
+ *
+ * Taking the *largest* notes is what makes this a true ceiling: the selector
+ * looks for the smallest cover clearing the target, so at the ceiling the only
+ * cover that exists is exactly this set.
+ *
+ * @internal
+ */
+export function spendableMax(
+    all: readonly StoredNote[],
+    asset: AssetId,
+    opts: SelectOpts = {},
+): SpendableMax {
+    // Negative is meaningless and would make `slice(0, n)` empty while
+    // `slice(n)` returns everything — clamped once rather than guarded twice.
+    const n = Math.max(0, opts.maxInputs ?? DEFAULT_SHAPE.nIn);
+    const { candidates, withheld } = partitionSpendable(all, asset, spendRules(opts));
+
+    const desc = candidates.map((note) => BigInt(note.value)).sort((a, b) => cmp(b, a));
+    // `fee` rather than a second name for it: `selectNotes` already spends a
+    // same-asset fee out of the same cover, by raising the threshold.
+    const net = sum(desc.slice(0, n)) - (opts.fee ?? 0n);
+
+    return {
+        max: branded<CircuitAmount>(net > 0n ? net : 0n),
+        withheld: { ...withheld, slots: sum(desc.slice(n)) },
+    };
 }

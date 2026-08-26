@@ -28,7 +28,13 @@ import type {
     WalletNote,
     WithdrawResult,
 } from "./result.js";
-import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
+import type {
+    CoinSelector,
+    SelectionResult,
+    SelectOpts,
+    SpendableMax,
+    WithheldValue,
+} from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import type { SyncOpts, SyncResult } from "./sync.js";
 
@@ -107,6 +113,23 @@ export interface WalletApi {
      * against this wallet's balances. Empty when the relayer charges nothing.
      */
     quoteFee(args: QuoteFeeArgs): Promise<FeeQuoteResult>;
+    /**
+     * The largest amount of `asset` a single spend can cover, and what is
+     * holding the rest back.
+     *
+     * Not the balance. The selector withholds notes that are reserved by an
+     * unconfirmed spend, still in their spend cooldown, or below the dust
+     * threshold, and a spend can consume only `maxInputs` of what remains — so
+     * a "max" built on the balance produces `InsufficientCoverError` against a
+     * figure the caller itself supplied. `withheld` breaks the difference down
+     * by cause so a UI can say which it is.
+     *
+     * Takes the same {@link SelectOpts} a spend does, so the prediction and the
+     * spend cannot be computed under different rules. `maxInputs` defaults to
+     * the circuit's `nIn`; pass `nIn - 1` when a cross-asset fee will need an
+     * input slot of its own, and `fee` for one paid in this same asset.
+     */
+    spendableMax(asset: AssetId, opts?: SelectOpts): Promise<SpendableMax>;
     selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult;
 
     // --- spend ---------------------------------------------------------------
@@ -168,4 +191,4 @@ export type {
     WalletNotePayload,
     WithdrawResult,
 } from "./result.js";
-export type { CoinSelector, SelectionResult, SelectOpts };
+export type { CoinSelector, SelectionResult, SelectOpts, SpendableMax, WithheldValue };

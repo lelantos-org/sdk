@@ -128,6 +128,7 @@ export {
     type Permit2SignArgs,
     PrivateKeySigner,
     resolveNetwork,
+    supportsAllowanceBatch,
     supportsAllowanceTransfer,
     supportsNativeEth,
     type TokenMeta,

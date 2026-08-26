@@ -79,6 +79,8 @@ export {
     type SelectionResult,
     type SelectOpts,
     SfrtCoinSelector,
+    type SpendableMax,
+    type WithheldValue,
 } from "./selection.js";
 export { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 export { sizeBNote } from "./swap.js";

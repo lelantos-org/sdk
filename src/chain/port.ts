@@ -9,6 +9,7 @@ import type {
     AuxOutput,
     DepositRequest,
     Permit2Sig,
+    PermitBatch,
     PermitSingle,
 } from "../protocol/deposit-request.js";
 import type {
@@ -106,6 +107,20 @@ export interface ChainAdapter {
     /** Sign `PermitSingle` for AllowanceTransfer-mode deposits. Optional. */
     signPermit2Allowance?(permit: PermitSingle): Promise<{ signature: string }>;
     /**
+     * Submit a pre-signed `PermitBatch` via the `permit` overload taking an
+     * array — one tx establishes N token windows. Optional.
+     */
+    permit2PermitAllowanceBatch?(
+        args: {
+            owner: EvmAddress;
+            permit: PermitBatch;
+            signature: string;
+        },
+        onTxHash?: (hash: Hex32) => void,
+    ): Promise<{ txHash: Hex32 }>;
+    /** Sign one `PermitBatch` covering N tokens. Optional. */
+    signPermit2AllowanceBatch?(permit: PermitBatch): Promise<{ signature: string }>;
+    /**
      * `MASP.cancelDeposit`. On-chain digest check rejects tampered
      * preimages. Optional.
      */
@@ -186,6 +201,26 @@ export type AllowanceTransferChain = ChainAdapter &
  */
 export type NativeEthChain = ChainAdapter &
     Required<Pick<ChainAdapter, "submitDepositNative" | "nativeAdapterAddress">>;
+
+/**
+ * Batched AllowanceTransfer setup: one signature and one tx for N tokens.
+ *
+ * A strict narrowing of {@link AllowanceTransferChain} rather than a widening
+ * of it — an adapter that can do single-token setup but not the batch stays
+ * fully usable, it just does not get the multi-token flow.
+ *
+ * @internal
+ */
+export type AllowanceBatchChain = AllowanceTransferChain &
+    Required<Pick<ChainAdapter, "signPermit2AllowanceBatch" | "permit2PermitAllowanceBatch">>;
+
+export function supportsAllowanceBatch(c: ChainAdapter): c is AllowanceBatchChain {
+    return (
+        supportsAllowanceTransfer(c) &&
+        !!c.signPermit2AllowanceBatch &&
+        !!c.permit2PermitAllowanceBatch
+    );
+}
 
 export function supportsAllowanceTransfer(c: ChainAdapter): c is AllowanceTransferChain {
     return (

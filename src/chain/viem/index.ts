@@ -15,6 +15,7 @@ import type {
     AuxOutput,
     DepositRequest,
     Permit2Sig,
+    PermitBatch,
     PermitSingle,
 } from "../../protocol/deposit-request.js";
 import { PERMIT2_ADDRESS } from "../../protocol/deposit-request.js";
@@ -198,6 +199,15 @@ export class ViemChainAdapter implements ChainAdapter {
         onTxHash?: (hash: Hex32) => void,
     ): Promise<{ txHash: Hex32 }> {
         return permit2.permit2PermitAllowance(this.ctx, args, onTxHash);
+    }
+    signPermit2AllowanceBatch(permit: PermitBatch): Promise<{ signature: string }> {
+        return permit2.signAllowanceBatch(this.ctx, permit);
+    }
+    permit2PermitAllowanceBatch(
+        args: { owner: EvmAddress; permit: PermitBatch; signature: string },
+        onTxHash?: (hash: Hex32) => void,
+    ): Promise<{ txHash: Hex32 }> {
+        return permit2.permit2PermitAllowanceBatch(this.ctx, args, onTxHash);
     }
     permit2Nonce(): Promise<bigint> {
         return permit2.permit2Nonce();

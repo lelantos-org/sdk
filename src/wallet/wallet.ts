@@ -3,7 +3,7 @@
 // is injected via `cfg`. Per-tx logic lives in `./{deposit,transfer,
 // withdraw,swap}.ts`; cache + persistence in `./note-cache.ts`.
 
-import { createMutex } from "../core/async.js";
+import { createMutex, sleep } from "../core/async.js";
 import {
     type AssetId,
     type AssetIdLike,
@@ -54,7 +54,14 @@ import type { NoteSource } from "./note-source.js";
 import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
 import { toWalletNote } from "./result-builder.js";
-import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
+import {
+    type CoinSelector,
+    DEFAULT_COOLDOWN_BLOCKS,
+    type SelectionResult,
+    type SelectOpts,
+    type SpendableMax,
+    spendableMax,
+} from "./selection.js";
 import type { Submitter } from "./submitter.js";
 import { executeSwap } from "./swap.js";
 import type { SyncOpts, SyncResult } from "./sync.js";
@@ -70,6 +77,23 @@ import type { TreeStore } from "./tree-store.js";
 import { executeWithdraw } from "./withdraw.js";
 
 const log = getLogger("lelantos:wallet");
+
+/**
+ * How long to wait for a consolidated note to clear its spend cooldown.
+ *
+ * The merged note is unspendable until it is `cooldownBlocks` old, so the
+ * caller's retry is pointless before then. A chain that is not producing
+ * blocks hits this and logs.
+ */
+const COOLDOWN_WAIT_MS = 30_000;
+/**
+ * Poll interval while waiting.
+ *
+ * Coarser than it looks: `ViemChainAdapter.blockNumber()` is cached for
+ * `cacheTime` (4s by default), so most polls resolve from that cache rather
+ * than the network.
+ */
+const COOLDOWN_POLL_MS = 1_000;
 
 export class Wallet implements WalletApi, SpendContext, SyncContext {
     readonly P: Poseidon;
@@ -278,6 +302,23 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         );
     }
 
+    async spendableMax(asset: AssetId, opts: SelectOpts = {}): Promise<SpendableMax> {
+        // The same note set the selector reads — the in-memory cache, not the
+        // persisted store. A caller reading `noteStore.load()` instead can see
+        // a different set and compute a max the selector then refuses.
+        //
+        // Full `SelectOpts`, not a narrowed pair: a caller passing
+        // `dustThreshold` or `cooldownBlocks` to `transfer` must be able to pass
+        // the same here, or the prediction runs under different rules than the
+        // spend it predicts.
+        const tipBlock = await this.cfg.chain.blockNumber?.();
+        return spendableMax(this.storedNotes(), asset, {
+            maxInputs: this.cfg.shape.nIn,
+            ...(tipBlock !== undefined ? { tipBlock } : {}),
+            ...opts,
+        });
+    }
+
     notes(filter: NotesFilter = {}): WalletNote[] {
         return this.cache.notes
             .filter((n) => {
@@ -471,9 +512,28 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
     }
 
     /**
-     * Self-spend the two smallest notes for `asset` into one change note.
+     * Self-spend the notes `selection` named into one change note.
+     *
      * Sends `consolidateSum - 1n` so a 1-unit change note pops out (some
      * selectors discard zero-value change).
+     *
+     * Three details are what make this actually merge, rather than appear to:
+     *
+     *   * **The notes are pinned.** Passing only an amount let the inner
+     *     selector cover it however it liked — usually with one large note,
+     *     merging none of the dust this was called to merge. `only` restricts
+     *     it to exactly the ids the caller named.
+     *   * **The change note is waited for.** `sync()` alone returns as soon as
+     *     one scan pass completes, which is typically before the relayer's tx
+     *     is mined, so the retry re-selected against a store that did not yet
+     *     contain the merged note.
+     *   * **Its cooldown is waited out.** A note is unspendable until
+     *     `tip - firstSeenBlock >= cooldownBlocks`, so a merge is useless to
+     *     the caller until a block has passed. Waiting here — rather than
+     *     lowering the cooldown for the retry — keeps the property the
+     *     cooldown exists for: spending a change note in the block that
+     *     created it links the two for anyone counting leaves.
+     *
      * @internal — used by per-tx helper modules for the auto-consolidate fallback.
      */
     async autoConsolidate(
@@ -485,13 +545,58 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
                 ? selection.consolidateSum - 1n
                 : selection.consolidateSum,
         );
-        await this.transfer({
+        const result = await this.transfer({
             to: this.address,
             amount: target,
             asset,
+            selectOpts: {
+                only: selection.consolidate.map((n) => n.id),
+                // The merge is the point: give it every slot the circuit has.
+                maxInputs: this.cfg.shape.nIn,
+            },
             // Inner call must NOT recurse.
             autoConsolidate: false,
         });
-        await this.sync();
+        await this.awaitCommitments([...result.ownCommitments]);
+        await this.awaitCooldown(asset, result.ownCommitments);
+    }
+
+    /**
+     * Block until the merged note has aged past the selector's spend cooldown.
+     *
+     * Measured against the note's own `firstSeenBlock`, not against a tip
+     * captured on entry: `awaitCommitments` has already returned by this point,
+     * so the note is in the cache with its block recorded, and indexing lag
+     * often means the tip is *already* far enough ahead. Waiting on "the tip
+     * moves once" instead would burn a block time the common case does not owe.
+     *
+     * Returns immediately when the adapter cannot report a block number, or
+     * when the note carries no `firstSeenBlock` — the selector's cooldown is
+     * inert in both cases, so there is nothing to wait for.
+     */
+    private async awaitCooldown(asset: AssetId, cms: readonly string[]): Promise<void> {
+        const cooldown = DEFAULT_COOLDOWN_BLOCKS;
+        const wanted = new Set(cms.map((c) => c.toLowerCase()));
+        const bornAt = this.cache.notes
+            .filter((n) => wanted.has(n.cm.toLowerCase()))
+            .map((n) => n.firstSeenBlock)
+            .filter((b): b is number => b !== undefined);
+        if (bornAt.length === 0) return;
+        const spendableAt = Math.max(...bornAt) + cooldown;
+
+        for (let waited = 0; ; waited += COOLDOWN_POLL_MS) {
+            const tip = await this.cfg.chain.blockNumber?.();
+            if (tip === undefined || tip >= spendableAt) return;
+            if (waited >= COOLDOWN_WAIT_MS) break;
+            await sleep(COOLDOWN_POLL_MS);
+        }
+        // Not fatal: the caller's next selection simply may not see the note,
+        // and it will report insufficient cover rather than doing something
+        // wrong. Worth a line, because on a chain that is not producing blocks
+        // this is the reason consolidation looks like it did nothing.
+        log.warn("chain tip did not advance; a consolidated note may still be in cooldown", {
+            asset: asset.toString(),
+            waitedMs: COOLDOWN_WAIT_MS,
+        });
     }
 }

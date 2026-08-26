@@ -18,11 +18,12 @@ export {
     resolveNetwork,
 } from "./networks.js";
 export type {
+    AllowanceBatchChain,
     AllowanceTransferChain,
     ChainAdapter,
     NativeEthChain,
 } from "./port.js";
-export { supportsAllowanceTransfer, supportsNativeEth } from "./port.js";
+export { supportsAllowanceBatch, supportsAllowanceTransfer, supportsNativeEth } from "./port.js";
 export type {
     AssetEntry,
     CancelDepositInputs,

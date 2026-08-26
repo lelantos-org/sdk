@@ -16,8 +16,25 @@ import {
     type DepositRequest,
     PERMIT2_ADDRESS,
     signPermit2Allowance,
+    signPermit2AllowanceBatch,
     signPermit2Witness,
 } from "./sign.js";
+
+/**
+ * The `PermitDetails` member list, as the tests state it independently of the
+ * production table.
+ *
+ * Hoisted because it was written out four times in this file: the point of
+ * restating it here rather than importing is that an unintended edit to
+ * `PERMIT2_ALLOWANCE_TYPES` fails a test — four copies meant an edit could
+ * match one and be missed by the others.
+ */
+const PERMIT_DETAILS = [
+    { name: "token", type: "address" },
+    { name: "amount", type: "uint160" },
+    { name: "expiration", type: "uint48" },
+    { name: "nonce", type: "uint48" },
+] as const;
 
 const PERMIT2_TYPES = {
     PermitWitnessTransferFrom: [
@@ -272,12 +289,7 @@ describe("signPermit2Allowance", () => {
                     { name: "spender", type: "address" },
                     { name: "sigDeadline", type: "uint256" },
                 ],
-                PermitDetails: [
-                    { name: "token", type: "address" },
-                    { name: "amount", type: "uint160" },
-                    { name: "expiration", type: "uint48" },
-                    { name: "nonce", type: "uint48" },
-                ],
+                PermitDetails: PERMIT_DETAILS,
             },
             primaryType: "PermitSingle",
             message: permit,
@@ -307,5 +319,228 @@ describe("signPermit2Allowance", () => {
             permit,
         });
         expect(out).toBe(permit);
+    });
+});
+
+describe("signPermit2AllowanceBatch", () => {
+    const BATCH_TYPES = {
+        PermitBatch: [
+            { name: "details", type: "PermitDetails[]" },
+            { name: "spender", type: "address" },
+            { name: "sigDeadline", type: "uint256" },
+        ],
+        PermitDetails: PERMIT_DETAILS,
+    } as const;
+
+    const spender = `0x${"22".repeat(20)}` as `0x${string}`;
+
+    // Two entries with *different* nonces on purpose: Permit2 keys nonces by
+    // `(owner, token, spender)`, so a batch that reused one value across
+    // entries would verify here and revert `InvalidNonce` on chain.
+    const permit = {
+        details: [
+            {
+                token: `0x${"11".repeat(20)}` as `0x${string}`,
+                amount: (1n << 160n) - 1n,
+                expiration: 2 ** 48 - 1,
+                nonce: 7,
+            },
+            {
+                token: `0x${"33".repeat(20)}` as `0x${string}`,
+                amount: 1_000_000n,
+                expiration: 1_900_000_000,
+                nonce: 0,
+            },
+        ],
+        spender,
+        sigDeadline: 1_700_000_000n,
+    };
+
+    const signerFor = () => new PrivateKeySigner(ANVIL_KEY, "http://localhost:0", 31337n);
+
+    it("recovers to the signer over the PermitBatch types", async () => {
+        const account = privateKeyToAccount(ANVIL_KEY);
+        const { signature } = await signPermit2AllowanceBatch({
+            signer: signerFor(),
+            chainId: 31337n,
+            permit,
+        });
+
+        const recovered = await recoverTypedDataAddress({
+            domain: { name: "Permit2", chainId: 31337, verifyingContract: PERMIT2_ADDRESS },
+            types: BATCH_TYPES,
+            primaryType: "PermitBatch",
+            message: permit,
+            signature: signature as `0x${string}`,
+        });
+
+        expect(recovered.toLowerCase()).toBe(account.address.toLowerCase());
+    });
+
+    // The whole point of the batch: N entries, ONE signature that is not the
+    // single-entry signature. A `PermitSingle` offered to the batch overload
+    // (or vice versa) must not verify.
+    it("does not collide with the PermitSingle signature for the same entry", async () => {
+        const single = await signPermit2Allowance({
+            signer: signerFor(),
+            chainId: 31337n,
+            permit: { details: permit.details[0]!, spender, sigDeadline: permit.sigDeadline },
+        });
+        const batch = await signPermit2AllowanceBatch({
+            signer: signerFor(),
+            chainId: 31337n,
+            permit: { details: [permit.details[0]!], spender, sigDeadline: permit.sigDeadline },
+        });
+        expect(batch.signature).not.toBe(single.signature);
+    });
+
+    it("is order-sensitive", async () => {
+        const a = await signPermit2AllowanceBatch({
+            signer: signerFor(),
+            chainId: 31337n,
+            permit,
+        });
+        const b = await signPermit2AllowanceBatch({
+            signer: signerFor(),
+            chainId: 31337n,
+            permit: { ...permit, details: [...permit.details].reverse() },
+        });
+        expect(a.signature).not.toBe(b.signature);
+    });
+
+    it("rejects a value that overflows its declared width", async () => {
+        await expect(
+            signPermit2AllowanceBatch({
+                signer: signerFor(),
+                chainId: 31337n,
+                permit: {
+                    ...permit,
+                    details: [{ ...permit.details[0]!, amount: 1n << 160n }],
+                },
+            }),
+        ).rejects.toThrow();
+    });
+
+    it("returns the permit it was given, unmodified", async () => {
+        const { permit: out } = await signPermit2AllowanceBatch({
+            signer: signerFor(),
+            chainId: 31337n,
+            permit,
+        });
+        expect(out).toBe(permit);
+    });
+});
+
+// Same role as `describe("permit2 witness type string")` above: the tests
+// there prove viem agrees with itself. These pin the bytes Permit2 actually
+// hashes, so a reordered field or a changed width in
+// `PERMIT2_ALLOWANCE_BATCH_TYPES` fails here rather than on chain as
+// `InvalidSigner`.
+describe("permit2 PermitBatch type string", () => {
+    const PERMIT_DETAILS_TYPE_STRING =
+        "PermitDetails(address token,uint160 amount,uint48 expiration,uint48 nonce)";
+    const PERMIT_BATCH_TYPE_STRING =
+        "PermitBatch(PermitDetails[] details,address spender,uint256 sigDeadline)" +
+        PERMIT_DETAILS_TYPE_STRING;
+
+    const PERMIT_DETAILS_TYPEHASH = keccak256(toBytes(PERMIT_DETAILS_TYPE_STRING));
+    const PERMIT_BATCH_TYPEHASH = keccak256(toBytes(PERMIT_BATCH_TYPE_STRING));
+
+    // Literals lifted from `PermitHash._PERMIT_DETAILS_TYPEHASH` and
+    // `_PERMIT_BATCH_TYPEHASH` in the vendored Permit2.
+    it("pins the typehashes Permit2 uses", () => {
+        expect(PERMIT_DETAILS_TYPEHASH).toBe(
+            "0x65626cad6cb96493bf6f5ebea28756c966f023ab9e8a83a7101849d5573b3678",
+        );
+        expect(PERMIT_BATCH_TYPEHASH).toBe(
+            "0xaf1b0d30d2cab0380e68f0689007e3254993c596f2fdd0aaa7f4d04f79440863",
+        );
+    });
+
+    // `PermitHash.hash(PermitBatch)` hashes the array member as
+    // `keccak256(abi.encodePacked(perDetailHashes))`. Hand-rolling it here and
+    // comparing against viem is what proves the `PermitDetails[]` member is
+    // encoded the way the contract reads it.
+    it("hand-rolled struct hash equals viem's hashTypedData", () => {
+        const details = [
+            {
+                token: `0x${"11".repeat(20)}` as `0x${string}`,
+                amount: 123_456n,
+                expiration: 1_900_000_000,
+                nonce: 7,
+            },
+            {
+                token: `0x${"33".repeat(20)}` as `0x${string}`,
+                amount: 1n,
+                expiration: 1_800_000_000,
+                nonce: 0,
+            },
+        ];
+        const spender = `0x${"22".repeat(20)}` as `0x${string}`;
+        const sigDeadline = 1_700_000_000n;
+
+        const detailHashes = details.map((d) =>
+            keccak256(
+                encodeAbiParameters(
+                    [
+                        { type: "bytes32" },
+                        { type: "address" },
+                        { type: "uint160" },
+                        { type: "uint48" },
+                        { type: "uint48" },
+                    ],
+                    [PERMIT_DETAILS_TYPEHASH, d.token, d.amount, d.expiration, d.nonce],
+                ),
+            ),
+        );
+        const structHash = keccak256(
+            encodeAbiParameters(
+                [
+                    { type: "bytes32" },
+                    { type: "bytes32" },
+                    { type: "address" },
+                    { type: "uint256" },
+                ],
+                [PERMIT_BATCH_TYPEHASH, keccak256(concat(detailHashes)), spender, sigDeadline],
+            ),
+        );
+
+        const domainSeparator = keccak256(
+            encodeAbiParameters(
+                [
+                    { type: "bytes32" },
+                    { type: "bytes32" },
+                    { type: "uint256" },
+                    { type: "address" },
+                ],
+                [
+                    keccak256(
+                        toBytes(
+                            "EIP712Domain(string name,uint256 chainId,address verifyingContract)",
+                        ),
+                    ),
+                    keccak256(toBytes("Permit2")),
+                    31337n,
+                    PERMIT2_ADDRESS as `0x${string}`,
+                ],
+            ),
+        );
+        const expected = keccak256(concat(["0x1901", domainSeparator, structHash]));
+
+        const actual = hashTypedData({
+            domain: { name: "Permit2", chainId: 31337, verifyingContract: PERMIT2_ADDRESS },
+            types: {
+                PermitBatch: [
+                    { name: "details", type: "PermitDetails[]" },
+                    { name: "spender", type: "address" },
+                    { name: "sigDeadline", type: "uint256" },
+                ],
+                PermitDetails: PERMIT_DETAILS,
+            },
+            primaryType: "PermitBatch",
+            message: { details, spender, sigDeadline },
+        });
+
+        expect(actual).toBe(expected);
     });
 });

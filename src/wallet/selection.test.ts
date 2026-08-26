@@ -3,33 +3,11 @@ import { assetId, circuitAmount } from "../core/brand.js";
 import { randomBelow } from "../core/random.js";
 import { SPEND_RESERVATION_MS } from "./constants.js";
 import type { StoredNote } from "./note-store.js";
-import { type SelectOpts, selectNotes } from "./selection.js";
+import { type SelectOpts, selectNotes, spendableMax } from "./selection.js";
+import { type StoredNoteOpts, storedNote } from "./wallet-test-utils.js";
 
-function note(
-    id: string,
-    value: bigint,
-    opts: {
-        asset?: bigint;
-        spent?: boolean;
-        firstSeenBlock?: number;
-        pendingSpendAt?: string;
-    } = {},
-): StoredNote {
-    return {
-        id,
-        asset: (opts.asset ?? 1n).toString(),
-        value: value.toString(),
-        rho: "0",
-        rcm: "0",
-        rcvDep: "0",
-        cm: `0x${id.padStart(64, "0")}`,
-        leafIndex: parseInt(id, 16) || 0,
-        spent: opts.spent ?? false,
-        discoveredAt: "1970-01-01T00:00:00Z",
-        firstSeenBlock: opts.firstSeenBlock,
-        pendingSpendAt: opts.pendingSpendAt,
-    };
-}
+const note = (id: string, value: bigint, opts: StoredNoteOpts = {}): StoredNote =>
+    storedNote(id, value, opts);
 
 const agoIso = (ms: number) => new Date(Date.now() - ms).toISOString();
 
@@ -370,5 +348,90 @@ describe("cover search cost", () => {
         if (r.plan !== "direct") throw new Error("unreachable");
         expect(r.sum).toBe(30n);
         expect(r.notes).toHaveLength(1);
+    });
+});
+
+// `only` exists so consolidation can force a merge. Without it the inner
+// self-spend was handed an amount, and SFRT covered that amount however it
+// liked — usually one large note, merging none of the dust it was called to
+// merge, so the retry failed for the same reason as the first attempt.
+describe("selectNotes with `only`", () => {
+    // The dust to merge sums to 30; note `03` covers the same target on its
+    // own for 28. Smallest-sum wins, so unrestricted selection takes `03` and
+    // merges nothing — which is exactly the case `only` exists for.
+    const notes = [note("01", 10n), note("02", 20n), note("03", 28n)];
+    const target = circuitAmount(27n);
+
+    it("covers from the named notes even when a cheaper cover exists", () => {
+        const r = selectNotes(notes, assetId(1n), target, { only: ["01", "02"], maxInputs: 4 });
+        expect(r.plan).toBe("direct");
+        if (r.plan !== "direct") return;
+        expect(r.notes.map((n) => n.id).sort()).toEqual(["01", "02"]);
+    });
+
+    it("takes the cheaper single note when nothing restricts it", () => {
+        // The behaviour `only` overrides, asserted so the two cannot silently
+        // converge and leave the restriction untested.
+        const r = selectNotes(notes, assetId(1n), target, { maxInputs: 4 });
+        expect(r.plan).toBe("direct");
+        if (r.plan !== "direct") return;
+        expect(r.notes.map((n) => n.id)).toEqual(["03"]);
+    });
+
+    it("does not resurrect a note the other rules exclude", () => {
+        // `only` narrows the candidate set; it never widens it. With `01`
+        // spent, the named pair can no longer reach the target.
+        const withSpent = [note("01", 10n, { spent: true }), note("02", 20n), note("03", 28n)];
+        expect(() =>
+            selectNotes(withSpent, assetId(1n), target, { only: ["01", "02"], maxInputs: 4 }),
+        ).toThrow(/insufficient unspent value/);
+    });
+});
+
+// The figure a "max" button should write. A max built on the balance is the
+// bug this replaces: the selector then refuses the caller's own number.
+describe("spendableMax", () => {
+    it("sums the largest notes the slots hold, and blames the cap for the rest", () => {
+        const notes = [note("01", 1n), note("02", 50n), note("03", 2n), note("04", 40n)];
+        expect(spendableMax(notes, assetId(1n), { maxInputs: 4 }).max).toBe(93n);
+
+        const capped = spendableMax(notes, assetId(1n), { maxInputs: 2 });
+        expect(capped.max).toBe(90n);
+        // Reachable by consolidating, unlike the time-based causes.
+        expect(capped.withheld.slots).toBe(3n);
+        expect(capped.withheld.cooldown).toBe(0n);
+        expect(capped.withheld.reserved).toBe(0n);
+    });
+
+    it("attributes a reserved note to the reservation, not the slot cap", () => {
+        const notes = [note("01", 100n), note("02", 7n, { pendingSpendAt: agoIso(60_000) })];
+        const r = spendableMax(notes, assetId(1n), { maxInputs: 4 });
+        expect(r.max).toBe(100n);
+        expect(r.withheld.reserved).toBe(7n);
+        expect(r.withheld.slots).toBe(0n);
+    });
+
+    it("attributes a cooling-down note to the cooldown", () => {
+        const notes = [note("01", 100n), note("02", 7n, { firstSeenBlock: 30 })];
+        const r = spendableMax(notes, assetId(1n), { maxInputs: 4, tipBlock: 30 });
+        expect(r.max).toBe(100n);
+        expect(r.withheld.cooldown).toBe(7n);
+    });
+
+    it("subtracts a same-asset fee, and never reports a negative", () => {
+        expect(spendableMax([note("01", 100n)], assetId(1n), { fee: 7n }).max).toBe(93n);
+        expect(spendableMax([note("01", 5n)], assetId(1n), { fee: 10n }).max).toBe(0n);
+        expect(spendableMax([], assetId(1n), {}).max).toBe(0n);
+    });
+
+    it("is a target the selector actually accepts", () => {
+        // The property that matters, stated directly: whatever this returns
+        // must not come back as insufficient cover.
+        const notes = [note("01", 1n), note("02", 50n), note("03", 2n), note("04", 40n)];
+        for (const maxInputs of [1, 2, 3, 4]) {
+            const { max } = spendableMax(notes, assetId(1n), { maxInputs });
+            const r = selectNotes(notes, assetId(1n), circuitAmount(max), { maxInputs });
+            expect(r.plan).toBe("direct");
+        }
     });
 });
