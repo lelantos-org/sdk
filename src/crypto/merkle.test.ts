@@ -243,8 +243,8 @@ describe("node cache export/import", () => {
         const nodes = source.exportNodes();
         expect(nodes.length).toBeGreaterThan(0);
 
-        // Counting Poseidon calls is the whole point: a restore that still
-        // rebuilds would return the right root and look fine.
+        // Counting Poseidon calls is what distinguishes a real restore from a
+        // rebuild: both return the correct root.
         let hashes = 0;
         const countingP: Poseidon = {
             backend: "js",

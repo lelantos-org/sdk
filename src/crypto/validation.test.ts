@@ -6,9 +6,9 @@ import { MerkleTree } from "./merkle.js";
 import { rootFromPath } from "./path.js";
 import { Poseidon } from "./poseidon.js";
 
-// Boundary checks on the field/point layer. The SDK validates carefully at the
-// JSON boundary (`core/decode`, `core/brand`) but used to hand raw decoded
-// values straight to field arithmetic, where the failures are silent.
+// Boundary checks on the field/point layer. Validation at the JSON boundary
+// (`core/decode`, `core/brand`) does not cover field arithmetic, where invalid
+// values fail silently.
 
 describe("Poseidon canonical inputs", () => {
     let P: Poseidon;

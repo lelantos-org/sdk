@@ -258,8 +258,8 @@ export class DepositStream {
     private markClosed(): void {
         if (this.closed) return;
         this.closed = true;
-        // Detached here rather than in `close()`, so a stream the transport
-        // closed under us is cleaned up too.
+        // Detached here rather than in `close()`, so a stream closed by the
+        // transport is cleaned up too.
         this.source.removeEventListener?.("message", this.onMessageEvent);
         this.source.removeEventListener?.("error", this.onErrorEvent);
         this.listeners.clear();

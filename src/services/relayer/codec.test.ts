@@ -8,13 +8,7 @@ import type {
     TransactAux,
     TransactPubInputs,
 } from "../../protocol/transact.js";
-import {
-    deserializeMerkleProof,
-    deserializeScannedNote,
-    serializeSubmitDeposit,
-    serializeSubmitSwap,
-    serializeSubmitTransact,
-} from "./codec.js";
+import { serializeSubmitDeposit, serializeSubmitSwap, serializeSubmitTransact } from "./codec.js";
 
 // Golden fixtures.
 //
@@ -217,77 +211,5 @@ describe("outbound encoding (golden)", () => {
         })();
         expect(isWalletError(err, "WIRE_FORMAT")).toBe(true);
         expect((err as Error).message).toContain("publicAssetId");
-    });
-});
-
-describe("inbound validation", () => {
-    it("decodes a well-formed merkle proof", () => {
-        const d = deserializeMerkleProof({
-            leafIndex: 3,
-            pathElements: [["1", "2", "3"]],
-            pathIndices: [0],
-            root: "0x2a",
-        });
-        expect(d.leafIndex).toBe(3);
-        expect(d.pathElements).toEqual([[1n, 2n, 3n]]);
-        expect(d.root).toBe(42n);
-    });
-
-    it("names the exact path of a bad value instead of throwing a TypeError", () => {
-        const err = (() => {
-            try {
-                deserializeMerkleProof({
-                    leafIndex: 3,
-                    pathElements: [["1", null]],
-                    pathIndices: [0],
-                    root: "1",
-                });
-            } catch (e) {
-                return e as Error & { path?: string };
-            }
-        })();
-        expect(isWalletError(err, "WIRE_FORMAT")).toBe(true);
-        expect(err?.path).toBe("$.pathElements[0][1]");
-        expect(err?.message).toContain("expected a decimal or 0x-hex integer");
-    });
-
-    it("rejects a non-object response", () => {
-        expect(() => deserializeMerkleProof("nope")).toThrow(/expected an object/);
-    });
-
-    it("rejects a missing field rather than yielding undefined downstream", () => {
-        expect(() => deserializeMerkleProof({ leafIndex: 1, root: "1" })).toThrow(
-            /\$\.pathElements/,
-        );
-    });
-
-    it("rejects odd-length hex in a scanned note", () => {
-        expect(() =>
-            deserializeScannedNote({
-                ciphertext: "0xabc",
-                clueR: ["1", "2"],
-                ephPub: ["3", "4"],
-                cm: "5",
-                leafIndex: 0,
-            }),
-        ).toThrow(/even-length hex/);
-    });
-
-    it("rejects a wrong-arity point", () => {
-        const err = (() => {
-            try {
-                deserializeScannedNote({
-                    ciphertext: "0x",
-                    clueR: ["1"],
-                    ephPub: ["3", "4"],
-                    cm: "5",
-                    leafIndex: 0,
-                });
-            } catch (e) {
-                return e as Error & { path?: string };
-            }
-        })();
-        expect(err?.path).toBe("$.clueR");
-        expect(err?.message).toContain("length 2");
     });
 });

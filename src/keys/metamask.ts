@@ -14,7 +14,7 @@ import type { Field } from "../crypto/poseidon.js";
 export const LELANTOS_NSK_DOMAIN: TypedDataDomain = {
     name: "Lelantos",
     version: "1",
-    // chainId omitted on purpose — nsk is chain-independent.
+    // chainId omitted: nsk is chain-independent.
 };
 
 const TYPES: Record<string, TypedDataParameter[]> = {
@@ -53,15 +53,12 @@ const SECP256K1_HALF_N = SECP256K1_N >> 1n;
  *   - `(r, s)` and `(r, n - s)` are both valid, and only some signers
  *     normalise to the low half.
  *
- * Hashing the raw 65 bytes therefore derived a *different* `nsk` — a different
- * address, and no access to the funds at the old one — from wallet software
- * that merely encoded the same signature differently. So `v` is dropped and
- * `s` is folded into its low form before hashing.
+ * Hashing the raw 65 bytes would derive a different `nsk`, and so a different
+ * address, from wallet software that merely encoded the same signature
+ * differently. `v` is dropped and `s` folded into its low form before hashing,
+ * making the derivation stable across encodings.
  *
- * **This changes derived keys.** Any address derived by an earlier version
- * from a signature will not be reproduced here. That is the point — the old
- * derivation was not stable — and it is why this belongs before a deployment
- * rather than after one. The mnemonic and private-key sources are unaffected.
+ * Mnemonic and private-key sources are unaffected.
  */
 export function reduceSignatureToScalar(sigHex: string): Field {
     const digest = keccak256(canonicalSignature(sigHex));

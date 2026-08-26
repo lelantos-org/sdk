@@ -4,14 +4,8 @@ import {
     encodeBase64Json,
     readPaymentRequired,
     readSettlement,
-    requestUrl,
-    withPaymentHeader,
 } from "./codec.js";
-import {
-    HEADER_PAYMENT_REQUIRED,
-    HEADER_PAYMENT_RESPONSE,
-    HEADER_PAYMENT_SIGNATURE,
-} from "./types.js";
+import { HEADER_PAYMENT_REQUIRED, HEADER_PAYMENT_RESPONSE } from "./types.js";
 
 describe("base64 JSON", () => {
     it("round-trips", () => {
@@ -106,36 +100,5 @@ describe("readSettlement", () => {
     it("swallows a malformed receipt — the request was already paid for", () => {
         const res = new Response("", { headers: { [HEADER_PAYMENT_RESPONSE]: "garbage" } });
         expect(readSettlement(res)).toBeUndefined();
-    });
-});
-
-describe("withPaymentHeader", () => {
-    it("adds the payment without dropping the caller's headers or method", () => {
-        const init = { method: "POST", headers: { authorization: "Bearer t" } };
-        const out = withPaymentHeader(init, { x402Version: 2 } as never);
-        const headers = new Headers(out.headers);
-
-        expect(out.method).toBe("POST");
-        expect(headers.get("authorization")).toBe("Bearer t");
-        expect(headers.get(HEADER_PAYMENT_SIGNATURE)).toBeTruthy();
-    });
-
-    it("does not mutate the caller's init", () => {
-        const init = { headers: { authorization: "Bearer t" } };
-        withPaymentHeader(init, { x402Version: 2 } as never);
-        expect(init.headers).toEqual({ authorization: "Bearer t" });
-    });
-
-    it("works with no init at all", () => {
-        const out = withPaymentHeader(undefined, { x402Version: 2 } as never);
-        expect(new Headers(out.headers).get(HEADER_PAYMENT_SIGNATURE)).toBeTruthy();
-    });
-});
-
-describe("requestUrl", () => {
-    it("handles all three fetch input forms", () => {
-        expect(requestUrl("https://x/y")).toBe("https://x/y");
-        expect(requestUrl(new URL("https://x/y"))).toBe("https://x/y");
-        expect(requestUrl(new Request("https://x/y"))).toBe("https://x/y");
     });
 });

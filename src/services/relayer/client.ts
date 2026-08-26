@@ -1,31 +1,29 @@
 // Wallet-side HTTP client for the off-chain MASP relayer service.
 //
-// Spends (transfer/withdraw/withdrawNative): wallet builds the transact
-// SNARK + pubInputs + per-output aux. Relayer assembles the matching
-// tree_update_batch SNARK (owns the multi-hundred-MB zkey + tree state) and
-// batches escrowed deposits, up to `MAX_L_BATCH = 4` leaves, under it.
+// Spends (transfer/withdraw/withdrawNative): the wallet builds the transact
+// SNARK, pubInputs and per-output aux. The relayer assembles the matching
+// tree_update_batch SNARK — it owns the multi-hundred-MB zkey and tree state —
+// and batches escrowed deposits under it, up to `MAX_L_BATCH = 4` leaves.
 //
-// Deposits do not go through here: `Wallet.deposit` broadcasts
-// `MASP.deposit` / `depositAuthorized` / `NativeAdapter.depositNative`
-// itself, and the relayer picks the escrow up from its `DepositEscrowed`
-// event. Settlement arrives on the SSE feed in `deposit-stream.ts`.
+// Deposits do not go through here. `Wallet.deposit` broadcasts `MASP.deposit`,
+// `depositAuthorized` or `NativeAdapter.depositNative` itself; the relayer
+// picks the escrow up from its `DepositEscrowed` event and settlement arrives
+// on the SSE feed in `deposit-stream.ts`.
 //
 // Tree state comes from `FmdClient`, which owns the commitment feed.
 //
-// Relayer can censor but not forge: every merkle path must verify against
-// on-chain `isKnownRoot` before the wallet trusts it.
+// The relayer can censor but not forge: every merkle path must verify against
+// on-chain `isKnownRoot` before the wallet trusts it. It must also not learn
+// which note a wallet cares about, so this client exposes no per-item lookup
+// and places no secret in a URL; callers page the chunk feeds and filter
+// locally, as with `FmdClient`.
 //
-// It must also not learn which note a wallet cares about: this client exposes
-// no per-item lookup and places no secret in a URL. Callers page the chunk
-// feeds and filter locally, as with `FmdClient`.
-//
-// A relayer may charge for the service, and charges privately: the fee is an
-// output note addressed to the relayer, built into the same spend. Feed
-// `estimateSpend`'s response to `bundle/fee.ts → feeOutputFromEstimate` and put
-// the result in an output slot. A submit rejected for an unpaid or underpaid
-// fee answers **402** — note that this is not an x402 payment challenge, and a
-// caller that installs `onPaymentRequired` on this client will see those
-// rejections there.
+// Fees are charged privately, as an output note addressed to the relayer and
+// built into the same spend. Feed `estimateSpend`'s response to
+// `bundle/fee.ts → feeOutputFromEstimate` and place the result in an output
+// slot. A submit rejected for an unpaid or underpaid fee answers **402**; this
+// is not an x402 payment challenge, but a caller that installs
+// `onPaymentRequired` on this client will see those rejections there.
 
 import { NetworkError } from "../../core/errors.js";
 import type { HttpClientOptions } from "../../core/http.js";

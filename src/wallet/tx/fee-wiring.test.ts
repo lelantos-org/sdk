@@ -364,9 +364,8 @@ describe("output slot order", () => {
         const payee = await relayerIdentity();
         const feeSlots = new Set<number>();
 
-        // 4x4 shape: four slots, so the old fixed layout would return {3} every
-        // time. At 40 draws a fair shuffle misses a slot with probability
-        // (3/4)^40 < 1e-5.
+        // 4x4 shape: four slots. A fixed layout returns {3} every time; at 40
+        // draws a fair shuffle misses a slot with probability (3/4)^40 < 1e-5.
         for (let i = 0; i < 40; i++) {
             const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
             const { ctx, submitted } = await makeCtx(notes, estimate(relayer.address, { "2": 7n }));
@@ -378,8 +377,8 @@ describe("output slot order", () => {
             });
 
             feeSlots.add(noteFor(submitted.payload!, ctx.J, relayer.ivk).slot);
-            // Wherever the payee's note landed, the receipt names it — and a
-            // transfer out is never booked as our own income.
+            // Wherever the payee's note landed, the receipt names it, and an
+            // outgoing transfer is never booked as the sender's income.
             const paid = noteFor(submitted.payload!, ctx.J, payee.ivk);
             expect(res.recipientCommitment).toBe(res.commitments[paid.slot]);
             expect(res.ownCommitments).not.toContain(res.recipientCommitment);

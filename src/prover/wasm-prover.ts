@@ -133,10 +133,10 @@ export class WasmProver implements Prover {
      * dispatches into the dead pool, so `session.prove` blocks on a latch no
      * live thread will ever signal.
      *
-     * So a further `build()` or `preload()` throws instead. Before, both
-     * returned a prover that looked fine and hung on first use, which is the
-     * worst available outcome. If a host needs to prove again after reclaiming
-     * this memory, it needs a fresh realm — a worker, or a child process.
+     * A further `build()` or `preload()` therefore throws rather than
+     * returning a prover that hangs on first use. A host needing to prove
+     * again after reclaiming this memory requires a fresh realm — a worker or
+     * a child process.
      *
      * When no pool was ever started (single-threaded by configuration) nothing
      * is poisoned, so the module memo is simply dropped and the next `build()`

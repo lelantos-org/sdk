@@ -39,7 +39,7 @@ export interface SyncContext {
  * Note id → nullifier, derived once per note rather than once per note per
  * sync — a reconcile pass costs one Poseidon per *newly seen* note.
  *
- * In memory only, deliberately. `StoredNote` is the persisted schema, and the
+ * In memory only. `StoredNote` is the persisted schema, and the
  * notes file carries no `nsk` — so a leaked or backed-up file today links its
  * holder to the user's on-chain commitments but not to their spends.
  * Nullifiers are exactly the on-chain spend identifiers; writing them into the

@@ -18,7 +18,7 @@ import type { LogLevel } from "../log/logger.js";
  */
 export interface WorkerLike {
     postMessage(msg: unknown, transfer?: readonly unknown[]): void;
-    // Return type is `void` deliberately: a Node worker`s Promise<number>
+    // Return type is `void`: a Node worker`s Promise<number>
     // is assignable to it, but a DOM worker`s void is not assignable to a
     // union containing Promise.
     terminate(): void;

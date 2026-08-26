@@ -1,6 +1,6 @@
 // Typed fmd-webserver HTTP client.
 //
-// The server deliberately exposes no per-item lookups: there is no
+// The server exposes no per-item lookups: there is no
 // `/v1/path/{cm}` and no "is this nullifier spent?" query, because either one
 // would tell the server (and every proxy log on the way) exactly which note a
 // caller is about to spend. Clients page the commitment and nullifier chunk
@@ -104,15 +104,14 @@ export interface CommitmentChunkEntry {
     /**
      * `Poseidon(TAG_LEAF, cm, cvDep.x, cvDep.y)`, computed server-side.
      *
-     * The feed used to carry `cm` and the `cvDep` point instead, and the only
-     * thing any client did with them was hash them into this. Sending the
-     * result is one field element rather than three: it drops ~1.05M pure-JS
-     * Poseidon-4 calls over a full tree — the single largest term in a cold
-     * sync — and cuts this feed roughly threefold on the wire.
+     * Sending the hash rather than `cm` and the `cvDep` point is one field
+     * element instead of three: it avoids ~1.05M pure-JS Poseidon-4 calls over
+     * a full tree, the largest single term in a cold sync, and cuts this feed
+     * roughly threefold on the wire.
      *
-     * The client no longer derives leaves from primary data, so a wrong value
-     * here yields a wrong root. That costs a rejected transaction, not funds,
-     * and `TreeStore.verifyRoot` is the check that catches it.
+     * The client does not derive leaves from primary data, so a wrong value
+     * here yields a wrong root — a rejected transaction, not a loss of funds.
+     * `TreeStore.verifyRoot` catches it.
      */
     leafHash: Field;
 }

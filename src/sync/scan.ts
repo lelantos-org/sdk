@@ -45,8 +45,8 @@ export interface ScanStats {
     /**
      * Decrypted cleanly but the payload does not reproduce the feed's `cm`.
      * Should be 0: a non-zero count means the feed is serving commitments that
-     * do not match their ciphertexts, or a sender built an output we cannot
-     * spend. See the check in {@link scanNotes}.
+     * do not match their ciphertexts, or a sender built an unspendable
+     * output. See the check in {@link scanNotes}.
      */
     cmMismatch: number;
     hits: number;

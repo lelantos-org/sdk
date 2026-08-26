@@ -33,10 +33,10 @@ describe("createWasmLoader", () => {
     });
 
     it("does not cache a rejection", async () => {
-        // One EMFILE on the Node wasm read, one 502 on the browser fetch, or
-        // one `postInit` timeout used to be replayed to every later caller in
-        // the realm — including after a working loader override was installed,
-        // which nothing could then recover from.
+        // A cached rejection — one EMFILE on the Node wasm read, one 502 on
+        // the browser fetch, one `postInit` timeout — would be replayed to
+        // every later caller in the realm, surviving a working loader
+        // override.
         let attempt = 0;
         const load = vi.fn(async () => {
             if (++attempt === 1) throw new Error("transient");

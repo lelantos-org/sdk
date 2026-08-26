@@ -317,9 +317,8 @@ export class WorkerRpcError<C extends WorkerErrorCode = WorkerErrorCode> extends
  *
  *   * `false` — the caller did not ask for consolidation. Self-spend
  *     `consolidate`, re-sync, and retry, or pass `{ autoConsolidate: true }`.
- *   * `true` — consolidation ran and the cover still did not appear. Repeating
- *     the same call will not help; suggesting `autoConsolidate` here is what
- *     the old single-message version wrongly did.
+ *   * `true` — consolidation ran and the cover still did not appear.
+ *     Repeating the same call will not help.
  */
 export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
     readonly target: bigint;

@@ -92,9 +92,8 @@ function post(scope: WorkerScopeLike, msg: RpcResponse, transfer?: readonly unkn
  * cannot be cloned.
  *
  * `toWireError` carries the error's `context`, and structured clone rejects a
- * function or class instance nested in there. That threw inside the catch, so
- * no response was ever sent and the caller hung until its timeout — turning a
- * diagnostic detail into a lost reply.
+ * function or class instance nested in it. Throwing inside the catch would
+ * send no response at all, leaving the caller to hang until its timeout.
  */
 function postError(scope: WorkerScopeLike, id: number, err: unknown): void {
     try {

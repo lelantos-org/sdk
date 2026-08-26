@@ -38,11 +38,11 @@ export async function executeTransfer(
         });
     }
 
-    // Decoded here rather than where the recipient is first needed, below
-    // `prepareSpend`. It is a pure check on caller input, and running it after
-    // selection meant a typo'd address was reported only once the wallet had
-    // already picked cover, possibly auto-consolidated (a whole self-spend plus
-    // a cooldown wait), synced and verified the tree, and built input slots.
+    // Decoded here rather than below `prepareSpend`, where the recipient is
+    // first needed. It is a pure check on caller input; running it after
+    // selection would report a typo'd address only after the wallet had picked
+    // cover, possibly auto-consolidated (a self-spend plus a cooldown wait),
+    // synced and verified the tree, and built input slots.
     const recipient = decodeAddress(ctx.J, args.to);
 
     const fee = await resolveFee(ctx, { kind: "transfer", spendAsset: asset, feeAsset });

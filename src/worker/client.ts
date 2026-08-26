@@ -167,9 +167,9 @@ export function createWorkerRpc<M extends MethodMap>(
             }
 
             // `addEventListener("abort", …)` below never fires on a signal
-            // that is already aborted, so without this the request is posted
-            // to the worker and left pending until its method timeout — or
-            // forever, since `timeouts` is per-method and optional.
+            // that is already aborted. Without this check the request is
+            // posted and stays pending until its method timeout, or forever,
+            // since `timeouts` is per-method and optional.
             if (callOpts.signal?.aborted) {
                 return Promise.reject(
                     callOpts.signal.reason ?? new Error(`${name}: ${method} aborted`),

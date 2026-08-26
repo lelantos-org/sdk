@@ -4,14 +4,11 @@
 // because the chain adapter, the relayer codec, and the aux digest all consume
 // them; none of those should depend on the Permit2 signer.
 //
-// The ABI component lists and the functions that map a struct onto them sit
-// together deliberately. The two consumers are a hash (`computePiHash`) and
-// calldata (`chain/viem/deposits.ts`), and they must agree field-for-field —
-// the hash is a Permit2 witness over the very struct the calldata carries. The
-// mapping used to be written out twice, once per consumer, on either side of a
-// tier boundary that stopped `protocol/` from reusing `chain/`'s copy. Adding
-// a field to `DepositRequest` and updating only one of them produced a
-// signature the contract rejects, with nothing local to point at.
+// The ABI component lists and the functions mapping a struct onto them are
+// colocated. Their two consumers — the `computePiHash` witness and the
+// calldata in `chain/viem/deposits.ts` — must agree field-for-field, since the
+// hash is a Permit2 witness over the struct the calldata carries. A mismatch
+// produces a signature the contract rejects, with no local symptom.
 
 import { bytesToHex } from "../core/hex.js";
 

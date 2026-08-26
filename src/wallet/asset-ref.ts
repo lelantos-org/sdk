@@ -6,7 +6,7 @@
 // `registered-assets.ts` is that layer, written because the SDK had none — so
 // it lives here instead.
 //
-// Resolution is deliberately syntactic, not a search across every field:
+// Resolution is syntactic, not a search across every field:
 //
 //   0x…    an ERC-20 address (case-insensitive; EIP-55 is not required)
 //   digits a decimal MASP asset id

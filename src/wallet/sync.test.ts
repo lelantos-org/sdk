@@ -3,7 +3,7 @@
 // The bug these guard against is invisible to any fixture smaller than one
 // page: a sync that fetches once returns the first `limit` rows and looks
 // correct, while a wallet whose notes sit past that point never finds them.
-// Every fixture here is therefore deliberately larger than the page size.
+// Every fixture here is therefore larger than the page size.
 
 import { describe, expect, it } from "vitest";
 import type { Field, Jubjub } from "../crypto/index.js";

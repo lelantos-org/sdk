@@ -57,10 +57,10 @@ const inputs = (count: number): ScanInput[] =>
 
 describe("WorkerPoolScanner dispatch", () => {
     it("keeps at most one scan in flight per worker", async () => {
-        // Every chunk used to be posted at once, so a slot could hold several
-        // scans all sharing one timeout while queued behind each other — and a
-        // chunk that had done no work yet would time out, taking a healthy
-        // worker with it via `recycle`.
+        // Posting every chunk at once lets one slot hold several scans that
+        // share a timeout while queued behind each other: a chunk that has
+        // done no work times out and `recycle` takes a healthy worker with
+        // it.
         let inFlight = 0;
         let peak = 0;
         const release: Array<() => void> = [];
@@ -114,8 +114,8 @@ describe("WorkerPoolScanner dispatch", () => {
     });
 
     it("does not leave an init rejection unobserved when no scan follows", async () => {
-        // `ready` is only awaited inside `runChunk`, so a pool that is never
-        // scanned — or is disposed first — used to trip Node's
+        // `ready` is awaited only inside `runChunk`, so a pool that is never
+        // scanned, or is disposed first, must not trip Node's
         // `unhandledRejection`.
         const unhandled: unknown[] = [];
         const onUnhandled = (err: unknown) => unhandled.push(err);

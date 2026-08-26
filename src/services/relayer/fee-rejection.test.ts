@@ -15,8 +15,7 @@ describe("isShieldedFeeRejection", () => {
             "shielded fee in asset 1 pays 240 but 250 is required (grace 300 bps)",
         );
         expect(isShieldedFeeRejection(err)).toBe(true);
-        // Narrowed, so `.body` is reachable without a cast — that reason is
-        // the whole point of the predicate.
+        // Narrowed, so `.body` is reachable without a cast.
         if (isShieldedFeeRejection(err)) expect(err.body).toContain("is required");
     });
 

@@ -543,7 +543,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
             asset,
             selectOpts: {
                 only: selection.consolidate.map((n) => n.id),
-                // The merge is the point: give it every slot the circuit has.
+                // Merging, so use every slot the circuit provides.
                 maxInputs: this.cfg.shape.nIn,
             },
             // Inner call must NOT recurse.

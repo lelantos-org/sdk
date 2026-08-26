@@ -33,36 +33,29 @@ export function deriveNk(P: Poseidon, nsk: Field): Field {
 /**
  * Off-circuit fmd-webserver subscription capability token.
  *
- * Deriving it leaves a wallet with no extra secret to persist: losing local
- * state costs a re-derivation, not the subscription.
+ * Derived rather than stored, so losing local state costs a re-derivation
+ * rather than the subscription.
  *
  * The input is `ivk`, not `dk`. Any detection delegate can recover `dk`: the γ
  * scalars a wallet POSTs are `x_i = dk + h_i`, and `h_i` follows from the
- * public `ck`. A `dk`-derived token would therefore be computable by the server
- * it authenticates against. `ivk` is secret and `dk = Poseidon(TAG_DK, ivk)` is
- * one-way, so a token derived from `ivk` is not.
+ * public `ck`, so a `dk`-derived token would be computable by the server it
+ * authenticates against. `ivk` is secret and `dk = Poseidon(TAG_DK, ivk)` is
+ * one-way.
  *
- * `epoch` makes the token rotatable; without it the token is a pure function
- * of an identity the wallet cannot change. The token is a bearer credential
- * sent on every poll, so bumping `epoch` derives a replacement under the same
- * identity.
+ * `epoch` makes the token rotatable. It is not secret, but it cannot be
+ * recovered from the server: there is no read-only subscription lookup, since
+ * one would be an existence oracle for tokens, and `POST /v1/subscriptions`
+ * creates on miss. Probing for the current epoch is therefore a write that
+ * either re-attaches to the token being rotated away from or recreates one a
+ * rotation deleted.
  *
- * The epoch is not a secret, but it cannot be recovered from the server, and
- * the caller must persist it once it is non-zero. There is no read-only
- * subscription lookup — deliberately, since one would be an existence oracle
- * for tokens — and `POST /v1/subscriptions` creates on miss, so probing for
- * the current epoch is a write that fails both ways: it either re-attaches to
- * the token being rotated away from, or recreates one that a rotation deleted.
+ * At the default `epoch = 0` the token is a pure function of `ivk` and there
+ * is nothing to persist. From the first rotation the caller must persist it.
+ * Losing a non-zero epoch costs a full re-backfill and strands the previous
+ * subscription, whose token is then unrecoverable.
  *
- * At the default `epoch = 0` there is nothing to persist; the token is a pure
- * function of `ivk`. The obligation starts on the first rotation. Losing a
- * non-zero epoch does not lose the wallet — register a fresh one and the
- * indexer backfills — but it costs a full re-backfill and strands the previous
- * subscription, which can no longer be deleted because its token is
- * unrecoverable.
- *
- * `epoch` is a `Field`, so a caller persisting it should store a plain number
- * and pass `BigInt(n)`; `JSON.stringify` throws on bigint.
+ * `epoch` is a `Field`: persist it as a plain number and pass `BigInt(n)`,
+ * since `JSON.stringify` throws on bigint.
  */
 export function deriveSubscriptionToken(P: Poseidon, ivk: Field, epoch: Field = 0n): Field {
     return P.hash([TAG_SUB_TOKEN, ivk, epoch]);

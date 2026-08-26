@@ -36,7 +36,7 @@ describe("thread pool init", () => {
     });
 
     it("degrades to single-threaded rather than throwing when init rejects", async () => {
-        // The failure path that used to strand the workers that did boot.
+        // Failure path: workers that booted must not be left stranded.
         const initThreadPool = vi.fn(async () => {
             throw new Error("PoolBuilder::build failed");
         });

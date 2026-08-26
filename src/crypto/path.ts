@@ -15,12 +15,11 @@ const ARITY = 4;
 /**
  * Recompute the root a `(leaf, path)` pair attests to.
  *
- * The path is validated rather than coerced. This is public API reached with
- * relayer-supplied data by design, and an out-of-range `pathIndices[lvl]` used
- * to mean the `k === slot` branch never fired: the running hash was dropped
- * entirely and the level hashed from siblings alone, returning a
- * plausible-looking root for a leaf that was never in the tree. A short
- * sibling array was zero-padded to the same effect.
+ * The path is validated rather than coerced: this is public API reached with
+ * relayer-supplied data. An out-of-range `pathIndices[lvl]` would skip the
+ * `k === slot` branch, dropping the running hash and hashing the level from
+ * siblings alone — a plausible root for a leaf that is not in the tree. A
+ * short sibling array zero-pads to the same effect.
  */
 export function rootFromPath(
     P: Poseidon,

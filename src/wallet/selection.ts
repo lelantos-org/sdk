@@ -334,14 +334,14 @@ function smallestCover(values: readonly bigint[], threshold: bigint, size: numbe
     // Seeded with the sum of the `size` largest values — the most any
     // combination of this size can reach.
     //
-    // Two things follow, and the second is the load-bearing one. If even that
-    // falls short, no combination qualifies and the walk is skipped entirely.
-    // Otherwise it is itself a valid cover, so the prune below has an incumbent
-    // from the very first branch. Starting at `null` instead meant the prune
-    // was dead until the first success — and on a wallet whose largest notes
-    // cannot reach `threshold` there is no success, so every C(n, size) was
-    // enumerated before returning null. That is exactly the dusty wallet that
-    // needs `consolidate-first`, which is reached only after this returns.
+    // Two things follow. If even that sum falls short, no combination
+    // qualifies and the walk is skipped entirely. Otherwise it is itself a
+    // valid cover, giving the prune below an incumbent from the first branch.
+    // Seeding with `null` would leave the prune inert until the first success,
+    // and a wallet whose largest notes cannot reach `threshold` has none — so
+    // every C(n, size) would be enumerated before returning null. That is the
+    // dusty wallet needing `consolidate-first`, reached only after this
+    // returns.
     let best = 0n;
     for (let i = values.length - size; i < values.length; i++) best += values[i]!;
     if (best < threshold) return null;

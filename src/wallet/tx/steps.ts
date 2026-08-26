@@ -203,7 +203,7 @@ const SUBMIT_UNKNOWN_BODY = "outcome unknown";
  *     it is, they are not ours to spend again right now.
  *   - 502 naming an unknown outcome: broadcast succeeded, no receipt arrived.
  *
- * @internal — exported to be tested directly; the policy is the whole point.
+ * @internal — exported for direct testing.
  */
 export function outcomeUnknown(err: unknown): boolean {
     if (!(err instanceof NetworkError)) return false;

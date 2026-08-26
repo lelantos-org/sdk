@@ -1,51 +1,45 @@
 // The relayer's fee, as an output note.
 //
-// A relayer that charges for relaying has to be paid, and paying it on chain
-// would undo the spend it is relaying: an ERC-20 transfer to the relayer ties
-// the payer to the transaction. So the fee is paid the same way anything else
-// in the pool is — an output note addressed to the relayer's own shielded
-// address, riding in the spend it pays for.
-//
-// The relayer holds only the incoming viewing key for that address. It can
-// recognise the note and read its value; it cannot spend it, and it learns
+// Paying a relayer on chain would undo the spend it relays: an ERC-20 transfer
+// ties the payer to the transaction. The fee is instead an output note
+// addressed to the relayer's shielded address, riding in the spend it pays for.
+// The relayer holds only the incoming viewing key for that address: it can
+// recognise the note and read its value, but cannot spend it and learns
 // nothing about the other outputs.
 //
-// Three constraints are worth knowing before calling this:
+// Three constraints apply:
 //
 //   * **A fee consumes an output slot.** Arity is fixed by the circuit
 //     (`nOut`), so the fee replaces a change slot rather than extending the
-//     transaction. A transfer that used three change-and-recipient slots gives
-//     one of them up to the fee.
-//   * **The fee comes out of change, not out of nowhere.** `buildSpend`
-//     enforces `sumIn === publicOut + sumOut`, and the fee note is part of
-//     `sumOut`. Splicing one in without taking its value off the change
-//     fails that check — which is the good outcome; the bad one is taking it
-//     off the *recipient's* note and quietly short-paying them. So:
+//     transaction.
+//   * **The fee comes out of change.** `buildSpend` enforces
+//     `sumIn === publicOut + sumOut` and the fee note is part of `sumOut`.
+//     Splicing one in without deducting its value from change fails that
+//     check; deducting it from the *recipient's* note passes the check and
+//     silently short-pays them. So:
 //
 //         const changeValue = selection.sum - sendValue - feeValue;
 //         const change = splitChange(pk, asset, changeValue, nOut - 2);
 //
-//     Those three arrays are positional and `buildSpend` only checks their
-//     lengths match, so the fee's entry has to land at the *same* index in all
-//     three — not at any particular one. The wallet paths describe each slot as
-//     a single `OutputSlotSpec` (`wallet/tx/outputs.ts`) and unzip at the
-//     `buildSpend` boundary precisely so that index cannot drift.
+//     The three arrays are positional and `buildSpend` checks only that their
+//     lengths match, so the fee's entry must land at the same index in all
+//     three. The wallet paths describe each slot as a single `OutputSlotSpec`
+//     (`wallet/tx/outputs.ts`) and unzip at the `buildSpend` boundary so that
+//     index cannot drift.
 //
-//     **The fee does not go last.** Slot order is the only thing left in the
-//     output vector that distinguishes one output from another — every other
-//     per-slot public signal is a commitment or a blinded point — so the wallet
-//     shuffles the slots, and a fee at a fixed index would publish which
-//     commitment is the relayer's on every spend. A caller driving `buildSpend`
-//     by hand should shuffle too. The relayer does not care: it trial-decrypts
-//     every output slot to find its payment.
+//     The fee must not go last. Slot order is the only remaining distinguisher
+//     between outputs — every other per-slot public signal is a commitment or
+//     a blinded point — so the wallet shuffles slots, and a fee at a fixed
+//     index would publish which commitment is the relayer's on every spend. A
+//     caller driving `buildSpend` by hand should shuffle too; the relayer
+//     trial-decrypts every output slot to find its payment.
 //   * **The fee's asset need not be the spend's.** The circuit conserves value
 //     per asset rather than in aggregate (`PerAssetValueBalance`), so one proof
 //     may carry the asset being moved alongside a second asset paying the
-//     relayer. It costs two more slots than paying in the asset already moving
-//     — an input note of the fee asset, and an output for its change — so it
-//     needs a shape wide enough to hold them. The relayer still has to accept
-//     the asset: `/chains` publishes the list, and `feeOutputFromEstimate`
-//     throws on one it did not quote.
+//     relayer. That costs two extra slots — an input note of the fee asset and
+//     an output for its change — so the shape must be wide enough. The relayer
+//     must also accept the asset: `/chains` publishes the list, and
+//     `feeOutputFromEstimate` throws on one it did not quote.
 
 import { InvalidArgumentError } from "../core/errors.js";
 import type { Jubjub } from "../crypto/jubjub.js";

@@ -259,9 +259,9 @@ describe("permit2 witness type string", () => {
 });
 
 describe("signPermit2Allowance", () => {
-    // Zero coverage before this: the function launders its input through
-    // `as unknown as Record<string, unknown>`, so a wrong uint48/uint160 width
-    // was caught by nothing in the repo.
+    // The function casts its input through `as unknown as Record<string,
+    // unknown>`, so a wrong uint48/uint160 width has no static check. These
+    // cover it.
     const permit = {
         details: {
             token: `0x${"11".repeat(20)}` as `0x${string}`,
@@ -334,7 +334,7 @@ describe("signPermit2AllowanceBatch", () => {
 
     const spender = `0x${"22".repeat(20)}` as `0x${string}`;
 
-    // Two entries with *different* nonces on purpose: Permit2 keys nonces by
+    // Two entries with different nonces: Permit2 keys nonces by
     // `(owner, token, spender)`, so a batch that reused one value across
     // entries would verify here and revert `InvalidNonce` on chain.
     const permit = {

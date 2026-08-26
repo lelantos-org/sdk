@@ -91,7 +91,7 @@ function paymentRequired(accepts: PaymentRequirements[]): Response {
 
 describe("x402", () => {
     it("requires a budget", () => {
-        // @ts-expect-error deliberately omitting the required option
+        // @ts-expect-error omitting the required option
         expect(() => x402(stubWallet(), {})).toThrow(/budget\.total` is required/);
     });
 

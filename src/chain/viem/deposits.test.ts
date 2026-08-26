@@ -8,10 +8,9 @@ import { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
 import { submitDeposit, submitDepositAuthorized, submitDepositNative } from "./deposits.js";
 
-// Which contract a deposit is sent to, and which function it encodes, are the
-// two things that change silently: a call built against the old pool ABI is
-// well-formed calldata that reverts on-chain, and a native deposit aimed at
-// the pool reverts even though the calldata itself is fine.
+// Which contract a deposit is sent to, and which function it encodes, both
+// fail silently: calldata built against a stale pool ABI is well-formed and
+// reverts on-chain, as does a native deposit aimed at the pool.
 
 const MASP = branded<EvmAddress>("0x0000000000000000000000000000000000000a11");
 const ADAPTER = branded<EvmAddress>("0x00000000000000000000000000000000000ada9e");

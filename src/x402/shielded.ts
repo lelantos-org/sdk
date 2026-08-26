@@ -118,8 +118,8 @@ export function shieldedExact(
 
         async quote(req: PaymentRequirements): Promise<PaymentQuote> {
             const terms = await read(req);
-            // Already circuit units — this network quotes in the wallet's own
-            // denomination, which is the point of having its own namespace.
+            // Already circuit units: this network quotes in the wallet's own
+            // denomination.
             return { amount: terms.amount, asset: await wallet.asset(terms.asset) };
         },
 

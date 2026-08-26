@@ -257,9 +257,9 @@ describe("DepositStream", () => {
 
 describe("DepositStream teardown", () => {
     it("detaches its transport handlers on close", async () => {
-        // The handlers were inline arrows, so nothing could remove them: every
-        // closed stream stayed attached to its source for as long as the
-        // source was reachable.
+        // Inline arrow handlers cannot be removed, leaving every closed
+        // stream attached to its source for as long as the source is
+        // reachable.
         const stream = new DepositStream("http://relayer.test", 1n, {
             eventSourceFactory: (url) => new FakeSource(url),
         });

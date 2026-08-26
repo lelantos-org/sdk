@@ -2,7 +2,7 @@
 //
 // URL assembly, query-param merging, and `Response` → `T` decoding. The
 // transport underneath — timeout, retry, backoff, redaction — is
-// `./http.ts`, and this file deliberately does not reimplement any of it:
+// `./http.ts`, and this file does not reimplement any of it:
 // `createJsonClient` composes a `createHttpClient` and forwards to it.
 //
 // Split from `./http.ts` because the two answer different questions. This one

@@ -87,7 +87,7 @@ const MERKLE_ARITY = 4;
  * inside the prover — as an opaque circom assertion, or worse, as a
  * valid-looking proof against the wrong root that only the chain rejects.
  *
- * The balance check above is deliberately not enough: it sums values across
+ * The balance check above is not sufficient: it sums values across
  * slots without regard to `asset`, so a mixed-asset selection passes it and
  * fails inside the circuit.
  */
@@ -152,10 +152,9 @@ function tally(into: Map<bigint, bigint>, asset: bigint, value: bigint): void {
  * independently for every asset present. That is what lets one spend carry the
  * asset being moved alongside a second asset paying the relayer's fee.
  *
- * A single sum across every slot — which is what this used to be — is not the
- * same check. It accepts a spend that mints one asset and burns another in
- * equal measure, which is precisely the forgery `PerAssetValueBalance` exists
- * to reject, and hands it to the prover to fail seconds later inside circom.
+ * A single sum across every slot is not the same check: it accepts a spend
+ * that mints one asset and burns another in equal measure, the forgery
+ * `PerAssetValueBalance` exists to reject.
  *
  * `publicOut` counts against {@link SpendArgs.asset} alone: the transparent
  * bucket is one `public_asset_id` signal in the circuit, so it belongs to

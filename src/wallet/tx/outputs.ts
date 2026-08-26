@@ -1,32 +1,29 @@
 // Output slots, as one object each instead of three parallel arrays.
 //
 // `buildSpend` takes `outputs`, `outputRecipients` and `outputRandomness` as
-// three positional arrays and only checks that their lengths match. Building
-// them separately means the order has to be repeated three times and kept in
-// step by hand — and a slot that drifts between them is not a type error, it is
-// a note delivered to the wrong address. The fee slot made that concrete: it is
-// the one entry whose recipient is not the sender, so a spread that lands it at
-// the wrong index pays the relayer's fee to the payer and vice versa, and every
-// balance check still passes.
+// three positional arrays and checks only that their lengths match. Building
+// them separately repeats the order three times: a slot that drifts between
+// them is not a type error but a note delivered to the wrong address. The fee
+// slot is the one entry whose recipient is not the sender, so a misplaced
+// index pays the relayer's fee to the payer and vice versa while every balance
+// check still passes.
 //
-// So a slot is described once, here, and unzipped at the `buildSpend` boundary.
-// Ownership rides along for the same reason: `ownIndices` is otherwise index
-// arithmetic over an order defined somewhere else.
+// A slot is therefore described once here and unzipped at the `buildSpend`
+// boundary. Ownership rides along for the same reason: `ownIndices` is
+// otherwise index arithmetic over an order defined elsewhere.
 //
-// That shape is also what makes the order safe to randomize, which is the other
-// half of this file's job. Slot index is the only thing left in the output
-// vector that distinguishes one output from another — every other per-slot
-// public signal is a commitment or a blinded point — so a fixed layout would
-// publish which commitment is the payee's and which is the relayer's on every
-// spend, to anyone reading the chain. With `nOut = 3` that labels up to a third
-// of the tree's leaves as relayer-owned, shrinking the cover set every later
-// spend draws from.
+// That shape also makes the order safe to randomize. Slot index is the only
+// remaining distinguisher between outputs — every other per-slot public signal
+// is a commitment or a blinded point — so a fixed layout would publish which
+// commitment is the payee's and which the relayer's on every spend. At
+// `nOut = 3` that labels up to a third of the tree's leaves as relayer-owned,
+// shrinking the cover set later spends draw from.
 //
-// So `finalizeSlots` shuffles, and it is the only way out of this module: the
-// three arrays, `ownIndices` and the payee's index all come back derived from
-// one permutation. Exporting the unzip on its own would let a caller shuffle
-// for `buildSpend` and read `ownIndices` off the unshuffled list — which type
-// checks, proves, submits, and misreports which notes are ours.
+// `finalizeSlots` shuffles and is the only exit from this module: the three
+// arrays, `ownIndices` and the payee's index all derive from one permutation.
+// Exporting the unzip separately would let a caller shuffle for `buildSpend`
+// and read `ownIndices` off the unshuffled list, which type checks, proves and
+// submits while misreporting note ownership.
 
 import type { OutputRandomness, OutputRecipient } from "../../bundle/common.js";
 import type { SpendArgs } from "../../bundle/spend.js";

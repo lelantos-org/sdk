@@ -306,8 +306,8 @@ describe("createWorkerRpc abort", () => {
         const rpc = createWorkerRpc<TestMethods>(w, { name: "t" });
 
         // `addEventListener("abort", …)` does not fire for a signal that has
-        // already aborted, so this used to be posted and left pending forever
-        // whenever the method had no timeout configured.
+        // already aborted, so an already-aborted signal must be checked
+        // eagerly or the call stays pending when no timeout is configured.
         await expect(
             rpc.call("echo", { v: 1 }, { signal: AbortSignal.abort(new Error("gone")) }),
         ).rejects.toThrow("gone");

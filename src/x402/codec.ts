@@ -60,23 +60,12 @@ export function readSettlement(res: Response): SettleResponse | undefined {
     }
 }
 
-/** Copy `init`, adding the payment. Never mutates the caller's object. */
-export function withPaymentHeader(
-    init: RequestInit | undefined,
-    payload: PaymentPayload,
-): RequestInit {
-    const headers = new Headers(init?.headers);
-    headers.set(HEADER_PAYMENT_SIGNATURE, encodeBase64Json(payload));
-    return { ...init, headers };
-}
-
 /**
  * Copy of `req` carrying the payment header.
  *
- * Takes a `Request` rather than a `RequestInit` because the retry has to
- * reproduce the original call exactly. Rebuilding it from `init` dropped the
- * method, body and headers of any caller who passed a `Request` — which both
- * documented integrations do.
+ * Takes a `Request` rather than a `RequestInit` because the retry must
+ * reproduce the original call exactly: rebuilding from `init` loses the
+ * method, body and headers of a caller that passed a `Request`.
  *
  * Consumes `req`'s body, so this must be the last use of it.
  */
@@ -84,13 +73,6 @@ export function withPaymentRequest(req: Request, payload: PaymentPayload): Reque
     const headers = new Headers(req.headers);
     headers.set(HEADER_PAYMENT_SIGNATURE, encodeBase64Json(payload));
     return new Request(req, { headers });
-}
-
-/** The URL a `fetch` argument refers to, in any of its three forms. */
-export function requestUrl(input: RequestInfo | URL): string {
-    if (typeof input === "string") return input;
-    if (input instanceof URL) return input.toString();
-    return input.url;
 }
 
 /**

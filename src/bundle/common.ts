@@ -177,9 +177,8 @@ export async function finalize(
     auxAndWitness: readonly OutputAuxWithWitness[],
 ): Promise<BuiltBundle> {
     if (!common.prover && !common.proverPaths) {
-        // `WalletConfigError`, matching `runProver`'s check on the identical
-        // condition — a caller filtering on `isWalletError` used to catch one
-        // and not the other.
+        // `WalletConfigError` matches `runProver`'s check on the identical
+        // condition, so `isWalletError` catches both.
         throw new WalletConfigError("BundleCommon: either `prover` or `proverPaths` is required");
     }
     const aux: OutputAux[] = auxAndWitness.map((a) => a.aux);
@@ -251,9 +250,9 @@ export async function runProver(
     // the invariant: only `./snarkjs.js` may reach the optional `snarkjs`
     // peer, and only lazily — an eager import anywhere on the default path
     // makes the optional dependency mandatory again. `bundle/common.ts` is
-    // squarely on the default path (`buildSpend` → `finalize` → here), so the
-    // static import meant every `./bundle` consumer carried the backend and
-    // the invariant was no longer checkable by reading `prover/`.
+    // squarely on the default path (`buildSpend` → `finalize` → here), so a
+    // static import would make every `./bundle` consumer carry the backend and
+    // put the invariant out of reach of a reader of `prover/`.
     const { prove } = await import("../prover/snarkjs.js");
     return (await prove(input, common.proverPaths)).proof;
 }

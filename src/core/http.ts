@@ -1,8 +1,7 @@
 // Shared HTTP transport: per-attempt AbortController timeout,
 // exponential-backoff retry with jitter, and typed `NetworkError`.
 //
-// The JSON layer that used to live at the bottom of this file is now
-// `./json-client.ts`; it composes this one rather than duplicating it.
+// The JSON layer lives in `./json-client.ts` and composes this transport.
 //
 // Cancellation
 // ------------
@@ -137,7 +136,7 @@ export function createHttpClient(
                 opts.timeoutMs ?? (idempotent ? DEFAULTS.timeoutMs : DEFAULTS.submitTimeoutMs);
             const allowRetry = idempotent || retryOnSubmit;
 
-            // Held separately, and deliberately not copied into `request`:
+            // Held separately, not copied into `request`:
             // each attempt composes it with a fresh per-attempt controller,
             // and a shared signal there would be overwritten by the first one.
             const callerSignal = init?.signal ?? undefined;

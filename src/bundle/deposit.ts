@@ -63,7 +63,7 @@ export interface BuiltDeposit {
     cm: Field;
     /**
      * Only the depositor's note. The fee note belongs to the relayer, so it is
-     * deliberately absent — counting it would inflate the wallet's balance
+     * absent: counting it would inflate the wallet's balance
      * with value it cannot spend.
      */
     producedNotes: [Note];

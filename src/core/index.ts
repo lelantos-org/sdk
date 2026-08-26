@@ -6,7 +6,7 @@
 
 export { type RetryPolicy, retry, type SleepOutcome, sleep, withTimeout } from "./async.js";
 export { bitAt, packBits, unpackBits } from "./bits.js";
-// `branded` is deliberately not re-exported: it is the `@internal` unvalidated
+// `branded` is not re-exported: it is the `@internal` unvalidated
 // escape hatch, and publishing it would let consumers bypass every constructor
 // below. SDK code imports it from `./brand.js` directly.
 export {

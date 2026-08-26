@@ -2,7 +2,7 @@
 //
 // Named for what it does rather than for what it is not. As `internal.ts`
 // it collided with `src/internal.ts`, which is the opposite thing: a
-// *published* subpath (`@lelantos-org/sdk/internal`) carrying deliberately
+// *published* subpath (`@lelantos-org/sdk/internal`) carrying
 // unstable primitives. One word, two meanings, one directory apart.
 
 import { type AssetId, branded, type CircuitAmount, type Hex32 } from "../core/brand.js";

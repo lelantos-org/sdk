@@ -234,12 +234,10 @@ export interface AsyncMemo<T> {
 /**
  * Memoise an async build, evicting on rejection.
  *
- * The eviction is the point. A plain `promise ??= build()` caches the
- * *rejection* too, so one transient failure — an `EMFILE` reading a wasm file,
- * a 502 fetching it, an RPC blip — is replayed to every later caller in the
- * realm, permanently, with no way to recover. That pattern appeared five times
- * in this codebase before this helper existed, and the two places that got it
- * right did so by hand.
+ * Eviction on rejection is the reason this exists. A plain
+ * `promise ??= build()` caches the rejection, so one transient failure — an
+ * `EMFILE` reading a wasm file, a 502 fetching it, an RPC blip — is replayed
+ * to every later caller in the realm with no way to recover.
  */
 export function memoAsync<T>(build: () => Promise<T>): AsyncMemo<T> {
     let pending: Promise<T> | undefined;

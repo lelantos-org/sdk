@@ -15,10 +15,9 @@ export interface NoteCommitInput {
 // Soundness requires asset_id < 2^64 and value < 2^64 (circuit range-checks both; caller
 // responsibility off-circuit).
 export function buildNoteCommitment(P: Poseidon, n: NoteCommitInput): Field {
-    // Both bounds, not just the upper one: a negative `asset` or `value` makes
-    // `packedAv` negative, which the circuit's range check would reject but
-    // which used to reach Poseidon unchallenged. `pk`/`rho`/`rcm` are checked
-    // by `P.hash`.
+    // Both bounds: a negative `asset` or `value` makes `packedAv` negative,
+    // which the circuit's range check rejects. `pk`/`rho`/`rcm` are checked by
+    // `P.hash`.
     assertU64(n.asset, "asset");
     assertU64(n.value, "value");
     const packedAv = n.asset * POW_2_64 + n.value;

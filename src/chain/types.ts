@@ -45,10 +45,9 @@ export interface EscrowedDepositView {
 
 /**
  * Preimage fields for `cancelDeposit`. The escrow row keeps only
- * `keccak(request)`, so every field the contract once read from storage is now
- * passed back in and checked against that digest — including `publicAssetId`,
- * `feeBpsAtSubmit`, `payer` and `submittedAt`. Cache them, because `escrowed()`
- * no longer returns any of them.
+ * `keccak(request)`, so every field is passed back in and checked against that
+ * digest — including `publicAssetId`, `feeBpsAtSubmit`, `payer` and
+ * `submittedAt`. Cache them: `escrowed()` returns none of them.
  *
  * All but `submittedAt` come straight off the `DepositEscrowed` log. That one
  * is the EVM's `block.number`, which the log does not carry on Arbitrum —

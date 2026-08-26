@@ -54,7 +54,7 @@ function available(): boolean {
  * Entries are keyed by the exact artifact URL, so **the URL is the version**.
  * Proving keys are immutable per circuits release; serve a new release under a
  * new path (or call {@link clearArtifactCache}) rather than expecting
- * revalidation. There is deliberately no conditional request here — a
+ * revalidation. There is no conditional request here: a
  * round-trip on every load would defeat the point.
  */
 export function cacheApiArtifactCache(): ArtifactCache | null {

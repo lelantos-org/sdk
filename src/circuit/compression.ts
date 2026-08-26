@@ -70,15 +70,13 @@ export function flatten(input: FlattenInput): Field[] {
     }
 
     // Checked against `nOut`, like every other slot group. Checking the three
-    // only against each other — and defaulting them to `[]` — meant a caller
-    // that omitted them got a short coefficient vector with no error at all.
-    //
-    // That is not hypothetical: `SubmitTransactPayload.pubInputs` deliberately
-    // omits the clue slots, because the relayer derives them from `aux` (see
-    // `protocol/transact.ts`). Anything reconstructing a `FlattenInput` from
-    // that wire shape produced 33 coefficients instead of 42 at 3x3, hence a
-    // completely different Fiat-Shamir `z` — surfacing only as an on-chain
-    // verifier revert, with nothing local to point at.
+    // only against each other, or defaulting them to `[]`, would let a caller
+    // that omits them build a short coefficient vector with no error raised.
+    // `SubmitTransactPayload.pubInputs` omits the clue slots — the relayer
+    // derives them from `aux`, see `protocol/transact.ts` — so a `FlattenInput`
+    // reconstructed from that wire shape yields 33 coefficients instead of 42
+    // at 3x3 and a different Fiat-Shamir `z`, surfacing only as an on-chain
+    // verifier revert.
     for (const [rx, ry, bits] of clueSlots(input, nOut)) {
         coeffs.push(BigInt(rx));
         coeffs.push(BigInt(ry));
@@ -108,14 +106,10 @@ type ClueSlot = readonly [Loose<string>, Loose<string>, Loose<string>];
  * Zipping is what makes the caller's reads total — destructuring a tuple needs
  * no non-null assertion, where three parallel indexed lookups would.
  *
- * The three are checked against `nOut` like every other slot group. Checking
- * them only against each other — and defaulting them to `[]` — meant a caller
- * that omitted them got a short coefficient vector with no error at all. That
- * is not hypothetical: `SubmitTransactPayload.pubInputs` deliberately omits
- * the clue slots because the relayer derives them from `aux` (see
- * `protocol/transact.ts`), so anything reconstructing a `FlattenInput` from
- * that wire shape produced 33 coefficients instead of 42 at 3x3 — a completely
- * different Fiat-Shamir `z`, surfacing only as an on-chain verifier revert.
+ * The three are checked against `nOut` like every other slot group, not just
+ * against each other: `SubmitTransactPayload.pubInputs` omits the clue slots,
+ * so a `FlattenInput` reconstructed from that wire shape would otherwise yield
+ * 33 coefficients instead of 42 at 3x3 and a different Fiat-Shamir `z`.
  */
 function clueSlots(input: FlattenInput, nOut: number): ClueSlot[] {
     const rx = requirePresent("out_clue_Rx", input.out_clue_Rx, nOut);

@@ -72,11 +72,11 @@ export const PERMIT2_PERMIT_ABI = /* @__PURE__ */ parseAbi([
 ]);
 
 /**
- * The `PermitBatch` overload of `permit`, kept in its own ABI rather than
- * appended to `PERMIT2_PERMIT_ABI`. `permit` is overloaded on Permit2, and two
- * entries of the same name in one ABI force every `encodeFunctionData` call to
- * disambiguate by argument shape — a silent footgun. One overload per const
- * keeps `functionName: "permit"` unambiguous at both call sites.
+ * The `PermitBatch` overload of `permit`, in its own ABI.
+ *
+ * Two entries of the same name in one ABI require every `encodeFunctionData`
+ * call to disambiguate by argument shape. One overload per const keeps
+ * `functionName: "permit"` unambiguous at both call sites.
  */
 export const PERMIT2_PERMIT_BATCH_ABI = /* @__PURE__ */ parseAbi([
     "function permit(address owner,((address token,uint160 amount,uint48 expiration,uint48 nonce)[] details,address spender,uint256 sigDeadline) permitBatch,bytes signature)",

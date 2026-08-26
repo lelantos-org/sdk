@@ -15,12 +15,10 @@
 // bare `Number(...)` or `.toString()`; `codec.test.ts` pins both encodings
 // with golden fixtures.
 
-import { bigintFrom, hexBytes, int, mapArr, obj, tuple2 } from "../../core/decode.js";
 import { WireFormatError } from "../../core/errors.js";
 import { bytesToHex } from "../../core/hex.js";
-import type { Field, Point } from "../../crypto/index.js";
+import type { Point } from "../../crypto/index.js";
 import type { AuxOutput } from "../../protocol/deposit-request.js";
-import type { ScannedNote } from "../../protocol/responses.js";
 import type {
     SubmitDepositPayload,
     SubmitSwapPayload,
@@ -141,39 +139,6 @@ export function serializeSubmitDeposit(p: SubmitDepositPayload): unknown {
         },
         aux: serializeAuxOutput(p.aux),
         feeAux: serializeAuxOutput(p.feeAux),
-    };
-}
-
-/** @internal */
-export function deserializeScannedNote(raw: unknown, path = "$"): ScannedNote {
-    const d = obj(raw, path);
-    return {
-        ciphertext: hexBytes(d.ciphertext, `${path}.ciphertext`),
-        clueR: tuple2(d.clueR, `${path}.clueR`, bigintFrom) as Point,
-        ephPub: tuple2(d.ephPub, `${path}.ephPub`, bigintFrom) as Point,
-        cm: bigintFrom(d.cm, `${path}.cm`),
-        leafIndex: int(d.leafIndex, `${path}.leafIndex`),
-    };
-}
-
-/** @internal */
-export function deserializeMerkleProof(
-    raw: unknown,
-    path = "$",
-): {
-    leafIndex: number;
-    pathElements: Field[][];
-    pathIndices: number[];
-    root: Field;
-} {
-    const d = obj(raw, path);
-    return {
-        leafIndex: int(d.leafIndex, `${path}.leafIndex`),
-        pathElements: mapArr(d.pathElements, `${path}.pathElements`, (lvl, p) =>
-            mapArr(lvl, p, bigintFrom),
-        ),
-        pathIndices: mapArr(d.pathIndices, `${path}.pathIndices`, int),
-        root: bigintFrom(d.root, `${path}.root`),
     };
 }
 

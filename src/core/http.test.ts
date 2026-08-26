@@ -133,8 +133,8 @@ describe("createJsonClient error messages", () => {
             { fetchImpl, retries: 0 },
         );
 
-        // The transport layer redacts; the JSON layer used to interpolate the
-        // raw URL, putting the detection key straight into the log line.
+        // Both layers must redact: interpolating the raw URL would put the
+        // detection key into the log line.
         await expect(json.get("/v1/notes", { params: { detectionKey: "s3cret" } })).rejects.toThrow(
             /REDACTED/,
         );

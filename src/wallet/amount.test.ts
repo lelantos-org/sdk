@@ -16,7 +16,7 @@ const NO_META = { id: 3n, token: "0x", scale: 1n, disabled: false } as unknown a
 
 describe("resolveAmount", () => {
     /// The split is by type, so the same digits mean different things — and
-    /// deliberately so, because guessing from magnitude cannot be made safe.
+    /// by design, because guessing from magnitude cannot be made safe.
     it("reads a bigint as circuit units and a string as token units", () => {
         expect(resolveAmount(1250n, USDC)).toBe(1250n);
         expect(resolveAmount("1250", USDC)).toBe(12_500_000n);

@@ -10,8 +10,8 @@
 //   detection key   dk = (x_1, ..., x_γ) ∈ Z_q^γ
 //   flag key        fk = (X_1, ..., X_γ) where X_i = B · x_i
 //
-// Key expansion. Both γ-component keys are derived on demand from a single
-// scalar; only the public half appears in an address:
+// Key expansion. Both γ-component keys derive on demand from a single scalar;
+// only the public half appears in an address:
 //
 //   root secret  dk_root ∈ Z_q          never published
 //   clue key     ck = B · dk_root       published (32 B, packed) in the address
@@ -20,14 +20,14 @@
 //   X_i = ck + B · h_i                  sender; computable from ck alone
 //
 // X_i = (dk_root + h_i)·B = x_i·B, and recovering x_i from ck is a discrete
-// log on Baby-Jubjub. Publishing `ck` therefore grants the ability to flag for
-// a recipient, not to detect for them. Follows Penumbra's S-FMD
+// log on Baby-Jubjub, so publishing `ck` grants the ability to flag for a
+// recipient, not to detect for them. Follows Penumbra's S-FMD
 // ClueKey/DetectionKey split (additive derivation, `decaf377-fmd::hkd`) over
 // Baby-Jubjub + Poseidon.
 //
-// Because `h_i` is public, a delegate holding any single `x_i` recovers
-// dk_root = x_i - h_i and hence every other x_i. Detection delegation is
-// therefore all-or-nothing and cannot be revoked or precision-bounded.
+// `h_i` is public, so a delegate holding any single `x_i` recovers
+// dk_root = x_i - h_i and every other x_i. Detection delegation is
+// all-or-nothing, non-revocable, and cannot be precision-bounded.
 //
 // Sender flags a message for fk:
 //   r ← Z_q*

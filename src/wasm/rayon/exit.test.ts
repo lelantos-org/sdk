@@ -49,9 +49,9 @@ describe.skipIf(!built)("rayon pool does not pin the Node event loop", () => {
         // fallback does not help — the module still dispatches into the dead
         // pool, so `prove` blocks on a latch nothing will ever signal.
         //
-        // Verified by hand before this guard existed: prove → shutdown →
-        // prove hung indefinitely. A clear throw is the best available
-        // outcome; a host that needs to prove again needs a fresh realm.
+        // Without the guard, prove → shutdown → prove hangs indefinitely. A
+        // throw is the available outcome; proving again requires a fresh
+        // realm.
         const script = `
             const { WasmProver } = await import(${JSON.stringify(DIST)});
             const { rayonWorkerCount } = await import(

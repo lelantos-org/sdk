@@ -54,12 +54,9 @@ export async function cancelDelay(ctx: ViemCtx): Promise<number> {
 /**
  * Blocks to look back when the caller names no `fromBlock`.
  *
- * Bounded rather than open-ended: public RPCs reject `eth_getLogs` spanning
- * more than a few thousand blocks, so the old `0n` default could never succeed
- * on mainnet or sepolia — it only worked on a fresh anvil, where genesis is a
- * few blocks back. ~12h at 12s blocks, which comfortably covers the cancel
- * window this lookup serves. A caller that needs further back passes an
- * explicit `fromBlock`.
+ * Bounded because public RPCs reject `eth_getLogs` spanning more than a few
+ * thousand blocks. ~12h at 12s blocks, which covers the cancel window this
+ * lookup serves. Callers needing a wider range pass an explicit `fromBlock`.
  */
 const DEFAULT_LOG_LOOKBACK_BLOCKS = 3_600n;
 

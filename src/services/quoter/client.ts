@@ -117,11 +117,11 @@ export async function fetchSwapQuote(
 /**
  * Validate the wire shape rather than asserting it.
  *
- * The previous `as WireSwapQuote` cast meant a missing `min_out` reached
- * `BigInt(undefined)` as a `TypeError` from deep inside the deserializer, and
- * an `expected_out` of `"abc"` as a `SyntaxError` — neither naming the field.
- * A quote drives how much a caller is willing to receive out of a swap, so a
- * malformed one has to fail loudly and say which value was wrong.
+ * An `as WireSwapQuote` cast would surface a missing `min_out` as a
+ * `TypeError` from `BigInt(undefined)` deep inside the deserializer, and an
+ * `expected_out` of `"abc"` as a `SyntaxError` — neither naming the field. A
+ * quote drives how much a caller is willing to receive out of a swap, so a
+ * malformed one must fail loudly and name the offending value.
  */
 function swapQuote(raw: unknown): SwapQuote {
     const d = obj(raw, "$");

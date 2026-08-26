@@ -89,9 +89,8 @@ describe("bech32m address", () => {
 
     // An address is user input — typed, pasted, or handed over by a payee — so
     // every way it can be wrong has to reach the caller as something they can
-    // branch on. The bech32 layer throws its library's own untyped error, and
-    // that used to escape unwrapped alongside four bare `Error`s from the
-    // checks below it.
+    // branch on. The bech32 layer throws its library's own untyped error,
+    // which must be wrapped rather than propagated.
     it("reports every malformed address as INVALID_ARGUMENT", () => {
         const sk = buildSpendingKey(P, J, 1n);
         const good = addressFromSpendingKey(J, sk);

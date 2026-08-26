@@ -124,14 +124,12 @@ export class Poseidon {
     }
 
     /**
-     * Initialises the wasm backend. Already `async` before it did anything, so
-     * no caller changes.
+     * Initialises the wasm backend.
      *
      * A failure here is not fatal: the JS tables cover every arity, so an
      * environment that cannot load wasm degrades to the slower backend rather
-     * than to a broken wallet. It is logged rather than swallowed — silently
-     * losing 2.5x is the kind of regression nobody notices until a cold sync
-     * takes a minute.
+     * than to a broken wallet. It is logged rather than swallowed, since a
+     * silent 2.5x loss surfaces only as a slow cold sync.
      */
     static async build(): Promise<Poseidon> {
         try {

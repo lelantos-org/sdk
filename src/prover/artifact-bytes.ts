@@ -179,11 +179,10 @@ async function fetchArtifact(
 ): Promise<Uint8Array> {
     const timeoutMs = opts.timeoutMs ?? ARTIFACT_TIMEOUT_MS;
 
-    // Checked before anything is opened, and this runs once per retry — so a
-    // user who cancelled during the first attempt used to have the remaining
-    // attempts each download the full ~29 MB to completion. Cancelling made
-    // the SDK transfer more bytes, not fewer. (`linkAbort` honours an
-    // already-aborted parent, but the error type matters here.)
+    // Checked once per retry, before anything is opened, so an abort during
+    // one attempt is not followed by a full ~29 MB download on the next.
+    // `linkAbort` honours an already-aborted parent; this raises the specific
+    // error type callers match on.
     if (opts.signal?.aborted) throw abortedError(path, opts.signal, attempt);
 
     const cancel = linkAbort(opts.signal);
