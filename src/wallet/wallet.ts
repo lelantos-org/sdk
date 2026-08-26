@@ -329,14 +329,6 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
             .map(toWalletNote);
     }
 
-    /**
-     * @deprecated Use `notes()` — it now takes an optional filter and reads
-     * across every asset when `asset` is omitted.
-     */
-    allNotes(filter: { spent?: boolean } = {}): WalletNote[] {
-        return this.notes(filter);
-    }
-
     balance(asset: AssetIdLike): CircuitAmount {
         return branded<CircuitAmount>(
             this.cache.notes

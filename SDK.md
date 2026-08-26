@@ -574,8 +574,9 @@ wallet.balance(1n);                                // bigint, unspent only
 wallet.balances();                                 // Map<assetId, bigint>, unspent only
 ```
 
-`allNotes()` still works but is deprecated: `notes()` now takes an optional
-filter and reads across every asset when `asset` is omitted.
+`allNotes()` was removed in 0.26.0. Call `notes()` — it takes the same
+`{ spent }` filter and reads across every asset when `asset` is omitted, so
+`allNotes(f)` becomes `notes(f)` unchanged.
 
 `WalletNote` is the integrator-facing type. Storage encoding (decimal-string bigints) is internal. For cryptographic fields (custom proofs / low-level builders) call `note.notePayload()` → `{ asset, value, rho, rcm, rcvDep }` as native bigints.
 
@@ -1260,7 +1261,7 @@ try {
         await wallet.transfer({ to, amount, autoConsolidate: true });
     } else if (isWalletError(e)) {
         switch (e.code) {
-            case "RELAYER_TIMEOUT": ...   // e.url, e.status
+            case "RELAYER_TIMEOUT": ...   // e.url, e.status, e.body
             case "PROVER_FAILED":   ...
             case "PERMIT_REJECTED": ...
             case "WALLET_CONFIG":   ...   // e.missing
@@ -1299,19 +1300,23 @@ try {
 |---|---|---|
 | `InsufficientCoverError` | `INSUFFICIENT_COVER` | No 1/2-note cover. Pass `autoConsolidate` or read `consolidate: StoredNote[]`. |
 | `WalletConfigError` | `WALLET_CONFIG` | `missing: string[]` lists all problems. |
-| `NetworkError` | `RELAYER_*` / `FMD_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `body?`, `cause?`. HTTP clients retry 5xx, 408, 429 and network errors 3 times (exp backoff); `402` is not retried. See `isShieldedFeeRejection` above. |
+| `NetworkError` | `RELAYER_*` / `FMD_*` / `QUOTER_*` | Wraps fetch failures + timeouts. Fields: `url`, `status?`, `body?`, `cause?`. HTTP clients retry 5xx, 408, 429 and network errors 3 times (exp backoff); `402` is not retried. See `isShieldedFeeRejection` above. |
 | `ProverError` | `PROVER_FAILED` | Proof generation failed. |
 | `ProverArtifactsMissingError` | `PROVER_ARTIFACTS_MISSING` | Field `tried: string[]`. Fix: pass `proverArtifacts`, install companion, or set `LELANTOS_PROVER_ARTIFACTS_DIR`. |
 | `PermitRejectedError` | `PERMIT_REJECTED` | User rejected EIP-2612 sig. |
 | `DepositAdapterError` | `DEPOSIT_ADAPTER` | Strategy mismatch (`native`/`allowance`/`witness`). |
-| `SelectionError` | `SELECTION` | Coin-selector failure. Field `asset?`. |
+| `SelectionError` | `SELECTION` | Coin-selector failure. Field `asset?`. Also raised when a cross-asset fee has no input slot left. |
+| `InvalidArgumentError` | `INVALID_ARGUMENT` | Field `argument?` names the offending parameter. Covers a malformed shielded address, mnemonic, private key or account index, and a `feeAsset` the relayer will not take. The rejected value is never in the message — it reaches logs verbatim. |
+| `WireFormatError` | `WIRE_FORMAT` | A response did not match the documented wire contract. Field `path` is the JSON path of the offending value, e.g. `$.min_out`. |
 | `TxMiningError` | `TX_MINING` | Chain tx submitted but not mined / reverted. |
 | `NetworkNotDeployedError` | `NETWORK_NOT_DEPLOYED` | Field `network: string`. Pick deployed preset or pass `NetworkPreset` literal. |
 | `X402PaymentError` | `X402_PAYMENT` | Field `reason`: `budget-exceeded`, `per-request-limit`, `host-not-allowed`, `no-acceptable-requirements`, `unsupported-requirements`, `payment-rejected`. Every reason except `payment-rejected` means no funds moved. |
 
 `HttpClientOptions` (`{ timeoutMs, retries, backoffMs }`) is passed to
 `FmdClient` or `RelayerClient` at construction; inject the configured client
-through `noteSource` / `submitter` to change it.
+through `noteSource` / `submitter` to change it. `fetchSwapQuote` accepts the
+same options per call, and defaults `timeoutMs` to 5 000 — a stale quote is
+worth less than a fast failure.
 
 Defaults: **3** retries after the first attempt, 250 ms backoff doubling with
 ±25% jitter, and a per-attempt timeout of **15 000 ms for idempotent requests

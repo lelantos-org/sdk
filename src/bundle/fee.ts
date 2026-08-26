@@ -47,6 +47,7 @@
 //     the asset: `/chains` publishes the list, and `feeOutputFromEstimate`
 //     throws on one it did not quote.
 
+import { InvalidArgumentError } from "../core/errors.js";
 import type { Jubjub } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
 import { decodeAddress } from "../keys/address.js";
@@ -131,20 +132,6 @@ export interface FeeOutputFromEstimateArgs {
 }
 
 /**
- * The fee slot for a spend, read straight off a relayer's estimate.
- *
- * Prefer this to {@link feeOutput}: an estimate carries the address on one
- * field and the amount on another, and picking the right quote out of `fees[]`
- * means matching on `assetId` — three joins a caller would otherwise redo, and
- * get subtly wrong, at every call site.
- *
- * Returns `null` when the relayer is not charging on this chain
- * (`shieldedFeeAddress` absent), which is the case where a spend needs no fee
- * slot at all. Throws when it *is* charging but cannot take this asset — that
- * is a spend which cannot be relayed, and silently omitting the fee would turn
- * it into a 402 from the submit call instead.
- */
-/**
  * Why this asset cannot pay, and what could.
  *
  * Names the payable assets rather than the raw quote list: the caller's next
@@ -171,6 +158,20 @@ function unpayable(estimate: EstimateResponse, asset: Field): string {
     );
 }
 
+/**
+ * The fee slot for a spend, read straight off a relayer's estimate.
+ *
+ * Prefer this to {@link feeOutput}: an estimate carries the address on one
+ * field and the amount on another, and picking the right quote out of `fees[]`
+ * means matching on `assetId` — three joins a caller would otherwise redo, and
+ * get subtly wrong, at every call site.
+ *
+ * Returns `null` when the relayer is not charging on this chain
+ * (`shieldedFeeAddress` absent), which is the case where a spend needs no fee
+ * slot at all. Throws when it *is* charging but cannot take this asset — that
+ * is a spend which cannot be relayed, and silently omitting the fee would turn
+ * it into a 402 from the submit call instead.
+ */
 export function feeOutputFromEstimate({
     J,
     estimate,
@@ -181,11 +182,11 @@ export function feeOutputFromEstimate({
 
     // Compared as `bigint`, not by narrowing `asset` to `number`: an asset id
     // is a `u64` in circuit, and `Number()` would silently round one past 2^53.
-    // Compared as `bigint`, not by narrowing `asset` to `number`: an asset id
-    // is a `u64` in circuit, and `Number()` would silently round one past 2^53.
     const quote = estimate.fees.find((f) => f.assetId !== undefined && BigInt(f.assetId) === asset);
     if (quote?.circuitAmount === undefined) {
-        throw new Error(unpayable(estimate, asset));
+        // Typed: the caller's move is to name a different `feeAsset`, and
+        // `unpayable` already lists the ones that would work.
+        throw new InvalidArgumentError(unpayable(estimate, asset), { argument: "feeAsset" });
     }
     return feeOutput({ J, relayerAddress, asset, circuitAmount: BigInt(quote.circuitAmount) });
 }

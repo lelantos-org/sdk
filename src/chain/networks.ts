@@ -1,6 +1,7 @@
 // Network presets resolve chainId/MASP/relayer/fmd/treeDepth in one keyword.
 
 import type { EvmAddress, EvmAddressLike } from "../core/brand.js";
+import { WalletConfigError } from "../core/errors.js";
 
 export interface NetworkPreset {
     chainId: bigint;
@@ -98,7 +99,7 @@ export function resolveNetwork(name: NetworkName | NetworkPreset): NetworkPreset
         const p = NETWORKS[name];
         if (!p) {
             const known = Object.keys(NETWORKS).join(", ");
-            throw new Error(`unknown network "${name}"; known: ${known}`);
+            throw new WalletConfigError(`unknown network "${name}"; known: ${known}`);
         }
         return p;
     }

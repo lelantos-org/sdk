@@ -27,6 +27,8 @@ export const WALLET_ERROR_CODES = [
     "RELAYER_FAILED",
     "FMD_TIMEOUT",
     "FMD_FAILED",
+    "QUOTER_TIMEOUT",
+    "QUOTER_FAILED",
     "WIRE_FORMAT",
     "PROVER_FAILED",
     "PROVER_ARTIFACTS_MISSING",
@@ -179,22 +181,28 @@ export class NetworkNotDeployedError extends WalletError<"NETWORK_NOT_DEPLOYED">
 
 // --- Network / HTTP ----------------------------------------------------------
 
-export type NetworkTimeoutCode = "RELAYER_TIMEOUT" | "FMD_TIMEOUT";
-export type NetworkFailureCode = "RELAYER_FAILED" | "FMD_FAILED";
+export type NetworkTimeoutCode = "RELAYER_TIMEOUT" | "FMD_TIMEOUT" | "QUOTER_TIMEOUT";
+export type NetworkFailureCode = "RELAYER_FAILED" | "FMD_FAILED" | "QUOTER_FAILED";
 export type NetworkErrorCode = NetworkTimeoutCode | NetworkFailureCode;
 
 /**
  * HTTP failure after retries, or deadline expired. `cause` carries the
  * underlying network error.
+ *
+ * Generic in its code so {@link AnyWalletError} can list one variant per code.
+ * A union-typed `code` is not assignable to `{ code: "RELAYER_TIMEOUT" }`, so
+ * without this the `Extract` behind {@link WalletErrorOf} discards this class
+ * and every network code narrows to `never`. The parameter defaults to the
+ * full union, so `NetworkError` still names the class in an annotation.
  */
-export class NetworkError extends WalletError<NetworkErrorCode> {
+export class NetworkError<C extends NetworkErrorCode = NetworkErrorCode> extends WalletError<C> {
     readonly url: string;
     readonly status?: number | undefined;
     /** Response body of the last failed attempt, truncated. */
     readonly body?: string | undefined;
 
     constructor(
-        code: NetworkErrorCode,
+        code: C,
         url: string,
         message: string,
         opts?: WalletErrorOptions & { status?: number | undefined; body?: string | undefined },
@@ -282,11 +290,13 @@ export type WorkerErrorCode = "WORKER_TIMEOUT" | "WORKER_CRASHED" | "WORKER_FAIL
  * A worker RPC call failed. `cause` carries the reconstructed remote error,
  * whose `stack` is the one from inside the worker; this error's own stack is
  * the call site on the main thread.
+ *
+ * Generic in its code for the same reason as {@link NetworkError}.
  */
-export class WorkerRpcError extends WalletError<WorkerErrorCode> {
+export class WorkerRpcError<C extends WorkerErrorCode = WorkerErrorCode> extends WalletError<C> {
     readonly method?: string | undefined;
     constructor(
-        code: WorkerErrorCode,
+        code: C,
         message: string,
         opts?: WalletErrorOptions & { method?: string | undefined },
     ) {
@@ -461,18 +471,27 @@ export class InternalError extends WalletError<"INTERNAL"> {
 /**
  * Union of every concrete SDK error, discriminated on `code`. Switching on
  * `code` narrows to the class carrying that variant's context fields.
+ *
+ * The two classes that cover several codes are expanded one code per member.
+ * `Extract` — which is what {@link WalletErrorOf} and the `code` overload of
+ * {@link isWalletError} are built on — matches a member only when its `code`
+ * is assignable to the literal being asked for, and a union-typed `code` never
+ * is. Listing `NetworkError` once would therefore make `WalletErrorOf` resolve
+ * to `never` for all four network codes, and the same for the three worker
+ * codes: the guard would still return `true` at runtime while narrowing away
+ * `url`, `status`, `body` and `method` at the type level.
  */
 export type AnyWalletError =
     | WalletConfigError
     | InvalidArgumentError
     | EnvironmentError
     | NetworkNotDeployedError
-    | NetworkError
+    | { [K in NetworkErrorCode]: NetworkError<K> }[NetworkErrorCode]
     | WireFormatError
     | ProverError
     | ProverArtifactsMissingError
     | ProverArtifactsFailedError
-    | WorkerRpcError
+    | { [K in WorkerErrorCode]: WorkerRpcError<K> }[WorkerErrorCode]
     | InsufficientCoverError
     | PermitRejectedError
     | DepositAdapterError

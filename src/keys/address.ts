@@ -25,6 +25,7 @@
 
 import { bech32m } from "bech32";
 import { branded, type ShieldedAddress } from "../core/brand.js";
+import { InvalidArgumentError } from "../core/errors.js";
 import { assertField } from "../core/field.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
@@ -51,13 +52,49 @@ export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): Shi
     );
 }
 
+/**
+ * Decode a payment address, validating both point slots.
+ *
+ * Every failure is an {@link InvalidArgumentError}: an address reaching here is
+ * something a user typed, pasted or was handed by a payee, so a malformed one
+ * is the caller's to report — not an SDK invariant. `bech32m.decode` throws its
+ * library's own untyped error on a bad checksum or charset, which is why the
+ * whole body is wrapped rather than only the checks below it.
+ *
+ * The address itself is left out of the message: it reaches application logs
+ * verbatim, and an address names a payee.
+ */
 export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
+    try {
+        return decode(J, addr);
+    } catch (err) {
+        if (err instanceof InvalidArgumentError) throw err;
+        // The bech32 layer's own message quotes the whole address back
+        // ("Invalid checksum for lelantos1…"), so it is kept on `cause` rather
+        // than forwarded into a message that reaches logs.
+        throw new InvalidArgumentError("invalid shielded address: not valid bech32m", {
+            argument: "address",
+            cause: err,
+        });
+    }
+}
+
+function decode(J: Jubjub, addr: string): DecodedAddress {
     const { prefix, words } = bech32m.decode(addr, BECH32_LIMIT);
-    if (prefix !== ADDRESS_HRP) throw new Error(`bad HRP: ${prefix}`);
+    if (prefix !== ADDRESS_HRP) {
+        throw new InvalidArgumentError(
+            `invalid shielded address: expected the "${ADDRESS_HRP}" prefix, got "${prefix}"`,
+            { argument: "address" },
+        );
+    }
 
     const payload = new Uint8Array(bech32m.fromWords(words));
     if (payload.length !== ADDRESS_PAYLOAD_LEN) {
-        throw new Error(`bad payload length: ${payload.length}`);
+        throw new InvalidArgumentError(
+            `invalid shielded address: bad payload length ${payload.length}, ` +
+                `expected ${ADDRESS_PAYLOAD_LEN}`,
+            { argument: "address" },
+        );
     }
 
     const pk_d = unpackChecked(J, payload.slice(0, FIELD_BYTES), "pk_d");
@@ -77,9 +114,14 @@ export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
 // expands to flag-key points with a known discrete log, which makes every
 // clue bit predictable.
 function unpackChecked(J: Jubjub, bytes: Uint8Array, name: string): Point {
+    const bad = (why: string): never => {
+        throw new InvalidArgumentError(`invalid shielded address: ${name} ${why}`, {
+            argument: "address",
+        });
+    };
     const p = J.unpackPoint(bytes);
-    if (!p) throw new Error(`${name} not on Baby-Jubjub`);
-    if (!J.inSubgroup(p)) throw new Error(`${name} not in prime subgroup`);
-    if (p[0] === 0n && p[1] === 1n) throw new Error(`${name} is the identity`);
+    if (!p) return bad("not on Baby-Jubjub");
+    if (!J.inSubgroup(p)) return bad("not in prime subgroup");
+    if (p[0] === 0n && p[1] === 1n) return bad("is the identity");
     return p;
 }

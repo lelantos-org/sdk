@@ -1,5 +1,6 @@
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { describe, expect, it } from "vitest";
+import { isWalletError } from "../core/errors.js";
 import { BN254_FR } from "../crypto/index.js";
 import { ADDRESS_HRP } from "./address.js";
 import {
@@ -101,6 +102,35 @@ describe("hd / ZIP-32-lite", () => {
         expect(accountPath(0)).toBe(`m/${ZIP32_PURPOSE}'/${LELANTOS_COIN_TYPE}'/0'`);
         expect(accountPath(7)).toBe(`m/${ZIP32_PURPOSE}'/${LELANTOS_COIN_TYPE}'/7'`);
         expect(() => accountPath(-1)).toThrow();
+    });
+
+    // Mnemonic and account index are both caller input, so both failures have
+    // to carry a code. Each threw a bare `Error` before.
+    it("reports bad caller input as INVALID_ARGUMENT", () => {
+        for (const call of [
+            () => mnemonicToAccountKey("not a mnemonic"),
+            () => mnemonicToAccountKey(TEST_MNEMONIC, -1),
+            () => mnemonicToAccountKey(TEST_MNEMONIC, 1.5),
+            () => accountPath(2 ** 31),
+        ]) {
+            let thrown: unknown;
+            try {
+                call();
+            } catch (err) {
+                thrown = err;
+            }
+            expect(isWalletError(thrown, "INVALID_ARGUMENT")).toBe(true);
+        }
+    });
+
+    it("keeps the mnemonic out of the rejection message", () => {
+        const secret = "abandon abandon abandon not-a-word";
+        try {
+            mnemonicToAccountKey(secret);
+            throw new Error("expected a throw");
+        } catch (err) {
+            expect((err as Error).message).not.toContain(secret);
+        }
     });
 
     it("deriveKeysFromMnemonic yields distinct addresses per account", async () => {

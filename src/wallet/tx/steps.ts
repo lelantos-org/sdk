@@ -11,7 +11,7 @@ import type { InputSlots } from "../../bundle/common.js";
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { branded } from "../../core/brand.js";
 import { safePhase } from "../../core/callbacks.js";
-import { NetworkError, WireFormatError } from "../../core/errors.js";
+import { NetworkError, SelectionError, WireFormatError } from "../../core/errors.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import { decodeAddress } from "../../keys/address.js";
 import { getLogger } from "../../log/logger.js";
@@ -120,10 +120,15 @@ export async function prepareSpend(
     if (feeCover) {
         const remaining = nIn - selection.notes.length;
         if (remaining < 1) {
-            throw new Error(
+            // Typed, not bare: the message already tells the caller what to do
+            // about it, which is the definition of a boundary error here — and
+            // `SelectionError` is what every other unrecoverable cover failure
+            // in this path reports.
+            throw new SelectionError(
                 `spend needs ${selection.notes.length} of ${nIn} input slots for asset ` +
                     `${args.asset}, leaving none for a fee in asset ${feeCover.asset}; ` +
                     "consolidate that asset or pay the fee in the asset being moved",
+                { asset: feeCover.asset },
             );
         }
         feeSelection = await cover(feeCover.asset, feeCover.value, remaining);

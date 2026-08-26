@@ -38,6 +38,13 @@ export async function executeTransfer(
         });
     }
 
+    // Decoded here rather than where the recipient is first needed, below
+    // `prepareSpend`. It is a pure check on caller input, and running it after
+    // selection meant a typo'd address was reported only once the wallet had
+    // already picked cover, possibly auto-consolidated (a whole self-spend plus
+    // a cooldown wait), synced and verified the tree, and built input slots.
+    const recipient = decodeAddress(ctx.J, args.to);
+
     const fee = await resolveFee(ctx, { kind: "transfer", spendAsset: asset, feeAsset });
 
     const { selection, feeSelection, ownAddr, inputs, merkleRoot, spentIds, covered } =
@@ -49,7 +56,6 @@ export async function executeTransfer(
             autoConsolidate: args.autoConsolidate,
             onPhase: args.onPhase,
         });
-    const recipient = decodeAddress(ctx.J, args.to);
     const changeValue = branded<CircuitAmount>(selection.sum - covered);
 
     const sendNote: Note = {

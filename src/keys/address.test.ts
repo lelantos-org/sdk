@@ -1,5 +1,6 @@
 import { bech32m } from "bech32";
 import { beforeAll, describe, expect, it } from "vitest";
+import { InvalidArgumentError, isWalletError } from "../core/errors.js";
 import { FIELD_BYTES, toLeBytes } from "../crypto/bytes.js";
 import { Jubjub, Poseidon } from "../crypto/index.js";
 import { ADDRESS_HRP, decodeAddress, encodeAddress } from "./address.js";
@@ -48,7 +49,7 @@ describe("bech32m address", () => {
         const sk = buildSpendingKey(P, J, 1n);
         const good = addressFromSpendingKey(J, sk);
         const bad = good.replace(new RegExp(`^${ADDRESS_HRP}`), "evil");
-        expect(() => decodeAddress(J, bad)).toThrow();
+        expect(() => decodeAddress(J, bad)).toThrow(InvalidArgumentError);
     });
 
     it("rejects a payload with a field scalar in the `ck` slot", () => {
@@ -61,6 +62,7 @@ describe("bech32m address", () => {
         payload.set(toLeBytes(sk.pk), 2 * FIELD_BYTES);
         const addr = bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), 256);
         expect(() => decodeAddress(J, addr)).toThrow(/ck not/);
+        expect(() => decodeAddress(J, addr)).toThrow(InvalidArgumentError);
     });
 
     it("rejects a 64-byte payload", () => {
@@ -69,7 +71,7 @@ describe("bech32m address", () => {
         payload.set(J.packPoint(sk.pk_d), 0);
         payload.set(toLeBytes(sk.dk), FIELD_BYTES);
         const short = bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), 256);
-        expect(() => decodeAddress(J, short)).toThrow(/payload length/);
+        expect(() => decodeAddress(J, short)).toThrow(/bad payload length/);
     });
 
     it("rejects an identity clue key", () => {
@@ -82,6 +84,49 @@ describe("bech32m address", () => {
         payload.set(toLeBytes(sk.pk), FIELD_BYTES);
         payload.set(J.packPoint([0n, 1n]), 2 * FIELD_BYTES);
         const addr = bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), 256);
-        expect(() => decodeAddress(J, addr)).toThrow(/^ck (not|is)\b/);
+        expect(() => decodeAddress(J, addr)).toThrow(/\bck (not|is)\b/);
+    });
+
+    // An address is user input — typed, pasted, or handed over by a payee — so
+    // every way it can be wrong has to reach the caller as something they can
+    // branch on. The bech32 layer throws its library's own untyped error, and
+    // that used to escape unwrapped alongside four bare `Error`s from the
+    // checks below it.
+    it("reports every malformed address as INVALID_ARGUMENT", () => {
+        const sk = buildSpendingKey(P, J, 1n);
+        const good = addressFromSpendingKey(J, sk);
+        const malformed = [
+            "",
+            "not-an-address",
+            good.slice(0, -1), // bad checksum — thrown by `bech32m.decode`
+            good.replace(new RegExp(`^${ADDRESS_HRP}`), "evil"), // bad HRP
+            bech32m.encode(ADDRESS_HRP, bech32m.toWords(new Uint8Array(8)), 256), // short
+        ];
+        for (const addr of malformed) {
+            let thrown: unknown;
+            try {
+                decodeAddress(J, addr);
+            } catch (err) {
+                thrown = err;
+            }
+            expect(isWalletError(thrown, "INVALID_ARGUMENT"), `for ${JSON.stringify(addr)}`).toBe(
+                true,
+            );
+            // Narrowed by the guard above; `argument` names what to blame.
+            if (!isWalletError(thrown, "INVALID_ARGUMENT")) throw new Error("unreachable");
+            expect(thrown.argument).toBe("address");
+        }
+    });
+
+    it("keeps the address out of the message, which reaches logs verbatim", () => {
+        const sk = buildSpendingKey(P, J, 1n);
+        const bad = `${addressFromSpendingKey(J, sk).slice(0, -1)}q`;
+        try {
+            decodeAddress(J, bad);
+            throw new Error("expected a throw");
+        } catch (err) {
+            expect(err).toBeInstanceOf(InvalidArgumentError);
+            expect((err as InvalidArgumentError).message).not.toContain(bad);
+        }
     });
 });

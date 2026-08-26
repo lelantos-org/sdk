@@ -34,6 +34,12 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             argument: "assetOut",
         });
     }
+    // Checked with the other argument validation rather than below
+    // `prepareSpend`, where the B-note recipient is first used: a malformed
+    // `bRecipient` is caller input, and deferring it charged a full selection,
+    // a possible auto-consolidate, and a tree sync before saying so.
+    const bRecipientAddress = args.bRecipient ?? ctx.address;
+    const bRecipient = decodeAddress(ctx.J, bRecipientAddress);
 
     // Resolve at the boundary; the constructors validate as they brand.
     const infoIn = await ctx.resolveAsset(args.assetIn);
@@ -62,8 +68,6 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
             autoConsolidate: args.autoConsolidate,
             onPhase: args.onPhase,
         });
-    const bRecipientAddress = args.bRecipient ?? ctx.address;
-    const bRecipient = decodeAddress(ctx.J, bRecipientAddress);
 
     const remainder = branded<CircuitAmount>(selection.sum - covered);
     // Every slot the fee does not need is change back to self. `finalizeSlots`

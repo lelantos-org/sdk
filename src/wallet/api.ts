@@ -92,11 +92,6 @@ export interface WalletApi {
 
     /** Omit a field to stop filtering on it; `notes()` returns everything. */
     notes(filter?: NotesFilter): WalletNote[];
-    /**
-     * @deprecated Use `notes()` — it now takes an optional filter and reads
-     * across every asset when `asset` is omitted.
-     */
-    allNotes(filter?: { spent?: boolean }): WalletNote[];
     /** Unspent total for one asset, in circuit units. */
     balance(asset: AssetIdLike): CircuitAmount;
     /** Unspent totals keyed by asset id — one pass for a multi-asset view. */

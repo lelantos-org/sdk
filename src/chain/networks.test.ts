@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { evmAddress } from "../core/brand.js";
+import { isWalletError } from "../core/errors.js";
 import {
     type DeployedNetworkName,
     isNetworkDeployed,
@@ -65,5 +66,18 @@ describe("resolveNetwork", () => {
 
     it("throws on an unknown name", () => {
         expect(() => resolveNetwork("nope" as NetworkName)).toThrow(/unknown network/);
+    });
+
+    // A preset name comes from application config, so an unknown one is
+    // wiring the caller can fix — the case `WalletConfigError` exists for.
+    // It threw a bare `Error`, which `isWalletError` does not see.
+    it("reports an unknown name as a typed config error", () => {
+        let thrown: unknown;
+        try {
+            resolveNetwork("nope" as NetworkName);
+        } catch (err) {
+            thrown = err;
+        }
+        expect(isWalletError(thrown, "WALLET_CONFIG")).toBe(true);
     });
 });

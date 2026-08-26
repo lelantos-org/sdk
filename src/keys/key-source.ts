@@ -3,6 +3,7 @@
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
+import { InvalidArgumentError } from "../core/errors.js";
 import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import { keccak256 } from "../core/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
@@ -66,7 +67,10 @@ export function resolveNsk(source: KeySource): Field {
  */
 export function hexPrivateKeyToNsk(hex: string): Field {
     if (!/^0x[0-9a-fA-F]{64}$/.test(hex)) {
-        throw new Error("expected 0x-prefixed 32-byte hex private key");
+        // The rejected value is a private key, so it stays out of the message.
+        throw new InvalidArgumentError("expected a 0x-prefixed 32-byte hex private key", {
+            argument: "hex",
+        });
     }
     const digest = keccak256(
         `0x${PK_DOMAIN_TAG_HEX}${hex.slice(2).toLowerCase()}` as `0x${string}`,

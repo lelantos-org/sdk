@@ -8,6 +8,7 @@
 import { blake2b } from "@noble/hashes/blake2";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
+import { InvalidArgumentError } from "../core/errors.js";
 import { BN254_FR } from "../core/field.js";
 import { fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Field } from "../crypto/poseidon.js";
@@ -57,7 +58,9 @@ function u32LE(n: number): Uint8Array {
 
 function checkIndex(i: number, label: string): void {
     if (!Number.isInteger(i) || i < 0 || i >= MAX_INDEX) {
-        throw new Error(`${label} must be integer in [0, 2^31); got ${i}`);
+        throw new InvalidArgumentError(`${label} must be an integer in [0, 2^31); got ${i}`, {
+            argument: label,
+        });
     }
 }
 
@@ -125,7 +128,9 @@ export function mnemonicToAccountKey(
     passphrase = "",
 ): ExtendedSpendingKey {
     if (!validateMnemonic(mnemonic, wordlist)) {
-        throw new Error("invalid BIP39 mnemonic");
+        // The mnemonic itself is left out: it is the wallet's root secret, and
+        // a message reaches application logs verbatim.
+        throw new InvalidArgumentError("invalid BIP39 mnemonic", { argument: "mnemonic" });
     }
     return deriveAccount(mnemonicToSeedSync(mnemonic, passphrase), account);
 }
