@@ -51,6 +51,13 @@ describe("fetchSwapQuote", () => {
         expect(calls[0]?.method).toBe("POST");
     });
 
+    // The venue set gates deserialization, so a venue the backend can now
+    // return must be listed here or every quote from it fails to parse.
+    it("accepts univ4 quotes", async () => {
+        const { impl } = respond({ ...WIRE, venue: "univ4" });
+        const q = await fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl });
+        expect(q.venue).toBe("univ4");
+    });
     it("trims a trailing slash off baseUrl", async () => {
         const { impl, calls } = respond(WIRE);
         await fetchSwapQuote("https://quoter.test/", REQ, { fetchImpl: impl });

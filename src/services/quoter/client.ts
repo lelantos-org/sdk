@@ -23,9 +23,9 @@ import { createJsonClient } from "../../core/json-client.js";
  *
  * @internal
  */
-export type SwapVenue = "univ3";
+export type SwapVenue = "univ3" | "univ4";
 
-const VENUES: ReadonlySet<string> = new Set<SwapVenue>(["univ3"]);
+const VENUES: ReadonlySet<string> = new Set<SwapVenue>(["univ3", "univ4"]);
 
 /**
  * Best route returned by `POST /v1/quotes`. All `bigint`-shaped fields
@@ -42,6 +42,10 @@ export interface SwapQuote {
      * `sqrtPriceLimitX96` to a tight bound around the quote to keep the
      * router's `SPL` check between the caller and the mempool. Multi-hop:
      * `abi.encodePacked` path bytes.
+     *
+     * UniV4 single-hop: `abi.encode(uint24 fee, int24 tickSpacing)` (64B).
+     * Currency ordering is derived from the token addresses by the adapter and
+     * `hooks` is pinned to the zero address, so neither appears here.
      */
     route: `0x${string}`;
     /** Quoter's expected output before slippage adjustment. */
