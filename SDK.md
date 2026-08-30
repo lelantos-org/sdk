@@ -375,13 +375,12 @@ treasury as dust. Show this figure, not `expectedOut`:
 ```ts
 import { sizeBNote } from "@lelantos-org/sdk/wallet";
 
-const feeBps = await chain.fetchFeeBps();
-const { scale } = await chain.fetchAsset(asset);
-const credited = sizeBNote(quote.minOut, scale, feeBps);
+const { scale, depositBps } = await chain.fetchAsset(asset);
+const credited = sizeBNote(quote.minOut, scale, depositBps);
 ```
 
 Do not re-derive it. The obvious closed form —
-`minOut * BPS / (scale * (BPS + feeBps))` — is only the lower bound the search
+`minOut * BPS / (scale * (BPS + depositBps))` — is only the lower bound the search
 starts from, and lands *below* `minOut` whenever the division is inexact: wrong
 on screen, and reverting on chain if used to size a transaction.
 
@@ -638,7 +637,6 @@ class EthersChainAdapter implements ChainAdapter {
     async chainId(): Promise<bigint> { ... }
     async payerAddress(): Promise<string> { ... }
     async fetchAsset(id: bigint): Promise<AssetEntry> { ... }
-    async fetchFeeBps(): Promise<bigint> { ... }
     async maspAddress(): Promise<string> { ... }
     async signPermit2(args: Permit2SignArgs) {
         // Drive your signer (ethers, viem, hardware wallet) to produce the
