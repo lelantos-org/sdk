@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
-import type { AssetInfo } from "../wallet/assets.js";
+import { makeAssetInfo } from "../wallet/assets.js";
 import type { TransferResult } from "../wallet/result.js";
 import { LELANTOS_POOL, SHIELDED_NAMESPACE, shieldedExact, shieldedNetwork } from "./shielded.js";
 import type { PaymentRequirements } from "./types.js";
@@ -14,14 +14,13 @@ const CHAIN_ID = 31337n;
 const RECIPIENT_CM = hex32(`0x${"11".repeat(32)}`);
 const CHANGE_CM = hex32(`0x${"22".repeat(32)}`);
 
-const WETH: AssetInfo = {
+const WETH = makeAssetInfo({
     id: assetId(1n),
     token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
-    disabled: false,
     symbol: "WETH",
     decimals: 18,
-};
+});
 
 function stubWallet() {
     const transfer = vi.fn(

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
-import type { AssetInfo } from "../wallet/assets.js";
+import { makeAssetInfo } from "../wallet/assets.js";
 import type { TransferResult } from "../wallet/result.js";
 import { x402 } from "./fetch.js";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "./types.js";
@@ -9,14 +9,13 @@ import { HEADER_PAYMENT_REQUIRED, HEADER_PAYMENT_SIGNATURE } from "./types.js";
 
 const CHAIN_ID = 31337n;
 
-const WETH: AssetInfo = {
+const WETH = makeAssetInfo({
     id: assetId(1n),
     token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
-    disabled: false,
     symbol: "WETH",
     decimals: 18,
-};
+});
 
 /** Only the members `x402()` touches. */
 function stubWallet(overrides: Partial<WalletApi> = {}): WalletApi {
@@ -239,14 +238,13 @@ describe("x402", () => {
         // Pricing belongs to the mechanism: a selector that priced eip155
         // offers itself against MASP asset 1n would skip every offer under an
         // `assetIds` override.
-        const USDC: AssetInfo = {
+        const USDC = makeAssetInfo({
             id: assetId(7n),
             token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
             scale: 10n ** 3n,
-            disabled: false,
             symbol: "USDC",
             decimals: 6,
-        };
+        });
         const wallet = stubWallet({
             keys: { nsk: 42n },
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 10n ** 12n },

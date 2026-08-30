@@ -2,9 +2,9 @@ import { hashTypedData, verifyTypedData } from "viem";
 
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
-import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
+import { assetId, circuitAmount, evmAddress, hex32, tokenAmount } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
-import type { AssetInfo } from "../wallet/assets.js";
+import { makeAssetInfo } from "../wallet/assets.js";
 import type { WithdrawResult } from "../wallet/result.js";
 import { deriveEphemeralKey } from "./ephemeral.js";
 import type { PaymentRequirements } from "./types.js";
@@ -15,14 +15,13 @@ const NSK = 12345678901234567890n;
 const PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
 
 /** 6-decimal token, scale 10^3 → one circuit unit is 0.001 USDC. */
-const USDC: AssetInfo = {
+const USDC = makeAssetInfo({
     id: assetId(1n),
     token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
     scale: 10n ** 3n,
-    disabled: false,
     symbol: "USDC",
     decimals: 6,
-};
+});
 
 function stubWallet(opts: { balances?: bigint[] } = {}) {
     const balances = [...(opts.balances ?? [10_000_000n])];
@@ -41,6 +40,11 @@ function stubWallet(opts: { balances?: bigint[] } = {}) {
             inputSum: circuitAmount(0n),
             sent: circuitAmount(0n),
             change: circuitAmount(0n),
+            // Token units, unlike the circuit-unit fields above. Zero to match
+            // the rest of this stub: nothing here asserts on the receipt's
+            // amounts, only on the calls x402 makes.
+            received: tokenAmount(0n),
+            feePaid: tokenAmount(0n),
         }),
     );
     const wallet = {
