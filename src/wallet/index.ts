@@ -102,6 +102,7 @@ export {
 } from "./sync.js";
 export {
     type MerkleNode,
+    type RootCheck,
     type TreePersistence,
     TreeStore,
     type TreeStoreState,

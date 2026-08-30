@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { circuitAmount } from "../../core/brand.js";
 import { randomJubjubScalar } from "../../core/random.js";
 import { TRANSACT_4X6 } from "../../core/shape.js";
@@ -13,7 +13,7 @@ import type { Prover } from "../../prover/types.js";
 import type { SpendContext } from "../context.js";
 import type { StoredNote } from "../note-store.js";
 import { executeTransfer } from "../transfer.js";
-import { storedNote } from "../wallet-test-utils.js";
+import { storedNote, stubTreeStore } from "../wallet-test-utils.js";
 import { executeWithdraw } from "../withdraw.js";
 
 // Paying the relayer in an asset the spend is not otherwise moving.
@@ -120,16 +120,7 @@ async function makeCtx(notes: StoredNote[], est?: EstimateResponse) {
                 return { plan: "direct" as const, notes: picked, sum };
             },
         },
-        treeStore: {
-            sync: vi.fn(async () => undefined),
-            verifyRoot: vi.fn(async () => true),
-            root: () => 0n,
-            getPath: () => ({
-                pathElements: Array.from({ length: 4 }, () => [0n, 0n, 0n]),
-                pathIndices: [0, 0, 0, 0],
-                root: 0n,
-            }),
-        },
+        treeStore: stubTreeStore(),
         storedNotes: () => notes,
         markSpent: async (ids: string[]) => {
             markedSpent.push(ids);

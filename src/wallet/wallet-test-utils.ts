@@ -20,6 +20,7 @@ import type { WalletConfig } from "./config.js";
 import type { ListNotesOpts, NotePage, NoteSource } from "./note-source.js";
 import { InMemoryNoteStore, type NoteStore, type StoredNote } from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
+import type { RootCheck } from "./tree-store.js";
 import { Wallet } from "./wallet.js";
 
 /** The spendability knobs the selector reads. All optional. */
@@ -172,4 +173,41 @@ export async function testWallet(opts: TestWalletOpts = {}) {
     const wallet = await Wallet.create({ type: "nsk", nsk: randomJubjubScalar() }, config);
 
     return { wallet, noteStore, nullifierStore, source, spent };
+}
+
+/**
+ * A `RootCheck` whose roots agree — a tree the chain would accept a proof
+ * against.
+ *
+ * The roots, not a flag, decide that: `RootCheck` carries no verdict field
+ * precisely so a fixture cannot claim agreement while spelling two different
+ * roots.
+ */
+export function reconciled(leaves = 4): RootCheck {
+    return { localRoot: 0n, chainRoot: 0n, localLeaves: leaves, chainLeaves: leaves };
+}
+
+/** A `RootCheck` whose roots differ, for the paths that must refuse to prove. */
+export function unreconciled(localLeaves = 4, chainLeaves = 4): RootCheck {
+    return { localRoot: 0n, chainRoot: 1n, localLeaves, chainLeaves };
+}
+
+/**
+ * The `TreeStore` surface a spend touches: reconcile, then read paths from a
+ * depth-4 tree.
+ *
+ * Shared because both spend suites build the same one, and `RootCheck` gaining
+ * a field would otherwise mean editing two fixtures — the drift this module
+ * exists to stop.
+ */
+export function stubTreeStore(depth = 4) {
+    return {
+        syncVerified: vi.fn(async () => reconciled()),
+        root: () => 0n,
+        getPath: () => ({
+            pathElements: Array.from({ length: depth }, () => [0n, 0n, 0n]),
+            pathIndices: Array.from({ length: depth }, () => 0),
+            root: 0n,
+        }),
+    };
 }

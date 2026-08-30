@@ -15,6 +15,7 @@
 import { WireFormatError } from "../core/errors.js";
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleNode, type MerkleProof, MerkleTree } from "../crypto/merkle.js";
+import { getLogger } from "../log/logger.js";
 import type { FmdClient } from "../services/fmd-server/client.js";
 import {
     chunkOf,
@@ -28,6 +29,8 @@ import {
 // Re-exported because `TreeStoreState.nodes` is typed by it: a
 // `TreePersistence` implementation cannot be written without naming it.
 export type { MerkleNode };
+
+const log = getLogger("lelantos:wallet:tree");
 
 export interface TreeStoreState {
     leaves: bigint[];
@@ -49,6 +52,7 @@ export interface TreeStoreState {
  * class MyPersistence implements TreePersistence {
  *     async load() { return JSON.parse(localStorage.getItem("tree") ?? "null"); }
  *     async save(state) { localStorage.setItem("tree", JSON.stringify(state)); }
+ *     async clear() { localStorage.removeItem("tree"); }
  * }
  * const wallet = await connect({ ..., treePersistence: new MyPersistence() });
  * ```
@@ -56,6 +60,31 @@ export interface TreeStoreState {
 export interface TreePersistence {
     load(): Promise<TreeStoreState | null>;
     save(state: TreeStoreState): Promise<void>;
+    /**
+     * Discard every record written for this tree.
+     *
+     * Required rather than optional, because a backend that cannot forget is
+     * one {@link TreeStore.reset} cannot repair: the rebuild would live in
+     * memory, `load()` would restore the discarded tree on the next start, and
+     * the wallet would pay the rebuild again on every spend while only ever
+     * logging a warning.
+     */
+    clear(): Promise<void>;
+}
+
+/**
+ * What {@link TreeStore.verifyRoot} saw.
+ *
+ * Carries the leaf counts rather than a verdict because they are what says
+ * *how* a tree disagrees, and the two ways need opposite handling. See
+ * {@link TreeStore.reset}. Whether the roots agree is `localRoot ===
+ * chainRoot`, which {@link TreeStore.syncVerified} reports for its callers.
+ */
+export interface RootCheck {
+    localRoot: Field;
+    chainRoot: Field;
+    localLeaves: number;
+    chainLeaves: number;
 }
 
 export interface TreeSyncOpts extends PagingOpts {
@@ -207,14 +236,102 @@ export class TreeStore {
      * a wrong leaf produces a wrong root, and this is where that surfaces,
      * rather than as an unexplained rejected transaction later.
      *
-     * Returns `true` when they agree. A mismatch is not necessarily an attack:
-     * the mirror lags the chain, so a tree synced mid-block legitimately
-     * differs. Callers should treat a mismatch as "resync and retry".
+     * Reports what it saw rather than a verdict; {@link syncVerified} is what
+     * acts on it.
      */
-    async verifyRoot(): Promise<boolean> {
+    async verifyRoot(): Promise<RootCheck> {
         const state = await this.fmd.fetchTreeState();
-        return state.root === this.root();
+        return {
+            localRoot: this.root(),
+            chainRoot: state.root,
+            localLeaves: this.tree.leaves.length,
+            chainLeaves: state.leafCount,
+        };
     }
+
+    /**
+     * Sync, then keep going until the tree the chain describes is the tree
+     * this store holds.
+     *
+     * Lives here rather than in the caller because the repair needs `sync`,
+     * `verifyRoot` and `reset` together, and every one of them is on this
+     * class. A caller only has to ask whether the returned roots agree.
+     *
+     * Three passes, each cheaper than the one after it:
+     *
+     *   1. Sync and check. Settles it in the ordinary case.
+     *   2. Repair according to what the counts say. Fewer leaves locally is a
+     *      lag — the mirror moved while the tree was being built — and another
+     *      sync appends what is missing. Otherwise there is nothing to append,
+     *      so the cheap move is a second, independent read of the chain state:
+     *      an equal count with a differing root is also what a `/v1/tree-state`
+     *      and a chunk feed read microseconds apart look like, and one HTTP GET
+     *      is worth spending to avoid pass 3.
+     *   3. Rebuild from leaf 0. What is left is a tree that diverged, and
+     *      syncing cannot repair one: see {@link reset}.
+     *
+     * Only pass 3 is expensive, and it is reached only once the two cheap
+     * repairs have failed.
+     */
+    async syncVerified(opts: TreeSyncOpts = {}): Promise<RootCheck> {
+        await this.sync(opts);
+        let check = await this.verifyRoot();
+        if (reconciles(check)) return check;
+
+        if (check.chainLeaves > check.localLeaves) {
+            log.debug("local tree is behind the chain; resyncing", counts(check));
+            await this.sync(opts);
+        } else {
+            log.debug("local tree disagrees with the chain; re-reading tree state", counts(check));
+        }
+        check = await this.verifyRoot();
+        if (reconciles(check)) return check;
+
+        log.warn("local tree diverges from the chain; rebuilding it from leaf 0", counts(check));
+        await this.reset();
+        await this.sync(opts);
+        return this.verifyRoot();
+    }
+
+    /**
+     * Throw the local tree away, along with anything persisted for it, so the
+     * next `sync()` rebuilds from leaf 0.
+     *
+     * The escape hatch for a tree that cannot be repaired by syncing, and the
+     * one place the reason is written down. `sync()` only appends: it pages
+     * from `chunkOf(syncedCount)` and drops every entry below that cursor, so
+     * a prefix that diverged from the chain — the server re-indexed, the pool
+     * was redeployed under the same chain id, a partially written restore —
+     * stays wrong no matter how many times it is re-run, and so does a local
+     * tree holding more leaves than the chain does.
+     *
+     * Expensive: the rebuild re-fetches and re-hashes every leaf. Reach for it
+     * only once an ordinary resync has failed to settle the disagreement,
+     * which is what {@link syncVerified} does.
+     */
+    async reset(): Promise<void> {
+        this.tree = new MerkleTree(this.P, this.treeDepth);
+        this.syncedCount = 0;
+        await this.persistence?.clear();
+    }
+}
+
+/** Whether the tree is one the chain would accept a proof against. */
+function reconciles(check: RootCheck): boolean {
+    return check.localRoot === check.chainRoot;
+}
+
+/**
+ * One spelling of a mismatch for every log line and error context, so a search
+ * for one of these fields finds all of them.
+ */
+function counts(check: RootCheck): Record<string, string | number> {
+    return {
+        localRoot: check.localRoot.toString(),
+        chainRoot: check.chainRoot.toString(),
+        localLeaves: check.localLeaves,
+        chainLeaves: check.chainLeaves,
+    };
 }
 
 /**

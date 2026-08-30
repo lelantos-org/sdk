@@ -157,26 +157,29 @@ export async function prepareSpend(
  * server's `leafHash` — so a wrong or lagging value yields a wrong root with
  * no local symptom. Proving against it costs a full Groth16 run (seconds to a
  * minute) and then fails `isKnownRoot` as an unexplained relayer rejection.
- * `verifyRoot` is the check that catches it, and until now nothing called it.
  *
- * One retry, because a mismatch is usually benign: the mirror lags the chain,
- * so a tree synced mid-block legitimately disagrees for a moment. A second
- * disagreement is not a race, so it is reported rather than proved against.
+ * `TreeStore.syncVerified` owns the reconciling, including the repairs; what
+ * belongs to the spend path is only the decision that an unreconciled tree is
+ * not something to prove against.
  */
 async function syncTreeToVerifiedRoot(ctx: SpendContext): Promise<void> {
-    await ctx.treeStore.sync();
-    if (await ctx.treeStore.verifyRoot()) return;
-
-    log.debug("local tree root disagrees with the chain; resyncing once");
-    await ctx.treeStore.sync();
-    if (await ctx.treeStore.verifyRoot()) return;
+    const check = await ctx.treeStore.syncVerified();
+    if (check.localRoot === check.chainRoot) return;
 
     throw new WireFormatError(
         "$.root",
-        "local Merkle root does not match the chain after resyncing — the commitment " +
-            "feed is serving leaves that do not reconcile, so any proof built against " +
-            "this tree would be rejected on chain",
-        { context: { root: ctx.treeStore.root().toString() } },
+        "local Merkle root does not match the chain after resyncing and rebuilding the " +
+            "tree from leaf 0 — the commitment feed is serving leaves that do not " +
+            "reconcile with the root it reports, so any proof built against this tree " +
+            "would be rejected on chain",
+        {
+            context: {
+                localRoot: check.localRoot.toString(),
+                chainRoot: check.chainRoot.toString(),
+                localLeaves: check.localLeaves,
+                chainLeaves: check.chainLeaves,
+            },
+        },
     );
 }
 

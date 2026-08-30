@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { NetworkError } from "../../core/errors.js";
 import { randomJubjubScalar } from "../../core/random.js";
@@ -10,7 +10,7 @@ import type { Prover } from "../../prover/types.js";
 import type { SpendContext } from "../context.js";
 import type { StoredNote } from "../note-store.js";
 import { executeTransfer } from "../transfer.js";
-import { storedNote } from "../wallet-test-utils.js";
+import { storedNote, stubTreeStore, unreconciled } from "../wallet-test-utils.js";
 import { executeWithdraw } from "../withdraw.js";
 
 // The executors depend on `SpendContext`, not on `Wallet`, so the fixture
@@ -53,18 +53,10 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
         },
     };
 
-    const treeStore = {
-        sync: vi.fn(async () => undefined),
-        // `prepareSpend` confirms the local root is one the chain holds before
-        // spending anything; these tests are not about that check.
-        verifyRoot: vi.fn(async () => true),
-        root: () => 0n,
-        getPath: () => ({
-            pathElements: Array.from({ length: 4 }, () => [0n, 0n, 0n]),
-            pathIndices: [0, 0, 0, 0],
-            root: 0n,
-        }),
-    };
+    // `prepareSpend` reconciles the tree with the chain before spending
+    // anything; these tests are not about that repair, only about what the
+    // spend path does with its verdict.
+    const treeStore = stubTreeStore();
 
     const ctx = {
         P,
@@ -132,7 +124,7 @@ describe("executeTransfer", () => {
         expect(markedSpent).toEqual([["01"]]);
         expect(res.sent).toBe(30n);
         expect(res.change).toBe(70n);
-        expect(treeStore.sync).toHaveBeenCalledOnce();
+        expect(treeStore.syncVerified).toHaveBeenCalledOnce();
     });
 
     it("credits only the change slots when sending to someone else", async () => {
@@ -368,6 +360,10 @@ describe("root verification before proving", () => {
     // so a wrong one yields a wrong root with no local symptom. Proving
     // against it costs a full Groth16 run and then fails `isKnownRoot` as an
     // unexplained relayer rejection.
+    //
+    // How a disagreeing tree is repaired belongs to `TreeStore.syncVerified`
+    // and is covered in `tree-store.test.ts`. What the spend path owns is the
+    // decision below: an unreconciled tree is not one to prove against.
 
     it("proves against a root the chain confirms", async () => {
         const { ctx, treeStore, submitted } = await makeCtx([storedNote("01", 100n)]);
@@ -375,27 +371,14 @@ describe("root verification before proving", () => {
 
         await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
 
-        expect(treeStore.verifyRoot).toHaveBeenCalled();
+        expect(treeStore.syncVerified).toHaveBeenCalled();
         expect(submitted).toHaveLength(1);
     });
 
-    it("resyncs once when the root disagrees, then proceeds", async () => {
-        // Usually benign: the mirror lags the chain, so a tree synced
-        // mid-block legitimately disagrees for a moment.
+    it("refuses to prove when the tree cannot be reconciled", async () => {
         const { ctx, treeStore, submitted } = await makeCtx([storedNote("01", 100n)]);
         const { address: recipient } = await makeCtx([]);
-        treeStore.verifyRoot.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-
-        await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
-
-        expect(treeStore.sync).toHaveBeenCalledTimes(2);
-        expect(submitted).toHaveLength(1);
-    });
-
-    it("refuses to prove when the root still disagrees after a resync", async () => {
-        const { ctx, treeStore, submitted } = await makeCtx([storedNote("01", 100n)]);
-        const { address: recipient } = await makeCtx([]);
-        treeStore.verifyRoot.mockResolvedValue(false);
+        treeStore.syncVerified.mockResolvedValue(unreconciled());
 
         await expect(
             executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) }),

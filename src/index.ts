@@ -206,6 +206,7 @@ export {
     parseAmount,
     previewWithdraw,
     requireTokenMeta,
+    type RootCheck,
     type SelectionResult,
     type SelectOpts,
     SfrtCoinSelector,

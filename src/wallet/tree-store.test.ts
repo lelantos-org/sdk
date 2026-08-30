@@ -35,15 +35,21 @@ function clientOf(chunks: CommitmentChunkOut[]): FmdClient {
     } as unknown as FmdClient;
 }
 
-function recordingPersistence(): TreePersistence & { saved: TreeStoreState[] } {
+function recordingPersistence(
+    initial: TreeStoreState | null = null,
+): TreePersistence & { saved: TreeStoreState[]; cleared: number } {
     const saved: TreeStoreState[] = [];
     return {
         saved,
+        cleared: 0,
         async load() {
-            return null;
+            return initial;
         },
         async save(state) {
             saved.push(state);
+        },
+        async clear() {
+            this.cleared++;
         },
     };
 }
@@ -145,6 +151,141 @@ describe("TreeStore chunk validation", () => {
         // The first chunk was already folded in, so dropping it would mean
         // re-downloading and re-hashing it on the next run.
         expect(persistence.saved.at(-1)?.leaves).toHaveLength(CHUNK_SIZE);
+    });
+});
+
+/** The root a tree holding the first `n` leaves of this feed computes. */
+async function rootOf(n: number): Promise<Field> {
+    const ref = new TreeStore(stubP, clientOf([chunk(0, 0, n)]));
+    await ref.sync();
+    return ref.root();
+}
+
+/**
+ * A client whose chunk feed and `/v1/tree-state` are driven separately.
+ *
+ * That separation is the point: every case `syncVerified` distinguishes is a
+ * disagreement between the two, and a client that derived one from the other
+ * could not express any of them.
+ */
+function twoFeedClient(feed: () => number, state: () => { root: Field; leafCount: number }) {
+    return {
+        fetchCommitmentChunk: async (id: number) =>
+            id === 0 ? chunk(0, 0, feed()) : chunk(id, id * CHUNK_SIZE, 0),
+        fetchTreeState: async () => ({ chainId: 31337, frontier: [], ...state() }),
+    } as unknown as FmdClient;
+}
+
+describe("TreeStore.syncVerified", () => {
+    it("settles on the first pass when the tree already agrees", async () => {
+        const root = await rootOf(10);
+        const persistence = recordingPersistence();
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => 10,
+                () => ({ root, leafCount: 10 }),
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified();
+
+        expect(check.localRoot).toBe(check.chainRoot);
+        expect(persistence.cleared).toBe(0);
+    });
+
+    it("resyncs a tree that is behind, without paying for a rebuild", async () => {
+        // The mirror moves while the tree is being built: the chain reports 14
+        // leaves against the 10 the feed had served a moment earlier.
+        const root14 = await rootOf(14);
+        let served = 10;
+        const persistence = recordingPersistence();
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => served,
+                () => {
+                    // Reading the chain state is what reveals the feed has moved.
+                    served = 14;
+                    return { root: root14, leafCount: 14 };
+                },
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified();
+
+        expect(check.localRoot).toBe(root14);
+        expect(check.localLeaves).toBe(14);
+        // Appending was enough, so the tree was never thrown away.
+        expect(persistence.cleared).toBe(0);
+    });
+
+    it("re-reads the chain state before paying for a rebuild", async () => {
+        // Equal leaf counts and a differing root is also what two reads taken
+        // microseconds apart look like. One GET is worth spending to find out.
+        const root = await rootOf(10);
+        let reads = 0;
+        const persistence = recordingPersistence();
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => 10,
+                () => ({ root: reads++ === 0 ? 999n : root, leafCount: 10 }),
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified();
+
+        expect(check.localRoot).toBe(check.chainRoot);
+        expect(persistence.cleared).toBe(0);
+    });
+
+    it("rebuilds from leaf 0 when the local tree diverged", async () => {
+        // A restored tree whose leaves are not the ones the feed serves — the
+        // shape a re-indexed server or a redeployed pool leaves behind. The
+        // cursor is already past the feed, so syncing appends nothing and only
+        // a rebuild can repair it.
+        const root = await rootOf(10);
+        const persistence = recordingPersistence({
+            leaves: Array.from({ length: 10 }, (_, i) => BigInt(1000 + i)),
+            syncedCount: 10,
+        });
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => 10,
+                () => ({ root, leafCount: 10 }),
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified();
+
+        expect(check.localRoot).toBe(root);
+        expect(persistence.cleared).toBe(1);
+    });
+
+    it("reports the mismatch when even a rebuild does not reconcile", async () => {
+        // A feed serving leaves that do not add up to the root it advertises.
+        // Nothing local can repair that, so it is reported rather than retried.
+        const persistence = recordingPersistence();
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => 10,
+                () => ({ root: 999n, leafCount: 10 }),
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified();
+
+        expect(check.chainRoot).toBe(999n);
+        expect(check.localRoot).not.toBe(999n);
+        expect(persistence.cleared).toBe(1);
     });
 });
 
