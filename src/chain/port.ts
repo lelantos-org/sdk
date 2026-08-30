@@ -36,9 +36,12 @@ export interface ChainAdapter {
      * before it builds the request. Optional.
      */
     nativeAdapterAddress?(): EvmAddress | undefined;
+    /**
+     * The registry entry, including the asset's two protocol fee rates. There
+     * is no pool-wide rate: fees are per-asset and per-leg, so they are read
+     * with the entry that defines them. 0 bps disables a leg's fee.
+     */
     fetchAsset(id: AssetId): Promise<AssetEntry>;
-    /** 0 disables fees. */
-    fetchFeeBps(): Promise<bigint>;
     /**
      * Sign Permit2 `PermitWitnessTransferFrom` witness-bound to
      * `piHash = keccak256(abi.encode(DepositRequest, aux))`.

@@ -15,6 +15,7 @@ const USDC = requireTokenMeta(
         scale: 1n,
         symbol: "USDC",
         decimals: 6,
+        feeBps: BPS,
     }),
 );
 
@@ -26,14 +27,27 @@ const NO_LADDER = requireTokenMeta(
         scale: 1n,
         symbol: "XYZ",
         decimals: 6,
+        feeBps: BPS,
     }),
 );
+
+/** `USDC` at a different withdraw rate; everything else held fixed. */
+const withRate = (asset: typeof USDC, withdrawBps: bigint) =>
+    requireTokenMeta(
+        makeAssetInfo({
+            id: asset.id,
+            token: asset.token,
+            scale: asset.scale,
+            decimals: asset.decimals,
+            feeBps: withdrawBps,
+        }),
+    );
 
 describe("previewWithdraw", () => {
     it("separates the gross published on chain from what the recipient gets", () => {
         // The distinction the API exists to make visible: `amount` is the
         // gross, and the recipient always receives less.
-        const p = previewWithdraw({ amount: "1000", asset: USDC, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1000", asset: USDC });
         expect(p.publicOut).toBe(1_000_000_000n);
         expect(p.net).toBe(998_000_000n);
         expect(p.fee).toBe(2_000_000n);
@@ -42,12 +56,12 @@ describe("previewWithdraw", () => {
     });
 
     it("accounts for every unit: net + fee is the gross", () => {
-        const p = previewWithdraw({ amount: "1000", asset: USDC, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1000", asset: USDC });
         expect(p.net + p.fee).toBe(p.publicOut * USDC.scale);
     });
 
     it("flags an on-ladder amount and suggests nothing", () => {
-        const p = previewWithdraw({ amount: "1000", asset: USDC, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1000", asset: USDC });
         expect(p.onLadder).toBe(true);
         expect(p.hasLadder).toBe(true);
         expect(p.suggestion).toBeUndefined();
@@ -56,13 +70,13 @@ describe("previewWithdraw", () => {
     it("flags an off-ladder amount and points at the nearest denomination", () => {
         // Not an error and nothing rejects it — but it publishes a near-unique
         // integer, so the caller has to be told.
-        const p = previewWithdraw({ amount: "1337", asset: USDC, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1337", asset: USDC });
         expect(p.onLadder).toBe(false);
         expect(p.suggestion).toBe(1_000_000_000n);
     });
 
     it("reports no ladder rather than pretending everything is off it", () => {
-        const p = previewWithdraw({ amount: "1337", asset: NO_LADDER, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1337", asset: NO_LADDER });
         expect(p.hasLadder).toBe(false);
         expect(p.onLadder).toBe(false);
         expect(p.suggestion).toBeUndefined();
@@ -70,6 +84,8 @@ describe("previewWithdraw", () => {
     });
 
     it("grows the net with the yield index, the denomination unchanged", () => {
+        // Fee-free on both sides, so the only difference is the index.
+        const free = withRate(USDC, 0n);
         const yielding = requireTokenMeta(
             makeAssetInfo({
                 id: USDC.id,
@@ -80,26 +96,41 @@ describe("previewWithdraw", () => {
                 yieldEnabled: true,
             }),
         );
-        const flat = previewWithdraw({ amount: 1_000_000_000n, asset: USDC, feeBps: 0n });
-        const grown = previewWithdraw({ amount: 1_000_000_000n, asset: yielding, feeBps: 0n });
+        const flat = previewWithdraw({ amount: 1_000_000_000n, asset: free });
+        const grown = previewWithdraw({ amount: 1_000_000_000n, asset: yielding });
         expect(grown.net).toBe((flat.net * 105n) / 100n);
         expect(grown.publicOut).toBe(flat.publicOut);
         expect(grown.onLadder).toBe(true);
     });
 
-    it("takes the fee rate as an argument, so a UI can call it per keystroke", () => {
-        expect(previewWithdraw({ amount: "1000", asset: USDC, feeBps: 0n }).net).toBe(
+    it("prices off the asset's own withdraw rate", () => {
+        expect(previewWithdraw({ amount: "1000", asset: withRate(USDC, 0n) }).net).toBe(
             1_000_000_000n,
         );
-        expect(previewWithdraw({ amount: "1000", asset: USDC, feeBps: 2_000n }).net).toBe(
+        expect(previewWithdraw({ amount: "1000", asset: withRate(USDC, 2_000n) }).net).toBe(
             800_000_000n,
+        );
+    });
+
+    it("ignores the deposit rate, which is the other leg", () => {
+        const lopsided = requireTokenMeta(
+            makeAssetInfo({
+                id: USDC.id,
+                token: USDC.token,
+                scale: USDC.scale,
+                decimals: USDC.decimals,
+                feeBps: { depositBps: 5_000n, withdrawBps: BPS },
+            }),
+        );
+        expect(previewWithdraw({ amount: "1000", asset: lopsided }).net).toBe(
+            previewWithdraw({ amount: "1000", asset: USDC }).net,
         );
     });
 });
 
 describe("denominationChoices", () => {
     it("labels every denomination with its gross and its net", () => {
-        const choices = denominationChoices(USDC, BPS);
+        const choices = denominationChoices(USDC);
         expect(choices).toHaveLength(13);
         expect(choices[0]).toEqual({ value: 10_000_000n, label: "10", netLabel: "9.98" });
         expect(choices.at(-1)).toEqual({
@@ -110,7 +141,7 @@ describe("denominationChoices", () => {
     });
 
     it("is empty for an asset with no ladder", () => {
-        expect(denominationChoices(NO_LADDER, BPS)).toEqual([]);
+        expect(denominationChoices(NO_LADDER)).toEqual([]);
     });
 
     it("moves the labels with the index while `value` stays put", () => {
@@ -122,7 +153,6 @@ describe("denominationChoices", () => {
                 decimals: USDC.decimals,
                 index: (RAY * 105n) / 100n,
             }),
-            0n,
         );
         expect(grown[0]?.value).toBe(10_000_000n); // unchanged
         expect(grown[0]?.label).toBe("10.5"); // worth more
@@ -139,12 +169,13 @@ describe("opting out of the ladder", () => {
             scale: USDC.scale,
             symbol: USDC.symbol,
             decimals: USDC.decimals,
+            feeBps: BPS,
             denominations: false,
         }),
     );
 
     it("reports no ladder and never nags about being off it", () => {
-        const p = previewWithdraw({ amount: "1337", asset: OPTED_OUT, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1337", asset: OPTED_OUT });
         expect(p.hasLadder).toBe(false);
         expect(p.onLadder).toBe(false);
         expect(p.suggestion).toBeUndefined();
@@ -154,13 +185,13 @@ describe("opting out of the ladder", () => {
     it("still reports the gross/net split, which is unrelated to the ladder", () => {
         // Opting out is about which amounts to prefer, not about hiding what a
         // withdrawal costs.
-        const p = previewWithdraw({ amount: "1000", asset: OPTED_OUT, feeBps: BPS });
+        const p = previewWithdraw({ amount: "1000", asset: OPTED_OUT });
         expect(p.publicOut).toBe(1_000_000_000n);
         expect(p.net).toBe(998_000_000n);
         expect(p.netFormatted).toBe("998");
     });
 
     it("offers no denomination choices to pick from", () => {
-        expect(denominationChoices(OPTED_OUT, BPS)).toEqual([]);
+        expect(denominationChoices(OPTED_OUT)).toEqual([]);
     });
 });

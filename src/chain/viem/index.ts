@@ -99,9 +99,6 @@ export class ViemChainAdapter implements ChainAdapter {
     fetchAsset(id: AssetId): Promise<AssetEntry> {
         return reads.fetchAsset(this.ctx, id);
     }
-    fetchFeeBps(): Promise<bigint> {
-        return reads.fetchFeeBps(this.ctx);
-    }
     getEscrowed(id: bigint): Promise<EscrowedDepositView | null> {
         return reads.getEscrowed(this.ctx, id);
     }

@@ -247,6 +247,27 @@ describe("resolveLadder — the opt-out", () => {
         expect(resolveLadder("0x000000000000000000000000000000000000DEAD", custom)).toEqual([1n]);
     });
 
+    /// The direction that actually bites. Only the lookup used to be
+    /// lowercased, so a table keyed the way every deploy script, explorer and
+    /// wallet hands you an address — EIP-55 checksummed — missed against the
+    /// lowercase address the relayer publishes. The miss was silent: no ladder,
+    /// change split evenly again, and nothing to say the map had been ignored.
+    it("matches a checksummed key against a lowercase token", () => {
+        const custom = new Map([["0x000000000000000000000000000000000000dEaD", [1n, 2n]]]);
+        expect(resolveLadder("0x000000000000000000000000000000000000dead", custom)).toEqual([
+            1n,
+            2n,
+        ]);
+    });
+
+    it("normalises a table once, however many assets resolve against it", () => {
+        // Memoised on the table itself, so a wallet resolving twenty assets
+        // does not rebuild the map twenty times.
+        const custom = new Map([["0x000000000000000000000000000000000000dEaD", [1n]]]);
+        const first = resolveLadder("0x000000000000000000000000000000000000dead", custom);
+        expect(resolveLadder("0x000000000000000000000000000000000000DEAD", custom)).toBe(first);
+    });
+
     it("returns [] rather than undefined, so consumers need no null check", () => {
         expect(resolveLadder("0x000000000000000000000000000000000000dEaD")).toEqual([]);
     });

@@ -5,10 +5,10 @@ import { buildSpend } from "../bundle/spend.js";
 import { branded, type CircuitAmount, type TokenAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { WalletConfigError } from "../core/errors.js";
-import { withdrawNet } from "../core/fees.js";
 import { resolveAmount } from "./amount.js";
 import type { WithdrawOptions, WithdrawResult } from "./api.js";
 import type { AssetRef } from "./asset-ref.js";
+import { withdrawNetFor } from "./assets.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
 import { feeSlots, resolveFee } from "./tx/fee.js";
@@ -130,13 +130,7 @@ export async function executeWithdraw(
     const { txHash } = await submitSpend(ctx, spent, () => ctx.submitter.submit(built.payload));
     // Settled on the receipt rather than left to the caller: recomputing it
     // needs `scale`, the fee rate and the index as they were at submission.
-    const settled = withdrawNet({
-        publicOut,
-        feeBps: await ctx.feeBps(),
-        scale: info.scale,
-        index: info.index,
-        yieldEnabled: info.yieldEnabled,
-    });
+    const settled = withdrawNetFor(publicOut, info);
     return makeTransactionResult({
         kind: "withdraw",
         txHash,

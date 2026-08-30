@@ -22,6 +22,30 @@ export function applyFee(amount: bigint, feeBps: bigint): bigint {
     return (amount * feeBps) / BPS_DENOMINATOR;
 }
 
+/** An asset's two protocol fee rates, in basis points. */
+export interface FeeRates {
+    /** Charged **on top of** the principal on a shield. */
+    depositBps: bigint;
+    /** **Skimmed from** the proceeds on an unshield. */
+    withdrawBps: bigint;
+}
+
+/**
+ * A caller-supplied replacement for what the pool reports.
+ *
+ * A bare `bigint` sets both legs — the common case for a test pool or a
+ * fixture, where the two are configured equal and naming them twice is noise.
+ * Pass the pair to price the legs apart.
+ */
+export type FeeOverride = bigint | FeeRates;
+
+/** {@link FeeOverride} applied to what the chain reported, or that unchanged. */
+export function resolveFeeRates(reported: FeeRates, override?: FeeOverride | undefined): FeeRates {
+    if (override === undefined) return reported;
+    if (typeof override === "bigint") return { depositBps: override, withdrawBps: override };
+    return override;
+}
+
 /**
  * Guard a value destined for `DepositRequest.publicIn` against the uint48
  * bound the pool enforces.

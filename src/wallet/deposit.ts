@@ -36,7 +36,6 @@ export async function executeDeposit(
     const recipient = decodeAddress(ctx.J, args.to ?? ctx.address);
     const payer = await ctx.cfg.chain.payerAddress();
     const assetEntry = await ctx.cfg.chain.fetchAsset(asset);
-    const feeBps = await ctx.feeBps();
     if (amount <= 0n) {
         throw new InvalidArgumentError("deposit amount must be positive (nonzero)", {
             argument: "amount",
@@ -48,7 +47,9 @@ export async function executeDeposit(
         scale: assetEntry.scale,
     });
     const inAmt = amount * assetEntry.scale;
-    const fee = applyFee(inAmt, feeBps);
+    // The shield rate, not the unshield one: a deposit is charged on top of the
+    // principal and a withdrawal is skimmed out of it, and the two rates differ.
+    const fee = applyFee(inAmt, info.depositBps);
 
     // The relayer is paid with a note minted alongside the depositor's, so its
     // value has to be funded here too: the payer is pulled all three parts and

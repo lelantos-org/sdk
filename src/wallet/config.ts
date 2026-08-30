@@ -2,6 +2,7 @@
 
 import type { ChainAdapter } from "../chain/port.js";
 import type { DenominationPolicy } from "../core/denominations.js";
+import type { FeeOverride } from "../core/fees.js";
 import type { CircuitShape } from "../core/shape.js";
 import type { Prover, ProverPaths } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
@@ -34,8 +35,20 @@ export interface WalletConfig {
     /** SNARK-bound; must equal relayer pipeline signer or contract reverts. */
     relayerAddress: string;
     chain: ChainAdapter;
-    /** Overrides `chain.fetchFeeBps()`. 1 bp = 0.01%. */
-    feeBps?: bigint | undefined;
+    /**
+     * Replaces the protocol fee rates the pool reports, for every asset.
+     * 1 bp = 0.01%.
+     *
+     * A bare bigint sets both legs; `{ depositBps, withdrawBps }` prices them
+     * apart. Applied when an `AssetInfo` is resolved, so it reaches deposit,
+     * withdraw, swap and `previewWithdraw` at once and cannot drift between
+     * them.
+     *
+     * For a pool whose rates the SDK cannot read — a fork, a fixture, a chain
+     * whose registry is not deployed yet. A wallet that sets this against a
+     * live pool will misquote the moment the owner changes a rate.
+     */
+    feeBps?: FeeOverride | undefined;
 
     /**
      * `fetch` used by every default HTTP pluggable — the FMD client and the

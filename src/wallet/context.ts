@@ -45,8 +45,6 @@ export interface SpendContext {
     markPendingSpend(ids: string[]): Promise<void>;
     /** Self-spend two notes into one so a 2-note cover becomes available. */
     autoConsolidate(asset: bigint, selection: SelectionResult): Promise<void>;
-    /** Config override, else the chain's current fee. */
-    feeBps(): Promise<bigint>;
     /**
      * Resolve an asset named by id, token address or symbol.
      *

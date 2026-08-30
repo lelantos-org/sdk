@@ -15,8 +15,8 @@
 import { parseAbi } from "viem";
 
 export const MASP_ABI = /* @__PURE__ */ parseAbi([
-    "function asset(uint64 id) view returns ((address token, bool disabled, uint256 scale))",
-    "function feeBps() view returns (uint16)",
+    "function asset(uint64 id) view returns ((address token, bool disabled, uint16 depositBps, uint16 withdrawBps, uint256 scale))",
+    "function assetFees(uint64 id) view returns (uint16 depositBps, uint16 withdrawBps)",
     "function treasury() view returns (address)",
     "function cancelDelay() view returns (uint32)",
     "function nextDepositId() view returns (uint256)",

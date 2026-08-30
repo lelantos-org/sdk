@@ -19,7 +19,7 @@ import {
     resolveLadder,
 } from "../core/denominations.js";
 import { InvalidArgumentError } from "../core/errors.js";
-import { type WithdrawNet, withdrawNet } from "../core/fees.js";
+import { type FeeOverride, resolveFeeRates, type WithdrawNet, withdrawNet } from "../core/fees.js";
 import { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "../core/units.js";
 
 /**
@@ -38,6 +38,22 @@ export interface AssetInfo {
     scale: bigint;
     /** Owner-flipped. Disabled assets block new deposits; existing notes stay spendable. */
     disabled: boolean;
+    /**
+     * Protocol fee on the shield leg, in basis points, charged **on top of**
+     * the principal.
+     *
+     * Per-asset and per-leg — there is no pool-wide rate — so this is resolved
+     * with the asset and never looked up separately. See
+     * {@link AssetInfo.withdrawBps}, which is deducted rather than added and is
+     * routinely a different number.
+     */
+    depositBps: bigint;
+    /**
+     * Protocol fee on the unshield leg, in basis points, **skimmed from** the
+     * gross leaving the pool — so a withdrawal of `publicOut` delivers less
+     * than `publicOut`. {@link withdrawNetFor} is the split.
+     */
+    withdrawBps: bigint;
     /** From `chain.tokenMeta`; undefined when the adapter does not implement it. */
     symbol?: string | undefined;
     /** ERC-20 decimals. Undefined when the adapter has no `tokenMeta`. */
@@ -108,13 +124,17 @@ export async function fetchAssetInfo(
     chain: ChainAdapter,
     id: AssetId,
     denominations: DenominationPolicy = true,
+    feeBps?: FeeOverride | undefined,
 ): Promise<AssetInfo> {
     const entry = await chain.fetchAsset(id);
+    const fees = resolveFeeRates(entry, feeBps);
     const info: AssetInfo = {
         id,
         token: entry.token,
         scale: entry.scale,
         disabled: entry.disabled,
+        depositBps: fees.depositBps,
+        withdrawBps: fees.withdrawBps,
         // A pool with no yield mixin reports neither, and `RAY` is the identity
         // for every conversion — so an adapter that has never heard of an index
         // keeps exactly its previous behaviour.
@@ -232,21 +252,20 @@ export function nearestDenomination(
 
 /**
  * Split a withdrawal's gross into what the recipient receives and what the
- * protocol keeps, reading `scale`, `index` and `yieldEnabled` off the asset.
+ * protocol keeps, reading `withdrawBps`, `scale`, `index` and `yieldEnabled`
+ * off the asset.
  *
  * The asset-aware wrapper over {@link withdrawNet}, and the only place those
- * three fields are mapped onto it — assembling them at each call site is how
- * one of them ends up stale or omitted, and the yield branch silently
- * misreports the net when `yieldEnabled` is the one that goes missing.
+ * four fields are mapped onto it — assembling them at each call site is how one
+ * of them ends up stale or omitted, and the yield branch silently misreports the
+ * net when `yieldEnabled` is the one that goes missing. Taking the rate from the
+ * asset rather than as an argument also removes the way this used to go wrong
+ * most easily: passing the deposit rate to a withdrawal.
  */
-export function withdrawNetFor(
-    publicOut: CircuitAmountLike,
-    asset: AssetInfo,
-    feeBps: bigint,
-): WithdrawNet {
+export function withdrawNetFor(publicOut: CircuitAmountLike, asset: AssetInfo): WithdrawNet {
     return withdrawNet({
         publicOut: circuitAmount(publicOut),
-        feeBps,
+        feeBps: asset.withdrawBps,
         scale: asset.scale,
         index: asset.index,
         yieldEnabled: asset.yieldEnabled,
@@ -264,6 +283,12 @@ export interface MakeAssetInfoArgs {
     symbol?: string | undefined;
     /** Default `false`. */
     disabled?: boolean | undefined;
+    /**
+     * Protocol fee rates in bps. A bare bigint sets both legs; the pair prices
+     * them apart. Default `0n` — free, which is what a fixture wants unless it
+     * is testing fee arithmetic.
+     */
+    feeBps?: FeeOverride | undefined;
     /** Pool-managed yield index, RAY-scaled. Default `RAY` (no yield accrued). */
     index?: bigint | undefined;
     /** Default `false`. */
@@ -295,11 +320,14 @@ export interface MakeAssetInfoArgs {
  * ```
  */
 export function makeAssetInfo(args: MakeAssetInfoArgs): AssetInfo {
+    const fees = resolveFeeRates({ depositBps: 0n, withdrawBps: 0n }, args.feeBps);
     const info: AssetInfo = {
         id: args.id,
         token: args.token,
         scale: args.scale,
         disabled: args.disabled ?? false,
+        depositBps: fees.depositBps,
+        withdrawBps: fees.withdrawBps,
         index: args.index ?? RAY,
         yieldEnabled: args.yieldEnabled ?? false,
         ladder: resolveLadder(args.token, args.denominations ?? true),

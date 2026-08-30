@@ -92,7 +92,13 @@ export {
     nearest,
     resolveLadder,
 } from "./core/denominations.js";
-export { withdrawNet, type WithdrawNet, type WithdrawNetArgs } from "./core/fees.js";
+export {
+    type FeeOverride,
+    type FeeRates,
+    withdrawNet,
+    type WithdrawNet,
+    type WithdrawNetArgs,
+} from "./core/fees.js";
 export type { HttpClientOptions } from "./core/http.js";
 
 // ── logging: off by default; install a sink to see anything ──────────────

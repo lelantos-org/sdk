@@ -119,6 +119,9 @@ export function ladderFor(token: string): Ladder | undefined {
  * A custom map **replaces** the built-ins rather than extending them, so a
  * caller supplying one gets exactly the ladders it listed and no surprises
  * from a table it did not write. Spread `BUILT_IN_LADDERS` to extend instead.
+ *
+ * Keys are ERC-20 addresses, matched case-insensitively: a checksummed address
+ * and its lowercase form resolve to the same ladder.
  */
 export type DenominationPolicy = boolean | ReadonlyMap<string, Ladder>;
 
@@ -131,9 +134,35 @@ export const BUILT_IN_LADDERS: ReadonlyMap<string, Ladder> = LADDERS;
  * Empty rather than `undefined` so consumers can iterate without a null check;
  * `hasLadder` is `length > 0`.
  */
+/**
+ * Case-normalised copies of caller-supplied tables, keyed by the original.
+ *
+ * The built-in table is lowercased at the source, but a caller's is whatever
+ * they had to hand — and an EIP-55 checksummed address is what every wallet,
+ * explorer and deploy script hands you. Matching it verbatim against a
+ * lowercased lookup misses, and the miss is silent: the asset simply reports no
+ * ladder, change goes back to splitting evenly, and nothing anywhere says why.
+ * That is precisely the undetectable-from-inside failure this module exists to
+ * avoid, so casing is normalised rather than documented.
+ *
+ * Weakly keyed and built once per table: `resolveLadder` runs per asset
+ * resolution, and rebuilding the map each time would be work proportional to
+ * the ladder table on a path that answers from a cache.
+ */
+const normalised = new WeakMap<ReadonlyMap<string, Ladder>, ReadonlyMap<string, Ladder>>();
+
+function lowerKeyed(table: ReadonlyMap<string, Ladder>): ReadonlyMap<string, Ladder> {
+    let found = normalised.get(table);
+    if (!found) {
+        found = new Map([...table].map(([k, v]) => [k.toLowerCase(), v]));
+        normalised.set(table, found);
+    }
+    return found;
+}
+
 export function resolveLadder(token: string, policy: DenominationPolicy = true): Ladder {
     if (policy === false) return [];
-    const table = policy === true ? LADDERS : policy;
+    const table = policy === true ? LADDERS : lowerKeyed(policy);
     return table.get(token.toLowerCase()) ?? [];
 }
 

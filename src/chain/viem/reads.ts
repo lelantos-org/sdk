@@ -12,23 +12,28 @@ import { evmBlockNumber } from "./evm-block.js";
 const ZERO_WORD = `0x${"0".repeat(64)}` as const;
 
 export async function fetchAsset(ctx: ViemCtx, id: AssetId): Promise<AssetEntry> {
-    // One struct, not three flat returns — viem decodes it to an object.
-    const { token, disabled, scale } = await ctx.publicClient.readContract({
-        address: ctx.maspAddress,
-        abi: MASP_ABI,
-        functionName: "asset",
-        args: [id],
-    });
-    return { token: branded<EvmAddress>(token), scale, disabled };
-}
-
-export async function fetchFeeBps(ctx: ViemCtx): Promise<bigint> {
-    const bps = await ctx.publicClient.readContract({
-        address: ctx.maspAddress,
-        abi: MASP_ABI,
-        functionName: "feeBps",
-    });
-    return BigInt(bps);
+    // One struct, not five flat returns — viem decodes it to an object.
+    //
+    // The two fee rates come back with the entry rather than from a second
+    // `assetFees(id)` call: they are read on every deposit and every withdraw,
+    // and the pool already returns them here, so asking twice is a round trip
+    // that buys nothing. `assetFees` stays in the ABI for callers that want
+    // the rates without the rest of the entry.
+    const { token, disabled, depositBps, withdrawBps, scale } = await ctx.publicClient.readContract(
+        {
+            address: ctx.maspAddress,
+            abi: MASP_ABI,
+            functionName: "asset",
+            args: [id],
+        },
+    );
+    return {
+        token: branded<EvmAddress>(token),
+        scale,
+        disabled,
+        depositBps: BigInt(depositBps),
+        withdrawBps: BigInt(withdrawBps),
+    };
 }
 
 export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedDepositView | null> {

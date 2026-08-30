@@ -8,6 +8,7 @@ import type { NetworkName, NetworkPreset } from "../../chain/networks.js";
 import type { ChainAdapter } from "../../chain/port.js";
 import type { WasmConfig } from "../../configure-wasm.js";
 import type { DenominationPolicy } from "../../core/denominations.js";
+import type { FeeOverride } from "../../core/fees.js";
 import type { CircuitShape } from "../../core/shape.js";
 import type { ProverArtifacts } from "../../prover/artifacts.js";
 import type { Prover, ProverPaths } from "../../prover/types.js";
@@ -163,7 +164,7 @@ export interface ConnectExtraOptions {
      */
     shape?: CircuitShape | undefined;
     /** See `WalletConfig.feeBps`. */
-    feeBps?: bigint | undefined;
+    feeBps?: FeeOverride | undefined;
 
     /** See `WalletConfig.fetchImpl`. */
     fetchImpl?: typeof fetch | undefined;

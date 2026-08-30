@@ -103,14 +103,16 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
             reserved.push(ids);
         },
         autoConsolidate: async () => undefined,
-        feeBps: async () => 0n,
         // Registry stand-in: these tests name assets by id, and `scale`/
-        // `decimals` are what human amounts would resolve against.
+        // `decimals` are what human amounts would resolve against. Both fee
+        // rates are zero: these cover slot wiring, not fee arithmetic.
         resolveAsset: async (ref: unknown) => ({
             id: BigInt(ref as bigint),
             token: "0x0000000000000000000000000000000000000000",
             scale: 1n,
             disabled: false,
+            depositBps: 0n,
+            withdrawBps: 0n,
             decimals: 18,
         }),
     } as unknown as SpendContext;

@@ -44,12 +44,16 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     // Resolve at the boundary; the constructors validate as they brand.
     const infoIn = await ctx.resolveAsset(args.assetIn);
     const assetIn = infoIn.id;
-    const assetOut = (await ctx.resolveAsset(args.assetOut)).id;
+    const infoOut = await ctx.resolveAsset(args.assetOut);
+    const assetOut = infoOut.id;
     const amount = resolveAmount(args.amount, infoIn);
     const wrapperAddress = evmAddress(args.wrapperAddress);
     const { quote } = args;
-    const feeBps = await ctx.feeBps();
-    const protocolFee = applyFee(amount, feeBps);
+    // Two rates, two assets. Leg 1 unshields `assetIn`, so it pays that asset's
+    // withdraw rate; leg 2 deposits the B-note in `assetOut`, so it pays that
+    // asset's deposit rate. Using one for both was correct only while the pool
+    // had a single rate.
+    const protocolFee = applyFee(amount, infoIn.withdrawBps);
     const publicOut = branded<CircuitAmount>(amount + protocolFee);
 
     // The relayer's fee rides on leg 1, which is the only leg that spends
@@ -102,7 +106,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
         recipient: bRecipientAddress,
     });
 
-    const bValue = sizeBNote(quote.minOut, entryOut.scale, feeBps, bFee.value);
+    const bValue = sizeBNote(quote.minOut, entryOut.scale, infoOut.depositBps, bFee.value);
     if (bValue <= 0n) {
         throw new InvalidArgumentError(
             `swap: minOut ${quote.minOut} below scaleOut*(1+fee) (zero B-note)`,
@@ -182,7 +186,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
 
     // MASP skims fee off gross before transferring to wrapper.
     const grossIn = publicOut * entryIn.scale;
-    const feeIn = applyFee(grossIn, feeBps);
+    const feeIn = applyFee(grossIn, infoIn.withdrawBps);
     const amountInUnits = grossIn - feeIn;
 
     const payload: SubmitSwapPayload = {
@@ -252,6 +256,7 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
 export function sizeBNote(
     minOut: bigint,
     scaleOut: bigint,
+    /** The *out* asset's `depositBps` — leg 2 mints the B-note as a deposit. */
     feeBps: bigint,
     relayerFee: bigint = 0n,
 ): bigint {

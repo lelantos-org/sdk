@@ -13,6 +13,17 @@ export interface AssetEntry {
      */
     disabled: boolean;
     /**
+     * Protocol fee on the shield leg, in basis points.
+     *
+     * Per-asset since contracts 0.5.0, and charged at a different rate from
+     * {@link AssetEntry.withdrawBps} — a pool can subsidise deposits to fill
+     * itself while still pricing exits. There is no pool-wide rate to fall
+     * back on, so both are read with the entry rather than separately.
+     */
+    depositBps: bigint;
+    /** Protocol fee on the unshield leg, in basis points. */
+    withdrawBps: bigint;
+    /**
      * Pool-managed yield index, RAY-scaled. Omitted by adapters reading a pool
      * with no yield mixin, where it is `RAY` — the value at which every
      * conversion reduces to the plain `scale` arithmetic.

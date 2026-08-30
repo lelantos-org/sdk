@@ -178,11 +178,6 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         return this.cache.file.notes;
     }
 
-    /** {@link SpendContext} — config override, else the chain's fee. */
-    async feeBps(): Promise<bigint> {
-        return this.cfg.feeBps ?? (await this.cfg.chain.fetchFeeBps());
-    }
-
     /** {@link SpendContext} — id, token address or symbol to a registry entry. */
     resolveAsset(ref: AssetRef): Promise<AssetInfo> {
         return this.assets_().resolve(ref);
@@ -379,7 +374,12 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
             // A refresh is only meaningful against the chain registry, which
             // is the authority on `scale` and `disabled`.
             const { id } = await this.assets_().resolve(ref);
-            const info = await fetchAssetInfo(this.cfg.chain, id, this.cfg.denominations ?? true);
+            const info = await fetchAssetInfo(
+                this.cfg.chain,
+                id,
+                this.cfg.denominations ?? true,
+                this.cfg.feeBps,
+            );
             this.assets_().put(info);
             return info;
         }
@@ -406,6 +406,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         this.assetRegistry ??= new AssetRegistry({
             chain: this.cfg.chain,
             denominations: this.cfg.denominations ?? true,
+            ...(this.cfg.feeBps !== undefined ? { feeBps: this.cfg.feeBps } : {}),
             ...(this.cfg.submitter.assets
                 ? { tokens: () => this.cfg.submitter.assets!(this.cfg.chainId) }
                 : {}),
@@ -551,7 +552,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         asset?: AssetRef | undefined;
     }): Promise<WithdrawPreview> {
         const info = await this.resolveAsset(args.asset ?? DEFAULT_ASSET);
-        return previewWithdraw({ amount: args.amount, asset: info, feeBps: await this.feeBps() });
+        return previewWithdraw({ amount: args.amount, asset: info });
     }
 
     /**
@@ -562,7 +563,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      */
     async withdrawDenominations(ref?: AssetRef): Promise<DenominationChoice[]> {
         const info = await this.resolveAsset(ref ?? DEFAULT_ASSET);
-        return denominationChoices(info, await this.feeBps());
+        return denominationChoices(info);
     }
 
     /** Unshield ERC20 to `args.to`. Throws `InsufficientCoverError` on no cover. */

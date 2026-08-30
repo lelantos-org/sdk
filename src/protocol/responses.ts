@@ -111,6 +111,16 @@ export interface ChainToken {
     /** Absent until read, or where the token implements no `symbol()`. */
     symbol?: string;
     /**
+     * Protocol fee on a shield of this asset, in bps. Absent until the relayer
+     * has indexed an `AssetFeeSet` for it.
+     *
+     * Absent means **unknown, not zero** — the registry falls back to reading
+     * the pool rather than quoting a free deposit.
+     */
+    depositBps?: number;
+    /** Protocol fee on an unshield of this asset, in bps. See `depositBps`. */
+    withdrawBps?: number;
+    /**
      * Pool-managed yield index, RAY-scaled. Decimal string; exceeds `u53`.
      * Absent from a relayer that predates the yield mixin, where it is `RAY`.
      */

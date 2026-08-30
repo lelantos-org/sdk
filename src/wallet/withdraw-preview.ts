@@ -29,14 +29,11 @@ import {
 export interface WithdrawPreviewArgs {
     /** The gross leaving the pool — what `WithdrawOptions.amount` will be. */
     amount: AmountLike;
-    asset: AssetInfo;
     /**
-     * The asset's withdraw rate, from `wallet.feeBps()`.
-     *
-     * Passed rather than fetched so this stays pure and a UI can call it on
-     * every keystroke; `wallet.previewWithdraw` supplies it for you.
+     * Carries its own `withdrawBps`, so this stays pure and a UI can call it on
+     * every keystroke without a round trip.
      */
-    feeBps: bigint;
+    asset: AssetInfo;
 }
 
 /** What {@link previewWithdraw} answers. */
@@ -75,20 +72,20 @@ export interface WithdrawPreview {
  * Preview a withdrawal without proving or submitting anything.
  *
  * ```ts
- * const p = previewWithdraw({ amount: "1000", asset: usdc, feeBps: 20n });
+ * const p = previewWithdraw({ amount: "1000", asset: usdc });
  * p.publicOut;    // 1_000_000_000n — what the chain sees
  * p.netFormatted; // "998" — what the recipient gets
  * p.onLadder;     // true
  * ```
  *
- * Pure. `wallet.previewWithdraw` is the bound form that resolves the asset and
- * fee rate for you.
+ * Pure. `wallet.previewWithdraw` is the bound form that resolves the asset for
+ * you.
  */
 export function previewWithdraw(args: WithdrawPreviewArgs): WithdrawPreview {
-    const { asset, feeBps } = args;
+    const { asset } = args;
     const meta = requireTokenMeta(asset);
     const publicOut = resolveAmount(args.amount, asset);
-    const { net, fee } = withdrawNetFor(publicOut, asset, feeBps);
+    const { net, fee } = withdrawNetFor(publicOut, asset);
 
     const onLadder = isOnLadder(publicOut, asset);
     const suggestion = onLadder ? undefined : nearestDenomination(publicOut, asset);
@@ -122,14 +119,14 @@ export interface DenominationChoice {
  * underlying than it used to be — while `value` never changes. Recompute on
  * index changes rather than caching the strings.
  */
-export function denominationChoices(asset: AssetInfo, feeBps: bigint): DenominationChoice[] {
+export function denominationChoices(asset: AssetInfo): DenominationChoice[] {
     const meta = requireTokenMeta(asset);
     return asset.ladder.map((d) => {
         const value = circuitAmount(d);
         return {
             value,
             label: formatAmount(value, asset),
-            netLabel: formatUnits(withdrawNetFor(value, asset, feeBps).net, meta.decimals),
+            netLabel: formatUnits(withdrawNetFor(value, asset).net, meta.decimals),
         };
     });
 }

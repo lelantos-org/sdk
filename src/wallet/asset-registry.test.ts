@@ -10,6 +10,8 @@ const TOKENS: ChainToken[] = [
         scale: "1000000000000",
         symbol: "WETH",
         decimals: 18,
+        depositBps: 25,
+        withdrawBps: 30,
     },
     {
         assetId: 2,
@@ -17,15 +19,25 @@ const TOKENS: ChainToken[] = [
         scale: "1",
         symbol: "USDC",
         decimals: 6,
+        depositBps: 10,
+        withdrawBps: 20,
     },
 ];
 
-function chain(entries: Record<string, { token: string; scale: bigint }> = {}): ChainAdapter {
+type Entry = { token: string; scale: bigint; depositBps?: bigint; withdrawBps?: bigint };
+
+function chain(entries: Record<string, Entry> = {}): ChainAdapter {
     return {
         fetchAsset: vi.fn(async (id: bigint) => {
             const e = entries[id.toString()];
             if (!e) throw new Error(`fixture: no asset ${id}`);
-            return { token: e.token, scale: e.scale, disabled: false };
+            return {
+                token: e.token,
+                scale: e.scale,
+                disabled: false,
+                depositBps: e.depositBps ?? 0n,
+                withdrawBps: e.withdrawBps ?? 0n,
+            };
         }),
     } as unknown as ChainAdapter;
 }
@@ -44,6 +56,58 @@ describe("AssetRegistry", () => {
         const r = new AssetRegistry({ chain: chain(), tokens: async () => TOKENS });
         expect((await r.resolve("WETH")).decimals).toBe(18);
         expect((await r.resolve("WETH")).scale).toBe(1000000000000n);
+    });
+
+    it("carries both fee rates from the list, which the two legs price apart", async () => {
+        const r = new AssetRegistry({ chain: chain(), tokens: async () => TOKENS });
+        const weth = await r.resolve("WETH");
+        expect(weth.depositBps).toBe(25n);
+        expect(weth.withdrawBps).toBe(30n);
+    });
+
+    /// An absent rate is unknown, not zero. Defaulting it would quote a free
+    /// withdrawal and under-report what the recipient actually receives, so the
+    /// registry reads the pool instead.
+    it("reads the pool for a token whose rates the relayer has not indexed", async () => {
+        const [weth] = TOKENS;
+        const { depositBps: _d, withdrawBps: _w, ...unpricedWeth } = weth!;
+        const unpriced: ChainToken[] = [unpricedWeth];
+        const c = chain({
+            "1": { token: weth!.token, scale: 1_000_000_000_000n, depositBps: 7n, withdrawBps: 9n },
+        });
+        const r = new AssetRegistry({ chain: c, tokens: async () => unpriced });
+
+        const info = await r.resolve(1n);
+        expect(info.depositBps).toBe(7n);
+        expect(info.withdrawBps).toBe(9n);
+        expect(c.fetchAsset).toHaveBeenCalledWith(1n);
+        // Still listed: completing it from the pool is not the same as dropping
+        // it, or the symbol would stop resolving until the indexer caught up.
+        expect((await r.resolve("WETH")).id).toBe(1n);
+    });
+
+    /// The override is what a fixture or a fork uses when the pool's own rates
+    /// are absent or wrong; it must win over both sources, not just one.
+    it("lets `feeBps` replace the rates from either source", async () => {
+        const [weth] = TOKENS;
+        const { depositBps: _d, withdrawBps: _w, ...unpricedWeth } = weth!;
+        const unpriced: ChainToken[] = [unpricedWeth];
+        const c = chain({ "1": { token: weth!.token, scale: 1n } });
+
+        const listed = new AssetRegistry({
+            chain: c,
+            tokens: async () => TOKENS,
+            feeBps: { depositBps: 1n, withdrawBps: 2n },
+        });
+        expect(await listed.resolve("WETH")).toMatchObject({ depositBps: 1n, withdrawBps: 2n });
+
+        // With no rates on the wire the override also spares the pool read.
+        const missing = new AssetRegistry({ chain: c, tokens: async () => unpriced, feeBps: 500n });
+        expect(await missing.resolve("WETH")).toMatchObject({
+            depositBps: 500n,
+            withdrawBps: 500n,
+        });
+        expect(c.fetchAsset).not.toHaveBeenCalled();
     });
 
     /// A wallet with no relayer must keep working exactly as it did: ids come

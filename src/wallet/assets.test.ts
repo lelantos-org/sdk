@@ -19,6 +19,8 @@ const WETH: AssetInfoWithMeta = {
     token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     scale: 10n ** 15n,
     disabled: false,
+    depositBps: 0n,
+    withdrawBps: 0n,
     symbol: "WETH",
     decimals: 18,
     // A pool with no yield mixin reports neither, and these are the identities
@@ -30,7 +32,13 @@ const WETH: AssetInfoWithMeta = {
 
 function stubChain(over: Record<string, unknown> = {}): ChainAdapter {
     return {
-        fetchAsset: async () => ({ token: WETH.token, scale: WETH.scale, disabled: false }),
+        fetchAsset: async () => ({
+            token: WETH.token,
+            scale: WETH.scale,
+            disabled: false,
+            depositBps: 0n,
+            withdrawBps: 0n,
+        }),
         tokenMeta: async () => ({ symbol: "WETH", decimals: 18 }),
         ...over,
     } as unknown as ChainAdapter;
