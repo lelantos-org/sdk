@@ -230,11 +230,24 @@ function loadJson<T>(name: string): T {
 }
 
 const index = loadJson<VectorIndex>("index.json");
-const treeUpdate = loadJson<VectorFile<TreeUpdateVector>>("tree-update-batch-4.json");
+
+// The batch vector is named for the circuit's `MAX_L`, which is not part of
+// `CircuitShape` — it tracks the batch circuit, not the transact arity. Read the
+// name out of the index rather than hardcoding it, so a widened batch is a
+// failing assertion here rather than an ENOENT at import time.
+const BATCH_FILE = Object.keys(index.files).find((name) =>
+    /^tree-update-batch-\d+\.json$/.test(name),
+);
+if (BATCH_FILE === undefined) {
+    throw new Error(
+        `no tree-update-batch-<MAX_L>.json in the published vector index: ${Object.keys(index.files).join(", ")}`,
+    );
+}
+const treeUpdate = loadJson<VectorFile<TreeUpdateVector>>(BATCH_FILE);
 
 /** One published transact shape and the vector file that pins it. */
 interface TransactSet {
-    /** `"2x2"`, `"3x3"`, … — names the `describe` block so a failure says which. */
+    /** `"4x6"` — names the `describe` block so a failure says which. */
     readonly id: string;
     readonly file: VectorFile<TransactVector>;
 }

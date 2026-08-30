@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { NetworkError } from "../../core/errors.js";
-import { randomFr, randomJubjubScalar } from "../../core/random.js";
+import { randomJubjubScalar } from "../../core/random.js";
 import { type CircuitShape, DEFAULT_SHAPE, shapeId, TRANSACT_SHAPES } from "../../core/shape.js";
 import { WasmJubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
@@ -10,6 +10,7 @@ import type { Prover } from "../../prover/types.js";
 import type { SpendContext } from "../context.js";
 import type { StoredNote } from "../note-store.js";
 import { executeTransfer } from "../transfer.js";
+import { storedNote } from "../wallet-test-utils.js";
 import { executeWithdraw } from "../withdraw.js";
 
 // The executors depend on `SpendContext`, not on `Wallet`, so the fixture
@@ -17,21 +18,6 @@ import { executeWithdraw } from "../withdraw.js";
 
 /** Every published shape, tagged with the id that names its `describe` block. */
 const SHAPES = TRANSACT_SHAPES.map((shape) => ({ id: shapeId(shape), shape }));
-
-function storedNote(id: string, value: bigint, asset = 1n): StoredNote {
-    return {
-        id,
-        asset: asset.toString(),
-        value: value.toString(),
-        rho: randomFr().toString(),
-        rcm: randomFr().toString(),
-        rcvDep: randomJubjubScalar().toString(),
-        cm: `0x${id.padStart(64, "0")}`,
-        leafIndex: Number.parseInt(id, 16) || 0,
-        spent: false,
-        discoveredAt: "1970-01-01T00:00:00Z",
-    };
-}
 
 const RELAYER_ADDR = "0x0000000000000000000000000000000000000001";
 const NATIVE_ADAPTER_ADDR = "0x00000000000000000000000000000000000ada9e";

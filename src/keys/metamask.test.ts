@@ -16,8 +16,12 @@ describe("reduceSignatureToScalar", () => {
     it("pins the derivation", () => {
         // Golden vector. A change here changes every signature-derived
         // address, so it must be deliberate.
+        //
+        // Rotated for v2, which widened the reduction from one keccak block to
+        // two so the fold into the 251-bit subgroup order stopped skewing
+        // residues by ~30:29. Every v1 signature-derived address is invalid.
         expect(reduceSignatureToScalar(sig(R, S_LOW, "1b")).toString()).toBe(
-            "942604603641856203371015992713527644944522714530121441261319488642200593159",
+            "1023816015239521581944689410812393643341180842685041365067078398366631624545",
         );
     });
 

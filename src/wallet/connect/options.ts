@@ -7,6 +7,7 @@ import type { Eip1193ProviderLike, EthSigner } from "../../chain/eth-signer.js";
 import type { NetworkName, NetworkPreset } from "../../chain/networks.js";
 import type { ChainAdapter } from "../../chain/port.js";
 import type { WasmConfig } from "../../configure-wasm.js";
+import type { DenominationPolicy } from "../../core/denominations.js";
 import type { CircuitShape } from "../../core/shape.js";
 import type { ProverArtifacts } from "../../prover/artifacts.js";
 import type { Prover, ProverPaths } from "../../prover/types.js";
@@ -148,12 +149,17 @@ export interface ConnectExtraOptions {
     nullifierPersistence?: NullifierPersistence | undefined;
     submitter?: Submitter | undefined;
     selector?: CoinSelector | undefined;
+    /**
+     * Which withdrawal ladders this wallet uses. Defaults to the built-ins;
+     * `false` opts out entirely. See `WalletConfig.denominations`.
+     */
+    denominations?: DenominationPolicy | undefined;
     scanner?: Scanner | undefined;
     syncStrategy?: SyncStrategy | undefined;
     /**
      * Input/output arity of the transact circuit. Defaults to `DEFAULT_SHAPE`
-     * (3×3); pass `TRANSACT_2X2` for a pool still on the narrower circuit.
-     * Also selects which artifact pair `bundledProverArtifacts` resolves.
+     * (4×6), the only shape with published keys. Also selects which artifact
+     * pair `bundledProverArtifacts` resolves.
      */
     shape?: CircuitShape | undefined;
     /** See `WalletConfig.feeBps`. */

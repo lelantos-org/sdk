@@ -8,7 +8,7 @@ import {
     resolveArtifacts,
 } from "./artifacts.js";
 
-// The zkey is ~29 MB at the default 3x3 shape and was re-downloaded on every
+// The zkey is tens of MB at the 4x6 shape and was re-downloaded on every
 // page load *and* every worker spawn before persistence existed. These pin the
 // two properties that make it worth having: a hit never touches the network,
 // and no storage failure can turn into a failed proof.

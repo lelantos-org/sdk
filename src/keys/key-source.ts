@@ -4,8 +4,9 @@
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { InvalidArgumentError } from "../core/errors.js";
-import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
-import { keccak256 } from "../core/keccak.js";
+import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER, reduceWideToField } from "../core/field.js";
+import { hexToBytes } from "../core/hex.js";
+import { keccakExpand } from "../core/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
 import { mnemonicToAccountKey } from "./hd.js";
 import { reduceSignatureToScalar } from "./metamask.js";
@@ -22,10 +23,13 @@ export type KeySource =
     | { type: "nsk"; nsk: Field };
 
 /**
- * ASCII bytes of `"lelantos.privateKey.nsk\0"`. Bumping invalidates
+ * ASCII bytes of `"lelantos.privateKey.nsk.v2\0"`. Bumping invalidates
  * every nsk derived from this path; do not change without coordinated migration.
+ *
+ * v2 goes with the widened reduction below — the tag moves with it so a v1 and
+ * a v2 key can never be derived from the same keccak input.
  */
-const PK_DOMAIN_TAG_HEX = "6c656c616e746f732e707269766174654b65792e6e736b00";
+const PK_DOMAIN_TAG_HEX = "6c656c616e746f732e707269766174654b65792e6e736b2e763200";
 
 /**
  * Mnemonic + account → nsk via ZIP-32-lite at m/32'/LELANTOS_COIN_TYPE'/account'.
@@ -59,9 +63,12 @@ export function resolveNsk(source: KeySource): Field {
 }
 
 /**
- * `keccak256(domainTag || privKey) mod BABYJUB_SUBGROUP_ORDER`.
+ * `keccakExpand(domainTag || privKey, 2) mod BABYJUB_SUBGROUP_ORDER`.
  * Domain-separated from EIP-712 sig reduction to prevent collisions
  * when a signature equals the raw key bytes.
+ *
+ * Two keccak blocks, not one: a bare 256-bit digest folded into the 251-bit
+ * subgroup order skews residues by about 30:29. See `reduceWideToField`.
  *
  * @internal
  */
@@ -72,11 +79,8 @@ export function hexPrivateKeyToNsk(hex: string): Field {
             argument: "hex",
         });
     }
-    const digest = keccak256(
-        `0x${PK_DOMAIN_TAG_HEX}${hex.slice(2).toLowerCase()}` as `0x${string}`,
-    );
-    const r = BigInt(digest) % BABYJUB_SUBGROUP_ORDER;
-    return r === 0n ? 1n : r;
+    const preimage = hexToBytes(`0x${PK_DOMAIN_TAG_HEX}${hex.slice(2).toLowerCase()}`);
+    return reduceWideToField(keccakExpand(preimage, 2), BABYJUB_SUBGROUP_ORDER, "nsk");
 }
 
 /** 24 words (default) = 256-bit; 12 = 128-bit. */

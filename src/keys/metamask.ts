@@ -6,14 +6,18 @@
 
 import { hashTypedData, type TypedDataDomain, type TypedDataParameter } from "viem";
 import { InvalidArgumentError } from "../core/errors.js";
-import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
-import { keccak256 } from "../core/keccak.js";
+import { BABYJUB_SUBGROUP_ORDER, reduceWideToField } from "../core/field.js";
+import { hexToBytes } from "../core/hex.js";
+import { keccakExpand } from "../core/keccak.js";
 import type { EthSigner } from "../core/signer.js";
 import type { Field } from "../crypto/poseidon.js";
 
 export const LELANTOS_NSK_DOMAIN: TypedDataDomain = {
     name: "Lelantos",
-    version: "1",
+    // v2 widened the reduction below from one keccak block to two. The domain
+    // moves with it: a v1 signature must not be reducible to a v2 nsk, so the
+    // user is asked to sign a visibly different message.
+    version: "2",
     // chainId omitted: nsk is chain-independent.
 };
 
@@ -28,7 +32,7 @@ const PRIMARY_TYPE = "LelantosKeyDerivation";
 
 const MESSAGE = {
     purpose: "nsk-derivation",
-    version: "1",
+    version: "2",
 } as const;
 
 // Returns nsk ∈ [1, BABYJUB_SUBGROUP_ORDER). Caller must persist this
@@ -59,12 +63,13 @@ const SECP256K1_HALF_N = SECP256K1_N >> 1n;
  * making the derivation stable across encodings.
  *
  * Mnemonic and private-key sources are unaffected.
+ *
+ * Two keccak blocks, not one: a bare 256-bit digest folded into the 251-bit
+ * subgroup order skews residues by about 30:29. See `reduceWideToField`.
  */
 export function reduceSignatureToScalar(sigHex: string): Field {
-    const digest = keccak256(canonicalSignature(sigHex));
-    const x = BigInt(digest);
-    const r = x % BABYJUB_SUBGROUP_ORDER;
-    return r === 0n ? 1n : r;
+    const canonical = hexToBytes(canonicalSignature(sigHex));
+    return reduceWideToField(keccakExpand(canonical, 2), BABYJUB_SUBGROUP_ORDER, "nsk");
 }
 
 /** `r || lowS` as 64 bytes of hex. Rejects anything that is not a signature. */

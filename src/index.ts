@@ -74,13 +74,25 @@ export {
     type CircuitShape,
     coeffCount,
     DEFAULT_SHAPE,
-    TRANSACT_2X2,
-    TRANSACT_3X3,
-    TRANSACT_4X4,
+    TRANSACT_4X6,
 } from "./core/shape.js";
 
 // ── amounts + HTTP options ───────────────────────────────────────────────
-export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./core/units.js";
+export { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "./core/units.js";
+export {
+    BUILT_IN_LADDERS,
+    type Decomposition,
+    decompose,
+    type DenominationPolicy,
+    descendingAtMost,
+    isDenomination,
+    type Ladder,
+    ladderFor,
+    largestAtMost,
+    nearest,
+    resolveLadder,
+} from "./core/denominations.js";
+export { withdrawNet, type WithdrawNet, type WithdrawNetArgs } from "./core/fees.js";
 export type { HttpClientOptions } from "./core/http.js";
 
 // ── logging: off by default; install a sink to see anything ──────────────
@@ -157,14 +169,23 @@ export {
     type DepositResult,
     type DirectSelection,
     DEFAULT_ASSET,
+    type DenominationChoice,
+    denominationChoices,
+    denominations,
     fetchAssetInfo,
     FmdMatchesNoteSource,
     FmdNoteSource,
     formatAmount,
     hasTokenMeta,
+    isDenominated,
+    isOnLadder,
+    makeAssetInfo,
+    type MakeAssetInfoArgs,
     HttpRelayerSubmitter,
     InMemoryNoteStore,
     minAmount,
+    nearestDenomination,
+    withdrawNetFor,
     type ListNotesOpts,
     type NotesFile,
     type NotesFilter,
@@ -177,10 +198,12 @@ export {
     type NullifierStoreState,
     type OnPhase,
     parseAmount,
+    previewWithdraw,
     requireTokenMeta,
     type SelectionResult,
     type SelectOpts,
     SfrtCoinSelector,
+    DenominationCoinSelector,
     type SpendPhase,
     type ConsolidateHint,
     type StoredNote,
@@ -197,6 +220,8 @@ export {
     type TreePersistence,
     TreeStore,
     type TreeStoreState,
+    type WithdrawPreview,
+    type WithdrawPreviewArgs,
     Wallet,
     type WalletApi,
     type WalletConfig,

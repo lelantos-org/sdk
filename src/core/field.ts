@@ -81,3 +81,47 @@ export function assertRange(
         });
     }
 }
+
+// --- deterministic reduction -------------------------------------------------
+
+/**
+ * Spare bits a wide draw must carry above its modulus before reduction.
+ *
+ * 64 is the usual margin (RFC 9380 §5 uses the same): reducing an `m`-bit
+ * uniform draw mod an `n`-bit modulus skews residues by at most `2^-(m-n)`, so
+ * 64 spare bits puts the skew below any distinguisher that matters.
+ */
+export const REDUCE_SPARE_BITS = 64;
+
+/**
+ * Reduce wide big-endian bytes into `[1, modulus)`.
+ *
+ * The deterministic counterpart to `randomFr` / `randomJubjubScalar`, which
+ * reject rather than reduce. Rejection is exact but needs to redraw; a key
+ * derivation has to be a pure function of its input, so it buys uniformity
+ * with extra input width instead.
+ *
+ * The width is not optional. Folding a bare 256-bit hash into BN254 Fr leaves
+ * 2 spare bits and skews the low residues by roughly 6:5 — the reason this
+ * function exists — so a draw with less than {@link REDUCE_SPARE_BITS} to
+ * spare is a programming error and throws rather than silently biasing a key.
+ *
+ * Zero maps to 1: it is unreachable in practice (probability ~`2^-254`) and
+ * `nsk = 0` degenerates to `pk_d = O`, an identity ECDH key whose every
+ * incoming note is publicly decryptable.
+ */
+export function reduceWideToField(bytes: Uint8Array, modulus: Field, what: string): Field {
+    const spare = bytes.length * 8 - modulus.toString(2).length;
+    if (spare < REDUCE_SPARE_BITS) {
+        throw new InvalidArgumentError(
+            `${what}: reducing ${bytes.length * 8} bits mod a ` +
+                `${modulus.toString(2).length}-bit modulus leaves ${spare} spare bits, ` +
+                `below the ${REDUCE_SPARE_BITS} needed for a negligibly biased result`,
+            { argument: what },
+        );
+    }
+    let v = 0n;
+    for (const b of bytes) v = (v << 8n) | BigInt(b);
+    const r = v % modulus;
+    return r === 0n ? 1n : r;
+}

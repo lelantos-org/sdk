@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ladderFor } from "../../core/denominations.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import { changeSlots, finalizeSlots, payTo, splitChange } from "./outputs.js";
 
@@ -10,7 +11,7 @@ import { changeSlots, finalizeSlots, payTo, splitChange } from "./outputs.js";
 const PK = 7n;
 const ASSET = 1n;
 const values = (remainder: bigint, slots: number) =>
-    splitChange(PK, ASSET, remainder, slots).map((n) => n.value);
+    splitChange({ pk: PK, asset: ASSET, remainder: remainder, slots: slots }).map((n) => n.value);
 
 describe("splitChange", () => {
     it("reproduces the original two-slot pair, remainder last", () => {
@@ -36,14 +37,16 @@ describe("splitChange", () => {
     });
 
     it("carries the asset and owner onto every slot", () => {
-        const notes = splitChange(PK, ASSET, 10n, 3);
+        const notes = splitChange({ pk: PK, asset: ASSET, remainder: 10n, slots: 3 });
         expect(notes.every((n) => n.pk === PK && n.asset === ASSET)).toBe(true);
         // Randomness is fresh per note, so no two share a rho.
         expect(new Set(notes.map((n) => n.rho)).size).toBe(3);
     });
 
     it("rejects a zero-slot split", () => {
-        expect(() => splitChange(PK, ASSET, 10n, 0)).toThrow(/at least one slot/);
+        expect(() => splitChange({ pk: PK, asset: ASSET, remainder: 10n, slots: 0 })).toThrow(
+            /at least one slot/,
+        );
     });
 });
 
@@ -54,7 +57,7 @@ const OWN = { pk: PK } as unknown as DecodedAddress;
 
 describe("changeSlots", () => {
     it("addresses every slot back to self", () => {
-        const slots = changeSlots(PK, OWN, ASSET, 10n, 3);
+        const slots = changeSlots({ pk: PK, ownAddr: OWN, asset: ASSET, remainder: 10n, slots: 3 });
         expect(slots).toHaveLength(3);
         expect(slots.every((s) => s.own)).toBe(true);
         expect(slots.every((s) => s.recipient === OWN)).toBe(true);
@@ -76,8 +79,12 @@ const pinned = (draws: number[]) => {
 
 /** [ours, ours, theirs] — two change slots and a relayer's fee note. */
 const changeAndFee = () => {
-    const mine = changeSlots(PK, OWN, ASSET, 10n, 2);
-    return [mine[0]!, mine[1]!, payTo(splitChange(99n, ASSET, 3n, 1)[0]!, THEIRS, false)];
+    const mine = changeSlots({ pk: PK, ownAddr: OWN, asset: ASSET, remainder: 10n, slots: 2 });
+    return [
+        mine[0]!,
+        mine[1]!,
+        payTo(splitChange({ pk: 99n, asset: ASSET, remainder: 3n, slots: 1 })[0]!, THEIRS, false),
+    ];
 };
 
 describe("finalizeSlots", () => {
@@ -113,7 +120,7 @@ describe("finalizeSlots", () => {
     });
 
     it("reports where the payee's slot landed, and omits it when there is none", () => {
-        const mine = changeSlots(PK, OWN, ASSET, 10n, 1);
+        const mine = changeSlots({ pk: PK, ownAddr: OWN, asset: ASSET, remainder: 10n, slots: 1 });
         const payee = { ...payTo(mine[0]!.note, THEIRS, false), payee: true };
         // pick(2) = 0 swaps 1<->0, so the payee moves off slot 0.
         expect(finalizeSlots([payee, mine[0]!], pinned([0])).payeeIndex).toBe(1);
@@ -121,7 +128,91 @@ describe("finalizeSlots", () => {
     });
 
     it("is empty when nothing is ours", () => {
-        const mine = changeSlots(PK, OWN, ASSET, 10n, 1);
+        const mine = changeSlots({ pk: PK, ownAddr: OWN, asset: ASSET, remainder: 10n, slots: 1 });
         expect(finalizeSlots([{ ...mine[0]!, own: false }]).ownIndices).toEqual([]);
+    });
+});
+
+describe("splitChange with a ladder", () => {
+    const usdc = ladderFor("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
+    if (!usdc) throw new Error("no USDC ladder");
+
+    const values = (remainder: bigint, slots: number) =>
+        splitChange({ pk: 1n, asset: 1n, remainder: remainder, slots: slots, ladder: usdc }).map(
+            (n) => n.value,
+        );
+
+    it("decomposes onto the ladder instead of splitting evenly", () => {
+        // Evenly this would be four notes of 1_225_000_000, none of them a
+        // denomination, none of them withdrawable without re-splitting first.
+        expect(values(4_900_000_000n, 4)).toEqual([
+            2_000_000_000n,
+            2_000_000_000n,
+            500_000_000n,
+            400_000_000n,
+        ]);
+    });
+
+    it("still emits exactly `slots` notes, zero-padding a short split", () => {
+        // `buildSpend` wants exactly `nOut` outputs, and an unused slot is a
+        // value-0 note to self.
+        const v = values(1_000_000_000n, 4);
+        expect(v).toHaveLength(4);
+        expect(v).toEqual([1_000_000_000n, 0n, 0n, 0n]);
+    });
+
+    it("conserves value exactly for any remainder and slot count", () => {
+        for (const remainder of [0n, 1n, 4_900_000_000n, 77_777_777n, 123_456_789_012n]) {
+            for (const slots of [1, 2, 3, 4]) {
+                const total = values(remainder, slots).reduce((a, b) => a + b, 0n);
+                expect(total).toBe(remainder);
+            }
+        }
+    });
+
+    it("emits at most one off-ladder note", () => {
+        for (const remainder of [4_900_000_000n, 77_777_777n, 123_456_789_012n, 999n]) {
+            const offLadder = values(remainder, 4).filter((v) => v !== 0n && !usdc.includes(v));
+            expect(offLadder.length).toBeLessThanOrEqual(1);
+        }
+    });
+
+    it("leaves the even split untouched when the asset has no ladder", () => {
+        // Every asset behaved this way before denominations existed, and an
+        // asset absent from the table must keep behaving that way.
+        expect(
+            splitChange({ pk: 1n, asset: 1n, remainder: 7n, slots: 2 }).map((n) => n.value),
+        ).toEqual([3n, 4n]);
+        expect(
+            splitChange({ pk: 1n, asset: 1n, remainder: 7n, slots: 2, ladder: undefined }).map(
+                (n) => n.value,
+            ),
+        ).toEqual([3n, 4n]);
+    });
+});
+
+describe("splitChange when the wallet opts out", () => {
+    it("splits evenly again, exactly as it did before denominations", () => {
+        // `WalletConfig.denominations: false` resolves an empty ladder, and an
+        // empty ladder must not be treated as "a ladder with nothing in it" —
+        // decomposing against it would dump the whole remainder into dust.
+        const optedOut = splitChange({
+            pk: 1n,
+            asset: 1n,
+            remainder: 4_900_000_000n,
+            slots: 4,
+            ladder: [],
+        });
+        expect(optedOut.map((n) => n.value)).toEqual([
+            1_225_000_000n,
+            1_225_000_000n,
+            1_225_000_000n,
+            1_225_000_000n,
+        ]);
+        expect(optedOut.map((n) => n.value)).toEqual(
+            splitChange({ pk: 1n, asset: 1n, remainder: 4_900_000_000n, slots: 4 }).map(
+                (n) => n.value,
+            ),
+        );
     });
 });

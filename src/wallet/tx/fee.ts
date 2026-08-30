@@ -120,5 +120,17 @@ export function feeSlots(
         own: false,
     };
     if (!feeSelection) return [relayerSlot];
-    return [relayerSlot, ...changeSlots(pk, ownAddr, fee.asset, feeSelection.sum - fee.value, 1)];
+    return [
+        relayerSlot,
+        // The fee asset's own change. No ladder: this is the relayer's asset,
+        // not the one being withdrawn, so there is no `publicOut` for it to
+        // conform to.
+        ...changeSlots({
+            pk,
+            ownAddr,
+            asset: fee.asset,
+            remainder: feeSelection.sum - fee.value,
+            slots: 1,
+        }),
+    ];
 }

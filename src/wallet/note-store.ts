@@ -3,7 +3,7 @@
 // The record schema itself lives in `core/note-record.ts` (tier 0) so
 // `InsufficientCoverError` can carry it without an upward dependency.
 
-import { fieldToBytes32, shortId } from "../core/index.js";
+import { fieldToBytes32, noteId } from "../core/index.js";
 import type { ScanHit } from "../sync/scan.js";
 
 export {
@@ -31,8 +31,17 @@ export function withinReservation(pendingSpendAt: string | undefined, now: numbe
     return now - at < SPEND_RESERVATION_MS;
 }
 
+/**
+ * Current notes-file schema version.
+ *
+ * v3 widened `StoredNote.id` from 4 to 16 random bytes. The id is an identity
+ * — it keys the nullifier memo, `markSpent` and selection's `only` filter — so
+ * a collision retires an unrelated note. See {@link migrateNotesFile}.
+ */
+export const NOTES_FILE_VERSION = 3;
+
 export interface NotesFile {
-    version: 1 | 2;
+    version: 1 | 2 | 3;
     notes: StoredNote[];
     /**
      * Resume point for `syncWallet`: the highest source row id whose notes are
@@ -50,8 +59,31 @@ export interface NoteStore {
     save(file: NotesFile): Promise<void>;
 }
 
+/**
+ * Bring a loaded file up to {@link NOTES_FILE_VERSION}.
+ *
+ * v1/v2 ids were 4 random bytes, which collide at a rate a real wallet
+ * reaches, so every note is renumbered on the way in. Ids are opaque and
+ * wallet-local — nothing off-device and nothing in the note's own record
+ * refers to one — so reissuing them costs nothing but is not idempotent
+ * across loads, and the caller is expected to persist the result.
+ *
+ * A no-op on a current file, returned as-is.
+ */
+export function migrateNotesFile(file: NotesFile): { file: NotesFile; migrated: boolean } {
+    if (file.version >= NOTES_FILE_VERSION) return { file, migrated: false };
+    return {
+        file: {
+            ...file,
+            version: NOTES_FILE_VERSION,
+            notes: file.notes.map((n) => ({ ...n, id: noteId() })),
+        },
+        migrated: true,
+    };
+}
+
 export class InMemoryNoteStore implements NoteStore {
-    private file: NotesFile = { version: 2, notes: [] };
+    private file: NotesFile = { version: NOTES_FILE_VERSION, notes: [] };
 
     async load(): Promise<NotesFile> {
         // Clone so caller mutations don't affect internal state.
@@ -59,7 +91,7 @@ export class InMemoryNoteStore implements NoteStore {
     }
 
     async save(file: NotesFile): Promise<void> {
-        this.file = { version: 2, notes: [...file.notes], ...cursorOf(file) };
+        this.file = { version: NOTES_FILE_VERSION, notes: [...file.notes], ...cursorOf(file) };
     }
 }
 
@@ -97,7 +129,7 @@ export function addHits(
         }
         known.add(cmHex);
         added.push({
-            id: shortId(),
+            id: noteId(),
             asset: h.asset.toString(),
             value: h.value.toString(),
             rho: h.rho.toString(),

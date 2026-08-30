@@ -27,6 +27,8 @@
 
 import type { OutputRandomness, OutputRecipient } from "../../bundle/common.js";
 import type { SpendArgs } from "../../bundle/spend.js";
+import { decompose, type Ladder } from "../../core/denominations.js";
+import { InternalError } from "../../core/errors.js";
 import { shuffled } from "../../core/random.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import type { Note } from "../../notes/note.js";
@@ -56,38 +58,90 @@ export function payTo(note: Note, recipient: DecodedAddress, own: boolean): Outp
     return { note, recipient, randomness: freshOutputAuxRandomness(), own };
 }
 
+/** What a change split needs to know. See {@link splitChange}. */
+export interface ChangeSplit {
+    /** Owner of every note produced — the spender's own `pk`. */
+    pk: bigint;
+    asset: bigint;
+    /** Value to distribute. The notes always sum to exactly this. */
+    remainder: bigint;
+    /** Output slots available. Exactly this many notes come back. */
+    slots: number;
+    /**
+     * Denominations to decompose onto. Omit — or pass an empty ladder — to
+     * split evenly, which is what every asset did before denominations and
+     * what a wallet that opted out still does.
+     */
+    ladder?: Ladder | undefined;
+}
+
 /**
- * Split a change remainder evenly across `slots` output notes.
+ * Split a change remainder across `slots` output notes.
  *
- * Every slot is used: an unused one would be a zero-value pad, and several
- * roughly equal notes preserve a multi-note cover for the next spend.
+ * **With a ladder**, the remainder is decomposed onto it greedily, largest
+ * first, with any off-ladder leftover in one final note. This matters more
+ * than it looks: `publicOut` must be a denomination for a withdrawal to blend
+ * with anyone else's, so change that lands off-ladder is change that cannot be
+ * withdrawn until it has been re-split. Splitting evenly would manufacture
+ * unwithdrawable notes on *every* spend, and they compound.
  *
- * An indivisible remainder goes to the *last* slots, so at two slots this
- * emits `[floor(r/2), ceil(r/2)]` — the same pair, in the same order, as the
- * two-slot-only version this replaced.
+ * Leftover dust is transient rather than permanent — an internal transfer
+ * publishes no amount, so a later self-spend re-splits `400 → 200 + 200` for
+ * free. That is what makes a bounded slot count workable against a discrete
+ * ladder.
+ *
+ * **Without one**, the remainder is split evenly. Every slot is used: an
+ * unused one would be a zero-value pad, and several roughly equal notes
+ * preserve a multi-note cover for the next spend. An indivisible remainder
+ * goes to the *last* slots, so at two slots this emits
+ * `[floor(r/2), ceil(r/2)]`.
+ *
+ * Either way exactly `slots` notes come back, zero-padded if the split needed
+ * fewer — value conservation is enforced in-circuit, so the values must sum to
+ * `remainder` exactly and an unused slot is a value-0 note to self.
  */
-export function splitChange(pk: bigint, asset: bigint, remainder: bigint, slots: number): Note[] {
+export function splitChange(args: ChangeSplit): Note[] {
+    const { pk, asset, remainder, slots, ladder } = args;
     if (slots < 1) throw new Error(`splitChange: need at least one slot, got ${slots}`);
+    // An EMPTY ladder is not "a ladder with nothing in it" — it is the shape a
+    // wallet that opted out (`WalletConfig.denominations: false`) resolves onto
+    // every asset. Decomposing against it places no pieces and dumps the whole
+    // remainder into the dust slot, so this length check is load-bearing: `[]`
+    // is truthy.
+    const values =
+        ladder && ladder.length > 0
+            ? denominatedValues(remainder, slots, ladder)
+            : evenValues(remainder, slots);
+    return values.map((value) => ({ asset, value, pk, ...freshNoteRandomness() }));
+}
+
+function evenValues(remainder: bigint, slots: number): bigint[] {
     const n = BigInt(slots);
     const base = remainder / n;
     const extra = remainder % n;
-    return Array.from({ length: slots }, (_, i) => ({
-        asset,
-        value: base + (BigInt(i) >= n - extra ? 1n : 0n),
-        pk,
-        ...freshNoteRandomness(),
-    }));
+    return Array.from({ length: slots }, (_, i) => base + (BigInt(i) >= n - extra ? 1n : 0n));
+}
+
+function denominatedValues(remainder: bigint, slots: number, ladder: Ladder): bigint[] {
+    const { pieces, dust } = decompose(remainder, ladder, slots);
+    const values = dust > 0n ? [...pieces, dust] : pieces;
+    // `decompose` reserves a slot for the remainder, so this cannot trip — but
+    // an over-long list would silently drop outputs at `buildSpend` and unbalance
+    // the proof, which is a far worse thing to debug than an assertion here.
+    if (values.length > slots) {
+        throw new InternalError(
+            `splitChange: decomposed ${remainder} into ${values.length} notes for ${slots} slots`,
+        );
+    }
+    // Pad rather than truncate: `buildSpend` wants exactly `nOut` outputs, and
+    // dropping a slot would drop value the circuit requires to balance.
+    while (values.length < slots) values.push(0n);
+    return values;
 }
 
 /** {@link splitChange}, as slots addressed back to self. */
-export function changeSlots(
-    pk: bigint,
-    ownAddr: DecodedAddress,
-    asset: bigint,
-    remainder: bigint,
-    count: number,
-): OutputSlotSpec[] {
-    return splitChange(pk, asset, remainder, count).map((note) => payTo(note, ownAddr, true));
+export function changeSlots(args: ChangeSplit & { ownAddr: DecodedAddress }): OutputSlotSpec[] {
+    return splitChange(args).map((note) => payTo(note, args.ownAddr, true));
 }
 
 /** Everything downstream needs about a spend's outputs, in their final order. */

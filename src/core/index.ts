@@ -40,6 +40,19 @@ export {
     tuple2,
 } from "./decode.js";
 export {
+    BUILT_IN_LADDERS,
+    type Decomposition,
+    type DenominationPolicy,
+    decompose,
+    descendingAtMost,
+    isDenomination,
+    type Ladder,
+    ladderFor,
+    largestAtMost,
+    nearest,
+    resolveLadder,
+} from "./denominations.js";
+export {
     type AnyWalletError,
     attachContext,
     DepositAdapterError,
@@ -71,7 +84,15 @@ export {
     type WorkerErrorCode,
     WorkerRpcError,
 } from "./errors.js";
-export { applyFee, assertPublicInFits, BPS_DENOMINATOR, PUBLIC_IN_MAX } from "./fees.js";
+export {
+    applyFee,
+    assertPublicInFits,
+    BPS_DENOMINATOR,
+    PUBLIC_IN_MAX,
+    type WithdrawNet,
+    type WithdrawNetArgs,
+    withdrawNet,
+} from "./fees.js";
 export {
     BABYJUB_SUBGROUP_ORDER,
     BN254_FR,
@@ -96,14 +117,13 @@ export {
 } from "./json-client.js";
 export { decodeStoredNote, type NoteRecord, type StoredNote } from "./note-record.js";
 export {
+    noteId,
     randomBelow,
     randomBytes,
-    randomFloat01,
     randomFr,
     randomJubjubScalar,
     randomU256,
     requireWebCrypto,
-    shortId,
     shuffled,
 } from "./random.js";
 export {
@@ -111,11 +131,9 @@ export {
     coeffCount,
     DEFAULT_SHAPE,
     shapeId,
-    TRANSACT_2X2,
-    TRANSACT_3X3,
-    TRANSACT_4X4,
+    TRANSACT_4X6,
 } from "./shape.js";
 export type { Eip1193ProviderLike, EthSigner } from "./signer.js";
 export { requestPersistentStorage } from "./storage.js";
-export { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "./units.js";
+export { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "./units.js";
 export { isHttpUrl, toAbsoluteUrl, type Url, urlToString } from "./url.js";

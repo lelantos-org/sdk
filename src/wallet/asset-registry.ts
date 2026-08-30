@@ -12,7 +12,9 @@
 
 import type { ChainAdapter } from "../chain/port.js";
 import { type AssetId, assetId } from "../core/brand.js";
+import { type DenominationPolicy, resolveLadder } from "../core/denominations.js";
 import { InvalidArgumentError } from "../core/errors.js";
+import { RAY } from "../core/units.js";
 import type { ChainToken } from "../protocol/responses.js";
 import { type AssetRef, classifyRef, describeRef, matchRef } from "./asset-ref.js";
 import { type AssetInfo, fetchAssetInfo } from "./assets.js";
@@ -20,6 +22,12 @@ import { type AssetInfo, fetchAssetInfo } from "./assets.js";
 /** Where a registry's token list comes from. */
 export interface AssetRegistrySource {
     chain: ChainAdapter;
+    /**
+     * Which withdrawal ladders assets resolve with. Defaults to the built-ins;
+     * `false` opts out entirely. Applied here so nothing downstream of
+     * `AssetInfo` has to know the policy.
+     */
+    denominations?: DenominationPolicy | undefined;
     /**
      * The relayer's registered-asset list, if one is reachable. Called at most
      * once and cached; a failure is not fatal, it only means symbols and token
@@ -29,7 +37,7 @@ export interface AssetRegistrySource {
 }
 
 /** `ChainToken` (wire) → `AssetInfo` (what the wallet hands out). */
-function fromChainToken(t: ChainToken): AssetInfo {
+function fromChainToken(t: ChainToken, denominations: DenominationPolicy): AssetInfo {
     const info: AssetInfo = {
         id: assetId(BigInt(t.assetId)),
         token: t.token as AssetInfo["token"],
@@ -38,6 +46,13 @@ function fromChainToken(t: ChainToken): AssetInfo {
         // flag; a disabled asset still resolves, and `deposit` is where the
         // chain rejects it.
         disabled: false,
+        // A relayer predating the yield mixin sends neither field. `RAY` is the
+        // identity for every conversion, so an old relayer keeps working — but
+        // it also means a wallet resolving through `/chains` against a *yielding*
+        // pool would read human amounts low until the relayer ships the field.
+        index: t.index === undefined ? RAY : BigInt(t.index),
+        yieldEnabled: t.yieldEnabled ?? false,
+        ladder: resolveLadder(t.token, denominations),
     };
     if (t.symbol !== undefined) info.symbol = t.symbol;
     if (t.decimals !== undefined) info.decimals = t.decimals;
@@ -76,7 +91,11 @@ export class AssetRegistry {
         if (hit) return hit;
 
         if (kind.kind === "id") {
-            const info = await fetchAssetInfo(this.src.chain, kind.id);
+            const info = await fetchAssetInfo(
+                this.src.chain,
+                kind.id,
+                this.src.denominations ?? true,
+            );
             this.byId.set(info.id, info);
             return info;
         }
@@ -119,7 +138,7 @@ export class AssetRegistry {
     private async fetchTokens(): Promise<void> {
         if (!this.src.tokens) return;
         for (const t of await this.src.tokens()) {
-            const info = fromChainToken(t);
+            const info = fromChainToken(t, this.src.denominations ?? true);
             // Never clobber an entry read from the chain itself, which carries
             // `disabled` and is the authority on scale.
             if (!this.byId.has(info.id)) this.byId.set(info.id, info);

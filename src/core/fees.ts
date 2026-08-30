@@ -1,6 +1,7 @@
 // Fee arithmetic and the on-chain amount bounds it has to respect.
 
 import { InvalidArgumentError } from "./errors.js";
+import { RAY } from "./units.js";
 
 /**
  * Basis-points denominator. `feeBps` is a uint16 fraction of 10_000;
@@ -42,4 +43,59 @@ export function assertPublicInFits(
             `uint48 limit of ${PUBLIC_IN_MAX}${hint}`,
         { argument: ctx.what },
     );
+}
+
+/** What a withdrawal of `publicOut` costs and delivers. See {@link withdrawNet}. */
+export interface WithdrawNetArgs {
+    /** The gross leaving the pool — a ladder denomination, in circuit units. */
+    publicOut: bigint;
+    /** The asset's withdraw rate. */
+    feeBps: bigint;
+    /** circuit-units → ERC-20-base-units multiplier. */
+    scale: bigint;
+    /** Pool-managed yield index, RAY-scaled. Defaults to `RAY`. */
+    index?: bigint;
+    /** Whether the pool routes this asset to a yield venue. Defaults to `false`. */
+    yieldEnabled?: boolean;
+}
+
+/** The two halves of a withdrawal, in ERC-20 base units. */
+export interface WithdrawNet {
+    /** Reaches the recipient. */
+    net: bigint;
+    /** Accrues to the treasury. */
+    fee: bigint;
+}
+
+/**
+ * Split a withdrawal's gross into what the recipient receives and what the
+ * protocol keeps.
+ *
+ * `publicOut` is the **gross**: `MASP._unshieldLeg` skims the fee out of the
+ * amount leaving the pool (`net = outAmt - fee`) rather than charging it on
+ * top. So a caller picks the gross — a ladder denomination, since that is the
+ * figure published on chain — and receives slightly less. This is where
+ * "slightly less" is computed, and it is the function a UI needs to show the
+ * two numbers side by side.
+ *
+ * The two branches mirror the contract exactly and are **not**
+ * interchangeable: they round at different points, so the wrong one misreports
+ * the net by up to a unit.
+ *
+ *   plain  the fee is taken from the converted token amount
+ *   yield  the fee is taken in normalized units *before* conversion, which is
+ *          what keeps `_drainDeposit` index-free and the escrow digest stable
+ */
+export function withdrawNet(args: WithdrawNetArgs): WithdrawNet {
+    const { publicOut, feeBps, scale, index = RAY, yieldEnabled = false } = args;
+    const toTokens = (units: bigint): bigint => (units * scale * index) / RAY;
+
+    if (yieldEnabled) {
+        const feeNorm = applyFee(publicOut, feeBps);
+        const net = toTokens(publicOut - feeNorm);
+        return { net, fee: toTokens(publicOut) - net };
+    }
+    const gross = toTokens(publicOut);
+    const fee = applyFee(gross, feeBps);
+    return { net: gross - fee, fee };
 }

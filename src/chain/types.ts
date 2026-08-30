@@ -12,6 +12,18 @@ export interface AssetEntry {
      * notes / escrows remain spendable.
      */
     disabled: boolean;
+    /**
+     * Pool-managed yield index, RAY-scaled. Omitted by adapters reading a pool
+     * with no yield mixin, where it is `RAY` — the value at which every
+     * conversion reduces to the plain `scale` arithmetic.
+     */
+    index?: bigint;
+    /**
+     * Whether the pool routes this asset's balance to a yield venue. Changes
+     * which unit space the withdraw fee is charged in, so it is not derivable
+     * from `index` alone: a freshly enabled asset sits at exactly `RAY`.
+     */
+    yieldEnabled?: boolean;
 }
 
 export interface Permit2SignArgs {

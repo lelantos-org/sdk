@@ -72,8 +72,8 @@ export interface TransferOptions {
      *
      * A different asset costs two extra slots — an input note of that asset and
      * an output for its change — so it needs a circuit shape wide enough to
-     * hold them: `nOut >= 4`, which the default 4×4 satisfies and a narrower
-     * pool on `TRANSACT_3X3` does not. The relayer must also accept it:
+     * hold them: `nOut >= 4`, which the default 4×6 satisfies with room to
+     * spare. The relayer must also accept it:
      * `/chains` publishes the list, and one it does not quote is rejected
      * before any proving starts.
      */
@@ -90,6 +90,21 @@ export interface TransferOptions {
 export interface WithdrawOptions {
     /** L1 ERC-20 recipient. */
     to: EvmAddressLike;
+    /**
+     * Gross `publicOut` — the amount leaving the pool, **not** the amount the
+     * recipient receives.
+     *
+     * BREAKING (0.28): this previously meant the net delivered, and the SDK
+     * grossed it up by the protocol fee. It does not any more, so the same call
+     * now withdraws slightly less than before. `MASP._unshieldLeg` skims the
+     * fee out of what leaves the pool (`net = outAmt - fee`), which makes
+     * `publicOut` the figure the chain publishes — so `publicOut` is what has
+     * to be a round denomination if the withdrawal is to blend with anyone
+     * else's. Call `wallet.previewWithdraw` to show the recipient's figure
+     * alongside it, and to learn whether the amount is on the ladder.
+     *
+     * Matches `SwapOptions.amount`, which has always been the gross.
+     */
     amount: AmountLike;
     /** Id, token address or symbol. Default asset 1. */
     asset?: AssetRef | undefined;
@@ -99,8 +114,8 @@ export interface WithdrawOptions {
      *
      * A different asset costs two extra slots — an input note of that asset and
      * an output for its change — so it needs a circuit shape wide enough to
-     * hold them: `nOut >= 4`, which the default 4×4 satisfies and a narrower
-     * pool on `TRANSACT_3X3` does not. The relayer must also accept it:
+     * hold them: `nOut >= 4`, which the default 4×6 satisfies with room to
+     * spare. The relayer must also accept it:
      * `/chains` publishes the list, and one it does not quote is rejected
      * before any proving starts.
      */
@@ -131,8 +146,8 @@ export interface SwapOptions {
      *
      * A different asset costs two extra slots — an input note of that asset and
      * an output for its change — so it needs a circuit shape wide enough to
-     * hold them: `nOut >= 4`, which the default 4×4 satisfies and a narrower
-     * pool on `TRANSACT_3X3` does not. The relayer must also accept it:
+     * hold them: `nOut >= 4`, which the default 4×6 satisfies with room to
+     * spare. The relayer must also accept it:
      * `/chains` publishes the list, and one it does not quote is rejected
      * before any proving starts.
      */

@@ -31,12 +31,19 @@ export type {
 export {
     type AssetInfo,
     type AssetInfoWithMeta,
+    denominations,
     fetchAssetInfo,
     formatAmount,
     hasTokenMeta,
+    isDenominated,
+    isOnLadder,
+    type MakeAssetInfoArgs,
+    makeAssetInfo,
     minAmount,
+    nearestDenomination,
     parseAmount,
     requireTokenMeta,
+    withdrawNetFor,
 } from "./assets.js";
 export type { SyncStrategy, WalletConfig } from "./config.js";
 export {
@@ -75,6 +82,7 @@ export {
 export {
     type CoinSelector,
     type ConsolidateFirst,
+    DenominationCoinSelector,
     type DirectSelection,
     type SelectionResult,
     type SelectOpts,
@@ -99,3 +107,10 @@ export {
     type TreeStoreState,
 } from "./tree-store.js";
 export { Wallet } from "./wallet.js";
+export {
+    type DenominationChoice,
+    denominationChoices,
+    previewWithdraw,
+    type WithdrawPreview,
+    type WithdrawPreviewArgs,
+} from "./withdraw-preview.js";

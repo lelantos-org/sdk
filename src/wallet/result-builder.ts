@@ -5,7 +5,13 @@
 // *published* subpath (`@lelantos-org/sdk/internal`) carrying
 // unstable primitives. One word, two meanings, one directory apart.
 
-import { type AssetId, branded, type CircuitAmount, type Hex32 } from "../core/brand.js";
+import {
+    type AssetId,
+    branded,
+    type CircuitAmount,
+    type Hex32,
+    type TokenAmount,
+} from "../core/brand.js";
 import { type DepositStrategy, InternalError } from "../core/errors.js";
 import { fieldToBytes32 } from "../core/hex.js";
 import type { Field } from "../crypto/index.js";
@@ -66,6 +72,8 @@ export interface MakeTransactionResultArgs {
     spent?: string[] | undefined;
     inputSum?: CircuitAmount | undefined;
     sent?: CircuitAmount | undefined;
+    /** Withdraw only: base units delivered, and base units the protocol kept. */
+    settlement?: { received: TokenAmount; feePaid: TokenAmount } | undefined;
     change?: CircuitAmount | undefined;
     depositId?: bigint | undefined;
     /**
@@ -90,6 +98,7 @@ export function makeTransactionResult<K extends TransactionKind>(
 }
 
 const ZERO = branded<CircuitAmount>(0n);
+const ZERO_TOKENS = branded<TokenAmount>(0n);
 
 function buildTransactionResult(args: MakeTransactionResultArgs): TransactionResult {
     const commitments: Hex32[] = args.built.cm.map(fieldToBytes32);
@@ -161,6 +170,8 @@ function buildTransactionResult(args: MakeTransactionResultArgs): TransactionRes
                 inputSum: args.inputSum ?? ZERO,
                 sent: args.sent ?? ZERO,
                 change: args.change ?? ZERO,
+                received: args.settlement?.received ?? ZERO_TOKENS,
+                feePaid: args.settlement?.feePaid ?? ZERO_TOKENS,
                 ownCommitments,
                 ownInflow,
             };

@@ -12,6 +12,7 @@ import {
     type Hex32,
     type ShieldedAddress,
 } from "../core/brand.js";
+import { descendingAtMost, isDenomination, type Ladder } from "../core/denominations.js";
 import { DepositAdapterError } from "../core/errors.js";
 import { type Jubjub, Poseidon } from "../crypto/index.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
@@ -20,6 +21,7 @@ import { addressFromSpendingKey, buildSpendingKey, type SpendingKey } from "../k
 import { getLogger } from "../log/logger.js";
 import type { Prover } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
+import type { AmountLike } from "./amount.js";
 import type {
     DepositOptions,
     DepositResult,
@@ -75,8 +77,27 @@ import {
 import { executeTransfer } from "./transfer.js";
 import type { TreeStore } from "./tree-store.js";
 import { executeWithdraw } from "./withdraw.js";
+import {
+    type DenominationChoice,
+    denominationChoices,
+    previewWithdraw,
+    type WithdrawPreview,
+} from "./withdraw-preview.js";
 
 const log = getLogger("lelantos:wallet");
+
+/**
+ * Denominations tried per `redenominate` round before the batch is abandoned.
+ *
+ * More than one because the relayer's fee comes out of the same cover, so the
+ * largest denomination a batch can reach frequently leaves nothing to pay it
+ * with; three covers the 2×/2.5× steps of the ladder without proving against
+ * hopeless targets indefinitely.
+ */
+const LADDER_RETRY_STEPS = 3;
+
+/** Rounds `redenominate` runs unless told otherwise. */
+const DEFAULT_REDENOMINATE_ROUNDS = 4;
 
 /**
  * How long to wait for a consolidated note to clear its spend cooldown.
@@ -358,7 +379,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
             // A refresh is only meaningful against the chain registry, which
             // is the authority on `scale` and `disabled`.
             const { id } = await this.assets_().resolve(ref);
-            const info = await fetchAssetInfo(this.cfg.chain, id);
+            const info = await fetchAssetInfo(this.cfg.chain, id, this.cfg.denominations ?? true);
             this.assets_().put(info);
             return info;
         }
@@ -384,6 +405,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
     private assets_(): AssetRegistry {
         this.assetRegistry ??= new AssetRegistry({
             chain: this.cfg.chain,
+            denominations: this.cfg.denominations ?? true,
             ...(this.cfg.submitter.assets
                 ? { tokens: () => this.cfg.submitter.assets!(this.cfg.chainId) }
                 : {}),
@@ -425,6 +447,122 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      */
     async transfer(args: TransferOptions): Promise<TransferResult> {
         return executeTransfer(this, args);
+    }
+
+    /**
+     * Re-shape off-ladder notes of `asset` onto the withdrawal ladder.
+     *
+     * A withdrawal's `publicOut` must be a denomination to blend with anyone
+     * else's, so a note that is not one cannot be withdrawn as-is. Change
+     * splitting already lands most value on the ladder, but a bounded number of
+     * output slots against a discrete ladder leaves a remainder — 4900 across
+     * four slots is `2000 + 2000 + 500` plus 400 of dust.
+     *
+     * That dust is transient rather than permanent, and this is what clears it.
+     * An internal transfer publishes no amount, so re-splitting `400 → 200 +
+     * 200` costs a proof and leaks nothing. Each round places `nOut - 1` ladder
+     * pieces and carries one residual, so the residual shrinks every round
+     * until it is below the lowest denomination — where it stops, because no
+     * decomposition can place it.
+     *
+     * Idempotent and safe to run on a schedule. Returns how many rounds it ran;
+     * zero means the asset has no ladder, or nothing was off it.
+     *
+     * Best-effort by construction: a round that cannot find cover stops the
+     * loop rather than throwing, because a partially-tidied note set is a
+     * strictly better position than the one it started from.
+     */
+    async redenominate(ref: AssetRef, opts: { maxRounds?: number } = {}): Promise<number> {
+        const info = await this.resolveAsset(ref);
+        // Empty when the token has no ladder, or when the wallet opted out via
+        // `WalletConfig.denominations` — either way there is nothing to conform to.
+        if (info.ladder.length === 0) return 0;
+
+        const maxRounds = opts.maxRounds ?? DEFAULT_REDENOMINATE_ROUNDS;
+        let rounds = 0;
+        while (rounds < maxRounds && (await this.redenominateRound(info.id, info.ladder))) rounds++;
+        return rounds;
+    }
+
+    /**
+     * One re-denomination round: reshape up to `nIn` off-ladder notes.
+     *
+     * `true` when a transfer landed and another round is worth attempting;
+     * `false` when there is nothing left to do, or nothing that can be done.
+     */
+    private async redenominateRound(asset: AssetId, ladder: Ladder): Promise<boolean> {
+        const offLadder = this.notes({ asset, spent: false })
+            .filter((n) => n.value > 0n && !isDenomination(n.value, ladder))
+            .slice(0, this.cfg.shape.nIn);
+        if (offLadder.length === 0) return false;
+
+        const total = offLadder.reduce((sum, n) => sum + n.value, 0n);
+        const only = offLadder.map((n) => n.id);
+
+        // The payee note of a self-transfer is ours too, so it wants to be a
+        // denomination like the change is; `splitChange` handles the rest.
+        //
+        // Largest first, but with fallbacks: the relayer's fee comes out of
+        // this same cover, so the largest denomination `total` can reach
+        // usually leaves no room for it. That is the common case, not the
+        // exceptional one — stopping at the first refusal would make this a
+        // no-op almost every time.
+        for (const target of descendingAtMost(total, ladder, LADDER_RETRY_STEPS)) {
+            try {
+                const result = await this.transfer({
+                    to: this.address,
+                    amount: branded<CircuitAmount>(target),
+                    asset,
+                    selectOpts: { only, maxInputs: this.cfg.shape.nIn },
+                    autoConsolidate: false,
+                });
+                await this.awaitCommitments([...result.ownCommitments]);
+                return true;
+            } catch (err) {
+                log.debug("redenominate: target did not fit, stepping down", {
+                    asset: asset.toString(),
+                    target: target.toString(),
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
+        // Either nothing on the ladder is small enough to place, or every
+        // candidate was refused. Retrying next round would prove against the
+        // same cover it already could not afford.
+        return false;
+    }
+
+    /**
+     * What a withdrawal would publish, cost and deliver — without proving.
+     *
+     * `amount` is the **gross**: the protocol fee is skimmed out of it, so the
+     * recipient receives `preview.net`, not `amount`. The gross is also the
+     * figure published on chain, so `preview.onLadder` says whether it will
+     * blend with other users' withdrawals or stand out as near-unique.
+     *
+     * ```ts
+     * const p = await wallet.previewWithdraw({ asset: "USDC", amount: "1000" });
+     * p.netFormatted; // "998" — what actually arrives
+     * p.onLadder;     // true
+     * ```
+     */
+    async previewWithdraw(args: {
+        amount: AmountLike;
+        asset?: AssetRef | undefined;
+    }): Promise<WithdrawPreview> {
+        const info = await this.resolveAsset(args.asset ?? DEFAULT_ASSET);
+        return previewWithdraw({ amount: args.amount, asset: info, feeBps: await this.feeBps() });
+    }
+
+    /**
+     * The asset's withdrawal denominations, labelled for a picker.
+     *
+     * Empty for an asset with no ladder, where any amount is as good as any
+     * other and there is nothing to choose from.
+     */
+    async withdrawDenominations(ref?: AssetRef): Promise<DenominationChoice[]> {
+        const info = await this.resolveAsset(ref ?? DEFAULT_ASSET);
+        return denominationChoices(info, await this.feeBps());
     }
 
     /** Unshield ERC20 to `args.to`. Throws `InsufficientCoverError` on no cover. */

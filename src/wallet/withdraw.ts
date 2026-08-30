@@ -2,10 +2,10 @@
 // the `kind` discriminator routes between the ERC-20 and native-ETH builders.
 
 import { buildSpend } from "../bundle/spend.js";
-import { branded, type CircuitAmount } from "../core/brand.js";
+import { branded, type CircuitAmount, type TokenAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { WalletConfigError } from "../core/errors.js";
-import { applyFee } from "../core/fees.js";
+import { withdrawNet } from "../core/fees.js";
 import { resolveAmount } from "./amount.js";
 import type { WithdrawOptions, WithdrawResult } from "./api.js";
 import type { AssetRef } from "./asset-ref.js";
@@ -40,12 +40,17 @@ export async function executeWithdraw(
     // Resolve at the boundary; below here everything is ids and circuit units.
     const info = await ctx.resolveAsset(args.asset);
     const asset = info.id;
-    const amount = resolveAmount(args.amount, info);
-    const feeBps = await ctx.feeBps();
-    // The protocol fee is skimmed on chain from the amount leaving the pool;
-    // the relayer's fee below is a separate charge, paid as a shielded note.
-    const protocolFee = applyFee(amount, feeBps);
-    const publicOut = branded<CircuitAmount>(amount + protocolFee);
+    // `amount` is the GROSS leaving the pool, not the net delivered.
+    //
+    // `MASP._unshieldLeg` skims the protocol fee out of `publicOut * scale`
+    // (`net = outAmt - fee`) rather than charging it on top, so grossing up
+    // here would publish `denomination + fee` — off any ladder, and a
+    // near-unique integer once a yield index is moving. `publicOut` is the
+    // value the chain publishes, so `publicOut` is what has to be a round
+    // denomination; `wallet.previewWithdraw` reports what the recipient gets.
+    //
+    // The relayer's fee below is a separate charge, paid as a shielded note.
+    const publicOut = resolveAmount(args.amount, info);
 
     const feeAsset =
         args.feeAsset === undefined ? undefined : (await ctx.resolveAsset(args.feeAsset)).id;
@@ -65,13 +70,17 @@ export async function executeWithdraw(
     // Every slot the fee does not need is change back to self. `finalizeSlots`
     // shuffles them, so the fee is at no fixed index — see `tx/outputs.ts`.
     const { args: outputs, ownIndices } = finalizeSlots([
-        ...changeSlots(
-            ctx.keys.pk,
+        ...changeSlots({
+            pk: ctx.keys.pk,
             ownAddr,
             asset,
             remainder,
-            ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
-        ),
+            slots: ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
+            // Change lands on the ladder so it is withdrawable as-is. Splitting
+            // evenly would make every spend mint notes that cannot be the
+            // `publicOut` of a later withdrawal without re-splitting first.
+            ladder: info.ladder,
+        }),
         ...feeSlots(relayerFee, feeSelection, ctx.keys.pk, ownAddr),
     ]);
 
@@ -119,6 +128,15 @@ export async function executeWithdraw(
     safePhase(args.onPhase, "submitting");
     const spent = spentIds;
     const { txHash } = await submitSpend(ctx, spent, () => ctx.submitter.submit(built.payload));
+    // Settled on the receipt rather than left to the caller: recomputing it
+    // needs `scale`, the fee rate and the index as they were at submission.
+    const settled = withdrawNet({
+        publicOut,
+        feeBps: await ctx.feeBps(),
+        scale: info.scale,
+        index: info.index,
+        yieldEnabled: info.yieldEnabled,
+    });
     return makeTransactionResult({
         kind: "withdraw",
         txHash,
@@ -127,6 +145,10 @@ export async function executeWithdraw(
         inputSum: selection.sum,
         sent: publicOut,
         change: remainder,
+        settlement: {
+            received: branded<TokenAmount>(settled.net),
+            feePaid: branded<TokenAmount>(settled.fee),
+        },
         ownIndices,
     });
 }

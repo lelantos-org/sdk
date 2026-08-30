@@ -80,13 +80,16 @@ export async function executeTransfer(
         payeeIndex,
     } = finalizeSlots([
         { ...payTo(sendNote, recipient, recipient.pk === ctx.keys.pk), payee: true },
-        ...changeSlots(
-            ctx.keys.pk,
+        ...changeSlots({
+            pk: ctx.keys.pk,
             ownAddr,
             asset,
-            changeValue,
-            ctx.cfg.shape.nOut - 1 - (fee?.slots ?? 0),
-        ),
+            remainder: changeValue,
+            slots: ctx.cfg.shape.nOut - 1 - (fee?.slots ?? 0),
+            // Transfer change is a note the owner will eventually withdraw, so
+            // it lands on the ladder for the same reason a withdrawal's does.
+            ladder: info.ladder,
+        }),
         ...feeSlots(fee, feeSelection, ctx.keys.pk, ownAddr),
     ]);
 

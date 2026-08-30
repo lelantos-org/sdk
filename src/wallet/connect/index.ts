@@ -92,6 +92,7 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
         submitter,
         prover,
         selector: opts.selector,
+        denominations: opts.denominations,
         scanner: opts.scanner,
         syncStrategy: opts.syncStrategy,
         feeBps: opts.feeBps,

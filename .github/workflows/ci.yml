@@ -135,6 +135,9 @@ jobs:
       - name: "WASM subpath lint (literal #wasm/* specifiers)"
         run: npm run check:wasm-imports
 
+      - name: "Entropy lint (no Math.random under src/)"
+        run: npm run check:entropy
+
       - name: Sync version
         run: node scripts/sync-version.mjs
 

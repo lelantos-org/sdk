@@ -1,4 +1,4 @@
-import type { AssetId, CircuitAmount, Hex32 } from "../core/brand.js";
+import type { AssetId, CircuitAmount, Hex32, TokenAmount } from "../core/brand.js";
 import type { DepositStrategy } from "../core/errors.js";
 
 // Wallet operation result types. Re-exported from `./api.ts` and the public barrel.
@@ -73,9 +73,26 @@ export interface WithdrawResult extends TxResultBase {
     kind: "withdraw";
     spent: string[];
     inputSum: CircuitAmount;
-    /** publicOut paid to the L1 recipient (gross, includes fee). */
+    /**
+     * `publicOut` — the gross that left the pool, in circuit units, and the
+     * figure published on chain.
+     *
+     * Not what the recipient got: the protocol fee is skimmed out of this.
+     * See {@link WithdrawResult.received}.
+     */
     sent: CircuitAmount;
     change: CircuitAmount;
+    /**
+     * ERC-20 base units that actually reached the recipient, after the
+     * protocol fee.
+     *
+     * On the receipt rather than left to the caller because recomputing it
+     * needs the asset's `scale`, its fee rate and the yield index as they were
+     * at submission — three lookups to answer "how much did they get".
+     */
+    received: TokenAmount;
+    /** ERC-20 base units the protocol kept. `received + feePaid` is the gross. */
+    feePaid: TokenAmount;
 }
 
 /**

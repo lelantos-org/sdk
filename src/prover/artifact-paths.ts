@@ -55,8 +55,7 @@ export function resolveArtifacts(input: ProverPaths | ProverArtifacts): {
 /**
  * Resolve default Groth16 prover artifacts for `shape`.
  *
- * Artifacts are named after the shape — `2x2.wasm` / `2x2_final.zkey`,
- * `3x3.wasm` / `3x3_final.zkey`, `4x4.wasm` / `4x4_final.zkey` — which is the
+ * Artifacts are named after the shape — `4x6.wasm` / `4x6_final.zkey` — which is the
  * convention the circuits package builds under. Resolution order:
  *   1. `LELANTOS_PROVER_ARTIFACTS_DIR` env var (Node) — must contain the
  *      pair for the shape in use.

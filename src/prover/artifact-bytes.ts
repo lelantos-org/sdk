@@ -16,8 +16,8 @@ import { type ArtifactCache, cacheApiArtifactCache } from "./artifact-cache.js";
 const log = getLogger("lelantos:prover:artifacts");
 
 /**
- * The zkey is ~21 MB at 2x2, ~29 MB at 3x3 (which is `DEFAULT_SHAPE`) and
- * ~40 MB at 4x4. A stalled download needs a long leash but not none.
+ * The 4x6 zkey is tens of MB — it sits in the 2^17 FFT domain. A stalled
+ * download needs a long leash but not none.
  *
  * 120 s covers the default shape down to roughly 3 Mbps. Slower links fail
  * here rather than hanging; raise it via `LoadArtifactOpts.timeoutMs` to

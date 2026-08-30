@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { circuitAmount } from "../../core/brand.js";
-import { randomFr, randomJubjubScalar } from "../../core/random.js";
-import { TRANSACT_4X4 } from "../../core/shape.js";
+import { randomJubjubScalar } from "../../core/random.js";
+import { TRANSACT_4X6 } from "../../core/shape.js";
 import { WasmJubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
 import { addressFromSpendingKey, buildSpendingKey } from "../../keys/keys.js";
@@ -13,6 +13,7 @@ import type { Prover } from "../../prover/types.js";
 import type { SpendContext } from "../context.js";
 import type { StoredNote } from "../note-store.js";
 import { executeTransfer } from "../transfer.js";
+import { storedNote } from "../wallet-test-utils.js";
 import { executeWithdraw } from "../withdraw.js";
 
 // Paying the relayer in an asset the spend is not otherwise moving.
@@ -26,21 +27,6 @@ import { executeWithdraw } from "../withdraw.js";
 const RELAYER_ADDR = "0x0000000000000000000000000000000000000001";
 const ASSET_A = 1n;
 const ASSET_B = 2n;
-
-function storedNote(id: string, value: bigint, asset: bigint): StoredNote {
-    return {
-        id,
-        asset: asset.toString(),
-        value: value.toString(),
-        rho: randomFr().toString(),
-        rcm: randomFr().toString(),
-        rcvDep: randomJubjubScalar().toString(),
-        cm: `0x${id.padStart(64, "0")}`,
-        leafIndex: Number.parseInt(id, 16) || 0,
-        spent: false,
-        discoveredAt: "1970-01-01T00:00:00Z",
-    };
-}
 
 /**
  * A fresh shielded address, standing in for the relayer's own.
@@ -115,7 +101,7 @@ async function makeCtx(notes: StoredNote[], est?: EstimateResponse) {
             treeDepth: 4,
             relayerAddress: RELAYER_ADDR,
             feeBps: 0n,
-            shape: TRANSACT_4X4,
+            shape: TRANSACT_4X6,
             chain: {},
         },
         prover,
@@ -210,7 +196,10 @@ function noteFor(payload: SubmitTransactPayload, J: SpendContext["J"], ivk: bigi
 
 describe("cross-asset relayer fee", () => {
     it("pays a transfer's fee from a second asset and conserves both", async () => {
-        const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
+        const notes = [
+            storedNote("01", 100n, { asset: ASSET_A }),
+            storedNote("02", 30n, { asset: ASSET_B }),
+        ];
         const { ctx, witness, markedSpent } = await makeCtx(
             notes,
             estimate(await shieldedAddress(), { "2": 7n }),
@@ -239,7 +228,7 @@ describe("cross-asset relayer fee", () => {
     });
 
     it("takes a same-asset fee out of change, not out of the recipient", async () => {
-        const notes = [storedNote("01", 100n, ASSET_A)];
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
         const { ctx, witness } = await makeCtx(
             notes,
             estimate(await shieldedAddress(), { "1": 7n }),
@@ -261,7 +250,7 @@ describe("cross-asset relayer fee", () => {
     });
 
     it("builds no fee slot when the relayer is not charging", async () => {
-        const notes = [storedNote("01", 100n, ASSET_A)];
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
         // Estimate present, but no shielded fee address: this chain subsidises.
         const est = { ...estimate(await shieldedAddress(), { "1": 7n }) };
         delete (est as { shieldedFeeAddress?: string }).shieldedFeeAddress;
@@ -281,7 +270,10 @@ describe("cross-asset relayer fee", () => {
 
     /// Better here than as a 402 after a full Groth16 run.
     it("refuses a fee asset the relayer does not quote", async () => {
-        const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
+        const notes = [
+            storedNote("01", 100n, { asset: ASSET_A }),
+            storedNote("02", 30n, { asset: ASSET_B }),
+        ];
         const { ctx } = await makeCtx(notes, estimate(await shieldedAddress(), { "1": 7n }));
         const { address: recipient } = await makeCtx([]);
 
@@ -296,7 +288,10 @@ describe("cross-asset relayer fee", () => {
     });
 
     it("pays a withdraw's fee from a second asset", async () => {
-        const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
+        const notes = [
+            storedNote("01", 100n, { asset: ASSET_A }),
+            storedNote("02", 30n, { asset: ASSET_B }),
+        ];
         const { ctx, witness, markedSpent } = await makeCtx(
             notes,
             estimate(await shieldedAddress(), { "2": 7n }),
@@ -331,7 +326,10 @@ describe("cross-asset relayer fee", () => {
     /// and is still undecryptable by the only party that needed to read it.
     it("leaves the fee note readable by the relayer, and not counted as ours", async () => {
         const relayer = await relayerIdentity();
-        const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
+        const notes = [
+            storedNote("01", 100n, { asset: ASSET_A }),
+            storedNote("02", 30n, { asset: ASSET_B }),
+        ];
         const { ctx, submitted } = await makeCtx(notes, estimate(relayer.address, { "2": 7n }));
         const { address: recipient } = await makeCtx([]);
 
@@ -364,10 +362,16 @@ describe("output slot order", () => {
         const payee = await relayerIdentity();
         const feeSlots = new Set<number>();
 
-        // 4x4 shape: four slots. A fixed layout returns {3} every time; at 40
-        // draws a fair shuffle misses a slot with probability (3/4)^40 < 1e-5.
-        for (let i = 0; i < 40; i++) {
-            const notes = [storedNote("01", 100n, ASSET_A), storedNote("02", 30n, ASSET_B)];
+        // 4x6 shape: six output slots. A fixed layout returns one slot every
+        // time; at 80 draws a fair shuffle leaves some slot unhit with
+        // probability at most 6·(5/6)^80 < 3e-6. The draw count is tied to the
+        // slot count — six slots need roughly twice the draws four did to keep
+        // the flake rate here.
+        for (let i = 0; i < 80; i++) {
+            const notes = [
+                storedNote("01", 100n, { asset: ASSET_A }),
+                storedNote("02", 30n, { asset: ASSET_B }),
+            ];
             const { ctx, submitted } = await makeCtx(notes, estimate(relayer.address, { "2": 7n }));
             const res = await executeTransfer(ctx, {
                 to: payee.address,
@@ -384,13 +388,13 @@ describe("output slot order", () => {
             expect(res.ownCommitments).not.toContain(res.recipientCommitment);
         }
 
-        expect([...feeSlots].sort()).toEqual([0, 1, 2, 3]);
+        expect([...feeSlots].sort()).toEqual([0, 1, 2, 3, 4, 5]);
     });
 
     it("refuses a zero-value transfer rather than padding the payee's slot", async () => {
         // A zero-value output is a self-pad every scanner discards, so there
         // would be no payee note for the receipt to name.
-        const { ctx } = await makeCtx([storedNote("01", 100n, ASSET_A)]);
+        const { ctx } = await makeCtx([storedNote("01", 100n, { asset: ASSET_A })]);
         const { address: recipient } = await makeCtx([]);
 
         await expect(

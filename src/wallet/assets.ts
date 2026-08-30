@@ -11,8 +11,16 @@ import {
     circuitAmount,
     type EvmAddress,
 } from "../core/brand.js";
+import {
+    type DenominationPolicy,
+    isDenomination,
+    type Ladder,
+    nearest,
+    resolveLadder,
+} from "../core/denominations.js";
 import { InvalidArgumentError } from "../core/errors.js";
-import { formatUnits, parseUnits, toCircuitUnits, toTokenUnits } from "../core/units.js";
+import { type WithdrawNet, withdrawNet } from "../core/fees.js";
+import { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "../core/units.js";
 
 /**
  * Everything known about a registered MASP asset.
@@ -34,6 +42,27 @@ export interface AssetInfo {
     symbol?: string | undefined;
     /** ERC-20 decimals. Undefined when the adapter has no `tokenMeta`. */
     decimals?: number | undefined;
+    /**
+     * Pool-managed yield index, RAY-scaled, `RAY` when the pool reports none.
+     *
+     * `tokenUnits = circuitUnits * scale * index / RAY`. Note this makes the
+     * human value of a fixed circuit amount *move over time* — a note is worth
+     * more underlying than it was — while the circuit amount itself never
+     * changes. That is the whole point of the normalized-unit design, and it
+     * is why a withdrawal denomination is a circuit-unit integer rather than a
+     * human amount.
+     */
+    index: bigint;
+    /** Whether the pool routes this asset to a yield venue. */
+    yieldEnabled: boolean;
+    /**
+     * Withdrawal denominations for this asset, ascending; `[]` when it has
+     * none — either because no ladder is defined for the token, or because the
+     * wallet opted out via `WalletConfig.denominations`.
+     *
+     * Resolved once here so no code downstream needs to know the policy.
+     */
+    ladder: Ladder;
 }
 
 /**
@@ -75,13 +104,23 @@ export function requireTokenMeta(asset: AssetInfo): AssetInfoWithMeta {
  * adapter exposes `tokenMeta`. Metadata failures are non-fatal: `symbol` and
  * `decimals` are left undefined.
  */
-export async function fetchAssetInfo(chain: ChainAdapter, id: AssetId): Promise<AssetInfo> {
+export async function fetchAssetInfo(
+    chain: ChainAdapter,
+    id: AssetId,
+    denominations: DenominationPolicy = true,
+): Promise<AssetInfo> {
     const entry = await chain.fetchAsset(id);
     const info: AssetInfo = {
         id,
         token: entry.token,
         scale: entry.scale,
         disabled: entry.disabled,
+        // A pool with no yield mixin reports neither, and `RAY` is the identity
+        // for every conversion — so an adapter that has never heard of an index
+        // keeps exactly its previous behaviour.
+        index: entry.index ?? RAY,
+        yieldEnabled: entry.yieldEnabled ?? false,
+        ladder: resolveLadder(entry.token, denominations),
     };
     if (chain.tokenMeta) {
         try {
@@ -108,7 +147,9 @@ export async function fetchAssetInfo(chain: ChainAdapter, id: AssetId): Promise<
  */
 export function parseAmount(value: string | number | bigint, asset: AssetInfo): CircuitAmount {
     const meta = requireTokenMeta(asset);
-    return toCircuitUnits(branded(parseUnits(value, meta.decimals)), meta.scale);
+    return toCircuitUnits(branded(parseUnits(value, meta.decimals)), meta.scale, {
+        index: meta.index,
+    });
 }
 
 /**
@@ -125,11 +166,145 @@ export function formatAmount(
     opts: { symbol?: boolean } = {},
 ): string {
     const meta = requireTokenMeta(asset);
-    const text = formatUnits(toTokenUnits(circuitAmount(amount), meta.scale), meta.decimals);
+    const text = formatUnits(
+        toTokenUnits(circuitAmount(amount), meta.scale, { index: meta.index }),
+        meta.decimals,
+    );
     return opts.symbol && meta.symbol ? `${text} ${meta.symbol}` : text;
 }
 
 /** Smallest non-zero amount the asset can express, as a decimal string. */
 export function minAmount(asset: AssetInfo): string {
     return formatAmount(branded(1n), asset);
+}
+
+/**
+ * The asset's withdrawal denominations, ascending, or `[]` when it has none.
+ *
+ * A withdrawal's `publicOut` is public, and normalized units do not move, so
+ * the naive round trip publishes the same integer at both ends. Choosing from
+ * this list is what makes that integer one many other users also publish —
+ * see `core/denominations.ts` for why it is a table of fixed integers rather
+ * than something derived from human amounts.
+ *
+ * ```ts
+ * const usdc = await wallet.asset("USDC");
+ * for (const d of denominations(usdc)) {
+ *     console.log(formatAmount(d, usdc, { symbol: true })); // "10 USDC", "20 USDC", …
+ * }
+ * ```
+ *
+ * The human labels move as the yield index does; the denominations themselves
+ * never do.
+ */
+export function denominations(asset: AssetInfo): Ladder {
+    return asset.ladder;
+}
+
+/** Whether the asset has a withdrawal ladder at all. */
+export function isDenominated(asset: AssetInfo): boolean {
+    return asset.ladder.length > 0;
+}
+
+/**
+ * Whether `amount` is one of the asset's denominations.
+ *
+ * `false` for every amount of an asset with no ladder — there is nothing to be
+ * on. Callers wanting to distinguish "off the ladder" from "no ladder exists"
+ * should check {@link isDenominated} first.
+ */
+export function isOnLadder(amount: CircuitAmountLike, asset: AssetInfo): boolean {
+    return isDenomination(circuitAmount(amount), asset.ladder);
+}
+
+/**
+ * The denomination closest to `amount`, or `undefined` when the asset has no
+ * ladder. Ties go to the smaller, so a suggestion never silently costs more
+ * than was asked for.
+ */
+export function nearestDenomination(
+    amount: CircuitAmountLike,
+    asset: AssetInfo,
+): CircuitAmount | undefined {
+    const found = nearest(circuitAmount(amount), asset.ladder);
+    return found === undefined ? undefined : branded<CircuitAmount>(found);
+}
+
+/**
+ * Split a withdrawal's gross into what the recipient receives and what the
+ * protocol keeps, reading `scale`, `index` and `yieldEnabled` off the asset.
+ *
+ * The asset-aware wrapper over {@link withdrawNet}, and the only place those
+ * three fields are mapped onto it — assembling them at each call site is how
+ * one of them ends up stale or omitted, and the yield branch silently
+ * misreports the net when `yieldEnabled` is the one that goes missing.
+ */
+export function withdrawNetFor(
+    publicOut: CircuitAmountLike,
+    asset: AssetInfo,
+    feeBps: bigint,
+): WithdrawNet {
+    return withdrawNet({
+        publicOut: circuitAmount(publicOut),
+        feeBps,
+        scale: asset.scale,
+        index: asset.index,
+        yieldEnabled: asset.yieldEnabled,
+    });
+}
+
+/** Input to {@link makeAssetInfo}. Everything but the first three has a default. */
+export interface MakeAssetInfoArgs {
+    id: AssetId;
+    token: EvmAddress;
+    /** circuit-units → ERC-20-base-units multiplier. */
+    scale: bigint;
+    /** ERC-20 decimals. Omit only if no human-unit conversion will be needed. */
+    decimals?: number | undefined;
+    symbol?: string | undefined;
+    /** Default `false`. */
+    disabled?: boolean | undefined;
+    /** Pool-managed yield index, RAY-scaled. Default `RAY` (no yield accrued). */
+    index?: bigint | undefined;
+    /** Default `false`. */
+    yieldEnabled?: boolean | undefined;
+    /**
+     * Which ladder to resolve for `token`. Default: the built-in table.
+     * `false` opts out; a map supplies custom ladders.
+     */
+    denominations?: DenominationPolicy | undefined;
+}
+
+/**
+ * Build an {@link AssetInfo} with every optional field defaulted.
+ *
+ * For tests, mocks, and custom registries that construct assets by hand rather
+ * than through `fetchAssetInfo`. Worth using rather than an object literal for
+ * one specific reason: it derives `ladder` from `token`, so the two cannot
+ * disagree. A hand-written literal that pairs one token's address with another
+ * token's ladder type-checks, runs, and silently splits change onto the wrong
+ * denominations.
+ *
+ * ```ts
+ * const usdc = makeAssetInfo({
+ *     id: assetId(2n),
+ *     token: evmAddress("0xA0b8…eB48"),
+ *     scale: 1n,
+ *     decimals: 6,
+ * });
+ * ```
+ */
+export function makeAssetInfo(args: MakeAssetInfoArgs): AssetInfo {
+    const info: AssetInfo = {
+        id: args.id,
+        token: args.token,
+        scale: args.scale,
+        disabled: args.disabled ?? false,
+        index: args.index ?? RAY,
+        yieldEnabled: args.yieldEnabled ?? false,
+        ladder: resolveLadder(args.token, args.denominations ?? true),
+    };
+    if (args.symbol !== undefined) info.symbol = args.symbol;
+    if (args.decimals !== undefined) info.decimals = args.decimals;
+    return info;
 }

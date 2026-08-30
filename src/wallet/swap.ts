@@ -73,13 +73,14 @@ export async function executeSwap(ctx: SpendContext, args: SwapOptions): Promise
     // Every slot the fee does not need is change back to self. `finalizeSlots`
     // shuffles them, so the fee is at no fixed index — see `tx/outputs.ts`.
     const { args: outputs, ownIndices } = finalizeSlots([
-        ...changeSlots(
-            ctx.keys.pk,
+        ...changeSlots({
+            pk: ctx.keys.pk,
             ownAddr,
-            assetIn,
+            asset: assetIn,
             remainder,
-            ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
-        ),
+            slots: ctx.cfg.shape.nOut - (relayerFee?.slots ?? 0),
+            ladder: infoIn.ladder,
+        }),
         ...feeSlots(relayerFee, feeSelection, ctx.keys.pk, ownAddr),
     ]);
 

@@ -35,7 +35,7 @@ import { auxDigest, computePiHash } from "./protocol/abi-hash.js";
 import type { AuxOutput, DepositRequest } from "./protocol/deposit-request.js";
 
 const PINNED = {
-    lelantosTypedDataHash: "0xaf9b4003f47701e282c9f5934e4ea6e5fe0f794e18c0e12c60bb6ba68ee3a93f",
+    lelantosTypedDataHash: "0x9e1eeace1f9571e06d932dec45d3b1365134bf23b02828818cd703c1b7461662",
     computePiHash: "0x4c168014e99a21cfa1eb087694c074f5dd0b2a5ad09cf165793720d321d88aa7",
     auxDigest: "0x0c1c91777a86f5850add27faced1cdd04125ab20d353f852f5ee880ecc76b9de",
     fiatShamirZ: "0x09749a91edf59dfc22cb354dc68e01ed58df7cd957ee08c5e8623f0f9374d29b",

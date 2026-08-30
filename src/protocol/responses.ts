@@ -110,6 +110,13 @@ export interface ChainToken {
     decimals?: number;
     /** Absent until read, or where the token implements no `symbol()`. */
     symbol?: string;
+    /**
+     * Pool-managed yield index, RAY-scaled. Decimal string; exceeds `u53`.
+     * Absent from a relayer that predates the yield mixin, where it is `RAY`.
+     */
+    index?: string;
+    /** Whether the pool routes this asset to a yield venue. Absent means no. */
+    yieldEnabled?: boolean;
 }
 
 /** @internal */

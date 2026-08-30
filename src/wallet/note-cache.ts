@@ -12,10 +12,26 @@ import {
     AWAIT_COMMITMENTS_SYNC_LIMIT,
 } from "./constants.js";
 import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
-import { addHits } from "./note-store.js";
+import { addHits, migrateNotesFile } from "./note-store.js";
 import type { NoteSink } from "./sync.js";
 
 const log = getLogger("lelantos:wallet:notes");
+
+/**
+ * Load, upgrading the schema in place if the store is behind.
+ *
+ * The upgrade is written back immediately. `migrateNotesFile` reissues note
+ * ids, so leaving it unpersisted would hand out a different set on the next
+ * load and strand any id the caller is still holding.
+ */
+async function loadMigrated(store: NoteStore): Promise<NotesFile> {
+    const { file, migrated } = migrateNotesFile(await store.load());
+    if (migrated) {
+        log.info("notes file migrated", { version: file.version, notes: file.notes.length });
+        await store.save(file);
+    }
+    return file;
+}
 
 export interface AwaitCommitmentsOpts {
     signal?: AbortSignal | undefined;
@@ -124,7 +140,7 @@ export class NoteCache implements NoteSink {
     }
 
     static async open(store: NoteStore): Promise<NoteCache> {
-        return new NoteCache(store, await store.load());
+        return new NoteCache(store, await loadMigrated(store));
     }
 
     get file(): NotesFile {
@@ -144,7 +160,7 @@ export class NoteCache implements NoteSink {
      */
     async refresh(): Promise<void> {
         await this.writes.run(async () => {
-            this.snapshot = await this.store.load();
+            this.snapshot = await loadMigrated(this.store);
             this.known = undefined;
         });
     }

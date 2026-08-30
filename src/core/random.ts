@@ -59,25 +59,13 @@ export function randomU256(): bigint {
 }
 
 /**
- * Uniform float in `[0, 1)` with 56 bits of entropy.
- *
- * For a random index use {@link randomBelow} instead: scaling this by `n` gives
- * unequal buckets unless `n` is a power of two.
- */
-export function randomFloat01(): number {
-    let n = 0;
-    for (const b of randomBytes(7)) n = n * 256 + b;
-    return n / 2 ** 56;
-}
-
-/**
  * Uniform integer in `[0, n)`.
  *
- * Rejection-sampled rather than `Math.floor(randomFloat01() * n)`: scaling a
- * float spreads 2^56 outcomes over `n` buckets, which are equal in size only
- * when `n` is a power of two. The bias is tiny at small `n` but it is a bias in
- * a slot permutation, which is exactly the thing the permutation exists to
- * remove.
+ * Rejection-sampled rather than folding a random draw with `%` or scaling a
+ * float: either spreads a fixed number of outcomes over `n` buckets, which are
+ * equal in size only when `n` divides that number. The bias is tiny at small
+ * `n` but it is a bias in a slot permutation, which is exactly the thing the
+ * permutation exists to remove.
  *
  * `bytes` is injectable so a test can force a permutation; it must behave like
  * {@link randomBytes}.
@@ -120,9 +108,21 @@ export function shuffled<T>(items: readonly T[], pick: (n: number) => number = r
     return out;
 }
 
-/** 8 hex chars of randomness — local note ids. */
-export function shortId(): string {
+/**
+ * A local note id: 32 hex chars, 128 bits of randomness.
+ *
+ * Wide because the id is an identity, not a display label. It keys the
+ * nullifier memo, the spent-set passed to `markSpent`, and the `only` filter
+ * in selection — so two notes sharing one means an unrelated note is retired
+ * as spent and withheld from the selector until the next rescan.
+ *
+ * The previous 4 bytes made that a birthday problem over a wallet's note
+ * count: ~1% at 10k notes and ~69% at 100k, which denomination decomposition
+ * and per-spend change notes reach. At 16 bytes it is not a consideration.
+ * Nothing outside the wallet ever sees this value.
+ */
+export function noteId(): string {
     let h = "";
-    for (const x of randomBytes(4)) h += x.toString(16).padStart(2, "0");
+    for (const x of randomBytes(16)) h += x.toString(16).padStart(2, "0");
     return h;
 }

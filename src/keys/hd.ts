@@ -4,20 +4,45 @@
 // PRF: blake2b keyed with parent chain code. Domain byte 0x11 is reserved
 // for hardened sk-derivation; 0x12 is reserved for future non-hardened
 // ivk-derivation.
+//
+// v2 changed how a PRF block is drawn. v1 took `nsk` from the first 32 bytes
+// of one 64-byte blake2b output, which is 2 bits wider than BN254 Fr, so
+// reducing it skewed the low residues by about 6:5. `nsk` now comes off 40
+// bytes — 66 spare bits, see `reduceWideToField`.
+//
+// That needs 72 bytes and blake2b caps output at 64, so the two halves are two
+// keyed calls under the same key, separated by a leading domain byte, rather
+// than one wider call. The chain code keeps its full 32 bytes. The
+// personalisation string carries the version, so a v1 and a v2 tree cannot be
+// confused; every v1-derived key is invalidated.
 
 import { blake2b } from "@noble/hashes/blake2";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { InvalidArgumentError } from "../core/errors.js";
-import { BN254_FR } from "../core/field.js";
-import { fromLeBytes, toLeBytes } from "../crypto/bytes.js";
+import { BN254_FR, reduceWideToField } from "../core/field.js";
+import { toLeBytes } from "../crypto/bytes.js";
 import type { Field } from "../crypto/poseidon.js";
 
 const HARDENED_BIT = 0x80000000;
 /** Exclusive upper bound for user-facing index. */
 const MAX_INDEX = HARDENED_BIT;
 
-const MASTER_PERSONAL = new TextEncoder().encode("Lelantos_ZIP32_v1_Master");
+const MASTER_PERSONAL = new TextEncoder().encode("Lelantos_ZIP32_v2_Master");
+
+/**
+ * PRF draw widths.
+ *
+ * `NSK_BYTES` is 40 rather than 32 so the reduction into BN254 Fr keeps 66
+ * spare bits. Narrowing it reintroduces the v1 bias, so `reduceWideToField`
+ * throws rather than letting that happen quietly.
+ */
+const NSK_BYTES = 40;
+const CHAIN_CODE_BYTES = 32;
+
+/** Leading domain byte separating the two halves of a PRF block. */
+const PRF_NSK = 0x00;
+const PRF_CHAIN_CODE = 0x01;
 
 /**
  * Matches Sapling/Orchard convention.
@@ -42,9 +67,23 @@ export interface ExtendedSpendingKey {
     childIndex: number;
 }
 
-function reduceNsk(b: Uint8Array): Field {
-    const v = fromLeBytes(b) % BN254_FR;
-    return v === 0n ? 1n : v;
+/**
+ * One PRF block: `nsk` and the next chain code, keyed by `key` over `data`.
+ *
+ * Two calls rather than one wide one because blake2b maxes out at 64 bytes and
+ * the two halves need 72 between them.
+ */
+function prf(key: Uint8Array, data: Uint8Array): { nsk: Field; chainCode: Uint8Array } {
+    const tagged = (tag: number, dkLen: number): Uint8Array => {
+        const buf = new Uint8Array(1 + data.length);
+        buf[0] = tag;
+        buf.set(data, 1);
+        return blake2b(buf, { dkLen, key });
+    };
+    return {
+        nsk: reduceWideToField(tagged(PRF_NSK, NSK_BYTES), BN254_FR, "nsk"),
+        chainCode: tagged(PRF_CHAIN_CODE, CHAIN_CODE_BYTES),
+    };
 }
 
 function u32LE(n: number): Uint8Array {
@@ -70,10 +109,8 @@ function checkIndex(i: number, label: string): void {
  * @internal
  */
 export function masterFromSeed(seed: Uint8Array): ExtendedSpendingKey {
-    const I = blake2b(seed, { dkLen: 64, key: MASTER_PERSONAL });
     return {
-        nsk: reduceNsk(I.slice(0, 32)),
-        chainCode: I.slice(32, 64),
+        ...prf(MASTER_PERSONAL, seed),
         depth: 0,
         childIndex: 0,
     };
@@ -95,10 +132,8 @@ export function deriveChildHardened(
     data[0] = 0x11;
     data.set(u32LE(wireIndex), 1);
     data.set(nskBytes, 5);
-    const I = blake2b(data, { dkLen: 64, key: parent.chainCode });
     return {
-        nsk: reduceNsk(I.slice(0, 32)),
-        chainCode: I.slice(32, 64),
+        ...prf(parent.chainCode, data),
         depth: parent.depth + 1,
         childIndex: wireIndex,
     };

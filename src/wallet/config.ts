@@ -1,6 +1,7 @@
 // Wallet runtime configuration. Every external dependency is pluggable.
 
 import type { ChainAdapter } from "../chain/port.js";
+import type { DenominationPolicy } from "../core/denominations.js";
 import type { CircuitShape } from "../core/shape.js";
 import type { Prover, ProverPaths } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
@@ -25,9 +26,9 @@ export interface WalletConfig {
     /** Matches deployed contract + circuit build. */
     treeDepth: number;
     /**
-     * Input/output arity of the transact circuit. Defaults to
-     * `DEFAULT_SHAPE` (4×4). A narrower pool must pass `TRANSACT_3X3` or
-     * `TRANSACT_2X2` explicitly — see `core/shape.ts`.
+     * Input/output arity of the transact circuit. Defaults to `DEFAULT_SHAPE`
+     * (4×6), which is the only shape the circuits package still publishes keys
+     * for — see `core/shape.ts`.
      */
     shape?: CircuitShape | undefined;
     /** SNARK-bound; must equal relayer pipeline signer or contract reverts. */
@@ -73,6 +74,24 @@ export interface WalletConfig {
     prover?: Prover | undefined;
     /** Defaults to SFRT. */
     selector?: CoinSelector | undefined;
+    /**
+     * Which withdrawal ladders this wallet uses. Defaults to the built-ins.
+     *
+     * ```ts
+     * denominations: false                       // opt out entirely
+     * denominations: new Map([[token, [...]]])   // custom, replacing built-ins
+     * ```
+     *
+     * `false` restores pre-denomination behaviour everywhere: change splits
+     * evenly again, `previewWithdraw` reports no ladder, and `redenominate`
+     * becomes a no-op. Worth choosing on a chain the built-in table does not
+     * cover — a wallet conforming to a ladder nobody else uses is as
+     * distinguishable as one ignoring a ladder everyone follows.
+     *
+     * Applied when an `AssetInfo` is resolved, so it reaches every path at
+     * once and cannot drift between them.
+     */
+    denominations?: DenominationPolicy | undefined;
     /**
      * Defaults to `LocalScanner`. Use `WorkerPoolScanner` for parallel
      * off-main-thread scan.
