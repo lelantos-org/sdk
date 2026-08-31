@@ -178,7 +178,6 @@
         "check:wasm-imports": "node scripts/check-wasm-imports.mjs",
         "check:entropy": "node scripts/check-entropy.mjs",
         "check:api": "node scripts/check-public-api.mjs",
-        "check:docs": "node scripts/check-docs.mjs",
         "check:bundle-size": "node scripts/check-bundle-size.mjs",
         "check:bundle-budget": "node scripts/bundle-budget.mjs",
         "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm ./wasm/poseidon/wasm",

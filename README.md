@@ -21,7 +21,7 @@ values the SDK returns stay type-distinct.
 Runtime requirements: Node 24+, modern browsers, or Deno. The SDK uses Web
 Crypto and `fetch`; it contains no `node:*` imports.
 
-Full walkthrough: [SDK.md](./SDK.md).
+Full documentation: <https://docs.lelantos.xyz>.
 
 ## Installation
 
@@ -44,8 +44,9 @@ Consumers need a token with the `read:packages` scope.
 
    `@lelantos-org/circuits` is an optional peer dependency. When present,
    `connect()` resolves prover artifacts automatically on Node. Browser callers
-   pass `proverArtifacts: { circuit, zkey }` to `connect()` instead; see
-   [SDK.md](./SDK.md) for the bundler asset-import pattern.
+   pass `proverArtifacts: { circuit, zkey }` to `connect()` instead; see the
+   [browser guide](https://docs.lelantos.xyz/guide/browser) for the bundler
+   asset-import pattern.
 
 3. In CI, pass the auto-provisioned `GITHUB_TOKEN`:
 
