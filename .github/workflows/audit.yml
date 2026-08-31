@@ -1,0 +1,80 @@
+name: Audit
+
+# Split out of `ci.yml`: auditing needs the two lockfiles and the advisory
+# databases, not a build. Nothing here depends on `dist/` or the WASM `pkg/`
+# output, so it runs alongside the build rather than after it.
+#
+# Also runs on a schedule. A new advisory lands against an unchanged lockfile
+# far more often than a dependency changes, and a push-only audit would not
+# notice until someone happened to open a PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 05:17 UTC daily. Off the hour on purpose — GitHub drops scheduled runs
+    # under load, and the top of the hour is the worst slot to ask for.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-node-deps
+        with:
+          npm-token: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # Production deps only. The tree's one GitHub Packages dependency
+      # (`@lelantos-org/circuits`, dev-only) cannot be signature-verified:
+      # GitHub Packages serves no registry signatures and no
+      # `/-/npm/v1/keys` endpoint, so npm cannot fetch verification keys for
+      # it and the audit fails on that package alone. Everything that ships
+      # to consumers comes from npmjs and is still verified here.
+      - name: Audit npm package signatures
+        run: npm audit signatures --omit=dev
+
+      # Two thresholds, because the two trees carry different risk. Everything
+      # under `--omit=dev` is code that runs in a consumer's wallet, so any
+      # advisory at all fails the run. The dev tree is build- and test-only and
+      # its transitive churn is constant (today: one low esbuild advisory about
+      # its dev server on Windows, via tsx), so it fails at `high` and merely
+      # reports below that. Run `npm audit fix` locally when this trips.
+      - name: "Audit npm dependencies (prod: any, full tree: high)"
+        run: npm run check:audit
+
+  cargo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `cargo audit` reads `wasm/Cargo.lock` and the RustSec database. It does
+      # not build, so this job wants neither the wasm32 target, `rust-src`, nor
+      # the pinned nightly that `ci.yml` installs — the runner's stock stable
+      # toolchain is enough.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # The Rust tree compiles into the `.wasm` blobs that ship to consumers, so
+      # it gets the same treatment as the prod npm tree: an advisory fails the
+      # run. Reasoned exceptions live in `wasm/.cargo/audit.toml`, which
+      # cargo-audit resolves relative to the working directory.
+      # Run from `wasm/` rather than via the `check:audit:wasm` npm script, so
+      # this job needs no `npm ci` at all. cargo-audit resolves its config
+      # relative to the working directory either way.
+      - name: Audit Rust dependencies
+        working-directory: wasm
+        run: cargo audit

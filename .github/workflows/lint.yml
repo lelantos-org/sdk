@@ -1,0 +1,48 @@
+name: Lint
+
+# Split out of `ci.yml`: every check here reads `src/` off the disk and nothing
+# else — no `dist/`, no WASM `pkg/`, no Rust toolchain. Keeping them in their
+# own workflow means a misplaced `node:` import or a stray `Math.random` fails
+# in well under a minute instead of behind a WASM build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-node-deps
+        with:
+          npm-token: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: "Browser-safety lint (no node: imports under src/)"
+        run: npm run check:browser-safe
+
+      - name: "Layer lint (tier ladder + no export *)"
+        run: npm run check:layers
+
+      - name: "WASM subpath lint (literal #wasm/* specifiers)"
+        run: npm run check:wasm-imports
+
+      - name: "Entropy lint (no Math.random under src/)"
+        run: npm run check:entropy

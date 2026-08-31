@@ -112,3 +112,9 @@ bench:
     @[ -f {{JUBJUB}}/pkg/jubjub_wasm.js ] || just jubjub-build
     @[ -f {{PROVER}}/pkg/prover.js ] || just prover-build
     cd .. && node scripts/bench-wasm.mjs
+
+# Audit the workspace lockfile against the RustSec advisory database.
+# Reasoned exceptions live in `.cargo/audit.toml`.
+audit:
+    ( command -v cargo-audit >/dev/null || cargo install cargo-audit )
+    cargo audit

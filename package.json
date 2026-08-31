@@ -183,6 +183,8 @@
         "check:bundle-budget": "node scripts/bundle-budget.mjs",
         "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm ./wasm/poseidon/wasm",
         "check:pack": "node scripts/check-pack.mjs",
+        "check:audit": "npm audit --omit=dev --audit-level=low && npm audit --audit-level=high",
+        "check:audit:wasm": "cd wasm && cargo audit",
         "prepare": "lefthook install >/dev/null 2>&1 || true",
         "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
     },

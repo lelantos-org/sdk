@@ -1,5 +1,14 @@
 name: CI
 
+# Static lints live in `lint.yml` and dependency auditing in `audit.yml`; both
+# run without a Rust toolchain and start in parallel with this workflow.
+#
+# What is left is everything that needs the compiled WASM packages. Those are
+# built once in `wasm` and handed to the three consumers as an artifact, so the
+# build/test/bench legs run concurrently instead of queueing behind each other
+# on a single runner. Splitting them into separate *workflows* instead would
+# mean three independent WASM builds — artifacts are scoped to a run.
+
 on:
   push:
     branches: [main]
@@ -18,7 +27,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
+  # ---------------------------------------------------------------------------
+  # Builds `wasm/*/pkg` and publishes it. Everything below `needs:` this.
+  # ---------------------------------------------------------------------------
+  wasm:
+    name: "WASM build"
     runs-on: ubuntu-latest
     env:
       # Pinned here rather than on the install step: the WASM package cache key
@@ -28,73 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - uses: rui314/setup-mold@v1
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: nightly-2025-06-23
-          components: rust-src
-          target: wasm32-unknown-unknown
-          rustflags: ""
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: wasm
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-pack
-
-      # wasm-pack uses `wasm-opt` from PATH when it can find one, and otherwise
-      # downloads a pinned binaryen from GitHub releases — a fetch that is not
-      # reliable from hosted runners and has no retry. All three crates set
-      # load-bearing `wasm-opt` flags (`-O4`, and SIMD/threads where the crate
-      # uses them) and the build is
-      # size-budgeted, so skipping the optimiser is not an option; installing it
-      # is. Keep this before any `just build`.
-      #
-      # Not `apt-get install binaryen`: the runners' `azure.archive.ubuntu.com`
-      # mirrorlist intermittently stalls `apt-get update` for tens of minutes
-      # with no retry cap, and noble ships binaryen 116. Fetch the upstream
-      # release tarball instead — pinned by version and sha256, retried, ~2s.
-      - name: Install binaryen (provides wasm-opt)
-        run: |
-          set -euo pipefail
-          tag="version_${BINARYEN_VERSION}"
-          tarball="binaryen-${tag}-x86_64-linux.tar.gz"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 \
-            -o "$RUNNER_TEMP/$tarball" \
-            "https://github.com/WebAssembly/binaryen/releases/download/${tag}/${tarball}"
-          echo "${BINARYEN_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/binaryen-${tag}/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/binaryen-${tag}/bin/wasm-opt" --version
-
-      - uses: extractions/setup-just@v2
-
-      - name: Install dependencies
-        run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
-
-      # Production deps only. The tree's one GitHub Packages dependency
-      # (`@lelantos-org/circuits`, dev-only) cannot be signature-verified:
-      # GitHub Packages serves no registry signatures and no
-      # `/-/npm/v1/keys` endpoint, so npm cannot fetch verification keys for
-      # it and the audit fails on that package alone. Everything that ships
-      # to consumers comes from npmjs and is still verified here.
-      - name: Audit npm package signatures
-        run: npm audit signatures --omit=dev
-
       # Git already hashes the tree: `HEAD:wasm` is the id of the `wasm/`
       # directory as committed, so it changes exactly when a tracked file under
       # it does. `hashFiles('wasm/**')` would instead walk `wasm/target/`, which
-      # `Swatinem/rust-cache` restores above and whose build-script output is not
+      # `Swatinem/rust-cache` restores below and whose build-script output is not
       # reproducible run to run.
       - name: Identify the WASM source tree
         id: wasm-tree
@@ -116,27 +66,101 @@ jobs:
             wasm/poseidon/pkg
           key: wasm-pkg-${{ runner.os }}-binaryen${{ env.BINARYEN_VERSION }}-${{ steps.wasm-tree.outputs.id }}
 
+      # Every toolchain step below is gated on the cache miss. On a hit this job
+      # is a checkout, a cache restore and an upload — roughly a minute — and
+      # the three consumers start that much sooner.
+      - uses: rui314/setup-mold@v1
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
+        with:
+          toolchain: nightly-2025-06-23
+          components: rust-src
+          target: wasm32-unknown-unknown
+          rustflags: ""
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
+        with:
+          workspaces: wasm
+
+      - uses: taiki-e/install-action@v2
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
+        with:
+          tool: wasm-pack
+
+      # wasm-pack uses `wasm-opt` from PATH when it can find one, and otherwise
+      # downloads a pinned binaryen from GitHub releases — a fetch that is not
+      # reliable from hosted runners and has no retry. All three crates set
+      # load-bearing `wasm-opt` flags (`-O4`, and SIMD/threads where the crate
+      # uses them) and the build is
+      # size-budgeted, so skipping the optimiser is not an option; installing it
+      # is. Keep this before any `just build`.
+      #
+      # Not `apt-get install binaryen`: the runners' `azure.archive.ubuntu.com`
+      # mirrorlist intermittently stalls `apt-get update` for tens of minutes
+      # with no retry cap, and noble ships binaryen 116. Fetch the upstream
+      # release tarball instead — pinned by version and sha256, retried, ~2s.
+      - name: Install binaryen (provides wasm-opt)
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          tag="version_${BINARYEN_VERSION}"
+          tarball="binaryen-${tag}-x86_64-linux.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 \
+            -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/WebAssembly/binaryen/releases/download/${tag}/${tarball}"
+          echo "${BINARYEN_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-${tag}/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/binaryen-${tag}/bin/wasm-opt" --version
+
+      - uses: extractions/setup-just@v2
+        if: steps.wasm-pkg.outputs.cache-hit != 'true'
+
       - name: Build WASM crates
         if: steps.wasm-pkg.outputs.cache-hit != 'true'
         run: cd wasm && just build
 
-      - name: Format check
-        run: npm run format:check
+      # Reads the three `_bg.wasm` files and nothing else, so it belongs here
+      # rather than in a consumer — and it runs on a cache hit too, which keeps
+      # the budget honest if the limits in the script are ever lowered.
+      - name: WASM size budget
+        run: node scripts/check-wasm-size.mjs
 
-      - name: Lint
-        run: npm run lint
+      # The three paths share the `wasm/` prefix, so the artifact is rooted
+      # there and `path: wasm` on the download side puts them back exactly.
+      - name: Upload WASM packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: |
+            wasm/prover/pkg
+            wasm/jubjub/pkg
+            wasm/poseidon/pkg
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: "Browser-safety lint (no node: imports under src/)"
-        run: npm run check:browser-safe
+  # ---------------------------------------------------------------------------
+  # Type-check, compile, and everything that inspects the compiled `dist/`.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build and package checks"
+    needs: wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: "Layer lint (tier ladder + no export *)"
-        run: npm run check:layers
+      - uses: ./.github/actions/setup-node-deps
+        with:
+          npm-token: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: "WASM subpath lint (literal #wasm/* specifiers)"
-        run: npm run check:wasm-imports
-
-      - name: "Entropy lint (no Math.random under src/)"
-        run: npm run check:entropy
+      - name: Download WASM packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: wasm
 
       - name: Sync version
         run: node scripts/sync-version.mjs
@@ -159,6 +183,32 @@ jobs:
       - name: "Docs type-check (README + SDK.md code blocks)"
         run: npm run check:docs
 
+      - name: Publish hygiene (publint + attw)
+        run: npm run check:publish
+
+      - name: Verify packed contents
+        run: npm run check:pack
+
+  # ---------------------------------------------------------------------------
+  # Unit suite. Runs from `src/`, so it needs the WASM packages but not `dist/`.
+  # ---------------------------------------------------------------------------
+  test:
+    name: "Unit tests"
+    needs: wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-node-deps
+        with:
+          npm-token: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Download WASM packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: wasm
+
       - name: Test (with coverage)
         run: npm run test:coverage
 
@@ -169,6 +219,27 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
+  # ---------------------------------------------------------------------------
+  # The long pole. Its own job so it overlaps `build` and `test` rather than
+  # adding its wall clock to theirs.
+  # ---------------------------------------------------------------------------
+  bench:
+    name: "Prover parity"
+    needs: wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-node-deps
+        with:
+          npm-token: ${{ secrets.PACKAGES_READ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Download WASM packages
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: wasm
+
       # The only coverage that runs the Rust prover and verifies its output
       # against the companion's verification key, for both shapes. `npm test`
       # excludes `*.bench.ts` to stay fast, so without this step nothing in CI
@@ -176,11 +247,19 @@ jobs:
       - name: "Prover parity (wasm vs snarkjs, both shapes)"
         run: npm run test:bench
 
-      - name: WASM size budget
-        run: node scripts/check-wasm-size.mjs
-
-      - name: Publish hygiene (publint + attw)
-        run: npm run check:publish
-
-      - name: Verify packed contents
-        run: npm run check:pack
+  # ---------------------------------------------------------------------------
+  # Single stable check for branch protection. Job names above can change
+  # freely; a required status named `CI` keeps pointing at this one. `always()`
+  # is what makes a skipped or cancelled upstream job fail the gate rather than
+  # silently pass it.
+  # ---------------------------------------------------------------------------
+  ci:
+    name: CI
+    if: always()
+    needs: [wasm, build, test, bench]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          echo '${{ toJSON(needs) }}'
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "false" ]

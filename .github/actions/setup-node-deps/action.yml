@@ -1,0 +1,26 @@
+name: "Setup Node and install dependencies"
+description: >
+  Pins Node from .nvmrc, restores the npm cache and runs `npm ci`. Split out
+  because every job in the CI fan-out needs exactly this preamble, and the
+  auth token below is easy to forget: `npm ci` pulls `@lelantos-org/circuits`
+  and `@lelantos-org/contracts` from GitHub Packages and 401s without it.
+
+inputs:
+  npm-token:
+    description: "Token with `packages: read` for the GitHub Packages registry."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.npm-token }}

@@ -1,0 +1,25 @@
+# `cargo audit` configuration for the WASM workspace.
+#
+# The crates here compile into the `.wasm` blobs that ship to consumers, so
+# advisories against this lockfile are treated as CI failures. Anything listed
+# below is a deliberate, reasoned exception — not a snooze. Re-check each entry
+# whenever the dependency that pulls it in is bumped.
+
+[advisories]
+ignore = [
+    # tracing-subscriber 0.2.25, pinned transitively by `ark-relations` 0.5.1
+    # (via ark-groth16 -> ark-crypto-primitives -> ark-snark). The fix is
+    # >=0.3.20, a semver-major we cannot take without arkworks moving first.
+    #
+    # Not reachable here regardless: the advisory is about ANSI escape
+    # sequences in *attacker-controlled text written to a terminal log*, and
+    # this workspace builds for `wasm32-unknown-unknown` with no subscriber
+    # installed and no terminal to poison. Drop this entry when arkworks
+    # upgrades.
+    "RUSTSEC-2025-0055",
+]
+
+# `derivative` (RUSTSEC-2024-0388) and `paste` (RUSTSEC-2024-0436) are
+# unmaintained-crate warnings, also from the arkworks tree. They are reported
+# but do not fail the run.
+informational_warnings = ["unmaintained", "unsound"]
