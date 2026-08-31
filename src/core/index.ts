@@ -138,5 +138,13 @@ export {
 } from "./shape.js";
 export type { Eip1193ProviderLike, EthSigner } from "./signer.js";
 export { requestPersistentStorage } from "./storage.js";
-export { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "./units.js";
+export {
+    formatUnits,
+    parseUnits,
+    RAY,
+    toCircuitUnits,
+    toTokenUnits,
+    toTokenUnitsAtRate,
+    type YieldRate,
+} from "./units.js";
 export { isHttpUrl, toAbsoluteUrl, type Url, urlToString } from "./url.js";

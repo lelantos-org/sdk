@@ -193,6 +193,25 @@ export function parseAmount(value: string | number | bigint, asset: AssetInfo): 
     const meta = requireTokenMeta(asset);
     return toCircuitUnits(branded(parseUnits(value, meta.decimals)), meta.scale, {
         index: meta.index,
+        // Two genuinely different situations, which is why the policy lives here
+        // rather than in `toCircuitUnits` — that primitive keeps honouring
+        // whatever a caller asks for explicitly.
+        //
+        // A plain asset's granularity is fixed at `scale`, so an amount finer
+        // than that was never representable and silently truncating it would
+        // short the user without saying so. It throws, as it always has.
+        //
+        // Under a moving index a unit is worth a non-round number of base
+        // units, so most human amounts have no exact equivalent — including the
+        // ones `formatAmount` itself produces. Refusing them would make a yield
+        // asset unusable through this API, and rounding down is the safe reading
+        // of an ambiguous amount: the caller gets slightly less than they asked
+        // for, never more than they hold.
+        // `?? RAY` is load-bearing: an asset whose index is unknown must keep
+        // the strict behaviour rather than fall through to the lossy branch.
+        // Treating "no index" as "yielding" would silently truncate on exactly
+        // the assets we know least about.
+        round: (meta.index ?? RAY) === RAY ? "exact" : "down",
     });
 }
 

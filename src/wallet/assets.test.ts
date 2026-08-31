@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChainAdapter } from "../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../core/brand.js";
+import { RAY } from "../core/units.js";
 import {
     type AssetInfo,
     type AssetInfoWithMeta,
@@ -113,5 +114,50 @@ describe("token-metadata narrowing", () => {
 
     it("passes a resolved asset straight through", () => {
         expect(requireTokenMeta(WETH)).toBe(WETH);
+    });
+});
+
+// Once a venue has earned, a unit is worth a non-round number of base units, so
+// most human amounts have no exact circuit-unit equivalent — including the one
+// `formatAmount` itself produces. Refusing them would make a yield asset
+// unusable through the wallet's own API.
+describe("parseAmount on a yield asset", () => {
+    // 1.1 × RAY: the venue has earned 10%.
+    const INDEX = (RAY * 11n) / 10n;
+    const EARNING: AssetInfoWithMeta = requireTokenMeta(
+        makeAssetInfo({
+            id: assetId(2n),
+            token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            scale: 1n,
+            decimals: 6,
+            symbol: "USDC",
+            index: INDEX,
+            yieldEnabled: true,
+        }),
+    );
+
+    it("accepts an amount that is not a whole number of units", () => {
+        expect(() => parseAmount("1", EARNING)).not.toThrow();
+    });
+
+    // Down, never up: the user asks for slightly less than they typed rather
+    // than for more than they hold.
+    it("rounds down rather than refusing", () => {
+        const units = parseAmount("1", EARNING);
+        expect(formatAmount(units, EARNING)).not.toBe("");
+        expect(units).toBeLessThanOrEqual(1_000_000n);
+    });
+
+    it("still round-trips what formatAmount wrote, without exceeding it", () => {
+        for (const units of [1n, 7n, 123_456n]) {
+            const text = formatAmount(circuitAmount(units), EARNING);
+            expect(parseAmount(text, EARNING)).toBeLessThanOrEqual(units);
+        }
+    });
+
+    // A plain asset's granularity is fixed, so anything finer was never
+    // representable and truncating it silently would short the user.
+    it("still refuses an unrepresentable amount on a plain asset", () => {
+        expect(() => parseAmount("0.0000000000000001", WETH)).toThrow();
     });
 });
