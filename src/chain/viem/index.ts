@@ -60,6 +60,16 @@ export class ViemChainAdapter implements ChainAdapter {
     private readonly _nativeAdapterAddress?: EvmAddress | undefined;
     private readonly chainIdOverride?: bigint | undefined;
     private cachedChainId?: bigint;
+    /**
+     * Whether this pool answers `yieldState`, remembered after the first
+     * `fetchAsset`.
+     *
+     * Probing is the read itself: a pool without the mixin reverts, and that
+     * costs an eth_call per asset fetched. One `false` here is enough to stop
+     * paying it — the selector cannot appear on a pool that has already been
+     * observed not to have it, since the code at an address does not change.
+     */
+    private poolYields?: boolean;
 
     constructor(opts: ViemChainAdapterOpts) {
         this.publicClient = createPublicClient({ transport: http(opts.rpcUrl) });
@@ -97,8 +107,21 @@ export class ViemChainAdapter implements ChainAdapter {
         return Number(await this.publicClient.getBlockNumber());
     }
 
-    fetchAsset(id: AssetId): Promise<AssetEntry> {
-        return reads.fetchAsset(this.ctx, id);
+    /**
+     * The registry entry, with the yield fields folded in when the pool has
+     * them.
+     *
+     * Composed here rather than inside `reads.fetchAsset` so that the
+     * "does this pool yield at all" answer can be remembered across calls:
+     * that is per-pool state, and the pool is what this class is.
+     */
+    async fetchAsset(id: AssetId): Promise<AssetEntry> {
+        const entry = await reads.fetchAsset(this.ctx, id);
+        if (this.poolYields === false) return entry;
+
+        const y = await reads.fetchAssetYield(this.ctx, id);
+        this.poolYields = y !== undefined;
+        return y ? { ...entry, ...y } : entry;
     }
     getEscrowed(id: bigint): Promise<EscrowedDepositView | null> {
         return reads.getEscrowed(this.ctx, id);

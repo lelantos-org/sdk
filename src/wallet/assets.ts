@@ -171,6 +171,11 @@ export async function fetchAssetInfo(
         yieldEnabled: entry.yieldEnabled ?? false,
         ladder: resolveLadder({ scale: entry.scale, decimals: meta?.decimals }, denominations),
     };
+    // Only when the adapter priced it. Assigned rather than spread with a
+    // default: `rate` has no identity value — a yielding asset without one
+    // cannot be quoted at all, and `scale` is not a safe stand-in, it is wrong
+    // by whatever the venue has earned.
+    if (entry.rate) info.rate = entry.rate;
     if (meta) {
         info.symbol = meta.symbol;
         info.decimals = meta.decimals;

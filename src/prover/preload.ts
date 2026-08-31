@@ -1,6 +1,7 @@
 // Eager WASM warmup. Idempotent — modules cache themselves after first build.
 
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
+import { loadWasmProver } from "./load-wasm-prover.js";
 import type { ProverPaths } from "./types.js";
 
 /** @internal */
@@ -22,7 +23,7 @@ export interface PreloadOpts {
 export async function preloadWasm(opts: PreloadOpts = {}): Promise<void> {
     const tasks: Promise<unknown>[] = [WasmJubjub.build()];
     if (opts.prover !== false) {
-        const { WasmProver } = await import("./wasm-prover.js");
+        const { WasmProver } = await loadWasmProver();
         tasks.push(WasmProver.preload(typeof opts.prover === "object" ? opts.prover : undefined));
     }
     await Promise.all(tasks);

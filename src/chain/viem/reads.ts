@@ -4,9 +4,10 @@ import { decodeEventLog } from "viem";
 import { type AssetId, branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { TxMiningError } from "../../core/errors.js";
 import { fieldToBytes32 } from "../../core/hex.js";
+import { RAY } from "../../core/units.js";
 import type { Field } from "../../crypto/index.js";
 import type { AssetEntry, DepositEscrowedRecord, EscrowedDepositView } from "../types.js";
-import { MASP_ABI } from "./abi.js";
+import { MASP_ABI, YIELD_VENUE_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
 import { evmBlockNumber } from "./evm-block.js";
 
@@ -35,6 +36,74 @@ export async function fetchAsset(ctx: ViemCtx, id: AssetId): Promise<AssetEntry>
         disabled,
         depositBps: BigInt(depositBps),
         withdrawBps: BigInt(withdrawBps),
+    };
+}
+
+/** The yield half of an {@link AssetEntry}, read off the pool's mixin. */
+export type AssetYield = Pick<AssetEntry, "index" | "yieldEnabled" | "rate">;
+
+/** `address(0)` — what `yieldState.venue` reads back as for a plain asset. */
+const ZERO_ADDRESS = `0x${"0".repeat(40)}` as const;
+
+/**
+ * `yieldState(id)`, or `undefined` when the pool has no such selector.
+ *
+ * The revert is load-bearing rather than an error to report: a pool deployed
+ * before the mixin cannot answer this at all, and every asset on it is a plain
+ * one — which is what makes the read backwards compatible. It is not
+ * distinguishable from an RPC failure, and deliberately so: the alternative is
+ * failing `fetchAsset` outright on a pool where nothing yields.
+ *
+ * Split from its caller so the catch covers exactly this probe. Reading the
+ * *venue* afterwards is a call to a contract the pool just named, and a failure
+ * there is a real fault that must not read as "no yield".
+ */
+async function readYieldState(ctx: ViemCtx, id: AssetId) {
+    try {
+        return await ctx.publicClient.readContract({
+            address: ctx.maspAddress,
+            abi: MASP_ABI,
+            functionName: "yieldState",
+            args: [id],
+        });
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * The asset's yield fields, or `undefined` when the pool has no yield mixin.
+ *
+ * Two calls at most, and the second only for an id that actually yields:
+ * `yieldState` answers both "does this id yield" — `venue` is zero when it does
+ * not — and, for one that does, everything except the venue's own position.
+ */
+export async function fetchAssetYield(ctx: ViemCtx, id: AssetId): Promise<AssetYield | undefined> {
+    const state = await readYieldState(ctx, id);
+    if (!state) return undefined;
+
+    // A plain id on a pool that does have the mixin. `index` is `RAY` here by
+    // construction — nothing is outstanding against a venue that is not bound —
+    // and there is no rate, because `scale` alone is already exact.
+    if (state.venue === ZERO_ADDRESS) return { index: RAY, yieldEnabled: false };
+
+    const lent = await ctx.publicClient.readContract({
+        address: branded<EvmAddress>(state.venue),
+        abi: YIELD_VENUE_ABI,
+        functionName: "totalAssets",
+    });
+
+    return {
+        index: state.index,
+        yieldEnabled: true,
+        // `gross` is the venue position plus what the pool is holding back;
+        // `supply` is every normalized unit written against it, the depositors'
+        // and the accrued performance fee's alike. Skimming the fee out of
+        // `supply` would price the rest above what the pool will actually pay.
+        rate: {
+            gross: lent + state.idle,
+            supply: state.totalNormalized + state.accruedFeeNormalized,
+        },
     };
 }
 

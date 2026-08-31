@@ -1,7 +1,7 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.33.1",
-    "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
+    "version": "0.34.0",
+    "description": "Lelantos MASP client SDK \u2014 keys, notes, FMD, prover.",
     "license": "MIT",
     "author": "Lelantos",
     "type": "module",
@@ -188,11 +188,15 @@
     },
     "peerDependencies": {
         "@lelantos-org/circuits": "0.12.1",
+        "circom_runtime": "^0.1.28",
         "snarkjs": "^0.7.4",
         "viem": "^2.49.3"
     },
     "peerDependenciesMeta": {
         "@lelantos-org/circuits": {
+            "optional": true
+        },
+        "circom_runtime": {
             "optional": true
         },
         "snarkjs": {
@@ -204,7 +208,6 @@
         "@noble/hashes": "^1.5.0",
         "@scure/bip39": "^1.3.0",
         "bech32": "^2.0.0",
-        "circom_runtime": "^0.1.28",
         "poseidon-lite": "^0.3.0"
     },
     "devDependencies": {
@@ -214,6 +217,7 @@
         "@lelantos-org/contracts": "0.5.0",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "^4.1.5",
+        "circom_runtime": "^0.1.28",
         "esbuild": "^0.28.2",
         "lefthook": "^1.8.0",
         "publint": "^0.3.0",

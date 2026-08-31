@@ -2,6 +2,7 @@
 // apart from the port in `./port.ts`.
 
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
+import type { YieldRate } from "../core/units.js";
 
 export interface AssetEntry {
     token: EvmAddress;
@@ -35,6 +36,16 @@ export interface AssetEntry {
      * from `index` alone: a freshly enabled asset sits at exactly `RAY`.
      */
     yieldEnabled?: boolean;
+    /**
+     * The pool's own `{ gross, supply }` ratio, for sizing a payment.
+     *
+     * Present only for a yield asset on an adapter that reads it. {@link index}
+     * above is floored on chain, so converting a *charge* through it can land
+     * below what the contract takes and a Permit2 `maxTotal` signed off that
+     * figure is refused; this pair is what the pool itself divides by. Absent
+     * on a plain asset, where `scale` alone is exact.
+     */
+    rate?: YieldRate;
 }
 
 export interface Permit2SignArgs {

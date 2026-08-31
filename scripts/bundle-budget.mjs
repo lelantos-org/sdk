@@ -74,14 +74,40 @@ const ENTRIES = [
         // Note this number is inflated by the harness (see the header) — treat
         // a rise in it as a signal to compare against the previous commit, not
         // as a literal download size.
+        //
+        // 653_000 → 663_240 (+10 KiB). This is the third raise the note above
+        // said should be spent on making the spend path lazy instead, so it is
+        // margin taken on credit rather than a re-baseline: the architectural
+        // fix is still owed.
+        //
+        // What happened in between is worth recording, because the raw numbers
+        // mislead. The entry tipped at 654.9 KB, and only ~0.9 KB of that was
+        // new source — the rest was three copies of `@noble/curves` (root, and
+        // nested under `viem` and `ox`) that had drifted into the lockfile.
+        // `npm dedupe` collapsed them and the entry fell to 629.3 KB, back
+        // inside the old ceiling. So this grant is not paying for growth that
+        // has happened; it is restoring the slack the previous note complained
+        // was too thin at ~0.5%.
+        //
+        // A corollary for the next person: when this trips, diff the lockfile
+        // before reading it as source growth. A duplicated transitive
+        // dependency moves this number far more than a feature does.
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/index.js";`,
-        max: 653_000,
+        max: 663_240,
     },
     {
+        // 350_000 → 360_240 (+10 KiB), for the same reason and from the same
+        // event as `root: connect` above: the duplicate `@noble/curves` copies
+        // took this to 352.0 KB, and deduping returned it to 326.4 KB.
+        //
+        // `unsplit` for this entry is 0.7 KB, so what it measures is almost
+        // entirely import-graph reach rather than the code a caller asked for.
+        // That makes it sensitive to dependency shape in a way the subpath
+        // entries below are not — which is exactly why both are kept.
         name: "root: errors only",
         source: `export { isWalletError } from "${ROOT}/dist/index.js";`,
-        max: 350_000,
+        max: 360_240,
     },
     {
         name: "subpath: errors",

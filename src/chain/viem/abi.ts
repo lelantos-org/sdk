@@ -17,6 +17,12 @@ import { parseAbi } from "viem";
 export const MASP_ABI = /* @__PURE__ */ parseAbi([
     "function asset(uint64 id) view returns ((address token, bool disabled, uint16 depositBps, uint16 withdrawBps, uint256 scale))",
     "function assetFees(uint64 id) view returns (uint16 depositBps, uint16 withdrawBps)",
+    // The yield mixin. One view rather than a getter per mapping, because the
+    // pool sits close to the EIP-170 limit — so this is also the cheapest way
+    // to learn whether an asset yields at all: `venue` is the zero address for
+    // a plain id. Absent entirely on a pool built before the mixin, where the
+    // call reverts; `reads.fetchAssetYield` treats that as "no yield".
+    "function yieldState(uint64 id) view returns ((address venue, uint16 bufferBps, uint16 perfBps, bool halted, uint256 totalNormalized, uint256 accruedFeeNormalized, uint256 idle, uint256 lastIdx, uint256 index))",
     "function treasury() view returns (address)",
     "function cancelDelay() view returns (uint32)",
     "function nextDepositId() view returns (uint256)",
@@ -52,6 +58,18 @@ export const NATIVE_ADAPTER_ABI = /* @__PURE__ */ parseAbi([
     "function cancelNative(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, uint32 submittedAt, (uint48 feeIn, bytes32 feeCm, uint256[2] feeCvDep) feeNote)",
     "event NativeDeposited(uint256 indexed id, address indexed refundTo, uint256 escrowed, uint256 returned)",
     "event NativeRefunded(uint256 indexed id, address indexed refundTo, uint256 amount)",
+]);
+
+/**
+ * The venue leg of a yield asset's gross position.
+ *
+ * Its own deployment, one per yield asset, so it is not part of `MASP_ABI` —
+ * the pool reports the idle half and the units outstanding, and the venue
+ * reports what is lent out. The two are added to get the `gross` the pool
+ * divides by.
+ */
+export const YIELD_VENUE_ABI = /* @__PURE__ */ parseAbi([
+    "function totalAssets() view returns (uint256)",
 ]);
 
 export const ERC20_ABI = /* @__PURE__ */ parseAbi([

@@ -8,6 +8,7 @@ import { getLogger } from "../log/logger.js";
 import { timed } from "../log/timed.js";
 import { serveWorkerRpc } from "../worker/serve.js";
 import { configureArtifactCache } from "./artifacts.js";
+import { loadWasmProver } from "./load-wasm-prover.js";
 import type { ProverPaths } from "./types.js";
 import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
 
@@ -28,7 +29,7 @@ async function getProver(
     paths: ProverPaths,
     setup: WorkerSetup,
 ): Promise<import("./wasm-prover.js").WasmProver> {
-    const wp = await import("./wasm-prover.js");
+    const wp = await loadWasmProver();
     if (!setupApplied) {
         setupApplied = true;
         if (typeof setup.threads === "number") wp.configureProverThreads(setup.threads);

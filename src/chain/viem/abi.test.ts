@@ -50,11 +50,17 @@ const fingerprint = (i: AbiItem): string => `${sigOf(i)} -> ${outputsOf(i)}`;
 
 /**
  * Entries that do not match the deployed contract, enumerated rather than
- * skipped wholesale. Empty: the SDK speaks the single-leaf deposit flow, and
- * the native paths live on `NativeAdapter` where the pool moved them.
- * Anything added here is a live incompatibility, not a style difference.
+ * skipped wholesale. Anything here is a live incompatibility, not a style
+ * difference.
+ *
+ * `yieldState` is the SDK running ahead of the published contracts package:
+ * the yield mixin is not in `@lelantos-org/contracts@0.5.0`, so there is
+ * nothing to compare the entry against yet. `reads.fetchAssetYield` is written
+ * for exactly that — a pool without the selector reverts and reads as "no
+ * yield" — so the SDK is correct against both shapes meanwhile. Drop this once
+ * the package ships the mixin; the test below then fails until it is removed.
  */
-const PENDING_MIGRATION = new Set<string>([]);
+const PENDING_MIGRATION = new Set<string>(["function:yieldState"]);
 
 /**
  * The pool and the native bridge are separate deployments, so each

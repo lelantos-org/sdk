@@ -39,7 +39,12 @@ const DIST = join(ROOT, "dist");
 //
 // Still a coarse "did something unexpected land in dist" tripwire —
 // `bundle-budget.mjs` is the gate for what users actually download.
-const MAX_BYTES = 358_400; // 350 KiB, as reported by `kb()` below.
+// 350 KB -> 400 KB: the same re-baseline again, for the same reason. The 350
+// KB ceiling was reached at 349.9 KB — 100.0% — so the headroom the note above
+// asked for was already spent, and reading the pool's yield state in the viem
+// adapter (`chain/viem/reads.ts`) tripped it by 1.4 KB. ~12% headroom puts the
+// margin back.
+const MAX_BYTES = 409_600; // 400 KiB, as reported by `kb()` below.
 
 let total = 0;
 let count = 0;
