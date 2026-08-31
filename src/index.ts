@@ -80,14 +80,13 @@ export {
 // ── amounts + HTTP options ───────────────────────────────────────────────
 export { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "./core/units.js";
 export {
-    BUILT_IN_LADDERS,
     type Decomposition,
     decompose,
     type DenominationPolicy,
     descendingAtMost,
     isDenomination,
     type Ladder,
-    ladderFor,
+    type LadderInputs,
     largestAtMost,
     nearest,
     resolveLadder,

@@ -56,10 +56,9 @@ export interface WithdrawPreview {
      */
     onLadder: boolean;
     /**
-     * Whether the asset has a ladder at all — `false` when no ladder is defined
-     * for the token, or when the wallet opted out via
-     * `WalletConfig.denominations`. `onLadder` is always `false` when this is,
-     * and means nothing in that case.
+     * Whether the asset has a ladder at all — `false` only when the wallet
+     * opted out via `WalletConfig.denominations`. `onLadder` is always `false`
+     * when this is, and means nothing in that case.
      */
     hasLadder: boolean;
     /** The asset's denominations, ascending. Empty when it has none. */

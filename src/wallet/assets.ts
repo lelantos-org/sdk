@@ -3,6 +3,7 @@
 // address, `scale`, symbol, decimals) is gathered here.
 
 import type { ChainAdapter } from "../chain/port.js";
+import type { TokenMeta } from "../chain/types.js";
 import {
     type AssetId,
     branded,
@@ -72,9 +73,9 @@ export interface AssetInfo {
     /** Whether the pool routes this asset to a yield venue. */
     yieldEnabled: boolean;
     /**
-     * Withdrawal denominations for this asset, ascending; `[]` when it has
-     * none — either because no ladder is defined for the token, or because the
-     * wallet opted out via `WalletConfig.denominations`.
+     * Withdrawal denominations for this asset, ascending; `[]` only when the
+     * wallet opted out via `WalletConfig.denominations`. Every asset otherwise
+     * has one, derived from its own `scale` and `decimals`.
      *
      * Resolved once here so no code downstream needs to know the policy.
      */
@@ -128,6 +129,17 @@ export async function fetchAssetInfo(
 ): Promise<AssetInfo> {
     const entry = await chain.fetchAsset(id);
     const fees = resolveFeeRates(entry, feeBps);
+    // Read before the ladder is placed, not after: `decimals` is what clamps
+    // the window to what this asset's granularity can express, so resolving it
+    // second would place every ladder as if decimals were unknown.
+    let meta: TokenMeta | undefined;
+    if (chain.tokenMeta) {
+        try {
+            meta = await chain.tokenMeta(entry.token);
+        } catch {
+            // Non-standard ERC-20s omit symbol()/decimals(); amounts still work.
+        }
+    }
     const info: AssetInfo = {
         id,
         token: entry.token,
@@ -140,16 +152,11 @@ export async function fetchAssetInfo(
         // keeps exactly its previous behaviour.
         index: entry.index ?? RAY,
         yieldEnabled: entry.yieldEnabled ?? false,
-        ladder: resolveLadder(entry.token, denominations),
+        ladder: resolveLadder({ scale: entry.scale, decimals: meta?.decimals }, denominations),
     };
-    if (chain.tokenMeta) {
-        try {
-            const meta = await chain.tokenMeta(entry.token);
-            info.symbol = meta.symbol;
-            info.decimals = meta.decimals;
-        } catch {
-            // Non-standard ERC-20s omit symbol()/decimals(); amounts still work.
-        }
+    if (meta) {
+        info.symbol = meta.symbol;
+        info.decimals = meta.decimals;
     }
     return info;
 }
@@ -294,8 +301,8 @@ export interface MakeAssetInfoArgs {
     /** Default `false`. */
     yieldEnabled?: boolean | undefined;
     /**
-     * Which ladder to resolve for `token`. Default: the built-in table.
-     * `false` opts out; a map supplies custom ladders.
+     * Whether to derive a ladder for this asset. Default `true`; `false` opts
+     * out. See `core/denominations`.
      */
     denominations?: DenominationPolicy | undefined;
 }
@@ -305,10 +312,10 @@ export interface MakeAssetInfoArgs {
  *
  * For tests, mocks, and custom registries that construct assets by hand rather
  * than through `fetchAssetInfo`. Worth using rather than an object literal for
- * one specific reason: it derives `ladder` from `token`, so the two cannot
- * disagree. A hand-written literal that pairs one token's address with another
- * token's ladder type-checks, runs, and silently splits change onto the wrong
- * denominations.
+ * one specific reason: it derives `ladder` from the `scale` and `decimals` it
+ * is given, so the three cannot disagree. A hand-written literal that pairs one
+ * asset's scale with another's ladder type-checks, runs, and silently splits
+ * change onto the wrong denominations.
  *
  * ```ts
  * const usdc = makeAssetInfo({
@@ -330,7 +337,9 @@ export function makeAssetInfo(args: MakeAssetInfoArgs): AssetInfo {
         withdrawBps: fees.withdrawBps,
         index: args.index ?? RAY,
         yieldEnabled: args.yieldEnabled ?? false,
-        ladder: resolveLadder(args.token, args.denominations ?? true),
+        // `args` is structurally a `LadderInputs`; repacking it would be two
+        // more field names to keep in step.
+        ladder: resolveLadder(args, args.denominations ?? true),
     };
     if (args.symbol !== undefined) info.symbol = args.symbol;
     if (args.decimals !== undefined) info.decimals = args.decimals;

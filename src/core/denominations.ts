@@ -32,138 +32,190 @@
 export type Ladder = readonly bigint[];
 
 /**
- * `{1, 2, 5} × 10^e` for `e` in `[minExp, maxExp]`, capped at `max`.
+ * `{1, 2, 5} × 10^e` for `e` in `[minExp, maxExp]`.
  *
  * The banknote ladder. Adjacent steps are 2× or 2.5×, so any amount is
  * reachable within ~20% using two or three pieces, and the shape is one users
  * already understand without being taught — which matters for a mechanism
  * whose value depends on people not routing around it.
  */
-function ladder(minExp: number, maxExp: number, max?: bigint): Ladder {
+function ladder(minExp: number, maxExp: number): Ladder {
     const out: bigint[] = [];
     for (let e = minExp; e <= maxExp; e++) {
-        for (const m of [1n, 2n, 5n]) {
-            const v = m * 10n ** BigInt(e);
-            if (max === undefined || v <= max) out.push(v);
-        }
+        for (const m of [1n, 2n, 5n]) out.push(m * 10n ** BigInt(e));
     }
-    return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return out;
 }
 
 /**
- * USDC, `scale = 1` on every deployed chain, so one circuit unit is 1e-6 USDC.
- * $10 … $100k at an index of RAY.
+ * Where the universal window sits, as circuit-unit exponents.
  *
- * The top is capped deliberately. A $500k withdrawal as a unique 500k
- * denomination has an anonymity set of one; as five 100k pieces each blends
- * with every other 100k note in the pool. Truncating the ladder helps large
- * holders rather than restricting them.
+ * The ladder is not keyed by token, and does not need to be. A circuit unit is
+ * `scale / 10^decimals` of a token, and an operator picks `scale` to make it a
+ * sensible granularity — which leaves circuit units roughly value-normalised
+ * across assets, where token units are not. Measured on the two assets this
+ * module used to carry a hand-tuned table for:
+ *
+ *     USDC  scale 1     1 circuit unit ≈ $0.000001
+ *     WETH  scale 1e10  1 circuit unit ≈ $0.00003
+ *
+ * ~30× apart, against ~3000× for one whole token. So one window in circuit
+ * units covers both, and the two curated ladders it replaces were already the
+ * same window to within two decades: $10–$100k and $3–$150k.
+ *
+ * Spanning more decades than any one asset needs is close to free. An amount
+ * falls in exactly one decade, so rungs at decades nobody reaches split no
+ * anonymity set; what splits sets is rung density *within* a decade, and that
+ * stays `{1, 2, 5}`. Widening is not the same kind of change as densifying.
+ *
+ * THESE ARE POOL-WIDE CONSENSUS VALUES, NOT TUNABLES. Under the address table
+ * they replaced, editing an entry moved one token's ladder; here a one-line
+ * edit reshapes every asset's ladder for every wallet on that version, and two
+ * SDK versions in one pool split the anonymity set at every rung outside their
+ * intersection. Change them only under a coordinated migration, the way
+ * `treeDepth` is changed. The golden list in `denominations.test.ts` pins the
+ * rungs literally so a change cannot land unnoticed.
  */
-const USDC_LADDER = ladder(7, 11, 100_000_000_000n);
+const FLOOR_EXP = 5;
+/**
+ * The top rung is `5 × 10^CAP_EXP`.
+ *
+ * Set by the *looser* of the two hand-tuned ladders — USDC's, which allowed
+ * ~$100k — so a large withdrawal of a cheap-per-unit asset stays a single
+ * transaction rather than repeating a low top rung across more pieces than
+ * there are output slots.
+ *
+ * The cost falls on the assets worth most per circuit unit. Nothing here
+ * correlates with value — WETH and a stablecoin can be byte-identical in
+ * `scale` and `decimals` and 3000× apart in price — so one cap cannot be right
+ * for both, and this one is the loose end of that trade: WETH tops out around
+ * 5000 tokens rather than the 50 its curated ladder allowed, so a withdrawal
+ * above ~50 ETH is a rarer integer than it used to be, and one above 5000 ETH
+ * is the first that blends by repeating.
+ *
+ * Worth being precise about what the loose end costs, because it is not merely
+ * generosity: the top decades *exist* and `previewWithdraw().onLadder` reports
+ * `true` for them, while almost nobody publishes them. An anonymity set is
+ * actual, not potential — so a rung nobody uses is worse than an absent one,
+ * because the wallet believes it is conforming and tells the user so. A picker
+ * should not present the top of the range as equivalent to a mid-ladder rung.
+ *
+ * To make the cap track value rather than granularity, it has to come from
+ * whoever knows what the asset is worth: a per-asset cap published by the pool
+ * operator alongside `scale` and `decimals`, falling back to this window when
+ * absent. That keeps the derivation automatic and adds no table here. It must
+ * be an operator constant and never a price feed — a cap that moves with price
+ * moves the ladder with it, which is the time-varying fingerprint this module
+ * exists to remove.
+ */
+const CAP_EXP = 11;
 
 /**
- * WETH, `scale = 1e10`, so one circuit unit is 1e-8 WETH (10 gwei).
- * 0.001 … 50 WETH at an index of RAY.
+ * How far the window may sit either side of one whole token, in decades.
  *
- * The floor is 0.001 rather than 0.01 because dust is bounded by the lowest
- * denomination: at 0.01 a decomposition would discard up to ~$30 of every
- * deposit at $3k/ETH. The three extra entries sit at the thin end of the
- * ladder, where set concentration barely matters.
+ * The only place `decimals` is consulted, and for a sanely scaled asset it does
+ * not bind at all — see {@link FLOOR_EXP}. It exists for the asset that is not:
+ * register an 18-decimal token at `scale = 1` and one circuit unit is 1e-18 of
+ * it, so the universal window describes amounts far too small to withdraw and a
+ * single token would need millions of pieces. Anchoring to the asset's own
+ * granularity turns that into a bounded ladder.
  */
-const WETH_LADDER = ladder(5, 9);
+const ASSET_WINDOW_DECADES = { below: 3, above: 5 } as const;
 
-/**
- * Ladders by ERC-20 address, lowercased.
- *
- * Keyed by **address**, never by symbol. A mis-resolved ladder silently splits
- * the anonymity set — the one failure mode that cannot be detected from inside
- * the wallet — and symbol sniffing is exactly how that happens. (`chains.ts`
- * carries an `isWeth` symbol check already flagged in-repo as the shape not to
- * copy.)
- *
- * An asset absent from this table has no ladder, and every path below degrades
- * to its pre-denomination behaviour rather than inventing one.
- */
-const LADDERS: ReadonlyMap<string, Ladder> = new Map([
-    // USDC
-    ["0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", USDC_LADDER], // mainnet
-    ["0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", USDC_LADDER], // base
-    ["0xaf88d065e77c8cc2239327c5edb3a432268e5831", USDC_LADDER], // arbitrum
-    // WETH
-    ["0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", WETH_LADDER], // mainnet
-    ["0x4200000000000000000000000000000000000006", WETH_LADDER], // base
-    ["0x82af49447d8a07e3bd95bd0d56f35241523fbab1", WETH_LADDER], // arbitrum
-]);
-
-/** The built-in ladder for an ERC-20, or `undefined` when there is none. */
-export function ladderFor(token: string): Ladder | undefined {
-    return LADDERS.get(token.toLowerCase());
+/** What a wallet needs to know about an asset to place its ladder. */
+export interface LadderInputs {
+    /** Circuit units → token base units. From the pool's asset entry. */
+    scale: bigint;
+    /**
+     * ERC-20 decimals, when the adapter could resolve them. Absent narrows
+     * nothing — see {@link ASSET_WINDOW_DECADES}.
+     */
+    decimals?: number | undefined;
 }
 
 /**
- * Which ladders a wallet uses.
+ * The unclamped window, built once.
+ *
+ * Returned by identity for every asset the clamp does not bind on, which is
+ * every sanely scaled one — so the common path allocates nothing and every such
+ * asset shares one array.
+ */
+const UNIVERSAL: Ladder = ladder(FLOOR_EXP, CAP_EXP);
+
+/** `floor(log10(x))` for a positive bigint, without going through `Number`. */
+function log10Floor(x: bigint): number {
+    return x.toString().length - 1;
+}
+
+/**
+ * Circuit units in one whole token, as an exponent.
+ *
+ * `decimals - log10(scale)`: USDC is `6 - 0 = 6`, WETH is `18 - 10 = 8`. A
+ * `scale` that is not a power of ten floors, which is the conservative
+ * direction — it can only place the window lower, never higher than the asset
+ * can represent.
+ */
+function unitExp(inputs: LadderInputs): number | undefined {
+    if (inputs.decimals === undefined) return undefined;
+    if (inputs.scale <= 0n) return undefined;
+    return inputs.decimals - log10Floor(inputs.scale);
+}
+
+/**
+ * The ladder for an asset: the universal window, clamped to what the asset's
+ * own granularity can sensibly express.
+ *
+ * Every asset gets one, and it is never empty. There is no table to be absent
+ * from and nothing for a caller to supply, which removes the failure this
+ * module used to warn about — an unlisted token silently resolving to no
+ * ladder, reverting to even splits with nothing anywhere saying why.
+ */
+export function universalLadder(inputs: LadderInputs): Ladder {
+    const unit = unitExp(inputs);
+    if (unit === undefined) return UNIVERSAL;
+
+    // What the asset's own granularity says the window should be.
+    //
+    // Floored at 0 in both bounds: a denomination is a circuit-unit integer, so
+    // there is nothing below 10^0 to offer. An asset whose `scale` exceeds
+    // `10^decimals` — one circuit unit worth many whole tokens — has a negative
+    // `unit`, and without this floor the exponent reaches `10n ** -23n`, which
+    // throws rather than degrading.
+    const assetLo = Math.max(0, unit - ASSET_WINDOW_DECADES.below);
+    const assetHi = Math.max(0, unit + ASSET_WINDOW_DECADES.above);
+    const lo = Math.max(FLOOR_EXP, assetLo);
+    const hi = Math.min(CAP_EXP, assetHi);
+
+    // Normally they overlap and the intersection is the answer.
+    if (hi >= lo) return lo === FLOOR_EXP && hi === CAP_EXP ? UNIVERSAL : ladder(lo, hi);
+
+    // Disjoint: follow the asset rather than intersecting to nothing.
+    return ladder(assetLo, assetHi);
+}
+
+/**
+ * Whether a wallet uses withdrawal ladders.
  *
  * ```ts
- * true                      // built-in ladders (the default)
- * false                     // none; pre-denomination behaviour everywhere
- * new Map([[token, [...]]]) // custom ladders, replacing the built-ins entirely
+ * true   // every asset gets its ladder (the default)
+ * false  // none; pre-denomination behaviour everywhere
  * ```
  *
- * Opting out is a legitimate choice, not a footgun to be discouraged. The
- * built-in table only covers USDC and WETH on three chains, so an integrator
- * elsewhere has no ladder to conform to — and a wallet reshaping change onto a
- * ladder nobody else uses is as distinguishable as one ignoring a ladder
- * everyone else follows. What costs privacy is being in a small group, in
- * either direction.
- *
- * A custom map **replaces** the built-ins rather than extending them, so a
- * caller supplying one gets exactly the ladders it listed and no surprises
- * from a table it did not write. Spread `BUILT_IN_LADDERS` to extend instead.
- *
- * Keys are ERC-20 addresses, matched case-insensitively: a checksummed address
- * and its lowercase form resolve to the same ladder.
+ * A boolean rather than a table: the ladder is derived from the asset, so
+ * there is nothing per-token to configure and no way to be missing from a list.
+ * Opting out stays a legitimate choice — but it is now the only reason an asset
+ * has no ladder, rather than one of two.
  */
-export type DenominationPolicy = boolean | ReadonlyMap<string, Ladder>;
-
-/** The built-in table, for callers extending rather than replacing it. */
-export const BUILT_IN_LADDERS: ReadonlyMap<string, Ladder> = LADDERS;
+export type DenominationPolicy = boolean;
 
 /**
- * The ladder `policy` gives this token, or `[]` when it gives none.
+ * The ladder `policy` gives this asset, or `[]` when it gives none.
  *
  * Empty rather than `undefined` so consumers can iterate without a null check;
  * `hasLadder` is `length > 0`.
  */
-/**
- * Case-normalised copies of caller-supplied tables, keyed by the original.
- *
- * The built-in table is lowercased at the source, but a caller's is whatever
- * they had to hand — and an EIP-55 checksummed address is what every wallet,
- * explorer and deploy script hands you. Matching it verbatim against a
- * lowercased lookup misses, and the miss is silent: the asset simply reports no
- * ladder, change goes back to splitting evenly, and nothing anywhere says why.
- * That is precisely the undetectable-from-inside failure this module exists to
- * avoid, so casing is normalised rather than documented.
- *
- * Weakly keyed and built once per table: `resolveLadder` runs per asset
- * resolution, and rebuilding the map each time would be work proportional to
- * the ladder table on a path that answers from a cache.
- */
-const normalised = new WeakMap<ReadonlyMap<string, Ladder>, ReadonlyMap<string, Ladder>>();
-
-function lowerKeyed(table: ReadonlyMap<string, Ladder>): ReadonlyMap<string, Ladder> {
-    let found = normalised.get(table);
-    if (!found) {
-        found = new Map([...table].map(([k, v]) => [k.toLowerCase(), v]));
-        normalised.set(table, found);
-    }
-    return found;
-}
-
-export function resolveLadder(token: string, policy: DenominationPolicy = true): Ladder {
-    if (policy === false) return [];
-    const table = policy === true ? LADDERS : lowerKeyed(policy);
-    return table.get(token.toLowerCase()) ?? [];
+export function resolveLadder(inputs: LadderInputs, policy: DenominationPolicy = true): Ladder {
+    return policy ? universalLadder(inputs) : [];
 }
 
 /** Whether `value` is exactly one of the ladder's denominations. */

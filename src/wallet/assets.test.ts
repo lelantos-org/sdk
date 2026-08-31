@@ -1,34 +1,32 @@
 import { describe, expect, it } from "vitest";
 import type { ChainAdapter } from "../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../core/brand.js";
-import { resolveLadder } from "../core/denominations.js";
-import { RAY } from "../core/units.js";
 import {
     type AssetInfo,
     type AssetInfoWithMeta,
     fetchAssetInfo,
     formatAmount,
     hasTokenMeta,
+    makeAssetInfo,
     minAmount,
     parseAmount,
     requireTokenMeta,
 } from "./assets.js";
 
-const WETH: AssetInfoWithMeta = {
-    id: assetId(1n),
-    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-    scale: 10n ** 15n,
-    disabled: false,
-    depositBps: 0n,
-    withdrawBps: 0n,
-    symbol: "WETH",
-    decimals: 18,
-    // A pool with no yield mixin reports neither, and these are the identities
-    // `fetchAssetInfo` fills in for an adapter that has never heard of an index.
-    index: RAY,
-    yieldEnabled: false,
-    ladder: resolveLadder("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-};
+// Built through `makeAssetInfo` rather than as a literal, so `scale`,
+// `decimals` and the ladder derived from them are stated once and cannot drift
+// — which a literal repeating the pair could not promise. `index` and
+// `yieldEnabled` default to the identities `fetchAssetInfo` fills in for an
+// adapter that has never heard of an index.
+const WETH: AssetInfoWithMeta = requireTokenMeta(
+    makeAssetInfo({
+        id: assetId(1n),
+        token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+        scale: 10n ** 15n,
+        symbol: "WETH",
+        decimals: 18,
+    }),
+);
 
 function stubChain(over: Record<string, unknown> = {}): ChainAdapter {
     return {

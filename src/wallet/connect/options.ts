@@ -151,7 +151,7 @@ export interface ConnectExtraOptions {
     submitter?: Submitter | undefined;
     selector?: CoinSelector | undefined;
     /**
-     * Which withdrawal ladders this wallet uses. Defaults to the built-ins;
+     * Whether this wallet uses withdrawal ladders. Defaults to `true`;
      * `false` opts out entirely. See `WalletConfig.denominations`.
      */
     denominations?: DenominationPolicy | undefined;

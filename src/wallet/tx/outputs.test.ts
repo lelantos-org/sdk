@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ladderFor } from "../../core/denominations.js";
+import { universalLadder } from "../../core/denominations.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import { changeSlots, finalizeSlots, payTo, splitChange } from "./outputs.js";
 
@@ -134,8 +134,7 @@ describe("finalizeSlots", () => {
 });
 
 describe("splitChange with a ladder", () => {
-    const usdc = ladderFor("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-    if (!usdc) throw new Error("no USDC ladder");
+    const usdc = universalLadder({ scale: 1n, decimals: 6 });
 
     const values = (remainder: bigint, slots: number) =>
         splitChange({ pk: 1n, asset: 1n, remainder: remainder, slots: slots, ladder: usdc }).map(

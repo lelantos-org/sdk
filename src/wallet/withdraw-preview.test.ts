@@ -19,7 +19,13 @@ const USDC = requireTokenMeta(
     }),
 );
 
-/** An asset the built-in table does not cover — no ladder to conform to. */
+/**
+ * An asset with no ladder.
+ *
+ * Reached only by opting out. Ladders are derived from `scale` and `decimals`,
+ * so there is no longer a token the table happens to miss — which is why this
+ * fixture names the policy rather than an obscure address.
+ */
 const NO_LADDER = requireTokenMeta(
     makeAssetInfo({
         id: assetId(9n),
@@ -28,6 +34,7 @@ const NO_LADDER = requireTokenMeta(
         symbol: "XYZ",
         decimals: 6,
         feeBps: BPS,
+        denominations: false,
     }),
 );
 
@@ -131,12 +138,12 @@ describe("previewWithdraw", () => {
 describe("denominationChoices", () => {
     it("labels every denomination with its gross and its net", () => {
         const choices = denominationChoices(USDC);
-        expect(choices).toHaveLength(13);
-        expect(choices[0]).toEqual({ value: 10_000_000n, label: "10", netLabel: "9.98" });
+        expect(choices).toHaveLength(21);
+        expect(choices[0]).toEqual({ value: 100_000n, label: "0.1", netLabel: "0.0998" });
         expect(choices.at(-1)).toEqual({
-            value: 100_000_000_000n,
-            label: "100000",
-            netLabel: "99800",
+            value: 500_000_000_000n,
+            label: "500000",
+            netLabel: "499000",
         });
     });
 
@@ -154,8 +161,8 @@ describe("denominationChoices", () => {
                 index: (RAY * 105n) / 100n,
             }),
         );
-        expect(grown[0]?.value).toBe(10_000_000n); // unchanged
-        expect(grown[0]?.label).toBe("10.5"); // worth more
+        expect(grown[0]?.value).toBe(100_000n); // unchanged
+        expect(grown[0]?.label).toBe("0.105"); // worth more
     });
 });
 

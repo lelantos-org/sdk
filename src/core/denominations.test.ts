@@ -1,25 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { circuitAmount } from "./brand.js";
 import {
-    BUILT_IN_LADDERS,
     decompose,
     descendingAtMost,
     isDenomination,
-    ladderFor,
     largestAtMost,
     nearest,
     resolveLadder,
+    universalLadder,
 } from "./denominations.js";
 import { RAY, toTokenUnits } from "./units.js";
 
-const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+// The two assets this module used to carry a hand-tuned table for, now
+// described only by what the pool and the ERC-20 already report.
+const USDC = { scale: 1n, decimals: 6 };
+const WETH = { scale: 10_000_000_000n, decimals: 18 };
 
-const usdc = () => {
-    const l = ladderFor(USDC);
-    if (!l) throw new Error("no USDC ladder");
-    return l;
-};
+const usdc = () => universalLadder(USDC);
+
+/** A mid-ladder rung, worth 1000 USDC at an index of RAY (`scale = 1`). */
+const ONE_THOUSAND_USDC = 1_000_000_000n;
 
 describe("ladder is index-invariant", () => {
     // The decisive property, and the one an index-unaware suite would never
@@ -27,11 +27,17 @@ describe("ladder is index-invariant", () => {
     // (scale * index)` — moves as the index moves, handing every user a
     // different integer, which is exactly the fingerprint denominations exist
     // to remove.
-    it("is a table of fixed integers, taking no asset metadata at all", () => {
+    it("is fixed integers, derived from static metadata and never the index", () => {
         // Pinned literally. A refactor deriving these from human amounts would
         // still pass at an index of RAY and diverge everywhere else, so the
         // guard has to be the integers themselves rather than a round trip.
-        expect(ladderFor(USDC)).toEqual([
+        expect(usdc()).toEqual([
+            100_000n,
+            200_000n,
+            500_000n,
+            1_000_000n,
+            2_000_000n,
+            5_000_000n,
             10_000_000n,
             20_000_000n,
             50_000_000n,
@@ -45,15 +51,20 @@ describe("ladder is index-invariant", () => {
             20_000_000_000n,
             50_000_000_000n,
             100_000_000_000n,
+            200_000_000_000n,
+            500_000_000_000n,
         ]);
-        // `ladderFor` takes an address and nothing else: there is no index,
-        // scale or decimals in scope for the value to depend on.
-        expect(ladderFor.length).toBe(1);
+        // One argument, and it carries only static asset properties: there is
+        // no index in scope for the value to depend on. Pinned on the function
+        // rather than on the fixture, so it fails if an index ever creeps in.
+        expect(universalLadder.length).toBe(1);
     });
 
     it("a denomination's worth moves with the index; the denomination does not", () => {
-        const before = usdc()[6] as bigint;
-        expect(before).toBe(1_000_000_000n); // 1000 USDC at RAY, scale 1
+        // Named, not positional: reaching in by index silently retargets to a
+        // different rung if the window ever moves, where this fails.
+        const before = ONE_THOUSAND_USDC;
+        expect(isDenomination(before, usdc())).toBe(true);
 
         expect(toTokenUnits(circuitAmount(before), 1n, { index: RAY })).toBe(1_000_000_000n);
         expect(toTokenUnits(circuitAmount(before), 1n, { index: (RAY * 105n) / 100n })).toBe(
@@ -63,35 +74,74 @@ describe("ladder is index-invariant", () => {
 
         // The point: what it is worth moved three times, the integer published
         // on chain did not.
-        expect(usdc()[6]).toBe(before);
+        expect(isDenomination(before, usdc())).toBe(true);
     });
 });
 
-describe("ladderFor", () => {
-    it("is keyed by address, case-insensitively, never by symbol", () => {
-        expect(ladderFor(USDC.toLowerCase())).toBe(ladderFor(USDC.toUpperCase()));
-        expect(ladderFor("0x0000000000000000000000000000000000000dead")).toBeUndefined();
+describe("universalLadder", () => {
+    it("keeps the floor the curated ladders chose, and caps above them", () => {
+        // The floor is the bound that matters for dust, and it lands exactly
+        // where the hand-tuned WETH ladder put it: 0.001. The cap is the loose
+        // end of the trade — 5000 rather than 50 — because one cap in circuit
+        // units cannot be right for two assets 3000x apart in price.
+        const weth = universalLadder(WETH);
+        expect(toTokenUnits(circuitAmount(weth[0] as bigint), WETH.scale)).toBe(10n ** 15n);
+        expect(toTokenUnits(circuitAmount(weth.at(-1) as bigint), WETH.scale)).toBe(
+            5000n * 10n ** 18n,
+        );
     });
 
-    it("gives USDC $10 … $100k in circuit units", () => {
-        expect(usdc()[0]).toBe(10_000_000n); // $10 at scale 1
-        expect(usdc().at(-1)).toBe(100_000_000_000n); // $100k
-        expect(usdc()).toHaveLength(13);
+    it("gives two differently scaled assets the same ladder", () => {
+        // The finding the table encoded and this replaces: an operator picks
+        // `scale` to make a circuit unit a sensible granularity, which leaves
+        // circuit units roughly value-normalised across assets. USDC and WETH
+        // land on one window — the curated pair were already within two
+        // decades of each other.
+        expect(universalLadder(WETH)).toEqual(usdc());
     });
 
-    it("gives WETH 0.001 … 50, where 1e8 units is exactly 1e18 wei", () => {
-        const weth = ladderFor(WETH);
-        if (!weth) throw new Error("no WETH ladder");
-        expect(weth[0]).toBe(100_000n); // 0.001 WETH
-        expect(weth.at(-1)).toBe(5_000_000_000n); // 50 WETH
+    it("means what the old curated ladders meant, at each asset's scale", () => {
+        // 1e5 circuit units: $0.10 of USDC, 0.001 WETH — the latter exactly
+        // the floor the hand-tuned WETH ladder chose, and for the same reason
+        // (dust is bounded by the lowest rung).
+        expect(usdc()[0]).toBe(100_000n);
+        expect(toTokenUnits(circuitAmount(100_000n), WETH.scale)).toBe(1_000_000_000_000_000n);
         // scale 1e10: one whole WETH is 1e8 circuit units.
-        expect(toTokenUnits(circuitAmount(100_000_000n), 10_000_000_000n)).toBe(
+        expect(toTokenUnits(circuitAmount(100_000_000n), WETH.scale)).toBe(
             1_000_000_000_000_000_000n,
         );
     });
 
+    it("needs no decimals, and gives the same ladder without them", () => {
+        // An adapter with no `tokenMeta` used to mean no ladder at all. It now
+        // means only that the clamp has nothing to narrow against — which for
+        // a sanely scaled asset changes nothing.
+        expect(universalLadder({ scale: USDC.scale })).toEqual(usdc());
+        expect(universalLadder({ scale: WETH.scale })).toEqual(usdc());
+    });
+
+    it("follows the asset when its granularity is nowhere near the default", () => {
+        // 18 decimals at scale 1: one circuit unit is 1e-18 of a token, so the
+        // universal window describes amounts far too small to withdraw — a
+        // one-token withdrawal against its cap would need millions of pieces.
+        // The window moves to where the asset lives instead of intersecting to
+        // nothing.
+        const fine = universalLadder({ scale: 1n, decimals: 18 });
+        const whole = 10n ** 18n;
+        expect(fine[0]).toBe(whole / 1000n); // 0.001 of a token
+        expect(fine.at(-1)).toBe(whole * 500_000n);
+    });
+
+    it("never returns an empty ladder, whatever the asset looks like", () => {
+        for (const decimals of [0, 2, 6, 8, 18, 24]) {
+            for (const scale of [1n, 10n ** 10n, 10n ** 20n]) {
+                expect(universalLadder({ scale, decimals }).length).toBeGreaterThan(0);
+            }
+        }
+    });
+
     it("is ascending with no duplicates", () => {
-        for (const l of [usdc(), ladderFor(WETH) ?? []]) {
+        for (const l of [usdc(), universalLadder(WETH), universalLadder({ scale: 1n })]) {
             expect([...l].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))).toEqual([...l]);
             expect(new Set(l).size).toBe(l.length);
         }
@@ -198,77 +248,30 @@ describe("descendingAtMost", () => {
     });
 
     it("is empty below the lowest denomination, which ends the retry chain", () => {
-        expect(descendingAtMost(9_999_999n, usdc(), 3)).toEqual([]);
+        expect(descendingAtMost(99_999n, usdc(), 3)).toEqual([]);
     });
 
     it("returns fewer than `limit` when the ladder runs out", () => {
-        expect(descendingAtMost(20_000_000n, usdc(), 5)).toEqual([20_000_000n, 10_000_000n]);
+        expect(descendingAtMost(200_000n, usdc(), 5)).toEqual([200_000n, 100_000n]);
     });
 });
 
 describe("resolveLadder — the opt-out", () => {
-    it("uses the built-in table by default", () => {
+    it("derives a ladder for every asset by default", () => {
         expect(resolveLadder(USDC)).toEqual(usdc());
         expect(resolveLadder(USDC, true)).toEqual(usdc());
+        // Including one no table would ever have listed.
+        expect(resolveLadder({ scale: 1n, decimals: 8 })).not.toEqual([]);
     });
 
-    it("returns nothing when opted out, for every token", () => {
-        // `false` must restore pre-denomination behaviour everywhere, not just
-        // for tokens the built-in table happens to miss.
+    it("returns nothing when opted out, for every asset", () => {
+        // `false` must restore pre-denomination behaviour everywhere, and is
+        // now the only reason an asset has no ladder.
         expect(resolveLadder(USDC, false)).toEqual([]);
         expect(resolveLadder(WETH, false)).toEqual([]);
     });
 
-    it("takes a custom table, replacing the built-ins rather than merging", () => {
-        // Replacing, so a caller supplying a map gets exactly what it listed
-        // and no surprises from a table it did not write.
-        const custom = new Map([["0x000000000000000000000000000000000000dead", [1n, 2n]]]);
-        expect(resolveLadder("0x000000000000000000000000000000000000dEaD", custom)).toEqual([
-            1n,
-            2n,
-        ]);
-        expect(resolveLadder(USDC, custom)).toEqual([]);
-    });
-
-    it("extends the built-ins when spread into a custom map", () => {
-        const extended = new Map([
-            ...BUILT_IN_LADDERS,
-            ["0x000000000000000000000000000000000000dead", [1n, 2n] as const],
-        ]);
-        expect(resolveLadder(USDC, extended)).toEqual(usdc());
-        expect(resolveLadder("0x000000000000000000000000000000000000dEaD", extended)).toEqual([
-            1n,
-            2n,
-        ]);
-    });
-
-    it("is case-insensitive on custom tables too", () => {
-        const custom = new Map([["0x000000000000000000000000000000000000dead", [1n]]]);
-        expect(resolveLadder("0x000000000000000000000000000000000000DEAD", custom)).toEqual([1n]);
-    });
-
-    /// The direction that actually bites. Only the lookup used to be
-    /// lowercased, so a table keyed the way every deploy script, explorer and
-    /// wallet hands you an address — EIP-55 checksummed — missed against the
-    /// lowercase address the relayer publishes. The miss was silent: no ladder,
-    /// change split evenly again, and nothing to say the map had been ignored.
-    it("matches a checksummed key against a lowercase token", () => {
-        const custom = new Map([["0x000000000000000000000000000000000000dEaD", [1n, 2n]]]);
-        expect(resolveLadder("0x000000000000000000000000000000000000dead", custom)).toEqual([
-            1n,
-            2n,
-        ]);
-    });
-
-    it("normalises a table once, however many assets resolve against it", () => {
-        // Memoised on the table itself, so a wallet resolving twenty assets
-        // does not rebuild the map twenty times.
-        const custom = new Map([["0x000000000000000000000000000000000000dEaD", [1n]]]);
-        const first = resolveLadder("0x000000000000000000000000000000000000dead", custom);
-        expect(resolveLadder("0x000000000000000000000000000000000000DEAD", custom)).toBe(first);
-    });
-
-    it("returns [] rather than undefined, so consumers need no null check", () => {
-        expect(resolveLadder("0x000000000000000000000000000000000000dEaD")).toEqual([]);
+    it("returns [] rather than undefined when opted out, so consumers need no null check", () => {
+        expect(resolveLadder({ scale: 10n ** 30n, decimals: 0 }, false)).toEqual([]);
     });
 });

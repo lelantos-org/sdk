@@ -24,7 +24,7 @@ import { type AssetInfo, fetchAssetInfo } from "./assets.js";
 export interface AssetRegistrySource {
     chain: ChainAdapter;
     /**
-     * Which withdrawal ladders assets resolve with. Defaults to the built-ins;
+     * Whether assets resolve with a withdrawal ladder. Defaults to `true`;
      * `false` opts out entirely. Applied here so nothing downstream of
      * `AssetInfo` has to know the policy.
      */
@@ -68,10 +68,14 @@ function feesFromChainToken(t: ChainToken, feeBps: FeeOverride | undefined): Fee
  * rebuild it.
  */
 function fromChainToken(t: ChainToken, denominations: DenominationPolicy): UnpricedAsset {
+    // Parsed once: the asset's `scale` and the ladder derived from it are the
+    // one pair that must agree, so they read the same value rather than the
+    // same decimal string twice.
+    const scale = BigInt(t.scale);
     const info: UnpricedAsset = {
         id: assetId(BigInt(t.assetId)),
         token: t.token as AssetInfo["token"],
-        scale: BigInt(t.scale),
+        scale,
         // `/chains` lists registered assets and does not carry the disabled
         // flag; a disabled asset still resolves, and `deposit` is where the
         // chain rejects it.
@@ -82,7 +86,7 @@ function fromChainToken(t: ChainToken, denominations: DenominationPolicy): Unpri
         // pool would read human amounts low until the relayer ships the field.
         index: t.index === undefined ? RAY : BigInt(t.index),
         yieldEnabled: t.yieldEnabled ?? false,
-        ladder: resolveLadder(t.token, denominations),
+        ladder: resolveLadder({ scale, decimals: t.decimals }, denominations),
     };
     if (t.symbol !== undefined) info.symbol = t.symbol;
     if (t.decimals !== undefined) info.decimals = t.decimals;

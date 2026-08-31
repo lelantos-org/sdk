@@ -88,18 +88,15 @@ export interface WalletConfig {
     /** Defaults to SFRT. */
     selector?: CoinSelector | undefined;
     /**
-     * Which withdrawal ladders this wallet uses. Defaults to the built-ins.
+     * Whether this wallet uses withdrawal ladders. Defaults to `true`.
      *
-     * ```ts
-     * denominations: false                       // opt out entirely
-     * denominations: new Map([[token, [...]]])   // custom, replacing built-ins
-     * ```
+     * Every asset's ladder is derived from its own `scale` and `decimals`, so
+     * there is nothing per-token to supply and no table an asset can be
+     * missing from — see `core/denominations`.
      *
      * `false` restores pre-denomination behaviour everywhere: change splits
      * evenly again, `previewWithdraw` reports no ladder, and `redenominate`
-     * becomes a no-op. Worth choosing on a chain the built-in table does not
-     * cover — a wallet conforming to a ladder nobody else uses is as
-     * distinguishable as one ignoring a ladder everyone follows.
+     * becomes a no-op. It is now the only reason an asset has no ladder.
      *
      * Applied when an `AssetInfo` is resolved, so it reaches every path at
      * once and cannot drift between them.

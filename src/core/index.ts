@@ -40,17 +40,17 @@ export {
     tuple2,
 } from "./decode.js";
 export {
-    BUILT_IN_LADDERS,
     type Decomposition,
     type DenominationPolicy,
     decompose,
     descendingAtMost,
     isDenomination,
     type Ladder,
-    ladderFor,
+    type LadderInputs,
     largestAtMost,
     nearest,
     resolveLadder,
+    universalLadder,
 } from "./denominations.js";
 export {
     type AnyWalletError,
