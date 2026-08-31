@@ -53,14 +53,13 @@ const fingerprint = (i: AbiItem): string => `${sigOf(i)} -> ${outputsOf(i)}`;
  * skipped wholesale. Anything here is a live incompatibility, not a style
  * difference.
  *
- * `yieldState` is the SDK running ahead of the published contracts package:
- * the yield mixin is not in `@lelantos-org/contracts@0.5.0`, so there is
- * nothing to compare the entry against yet. `reads.fetchAssetYield` is written
- * for exactly that — a pool without the selector reverts and reads as "no
- * yield" — so the SDK is correct against both shapes meanwhile. Drop this once
- * the package ships the mixin; the test below then fails until it is removed.
+ * Empty, and kept rather than deleted: the SDK regularly lands a read before
+ * `@lelantos-org/contracts` publishes the mixin behind it, and the entry has to
+ * be checkable-in-principle meanwhile. The yield mixin was the last one, exempt
+ * until 0.6.1 shipped it. The second test below is what forces an exemption out
+ * again once the package catches up.
  */
-const PENDING_MIGRATION = new Set<string>(["function:yieldState"]);
+const PENDING_MIGRATION = new Set<string>();
 
 /**
  * The pool and the native bridge are separate deployments, so each
