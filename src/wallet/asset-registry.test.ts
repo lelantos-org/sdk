@@ -164,3 +164,45 @@ describe("AssetRegistry", () => {
         expect((await r.list()).map((a) => a.id)).toEqual([1n, 2n]);
     });
 });
+
+// The relayer publishes `gross` and `supply` alongside the index because the
+// index it reports is FLOORED on chain: a charge sized through it can land
+// under what the contract takes, and the Permit2 pull is then refused. The
+// registry therefore has to carry the pair through, not just the index.
+describe("AssetRegistry yield state", () => {
+    const YIELDING: ChainToken[] = [
+        {
+            assetId: 9,
+            token: "0xDDdd000000000000000000000000000000000000",
+            scale: "1",
+            symbol: "USDC",
+            decimals: 6,
+            depositBps: 20,
+            withdrawBps: 20,
+            yieldState: {
+                venue: "0xEEee000000000000000000000000000000000000",
+                gross: "1100000",
+                supply: "1000000",
+                index: "1100000000000000000000000000",
+                halted: false,
+            },
+        },
+    ];
+
+    it("carries the exact rate, not only the reported index", async () => {
+        const reg = new AssetRegistry({ chain: chain(), tokens: async () => YIELDING });
+        const a = await reg.resolve(9n);
+        expect(a.yieldEnabled).toBe(true);
+        expect(a.index).toBe(1_100_000_000_000_000_000_000_000_000n);
+        expect(a.rate).toEqual({ gross: 1_100_000n, supply: 1_000_000n });
+    });
+
+    // An asset with no venue prices at `scale` forever, and must not be given a
+    // rate that would send it down the index branch.
+    it("leaves a plain asset with no rate and no index", async () => {
+        const reg = new AssetRegistry({ chain: chain(), tokens: async () => TOKENS });
+        const a = await reg.resolve(1n);
+        expect(a.yieldEnabled).toBe(false);
+        expect(a.rate).toBeUndefined();
+    });
+});

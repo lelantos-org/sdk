@@ -78,7 +78,15 @@ export {
 } from "./core/shape.js";
 
 // ── amounts + HTTP options ───────────────────────────────────────────────
-export { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "./core/units.js";
+export {
+    formatUnits,
+    parseUnits,
+    RAY,
+    toCircuitUnits,
+    toTokenUnits,
+    toTokenUnitsAtRate,
+    type YieldRate,
+} from "./core/units.js";
 export {
     type Decomposition,
     decompose,

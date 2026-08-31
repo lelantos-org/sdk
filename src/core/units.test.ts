@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { circuitAmount, tokenAmount } from "./brand.js";
-import { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "./units.js";
+import {
+    formatUnits,
+    parseUnits,
+    RAY,
+    toCircuitUnits,
+    toTokenUnits,
+    toTokenUnitsAtRate,
+} from "./units.js";
 
 describe("parseUnits", () => {
     it("scales a decimal string by `decimals`", () => {
@@ -113,5 +120,43 @@ describe("index-aware conversions", () => {
         const idx = (RAY * 105n) / 100n;
         expect(() => toCircuitUnits(tokenAmount(7n), 10n, {})).toThrow(/multiple of scale/);
         expect(() => toCircuitUnits(tokenAmount(7n), 10n, { index: idx })).toThrow(/index/);
+    });
+});
+
+// `gross / supply` rather than the reported index, because that index is
+// floored on chain: sizing a charge through it can land below what the pool
+// takes, and the Permit2 pull is then refused.
+describe("toTokenUnitsAtRate", () => {
+    const N = circuitAmount(1_000_000n);
+
+    it("is the plain scale when nothing is outstanding", () => {
+        expect(toTokenUnitsAtRate(N, 10n, undefined)).toBe(10_000_000n);
+        expect(toTokenUnitsAtRate(N, 10n, { gross: 0n, supply: 0n })).toBe(10_000_000n);
+    });
+
+    it("prices at the pool's own ratio once the venue has earned", () => {
+        expect(toTokenUnitsAtRate(N, 1n, { gross: 1_100_000n, supply: 1_000_000n })).toBe(
+            1_100_000n,
+        );
+    });
+
+    // Up by default: this is the figure a payer is charged, and rounding it
+    // down under-signs the ceiling.
+    it("rounds up by default and down on request", () => {
+        const rate = { gross: 1_000_003n, supply: 1_000_000n };
+        const n = circuitAmount(7n);
+        expect(toTokenUnitsAtRate(n, 1n, rate)).toBe(8n);
+        expect(toTokenUnitsAtRate(n, 1n, rate, { round: "down" })).toBe(7n);
+    });
+
+    it("prices a venue loss without special casing", () => {
+        expect(toTokenUnitsAtRate(N, 1n, { gross: 900_000n, supply: 1_000_000n })).toBe(900_000n);
+    });
+
+    // A total loss is not an empty pool. The contract's only fallback is
+    // `supply == 0`, so units backed by nothing are worth nothing — treating
+    // this as "no rate yet" would price them at face value.
+    it("prices units with no backing left at zero, not at scale", () => {
+        expect(toTokenUnitsAtRate(N, 10n, { gross: 0n, supply: 1_000_000n })).toBe(0n);
     });
 });

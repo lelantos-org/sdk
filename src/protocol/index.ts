@@ -30,6 +30,7 @@ export type {
     RelayerSubmitResponse,
     ScannedNote,
     ShieldedFeeTerms,
+    YieldStateInfo,
 } from "./responses.js";
 export type {
     SpendKind,

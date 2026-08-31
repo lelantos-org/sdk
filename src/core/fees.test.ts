@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { withdrawNet } from "./fees.js";
+import { tokenAmount } from "./brand.js";
+import { InvalidArgumentError } from "./errors.js";
+import { depositCeiling, depositTotal, withdrawNet } from "./fees.js";
 import { RAY } from "./units.js";
 
 // `publicOut` is the GROSS: `MASP._unshieldLeg` skims the fee out of what
@@ -84,5 +86,101 @@ describe("withdrawNet fee accounting", () => {
                 expect(net + fee).toBe(gross);
             }
         }
+    });
+});
+
+// The mirror image of `withdrawNet`: a shield is charged ON TOP of the
+// principal, and its yield branch takes the fee in units before converting
+// once. These pin both against what `MASP.deposit` actually pulls, because
+// under-quoting here is not a rounding nit — the Permit2 pull is refused and
+// the deposit reverts.
+describe("depositTotal", () => {
+    const N = 1_000_000n; // circuit units
+    const BPS = 20n; // 0.2%, the deployed rate
+
+    it("charges the fee on top of the principal, not out of it", () => {
+        const total = depositTotal({ publicIn: N, feeIn: 0n, depositBps: BPS, scale: 1n });
+        expect(total).toBe(N + 2_000n);
+        expect(total).toBeGreaterThan(N);
+    });
+
+    it("funds the relayer's note as well as the principal", () => {
+        const withFee = depositTotal({ publicIn: N, feeIn: 500n, depositBps: 0n, scale: 1n });
+        expect(withFee).toBe(N + 500n);
+    });
+
+    // The pool takes the fee in units and converts the total once, so the
+    // result is not `plainTotal * index` — it rounds at a different point.
+    it("takes a yield asset's fee in units and converts the total once", () => {
+        // gross/supply = 1.1: the venue has earned 10%.
+        const rate = { gross: 1_100_000n, supply: 1_000_000n };
+        const total = depositTotal({
+            publicIn: N,
+            feeIn: 0n,
+            depositBps: BPS,
+            scale: 1n,
+            yieldEnabled: true,
+            rate,
+        });
+        // ceil((1_000_000 + 2_000) * 1_100_000 / 1_000_000)
+        expect(total).toBe(1_102_200n);
+    });
+
+    it("rounds a yield charge up, never down", () => {
+        // A ratio that cannot divide evenly, so the direction is observable.
+        const rate = { gross: 1_000_003n, supply: 1_000_000n };
+        const total = depositTotal({
+            publicIn: 7n,
+            feeIn: 0n,
+            depositBps: 0n,
+            scale: 1n,
+            yieldEnabled: true,
+            rate,
+        });
+        // 7 * 1_000_003 / 1_000_000 = 7.000021 → 8, so the payer covers it.
+        expect(total).toBe(8n);
+    });
+
+    it("is the plain arithmetic when the venue has earned nothing yet", () => {
+        const rate = { gross: 0n, supply: 0n };
+        const yielded = depositTotal({
+            publicIn: N,
+            feeIn: 0n,
+            depositBps: BPS,
+            scale: 10n,
+            yieldEnabled: true,
+            rate,
+        });
+        expect(yielded).toBe(depositTotal({ publicIn: N, feeIn: 0n, depositBps: BPS, scale: 10n }));
+    });
+
+    // `scale` is not a conservative fallback: it under-quotes by exactly what
+    // the venue has earned, which is the amount that makes the pull revert.
+    it("refuses to quote a yield asset with no reported rate", () => {
+        expect(() =>
+            depositTotal({
+                publicIn: N,
+                feeIn: 0n,
+                depositBps: BPS,
+                scale: 1n,
+                yieldEnabled: true,
+            }),
+        ).toThrow(InvalidArgumentError);
+    });
+});
+
+// Overshooting costs the payer nothing — Permit2 transfers only what the pool
+// asks for, an allowance is a cap, and `NativeAdapter` refunds the unused
+// `msg.value` — while undershooting reverts the deposit.
+describe("depositCeiling", () => {
+    it("signs a plain asset's cost exactly", () => {
+        expect(depositCeiling(tokenAmount(1_000_000n), false)).toBe(1_000_000n);
+    });
+
+    it("leaves a yield asset room for the index to move before inclusion", () => {
+        const quoted = tokenAmount(1_000_000n);
+        const ceiling = depositCeiling(quoted, true);
+        expect(ceiling).toBeGreaterThan(quoted);
+        expect(ceiling).toBe(1_005_000n); // 50 bps
     });
 });

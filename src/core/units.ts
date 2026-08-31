@@ -81,6 +81,11 @@ export function formatUnits(value: bigint, decimals: number): string {
  * and the rounding is not symmetric with {@link toCircuitUnits}: round **down**
  * on the way out of the pool and **up** on the way in, so dust always accrues
  * to the remaining holders rather than to whoever is transacting.
+ *
+ * `index` is floored where the pool reports it, so this is a *display*
+ * conversion. To size a payment, use {@link toTokenUnitsAtRate}, which divides
+ * by the pool's own `gross / supply` and cannot land under what the contract
+ * charges.
  */
 export function toTokenUnits(
     circuitAmount: CircuitAmount,
@@ -93,6 +98,71 @@ export function toTokenUnits(
     const down = numer / RAY;
     if ((opts.round ?? "down") === "down") return branded<TokenAmount>(down);
     return branded<TokenAmount>(numer % RAY === 0n ? down : down + 1n);
+}
+
+/**
+ * What a yield asset's units are worth right now, as the pool itself measures
+ * it: `gross` is the venue position plus the pool's idle balance, `supply` the
+ * units outstanding against it.
+ *
+ * The pair rather than {@link RAY}-scaled `index`, because the pool converts by
+ * `units * gross / supply` — `scale` and `RAY` both cancel out of that — while
+ * the index it *reports* is floored. Quoting a deposit through the floored index
+ * can therefore land below what the contract actually charges, and a
+ * `maxTotal` signed off that figure is refused by Permit2. Use `index` to show a
+ * number to a person; use this to size money.
+ */
+export interface YieldRate {
+    gross: bigint;
+    supply: bigint;
+}
+
+/**
+ * Circuit units → ERC-20 base units at a pool-measured rate.
+ *
+ * Prefer this over {@link toTokenUnits} for any figure someone is *charged*.
+ * That one converts through the RAY-scaled index, which the pool floors when it
+ * reports it, so a charge sized through it can land below what the contract
+ * actually takes. Use the index to show a number to a person; use this to size
+ * money.
+ *
+ * `undefined`, or a rate with no units outstanding, is the plain
+ * `circuit * scale`: an empty pool has no ratio yet and one unit is worth
+ * exactly `scale` by definition, which is what pins a new asset's index to
+ * {@link RAY}.
+ *
+ * A `supply` with zero `gross` is **not** that case and is not special-cased
+ * here — it is a pool whose venue lost everything, where the contract pays out
+ * zero and so does this. Treating it as an empty pool would price worthless
+ * units at face value.
+ *
+ * Rounds **up** by default, because the caller is paying in: this is the figure
+ * a shield is charged, and rounding it down under-signs the Permit2 ceiling.
+ * {@link toTokenUnits} keeps the opposite default for the same reason in
+ * reverse.
+ */
+export function toTokenUnitsAtRate(
+    circuitAmount: CircuitAmount,
+    scale: bigint,
+    rate: YieldRate | undefined,
+    opts: { round?: "down" | "up" } = {},
+): TokenAmount {
+    const round = opts.round ?? "up";
+    // `supply` alone, matching `YieldOps._toUnderlying`: the contract's only
+    // fallback is `s == 0`.
+    if (rate === undefined || rate.supply === 0n) {
+        return branded<TokenAmount>(circuitAmount * scale);
+    }
+    if (rate.supply < 0n || rate.gross < 0n) {
+        throw new RangeError(
+            `toTokenUnitsAtRate: rate must be non-negative, got gross ${rate.gross} ` +
+                `supply ${rate.supply}`,
+        );
+    }
+    const numer = circuitAmount * rate.gross;
+    const down = numer / rate.supply;
+    if (round === "down") return branded<TokenAmount>(down);
+    return branded<TokenAmount>(numer % rate.supply === 0n ? down : down + 1n);
 }
 
 /**

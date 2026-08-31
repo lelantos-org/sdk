@@ -121,12 +121,41 @@ export interface ChainToken {
     /** Protocol fee on an unshield of this asset, in bps. See `depositBps`. */
     withdrawBps?: number;
     /**
-     * Pool-managed yield index, RAY-scaled. Decimal string; exceeds `u53`.
-     * Absent from a relayer that predates the yield mixin, where it is `RAY`.
+     * Present iff the pool routes this asset's balance to a yield venue.
+     *
+     * Absent means plain custody, where a circuit unit is worth `scale` base
+     * units forever — and also covers a relayer predating the yield mixin.
+     * Absent for a *yielding* asset the relayer has not priced yet, which is
+     * deliberate: `scale` is not a safe fallback there, it is wrong by whatever
+     * the venue has already earned.
      */
-    index?: string;
-    /** Whether the pool routes this asset to a yield venue. Absent means no. */
-    yieldEnabled?: boolean;
+    yieldState?: YieldStateInfo;
+}
+
+/**
+ * What a yield asset is currently worth, and under what terms.
+ *
+ * Decimal strings throughout; every one of these exceeds `u53`.
+ */
+export interface YieldStateInfo {
+    /** Venue holding the position. Bound once at registration and immutable. */
+    venue: string;
+    /** Venue position plus the pool's idle balance, in token base units. */
+    gross: string;
+    /** Units outstanding: note holders plus the treasury's unswept fee. */
+    supply: string;
+    /**
+     * `gross * RAY / (supply * scale)`, for display.
+     *
+     * Floored on chain, so it must not be used to size a payment — convert with
+     * `gross` and `supply`, which is how the pool itself does it.
+     */
+    index: string;
+    /**
+     * The venue is no longer being supplied. Existing backing is unaffected:
+     * the asset degrades to zero-yield custody, still fully backed.
+     */
+    halted: boolean;
 }
 
 /** @internal */

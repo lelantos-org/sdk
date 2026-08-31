@@ -21,7 +21,14 @@ import {
 } from "../core/denominations.js";
 import { InvalidArgumentError } from "../core/errors.js";
 import { type FeeOverride, resolveFeeRates, type WithdrawNet, withdrawNet } from "../core/fees.js";
-import { formatUnits, parseUnits, RAY, toCircuitUnits, toTokenUnits } from "../core/units.js";
+import {
+    formatUnits,
+    parseUnits,
+    RAY,
+    toCircuitUnits,
+    toTokenUnits,
+    type YieldRate,
+} from "../core/units.js";
 
 /**
  * Everything known about a registered MASP asset.
@@ -72,6 +79,16 @@ export interface AssetInfo {
     index: bigint;
     /** Whether the pool routes this asset to a yield venue. */
     yieldEnabled: boolean;
+    /**
+     * The pool's own measure of what a unit is worth, for sizing a payment.
+     *
+     * Present only for a yield asset the source has priced. `index` above is
+     * floored on chain, so converting a *charge* through it can land below what
+     * the contract takes; this pair is what the pool itself divides by. A
+     * yielding asset with no `rate` cannot be quoted — `scale` is not a safe
+     * fallback, it is wrong by whatever the venue has earned.
+     */
+    rate?: YieldRate;
     /**
      * Withdrawal denominations for this asset, ascending; `[]` only when the
      * wallet opted out via `WalletConfig.denominations`. Every asset otherwise

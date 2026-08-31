@@ -2,10 +2,10 @@
 
 import { buildDeposit } from "../bundle/deposit.js";
 import { supportsAllowanceTransfer, supportsNativeEth } from "../chain/port.js";
-import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../core/brand.js";
+import type { EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
 import { DepositAdapterError, type DepositStrategy, InvalidArgumentError } from "../core/errors.js";
-import { applyFee, assertPublicInFits } from "../core/fees.js";
+import { assertPublicInFits, depositCeiling, depositTotal } from "../core/fees.js";
 import { randomU256 } from "../core/random.js";
 import { decodeAddress } from "../keys/address.js";
 import { getLogger } from "../log/logger.js";
@@ -46,11 +46,6 @@ export async function executeDeposit(
         asset,
         scale: assetEntry.scale,
     });
-    const inAmt = amount * assetEntry.scale;
-    // The shield rate, not the unshield one: a deposit is charged on top of the
-    // principal and a withdrawal is skimmed out of it, and the two rates differ.
-    const fee = applyFee(inAmt, info.depositBps);
-
     // The relayer is paid with a note minted alongside the depositor's, so its
     // value has to be funded here too: the payer is pulled all three parts and
     // `maxTotal` must cover them or Permit2 refuses the transfer.
@@ -63,8 +58,22 @@ export async function executeDeposit(
         asset,
         scale: assetEntry.scale,
     });
-    const relayerAmt = relayerFee.value * assetEntry.scale;
-    const total = branded<TokenAmount>(inAmt + fee + relayerAmt);
+    // The shield rate, not the unshield one: a deposit is charged on top of the
+    // principal and a withdrawal is skimmed out of it, and the two rates differ.
+    // A yield asset is priced off the pool's own `gross / supply`, so this also
+    // refuses to guess when the source has not reported one.
+    const quoted = depositTotal({
+        publicIn: amount,
+        feeIn: relayerFee.value,
+        depositBps: info.depositBps,
+        scale: assetEntry.scale,
+        yieldEnabled: info.yieldEnabled,
+        rate: info.rate,
+    });
+    // A ceiling, not an estimate — which is what all three consumers below
+    // want: the Permit2 signature, the allowance check and the native
+    // `msg.value`. The unused part is never taken.
+    const total = depositCeiling(quoted, info.yieldEnabled);
 
     // Strategy first: it decides who the on-chain escrow belongs to, and the
     // request is signed and digest-bound over that address. A native deposit

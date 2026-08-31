@@ -80,16 +80,25 @@ function fromChainToken(t: ChainToken, denominations: DenominationPolicy): Unpri
         // flag; a disabled asset still resolves, and `deposit` is where the
         // chain rejects it.
         disabled: false,
-        // A relayer predating the yield mixin sends neither field. `RAY` is the
-        // identity for every conversion, so an old relayer keeps working — but
-        // it also means a wallet resolving through `/chains` against a *yielding*
-        // pool would read human amounts low until the relayer ships the field.
-        index: t.index === undefined ? RAY : BigInt(t.index),
-        yieldEnabled: t.yieldEnabled ?? false,
+        // A relayer predating the yield mixin sends no `yieldState`. `RAY` is
+        // the identity for every conversion, so an old relayer keeps working —
+        // but it also means a wallet resolving through `/chains` against a
+        // *yielding* pool would read human amounts low until the relayer ships
+        // the field.
+        index: t.yieldState === undefined ? RAY : BigInt(t.yieldState.index),
+        yieldEnabled: t.yieldState !== undefined,
         ladder: resolveLadder({ scale, decimals: t.decimals }, denominations),
     };
     if (t.symbol !== undefined) info.symbol = t.symbol;
     if (t.decimals !== undefined) info.decimals = t.decimals;
+    // Carried apart from `index` on purpose: this is the pair the pool divides
+    // by, and the only figure a charge may be sized from.
+    if (t.yieldState !== undefined) {
+        info.rate = {
+            gross: BigInt(t.yieldState.gross),
+            supply: BigInt(t.yieldState.supply),
+        };
+    }
     return info;
 }
 

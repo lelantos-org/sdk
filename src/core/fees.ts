@@ -1,7 +1,8 @@
 // Fee arithmetic and the on-chain amount bounds it has to respect.
 
+import { branded, type CircuitAmount, type TokenAmount } from "./brand.js";
 import { InvalidArgumentError } from "./errors.js";
-import { RAY } from "./units.js";
+import { RAY, toTokenUnitsAtRate, type YieldRate } from "./units.js";
 
 /**
  * Basis-points denominator. `feeBps` is a uint16 fraction of 10_000;
@@ -122,4 +123,85 @@ export function withdrawNet(args: WithdrawNetArgs): WithdrawNet {
     const gross = toTokens(publicOut);
     const fee = applyFee(gross, feeBps);
     return { net: gross - fee, fee };
+}
+
+/** What a shield charges the payer, and the pieces it is made of. */
+export interface DepositTotalArgs {
+    /** Principal, in circuit units. */
+    publicIn: bigint;
+    /** Value of the relayer's fee note, in circuit units. */
+    feeIn: bigint;
+    /** The asset's deposit rate. */
+    depositBps: bigint;
+    /** circuit-units → ERC-20-base-units multiplier. */
+    scale: bigint;
+    /** Whether the pool routes this asset to a yield venue. Defaults to `false`. */
+    yieldEnabled?: boolean;
+    /** Required when `yieldEnabled`; see {@link YieldRate}. */
+    rate?: YieldRate | undefined;
+}
+
+/**
+ * What the pool will pull from the payer for one shield, in ERC-20 base units.
+ *
+ * The counterpart to {@link withdrawNet}, and it branches for the same reason:
+ * a shield is charged **on top of** the principal while a withdrawal is skimmed
+ * out of it, and the two unit spaces round at different points.
+ *
+ *   plain  fee is taken on the converted token amount, as
+ *          `MASP._computeAmounts` does
+ *   yield  fee is taken in normalized units and the *total* is converted once,
+ *          rounding up — which is what keeps `_drainDeposit` index-free and the
+ *          escrow digest stable
+ *
+ * The yield branch converts with `rate`, never with the reported index: that
+ * index is floored on chain, so a charge sized through it can land below what
+ * the contract takes and the Permit2 pull is refused.
+ *
+ * @throws {InvalidArgumentError} when the asset yields but no `rate` was
+ * supplied. `scale` is not a safe fallback — it under-quotes by whatever the
+ * venue has earned, which is precisely the amount that makes the pull revert.
+ */
+export function depositTotal(args: DepositTotalArgs): TokenAmount {
+    const { publicIn, feeIn, depositBps, scale, yieldEnabled = false, rate } = args;
+    if (!yieldEnabled) {
+        const inAmt = publicIn * scale;
+        return branded<TokenAmount>(inAmt + applyFee(inAmt, depositBps) + feeIn * scale);
+    }
+    if (rate === undefined) {
+        throw new InvalidArgumentError(
+            "this asset earns yield, so its deposit cost depends on the pool's current " +
+                "index; the source did not report one",
+            { argument: "rate" },
+        );
+    }
+    const units = publicIn + applyFee(publicIn, depositBps) + feeIn;
+    return toTokenUnitsAtRate(branded<CircuitAmount>(units), scale, rate, { round: "up" });
+}
+
+/**
+ * Headroom added to a yield asset's signed deposit ceiling, in basis points.
+ *
+ * 50 bps is roughly a thousand times the drift a 5% APY produces over the
+ * default Permit2 deadline, while still bounding what a misbehaving pool could
+ * pull beyond the quote.
+ */
+export const DEPOSIT_INDEX_HEADROOM_BPS = 50n;
+
+/**
+ * What to sign for a deposit, given what it currently costs.
+ *
+ * Every consumer of this figure wants a ceiling rather than an estimate:
+ * Permit2 transfers only what the pool asks for, an allowance is a cap, and
+ * `NativeAdapter` refunds the unused part of `msg.value`. So overshooting costs
+ * the payer nothing, while undershooting reverts the deposit.
+ *
+ * A yield asset's cost is `units * gross / supply` and `gross` grows with the
+ * venue on every block, so a ceiling signed at exactly the quote is stale the
+ * moment it is signed. Plain assets add nothing: their cost is exact and does
+ * not move.
+ */
+export function depositCeiling(quoted: TokenAmount, yieldEnabled: boolean): TokenAmount {
+    if (!yieldEnabled) return quoted;
+    return branded<TokenAmount>(quoted + applyFee(quoted, DEPOSIT_INDEX_HEADROOM_BPS));
 }
