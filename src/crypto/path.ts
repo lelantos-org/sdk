@@ -68,6 +68,16 @@ export interface PathCheck {
 }
 
 /**
+ * Whether the pool would accept a proof against `root`.
+ *
+ * Named because two layers ask it — this module for a scanned path, and
+ * `TreeStore` before condemning a locally built tree — and `ChainAdapter`
+ * supplies it. Without one name they are the same contract declared twice,
+ * with nothing telling a caller of `verifyPath` what to pass.
+ */
+export type IsKnownRoot = (root: Field) => Promise<boolean>;
+
+/**
  * Check a path against the set of roots the chain accepts. Returns the
  * computed root alongside the verdict so a rejection is diagnosable.
  */
@@ -76,7 +86,7 @@ export async function verifyPath(
     leaf: Field,
     pathElements: Field[][],
     pathIndices: number[],
-    isKnownRootOnChain: (root: Field) => Promise<boolean>,
+    isKnownRootOnChain: IsKnownRoot,
 ): Promise<PathCheck> {
     const computedRoot = rootFromPath(P, leaf, pathElements, pathIndices);
     return { ok: await isKnownRootOnChain(computedRoot), computedRoot };

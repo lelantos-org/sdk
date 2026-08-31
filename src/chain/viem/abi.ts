@@ -21,6 +21,7 @@ export const MASP_ABI = /* @__PURE__ */ parseAbi([
     "function cancelDelay() view returns (uint32)",
     "function nextDepositId() view returns (uint256)",
     "function escrowed(uint256 id) view returns (bytes32 digest)",
+    "function isKnownRoot(bytes32 root) view returns (bool)",
     "function deposit((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv, uint64 feeIn, bytes32 feeCm, uint256[2] feeCvDep, uint256 feeRcv) d, (uint256 nonce, uint256 deadline, uint256 maxTotal, bytes signature) sig, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) feeAux) returns (uint256 id)",
     "function depositAuthorized((uint256 chainId, uint64 publicAssetId, uint64 publicIn, address payer, address recipient, bytes32 outCm, uint256[2] cvDep, uint256 rcv, uint64 feeIn, bytes32 feeCm, uint256[2] feeCvDep, uint256 feeRcv) d, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) aux, (uint256 clueRx, uint256 clueRy, uint256 ephPubX, uint256 ephPubY, bytes ciphertext) feeAux) returns (uint256 id)",
     "function cancelDeposit(uint256 id, uint48 publicIn, bytes32 cm, uint256[2] cvDep, uint64 publicAssetId, uint16 fbps, address payer, uint32 submittedAt, (uint48 feeIn, bytes32 feeCm, uint256[2] feeCvDep) feeNote)",

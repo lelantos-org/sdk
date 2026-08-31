@@ -191,7 +191,7 @@ describe("TreeStore.syncVerified", () => {
 
         const check = await store.syncVerified();
 
-        expect(check.localRoot).toBe(check.chainRoot);
+        expect(check.spendable).toBe(true);
         expect(persistence.cleared).toBe(0);
     });
 
@@ -239,7 +239,7 @@ describe("TreeStore.syncVerified", () => {
 
         const check = await store.syncVerified();
 
-        expect(check.localRoot).toBe(check.chainRoot);
+        expect(check.spendable).toBe(true);
         expect(persistence.cleared).toBe(0);
     });
 
@@ -268,6 +268,48 @@ describe("TreeStore.syncVerified", () => {
         expect(persistence.cleared).toBe(1);
     });
 
+    it("takes the pool's word over the mirror's, without rebuilding", async () => {
+        // The case the whole escalation exists for: a mirror serving a root
+        // the chain never held — one built at the wrong depth, say. Rebuilding
+        // cannot help, because the local tree was right all along.
+        const persistence = recordingPersistence();
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => 10,
+                () => ({ root: 999n, leafCount: 10 }),
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified({ isKnownRoot: async () => true });
+
+        expect(check.spendable).toBe(true);
+        // The expensive repair is what the chain read buys back.
+        expect(persistence.cleared).toBe(0);
+    });
+
+    it("treats an oracle that throws as silence, not permission", async () => {
+        const persistence = recordingPersistence();
+        const store = await TreeStore.withPersistence(
+            stubP,
+            twoFeedClient(
+                () => 10,
+                () => ({ root: 999n, leafCount: 10 }),
+            ),
+            persistence,
+        );
+
+        const check = await store.syncVerified({
+            isKnownRoot: async () => {
+                throw new Error("rpc down");
+            },
+        });
+
+        expect(check.spendable).toBe(false);
+        expect(persistence.cleared).toBe(1);
+    });
+
     it("reports the mismatch when even a rebuild does not reconcile", async () => {
         // A feed serving leaves that do not add up to the root it advertises.
         // Nothing local can repair that, so it is reported rather than retried.
@@ -283,7 +325,8 @@ describe("TreeStore.syncVerified", () => {
 
         const check = await store.syncVerified();
 
-        expect(check.chainRoot).toBe(999n);
+        expect(check.spendable).toBe(false);
+        expect(check.mirrorRoot).toBe(999n);
         expect(check.localRoot).not.toBe(999n);
         expect(persistence.cleared).toBe(1);
     });

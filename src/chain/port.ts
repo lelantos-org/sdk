@@ -5,6 +5,7 @@
 // which path is available, since the interface alone cannot say.
 
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
+import type { IsKnownRoot } from "../crypto/path.js";
 import type {
     AuxOutput,
     DepositRequest,
@@ -166,6 +167,14 @@ export interface ChainAdapter {
     permit2Address?(): EvmAddress;
     /** `WETH9.deposit{value}`. Optional. */
     wrapNative?(wethAddr: EvmAddress, value: bigint): Promise<{ txHash: Hex32 }>;
+    /**
+     * Whether the pool would accept a proof against `root`, from the 64-root
+     * ring it keeps. The authority the commitment mirror only approximates.
+     *
+     * Optional, like the reads around it: an adapter that cannot reach the pool
+     * leaves the mirror as the last word.
+     */
+    isKnownRoot?: IsKnownRoot;
     /**
      * Current chain tip. Feeds `SelectOpts.tipBlock`, without which the
      * selector's spend cooldown is inert. Names no address and no topic.

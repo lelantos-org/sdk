@@ -151,33 +151,39 @@ export async function prepareSpend(
 }
 
 /**
- * Sync the tree and confirm the root it built is one the chain holds.
+ * Sync the tree and confirm it is one the pool would accept a proof against.
  *
  * The wallet no longer derives leaves from primary data — it trusts the
  * server's `leafHash` — so a wrong or lagging value yields a wrong root with
  * no local symptom. Proving against it costs a full Groth16 run (seconds to a
  * minute) and then fails `isKnownRoot` as an unexplained relayer rejection.
  *
- * `TreeStore.syncVerified` owns the reconciling, including the repairs; what
- * belongs to the spend path is only the decision that an unreconciled tree is
- * not something to prove against.
+ * `TreeStore.syncVerified` owns the reconciling, the repairs, and when to put
+ * the question to the chain; it is handed the adapter's `isKnownRoot` because
+ * reaching the pool is a capability it does not otherwise have. What belongs
+ * to the spend path is only the refusal.
  */
 async function syncTreeToVerifiedRoot(ctx: SpendContext): Promise<void> {
-    const check = await ctx.treeStore.syncVerified();
-    if (check.localRoot === check.chainRoot) return;
+    const chain = ctx.cfg.chain;
+    // Bound, because it is passed on as a value and the adapter's own reads
+    // go through `this`.
+    const check = await ctx.treeStore.syncVerified({
+        isKnownRoot: chain.isKnownRoot?.bind(chain),
+    });
+    if (check.spendable) return;
 
     throw new WireFormatError(
         "$.root",
         "local Merkle root does not match the chain after resyncing and rebuilding the " +
-            "tree from leaf 0 — the commitment feed is serving leaves that do not " +
-            "reconcile with the root it reports, so any proof built against this tree " +
-            "would be rejected on chain",
+            "tree from leaf 0, and the pool does not recognise it either — the commitment " +
+            "feed is serving leaves that do not reconcile with the root it reports, so any " +
+            "proof built against this tree would be rejected on chain",
         {
             context: {
                 localRoot: check.localRoot.toString(),
-                chainRoot: check.chainRoot.toString(),
+                mirrorRoot: check.mirrorRoot.toString(),
                 localLeaves: check.localLeaves,
-                chainLeaves: check.chainLeaves,
+                mirrorLeaves: check.mirrorLeaves,
             },
         },
     );

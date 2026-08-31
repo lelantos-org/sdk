@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { NetworkError } from "../../core/errors.js";
 import { randomJubjubScalar } from "../../core/random.js";
@@ -386,5 +386,21 @@ describe("root verification before proving", () => {
 
         // The point of the check: nothing was proved and nothing was sent.
         expect(submitted).toHaveLength(0);
+    });
+
+    it("hands the adapter's root oracle to the tree store", async () => {
+        // Whether to consult the pool, and when, belongs to `syncVerified`;
+        // the spend path only supplies the capability. Covered here because
+        // nothing else would notice if the wiring were dropped.
+        const { ctx, treeStore } = await makeCtx([storedNote("01", 100n)]);
+        const { address: recipient } = await makeCtx([]);
+        const isKnownRoot = vi.fn(async () => true);
+        ctx.cfg.chain.isKnownRoot = isKnownRoot;
+
+        await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
+
+        expect(treeStore.syncVerified).toHaveBeenCalledWith(
+            expect.objectContaining({ isKnownRoot: expect.any(Function) }),
+        );
     });
 });

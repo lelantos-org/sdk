@@ -15,6 +15,7 @@
 import { WireFormatError } from "../core/errors.js";
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleNode, type MerkleProof, MerkleTree } from "../crypto/merkle.js";
+import type { IsKnownRoot } from "../crypto/path.js";
 import { getLogger } from "../log/logger.js";
 import type { FmdClient } from "../services/fmd-server/client.js";
 import {
@@ -75,16 +76,37 @@ export interface TreePersistence {
 /**
  * What {@link TreeStore.verifyRoot} saw.
  *
- * Carries the leaf counts rather than a verdict because they are what says
- * *how* a tree disagrees, and the two ways need opposite handling. See
- * {@link TreeStore.reset}. Whether the roots agree is `localRoot ===
- * chainRoot`, which {@link TreeStore.syncVerified} reports for its callers.
+ * `mirrorRoot`, not `chainRoot`: it comes from the commitment server, which
+ * mirrors the chain rather than being it. The distinction is the whole reason
+ * `spendable` exists — a mirror built at the wrong depth, or lagging, reports
+ * a root the chain never held and condemns a local tree that is perfectly
+ * good, so agreement with it is sufficient but not necessary.
+ *
+ * The leaf counts say *how* a tree disagrees, which decides how to repair it:
+ * see {@link TreeStore.reset}.
  */
 export interface RootCheck {
+    /**
+     * The tree is one the pool would accept a proof against.
+     *
+     * Not derivable from the roots: it is true when they agree, and also when
+     * they do not but the chain itself vouched for the local root.
+     */
+    spendable: boolean;
     localRoot: Field;
-    chainRoot: Field;
+    mirrorRoot: Field;
     localLeaves: number;
-    chainLeaves: number;
+    mirrorLeaves: number;
+}
+
+export interface TreeVerifyOpts extends TreeSyncOpts {
+    /**
+     * Asks the pool whether it would accept the local root.
+     *
+     * Supplied by the caller because reaching the chain is a capability
+     * `TreeStore` does not otherwise need; when to consult it stays here.
+     */
+    isKnownRoot?: IsKnownRoot | undefined;
 }
 
 export interface TreeSyncOpts extends PagingOpts {
@@ -241,11 +263,13 @@ export class TreeStore {
      */
     async verifyRoot(): Promise<RootCheck> {
         const state = await this.fmd.fetchTreeState();
+        const localRoot = this.root();
         return {
-            localRoot: this.root(),
-            chainRoot: state.root,
+            spendable: state.root === localRoot,
+            localRoot,
+            mirrorRoot: state.root,
             localLeaves: this.tree.leaves.length,
-            chainLeaves: state.leafCount,
+            mirrorLeaves: state.leafCount,
         };
     }
 
@@ -267,25 +291,39 @@ export class TreeStore {
      *      an equal count with a differing root is also what a `/v1/tree-state`
      *      and a chunk feed read microseconds apart look like, and one HTTP GET
      *      is worth spending to avoid pass 3.
-     *   3. Rebuild from leaf 0. What is left is a tree that diverged, and
-     *      syncing cannot repair one: see {@link reset}.
+     *   3. Ask the pool directly, when the caller supplied `isKnownRoot`. The
+     *      mirror is not the authority, and this is the one question that
+     *      cannot be wrong. A yes here means the tree was always fine and the
+     *      mirror is the faulty party — which is worth one RPC round trip,
+     *      because the alternative below costs every leaf again.
+     *   4. Rebuild from leaf 0. What is left is a tree that really did
+     *      diverge, and syncing cannot repair one: see {@link reset}.
      *
-     * Only pass 3 is expensive, and it is reached only once the two cheap
-     * repairs have failed.
+     * Only pass 4 is expensive, and it is reached only once all three cheap
+     * answers have failed.
      */
-    async syncVerified(opts: TreeSyncOpts = {}): Promise<RootCheck> {
+    async syncVerified(opts: TreeVerifyOpts = {}): Promise<RootCheck> {
         await this.sync(opts);
         let check = await this.verifyRoot();
-        if (reconciles(check)) return check;
+        if (check.spendable) return check;
 
-        if (check.chainLeaves > check.localLeaves) {
-            log.debug("local tree is behind the chain; resyncing", counts(check));
+        if (check.mirrorLeaves > check.localLeaves) {
+            log.debug("local tree is behind the mirror; resyncing", counts(check));
             await this.sync(opts);
         } else {
-            log.debug("local tree disagrees with the chain; re-reading tree state", counts(check));
+            log.debug("local tree disagrees with the mirror; re-reading tree state", counts(check));
         }
         check = await this.verifyRoot();
-        if (reconciles(check)) return check;
+        if (check.spendable) return check;
+
+        if (await vouchedFor(opts.isKnownRoot, check.localRoot)) {
+            log.warn(
+                "commitment mirror disagrees with the chain, but the pool accepts the local " +
+                    "root; spending against it and leaving the mirror to catch up",
+                counts(check),
+            );
+            return { ...check, spendable: true };
+        }
 
         log.warn("local tree diverges from the chain; rebuilding it from leaf 0", counts(check));
         await this.reset();
@@ -316,9 +354,24 @@ export class TreeStore {
     }
 }
 
-/** Whether the tree is one the chain would accept a proof against. */
-function reconciles(check: RootCheck): boolean {
-    return check.localRoot === check.chainRoot;
+/**
+ * Ask the pool about `root`, treating every non-answer as "no".
+ *
+ * An adapter that cannot reach the chain, and a read that fails, are both
+ * silence rather than permission — the mirror's verdict stands, and the caller
+ * is already on its way to a typed error that says more than an RPC failure
+ * would.
+ */
+async function vouchedFor(ask: IsKnownRoot | undefined, root: Field): Promise<boolean> {
+    if (!ask) return false;
+    try {
+        return await ask(root);
+    } catch (err) {
+        log.debug("could not ask the pool about the local root", {
+            error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+    }
 }
 
 /**
@@ -328,9 +381,9 @@ function reconciles(check: RootCheck): boolean {
 function counts(check: RootCheck): Record<string, string | number> {
     return {
         localRoot: check.localRoot.toString(),
-        chainRoot: check.chainRoot.toString(),
+        mirrorRoot: check.mirrorRoot.toString(),
         localLeaves: check.localLeaves,
-        chainLeaves: check.chainLeaves,
+        mirrorLeaves: check.mirrorLeaves,
     };
 }
 

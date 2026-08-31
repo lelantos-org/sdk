@@ -51,18 +51,32 @@ const ROOT = resolve(__dirname, "..");
  */
 const ENTRIES = [
     {
-        // Raised from 640_000 in the 0.22 line, where the entry had been sitting
-        // 33 bytes under the ceiling and a selector fix (nesting `FeeNote` as a
-        // tuple in the two `cancel*` signatures) cost 61 bytes and tipped it.
+        // Raised from 650_000 in the 0.31 line, the second time this entry has
+        // been tipped by a small change landing on exhausted slack:
         //
-        // The ~10 KB of headroom is slack to absorb changes like that one
-        // without a budget edit per commit, not room to grow into. Note this
-        // number is inflated by the harness (see the header) — treat a rise in
-        // it as a signal to compare against the previous commit, not as a
-        // literal download size.
+        //     c0e0bb5, before the feature work   627,542 B
+        //     the same tree without syncVerified 649,994 B
+        //     with it                            650,741 B
+        //
+        // The lesson of those numbers is that the previous grant was too
+        // generous: ~10 KB of slack absorbed 22 KB of growth across two weeks
+        // with nobody looking, and the entry was only re-examined once it
+        // tipped. So this ceiling sits just above the measurement rather than a
+        // round number above it — the next regression should trip while it is
+        // still attributable to one commit.
+        //
+        // Nothing here moves off the eager graph by rearranging it: `connect`
+        // statically reaches `tx/steps`, `withdraw`, `transfer` and `swap`, so
+        // the whole spend path is eager already. Shrinking this entry means
+        // making that path lazy, which is an architectural change and not a
+        // budget edit — and is what a third raise should be spent on instead.
+        //
+        // Note this number is inflated by the harness (see the header) — treat
+        // a rise in it as a signal to compare against the previous commit, not
+        // as a literal download size.
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/index.js";`,
-        max: 650_000,
+        max: 653_000,
     },
     {
         name: "root: errors only",

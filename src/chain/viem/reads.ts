@@ -3,6 +3,8 @@
 import { decodeEventLog } from "viem";
 import { type AssetId, branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { TxMiningError } from "../../core/errors.js";
+import { fieldToBytes32 } from "../../core/hex.js";
+import type { Field } from "../../crypto/index.js";
 import type { AssetEntry, DepositEscrowedRecord, EscrowedDepositView } from "../types.js";
 import { MASP_ABI } from "./abi.js";
 import type { ViemCtx } from "./ctx.js";
@@ -46,6 +48,16 @@ export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedDep
     // A cleared or never-written row reads back as the zero word.
     if (digest === ZERO_WORD) return null;
     return { digest: branded<Hex32>(digest) };
+}
+
+/** Whether the pool would accept a proof against `root`. */
+export async function isKnownRoot(ctx: ViemCtx, root: Field): Promise<boolean> {
+    return await ctx.publicClient.readContract({
+        address: ctx.maspAddress,
+        abi: MASP_ABI,
+        functionName: "isKnownRoot",
+        args: [fieldToBytes32(root)],
+    });
 }
 
 export async function cancelDelay(ctx: ViemCtx): Promise<number> {

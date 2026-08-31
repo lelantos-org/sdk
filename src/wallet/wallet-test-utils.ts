@@ -175,21 +175,33 @@ export async function testWallet(opts: TestWalletOpts = {}) {
     return { wallet, noteStore, nullifierStore, source, spent };
 }
 
-/**
- * A `RootCheck` whose roots agree — a tree the chain would accept a proof
- * against.
- *
- * The roots, not a flag, decide that: `RootCheck` carries no verdict field
- * precisely so a fixture cannot claim agreement while spelling two different
- * roots.
- */
+/** A `RootCheck` for a tree the pool would accept a proof against. */
 export function reconciled(leaves = 4): RootCheck {
-    return { localRoot: 0n, chainRoot: 0n, localLeaves: leaves, chainLeaves: leaves };
+    return {
+        spendable: true,
+        localRoot: 0n,
+        mirrorRoot: 0n,
+        localLeaves: leaves,
+        mirrorLeaves: leaves,
+    };
 }
 
-/** A `RootCheck` whose roots differ, for the paths that must refuse to prove. */
-export function unreconciled(localLeaves = 4, chainLeaves = 4): RootCheck {
-    return { localRoot: 0n, chainRoot: 1n, localLeaves, chainLeaves };
+/**
+ * A `RootCheck` the spend path must refuse: the mirror disagrees and the chain
+ * did not vouch for the local root either.
+ *
+ * `spendable` is the verdict `syncVerified` reached after consulting both, so
+ * a fixture sets it rather than deriving it from the roots — the two differing
+ * is exactly the case where it is not derivable.
+ */
+export function unreconciled(localLeaves = 4, mirrorLeaves = 4): RootCheck {
+    return {
+        spendable: false,
+        localRoot: 0n,
+        mirrorRoot: 1n,
+        localLeaves,
+        mirrorLeaves,
+    };
 }
 
 /**

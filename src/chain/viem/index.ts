@@ -11,6 +11,7 @@
 import { createPublicClient, http, type PublicClient } from "viem";
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../../core/brand.js";
 import type { EthSigner } from "../../core/signer.js";
+import type { Field } from "../../crypto/index.js";
 import type {
     AuxOutput,
     DepositRequest,
@@ -107,6 +108,9 @@ export class ViemChainAdapter implements ChainAdapter {
     }
     cancelDelay(): Promise<number> {
         return reads.cancelDelay(this.ctx);
+    }
+    isKnownRoot(root: Field): Promise<boolean> {
+        return reads.isKnownRoot(this.ctx, root);
     }
 
     // ── tokens ───────────────────────────────────────────────────────────
