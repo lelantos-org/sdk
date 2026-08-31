@@ -137,6 +137,7 @@
     "WorkerRpcError",
     "X402PaymentError",
     "X402RefusalReason",
+    "YieldRate",
     "assetId",
     "circuitAmount",
     "coeffCount",
@@ -188,6 +189,7 @@
     "syncWallet",
     "toCircuitUnits",
     "toTokenUnits",
+    "toTokenUnitsAtRate",
     "tokenAmount",
     "withdrawNet",
     "withdrawNetFor"
@@ -551,6 +553,7 @@
     "SwapBlob",
     "TransactAux",
     "TransactPubInputs",
+    "YieldStateInfo",
     "auxDigest",
     "computePiHash"
   ],
