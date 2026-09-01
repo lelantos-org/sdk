@@ -160,3 +160,39 @@ describe("toTokenUnitsAtRate", () => {
         expect(toTokenUnitsAtRate(N, 10n, { gross: 0n, supply: 1_000_000n })).toBe(0n);
     });
 });
+
+describe("toCircuitUnits round: up", () => {
+    const scale = 10n ** 10n;
+    // A deliberately awkward index, so most unit counts have no exact decimal.
+    const index = (RAY * 1_007_024_198_360_401_419n) / 1_000_000_000_000_000_000n;
+
+    it("recovers the unit count a floored conversion came from", () => {
+        // The round trip the max button and the ladder chips depend on.
+        for (const units of [1n, 2n, 7n, 999n, 1_000_000n, 123_456_789n]) {
+            const base = toTokenUnits(circuitAmount(units), scale, { index });
+            expect(toCircuitUnits(base, scale, { index, round: "up" })).toBe(units);
+        }
+    });
+
+    it("floors would lose a unit on the same input", () => {
+        // Stated as a test so the reason `up` exists cannot be optimised away:
+        // this is the failure it was added to prevent.
+        const base = toTokenUnits(circuitAmount(999n), scale, { index });
+        expect(toCircuitUnits(base, scale, { index, round: "down" })).toBe(998n);
+        expect(toCircuitUnits(base, scale, { index, round: "up" })).toBe(999n);
+    });
+
+    it("cannot over-draw a balance", () => {
+        const balance = 1_000n;
+        const spendable = toTokenUnits(circuitAmount(balance), scale, { index });
+        expect(toCircuitUnits(spendable, scale, { index, round: "up" })).toBeLessThanOrEqual(
+            balance,
+        );
+    });
+
+    it("is exact on a boundary, whichever way it rounds", () => {
+        const onBoundary = toTokenUnits(circuitAmount(5n), scale, {});
+        expect(toCircuitUnits(onBoundary, scale, { round: "up" })).toBe(5n);
+        expect(toCircuitUnits(onBoundary, scale, { round: "down" })).toBe(5n);
+    });
+});

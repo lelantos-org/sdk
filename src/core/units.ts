@@ -70,6 +70,19 @@ export function formatUnits(value: bigint, decimals: number): string {
 }
 
 /**
+ * `numer / denom`, floored or ceiled.
+ *
+ * The rounding direction is this module's whole contract — down out of the pool,
+ * up into it, so dust accrues to the remaining holders — and it was spelled
+ * three different ways in three functions. One spelling, so an off-by-one has
+ * one place to hide rather than three.
+ */
+function divRound(numer: bigint, denom: bigint, round: "down" | "up"): bigint {
+    const down = numer / denom;
+    return round === "up" && numer % denom !== 0n ? down + 1n : down;
+}
+
+/**
  * Circuit units → ERC-20 base units.
  *
  * `token = circuit * scale * index / RAY`. At the default `index` of {@link RAY}
@@ -94,10 +107,7 @@ export function toTokenUnits(
 ): TokenAmount {
     const index = opts.index ?? RAY;
     if (index <= 0n) throw new RangeError(`toTokenUnits: index must be positive, got ${index}`);
-    const numer = circuitAmount * scale * index;
-    const down = numer / RAY;
-    if ((opts.round ?? "down") === "down") return branded<TokenAmount>(down);
-    return branded<TokenAmount>(numer % RAY === 0n ? down : down + 1n);
+    return branded<TokenAmount>(divRound(circuitAmount * scale * index, RAY, opts.round ?? "down"));
 }
 
 /**
@@ -159,23 +169,39 @@ export function toTokenUnitsAtRate(
                 `supply ${rate.supply}`,
         );
     }
-    const numer = circuitAmount * rate.gross;
-    const down = numer / rate.supply;
-    if (round === "down") return branded<TokenAmount>(down);
-    return branded<TokenAmount>(numer % rate.supply === 0n ? down : down + 1n);
+    return branded<TokenAmount>(divRound(circuitAmount * rate.gross, rate.supply, round));
 }
 
 /**
  * ERC-20 base units → circuit units.
  *
- * @throws {RangeError} when the amount is not a whole number of circuit
- * units. Pass `{ round: "down" }` to floor instead; the remainder is dropped
- * without notice, so use it only where dust does not matter.
+ * `round` picks what happens off a unit boundary:
+ *
+ * - `"exact"` (default) throws. Right wherever an off-boundary amount is a
+ *   mistake — at a fixed `scale` it always was, since nothing finer was ever
+ *   representable and truncating would short the caller silently.
+ * - `"down"` floors. The remainder is dropped without notice, so use it only
+ *   where dust does not matter.
+ * - `"up"` ceils, for the inverse of a conversion that floored.
+ *   {@link toTokenUnits} produces `floor(units * step / RAY)`, which sits at or
+ *   below the exact worth of `units`; flooring a second time on the way back
+ *   lands under it and the round trip loses a unit. `"up"` is the smallest unit
+ *   count worth at least `tokenAmount`, and recovers the original exactly:
+ *   `toCircuitUnits(toTokenUnits(v, …), …, { round: "up" }) === v`.
+ *
+ *   That round trip is not cosmetic once an index is moving. A unit is then
+ *   worth a non-round number of base units, so most unit counts have no exact
+ *   decimal at the token's `decimals` — including whatever a "max" control
+ *   writes into a field and reads back. Rounding up cannot over-draw: if
+ *   `tokenAmount <= toTokenUnits(balance, …)` then the result is `<= balance`.
+ *
+ * @throws {RangeError} when the amount is not a whole number of circuit units
+ * and `round` is `"exact"`.
  */
 export function toCircuitUnits(
     tokenAmount: TokenAmount,
     scale: bigint,
-    opts: { round?: "exact" | "down"; index?: bigint } = {},
+    opts: { round?: "exact" | "down" | "up"; index?: bigint } = {},
 ): CircuitAmount {
     if (scale <= 0n) throw new RangeError(`toCircuitUnits: scale must be positive, got ${scale}`);
     const index = opts.index ?? RAY;
@@ -201,7 +227,7 @@ export function toCircuitUnits(
                       `${step} / ${RAY} base units`,
         );
     }
-    return branded<CircuitAmount>((numer - rest) / step);
+    return branded<CircuitAmount>(divRound(numer, step, opts.round === "up" ? "up" : "down"));
 }
 
 /** Reject float artefacts (`1e-7`, `0.1 + 0.2`) before they reach `BigInt`. */
