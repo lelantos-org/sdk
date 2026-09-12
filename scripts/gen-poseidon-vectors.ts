@@ -2,7 +2,7 @@
 // Output: tests/vectors/poseidon.json, written to *both* repos.
 //
 // Why this file exists: `sdk/wasm/poseidon` vendors the permutation from
-// `backend/crates/fmd-crypto/src/poseidon/`, so two copies must stay
+// `backend/crates/common-crypto/src/poseidon/`, so two copies must stay
 // bit-identical. The backend's own `poseidon/tests.rs` explains the hazard —
 // parity against `light-poseidon` is *relative*, so a constants change under a
 // version bump would move both sides together while every assertion still

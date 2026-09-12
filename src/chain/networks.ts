@@ -14,6 +14,13 @@ export interface NetworkPreset {
     treeDepth: number;
     /** Defaults to canonical CREATE2 deployment. */
     permit2Address?: EvmAddressLike;
+    /**
+     * `NativeAdapter`, which wraps ETH on the way in and unwraps on the way
+     * out. Omitted where the deployment has none: the adapter then reports
+     * `deposit({ asEth: true })` and `withdrawEth` as unsupported, which is
+     * accurate rather than a failure.
+     */
+    nativeAdapterAddress?: EvmAddressLike;
     /** Surfaced in `NetworkNotDeployedError`. */
     deploymentStatusUrl?: string;
 }

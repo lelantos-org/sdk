@@ -10,7 +10,6 @@
 //!       piC: [x,y,"1"], publicSignals: [decimal strings] }
 
 mod encode;
-mod qap;
 mod trace;
 mod wtns;
 mod zkey;
@@ -18,14 +17,13 @@ mod zkey;
 use std::io::Cursor;
 
 use ark_bn254::{Bn254, Fr};
-use ark_groth16::{Groth16, ProvingKey};
-use ark_relations::r1cs::ConstraintMatrices;
+use ark_groth16::ProvingKey;
 use ark_std::UniformRand;
 use rand_core::OsRng;
+use taceo_groth16::{CircomReduction, ConstraintMatrices, Groth16};
 use wasm_bindgen::prelude::*;
 
 use crate::encode::{public_signals, ProveOutput};
-use crate::qap::CircomReduction;
 use crate::trace::ProveTrace;
 use crate::zkey::read_zkey;
 
@@ -46,6 +44,26 @@ static TALC: talc::sync::TalcLock<
 #[wasm_bindgen(start)]
 pub fn _start() {
     console_error_panic_hook::set_once();
+}
+
+/// How many threads the prover will actually use, as rayon reports it on the
+/// calling thread.
+///
+/// Not the same question as how many workers `initThreadPool` was given. The
+/// prover's parallelism is sized from this number — both the MSM and the FFT
+/// divide their work by it — so if it reads 1 while the pool has 16 workers,
+/// proving runs serial no matter how the pool was configured. Call it from the
+/// same context that calls `prove`; the answer is context-dependent.
+#[wasm_bindgen(js_name = threadCount)]
+pub fn thread_count() -> usize {
+    #[cfg(feature = "parallel")]
+    {
+        rayon::current_num_threads()
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        1
+    }
 }
 
 #[wasm_bindgen]
@@ -76,13 +94,11 @@ impl ProverSession {
 
         let r = Fr::rand(&mut OsRng);
         let s = Fr::rand(&mut OsRng);
-        let proof = Groth16::<Bn254, CircomReduction>::create_proof_with_reduction_and_matrices(
+        let proof = Groth16::<Bn254>::prove::<CircomReduction>(
             &self.pk,
             r,
             s,
             &self.matrices,
-            self.matrices.num_instance_variables,
-            self.matrices.num_constraints,
             witness.as_slice(),
         )
         .map_err(jserr)?;

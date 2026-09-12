@@ -1,7 +1,7 @@
 //! Poseidon-5 over BN254, circomlib-compatible.
 //!
 //! `src/poseidon/` is **vendored byte-for-byte** from
-//! `backend/crates/fmd-crypto/src/poseidon/` (only the `#[cfg(test)] mod
+//! `backend/crates/common-crypto/src/poseidon/` (only the `#[cfg(test)] mod
 //! tests;` line is dropped, since that module is not vendored). Keeping it
 //! diffable is deliberate: `diff` against the backend is the cheap drift
 //! check, and `tests/vectors/poseidon.json` — asserted by both repos' suites —

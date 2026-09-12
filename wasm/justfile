@@ -69,7 +69,7 @@ poseidon-build-dev: (poseidon-wasm-build "dev")
 drift:
     #!/usr/bin/env bash
     set -euo pipefail
-    be="../../backend/crates/fmd-crypto/src/poseidon"
+    be="../../backend/crates/common-crypto/src/poseidon"
     if [ ! -d "$be" ]; then echo "drift: backend not checked out, skipping"; exit 0; fi
     rc=0
     for f in circom.rs sparse.rs; do

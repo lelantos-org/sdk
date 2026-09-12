@@ -11,9 +11,13 @@ import type { PublicClient } from "viem";
 import { branded, type EvmAddress } from "../../core/brand.js";
 import type { EthSigner } from "../../core/signer.js";
 
-export interface ViemCtx {
+/**
+ * The shared state a read needs. No signer: the reads in `reads.ts`, and the
+ * balance/allowance/receipt half of `token.ts`, are exactly what a wallet with
+ * no EVM key can still do.
+ */
+export interface ViemReadCtx {
     readonly publicClient: PublicClient;
-    readonly signer: EthSigner;
     readonly maspAddress: EvmAddress;
     readonly permit2Address: EvmAddress;
     /**
@@ -24,6 +28,11 @@ export interface ViemCtx {
     readonly nativeAdapterAddress?: EvmAddress | undefined;
     /** Resolves the chain id, caching after the first RPC round trip. */
     chainId(): Promise<bigint>;
+}
+
+/** A read context that also holds a signing key. */
+export interface ViemCtx extends ViemReadCtx {
+    readonly signer: EthSigner;
 }
 
 /** Brand a caller-supplied address string. */

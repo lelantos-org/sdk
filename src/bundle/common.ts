@@ -2,16 +2,18 @@
 //
 // The transact spend builders (`buildTransfer`, `buildWithdraw`, `buildWithdrawNative`)
 // prove the transact_2x2 SNARK and return a `SubmitTransactPayload` for
-// `/v1/transact`. `buildDeposit` does NOT prove — deposits go through
-// `MASP.deposit` (Permit2 witness); returns a `BuiltDeposit` for the
-// wallet to sign + POST to `/v1/deposit`.
+// `/v1/spend`. `buildDeposit` does NOT prove — deposits go through
+// `MASP.deposit` (Permit2 witness); returns a `BuiltDeposit` the wallet signs
+// and broadcasts itself. The relayer serves no deposit route: it picks the
+// escrow up from the `DepositEscrowed` event.
 
-import type { CircomTransactInput } from "../circuit/index.js";
 import {
+    circuitSignals,
     dummyInputAt,
     fiatShamirZ,
     flatten,
     type SpendableCachedNote,
+    type TransactWitnessBundle,
     toCircomInput,
     toSpentNoteFromPath,
 } from "../circuit/index.js";
@@ -202,7 +204,12 @@ export async function finalize(
     });
 
     const z = computeFiatShamirZ(baseInput);
-    const proof = await runProver(common, { ...baseInput, z: z.toString() });
+    // `circuitSignals` drops the challenge-only fields. They are logical public
+    // inputs — hashed into `z` just above — but not circuit signals, and the
+    // witness calculator rejects a key the circuit does not declare.
+    const proof = await runProver(common, {
+        ...circuitSignals({ ...baseInput, z: z.toString() }),
+    });
 
     return {
         payload: {
@@ -231,12 +238,12 @@ export function fieldToBytes32(f: Field): string {
 }
 
 /** @internal */
-function computeFiatShamirZ(baseInput: CircomTransactInput): bigint {
+function computeFiatShamirZ(baseInput: TransactWitnessBundle): bigint {
     return fiatShamirZ(flatten(baseInput));
 }
 
-/** @internal */
-export async function runProver(
+/** Module-local: `finalize` above is the only caller. */
+async function runProver(
     common: BundleCommon,
     input: Record<string, unknown>,
 ): Promise<Groth16Proof> {
@@ -265,14 +272,14 @@ export async function runProver(
  */
 function extractPubInputs(
     common: BundleCommon,
-    base: CircomTransactInput,
+    base: TransactWitnessBundle,
     asset: bigint,
     publicIn: bigint,
     publicOut: bigint,
 ): TransactPubInputs {
     // The explicit re-parse is the trust boundary between the prover witness
     // (decimal strings) and the relayer wire format (bigints/points). Typing
-    // the witness as `CircomTransactInput` keeps it cast-free.
+    // the witness as `TransactWitnessBundle` keeps it cast-free.
     // A curve point is always (x, y) whatever the shape — unlike the
     // per-slot arrays below, whose length is `nIn` or `nOut`.
     const point = (v: readonly string[] | undefined): [bigint, bigint] => {

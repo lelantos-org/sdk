@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import type { Field, Poseidon } from "../crypto/index.js";
-import type { CommitmentChunkOut, FmdClient } from "../services/fmd-server/client.js";
+import type { CommitmentChunkOut, FmdClient } from "../services/fmd-server/index.js";
 import { CHUNK_SIZE } from "./chunk-feed.js";
 import { type TreePersistence, TreeStore, type TreeStoreState } from "./tree-store.js";
 

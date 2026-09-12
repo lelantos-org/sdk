@@ -1,5 +1,12 @@
-// SnarkCompression: the 31-slot PI vector and its Fiat-Shamir challenge.
+// SnarkCompression: the logical public inputs, the Fiat-Shamir challenge they
+// hash to, and the subset of them the polynomial evaluates.
 // Mirrors `PubInputs.compress(Transact)` on-chain.
+//
+// Two vectors, not one. `flatten` is every logical public input and is what `z`
+// hashes; `coeffs` is the strict subset the circuit pins and is what `y`
+// evaluates. `PolyEval` is affine in each coefficient and the prover reads `z`
+// before choosing a witness, so an unconstrained coefficient is one linear
+// equation in one unknown — see `coeffCount` in `core/shape.ts`.
 
 import { encodeAbiParameters, keccak256 } from "viem";
 import { BN254_FR, type Field } from "../core/field.js";
@@ -25,16 +32,19 @@ export type FlattenInput = {
 };
 
 /**
- * Flatten the logical PIs into the PolyEval coefficient vector, in
+ * Flatten the logical PIs into the Fiat-Shamir challenge preimage, in
  * `PubInputs.compress(Transact)` order:
  *
  *   9 scalar slots + 3·N_IN (nullifier, in_cv) + 8·N_OUT (out_cm, out_cv,
- *   out_cv_dep, 3 clue slots) — see `coeffCount` in `core/shape.ts`, which is
- *   31 at 2×2 and 42 at 3×3.
+ *   out_cv_dep, 3 clue slots) — see `challengeWordCount` in `core/shape.ts`,
+ *   which is 69 at 4×6.
+ *
+ * This is the vector `fiatShamirZ` hashes, NOT the one `hornerEval` evaluates —
+ * use `coeffs` for that. The two differ by the 23 fields the circuit does not
+ * constrain, which bind through `z` precisely because they are hashed.
  *
  * The shape is read off the input arrays rather than hardcoded, so a witness
- * for any `Transact(DEPTH, N_IN, N_OUT)` instance flattens correctly. Only
- * the 2×2 circuit is deployed today; the 3×3 vectors exercise the rest.
+ * for any `Transact(DEPTH, N_IN, N_OUT)` instance flattens correctly.
  */
 export function flatten(input: FlattenInput): Field[] {
     const nIn = input.nullifier.length;
@@ -59,15 +69,18 @@ export function flatten(input: FlattenInput): Field[] {
         coeffs.push(BigInt(x));
         coeffs.push(BigInt(y));
     }
-    coeffs.push(BigInt(input.recipient_address));
-    coeffs.push(BigInt(input.chain_id));
-    coeffs.push(BigInt(input.payer_address));
-    coeffs.push(BigInt(input.relayer_address));
     for (let j = 0; j < nOut; j++) {
         const [x, y] = requirePoint("out_cv_dep", input.out_cv_dep[j]);
         coeffs.push(BigInt(x));
         coeffs.push(BigInt(y));
     }
+    // The four unpinned words follow every pinned one, so the coefficient
+    // vector is this preimage's leading `coeffCount` words. Matches the member
+    // order of `PubInputs.Transact`, which is what the contract calldata-copies.
+    coeffs.push(BigInt(input.recipient_address));
+    coeffs.push(BigInt(input.chain_id));
+    coeffs.push(BigInt(input.payer_address));
+    coeffs.push(BigInt(input.relayer_address));
 
     // Checked against `nOut`, like every other slot group. Checking the three
     // only against each other, or defaulting them to `[]`, would let a caller
@@ -84,6 +97,30 @@ export function flatten(input: FlattenInput): Field[] {
     }
     coeffs.push(BigInt(input.out_aux_digest));
     return coeffs;
+}
+
+/**
+ * The PolyEval coefficient vector: the subset of `flatten` the circuit pins.
+ *
+ *   4 scalar slots + 3·N_IN (nullifier, in_cv) + 5·N_OUT (out_cm, out_cv,
+ *   out_cv_dep) — 46 at 4×6.
+ *
+ * Every entry is bound by a constraint in `4x6.circom` outside `PolyEval`: the
+ * root by Merkle membership, the nullifiers and commitments by Poseidon, the
+ * value commitments by `ValueCommit`, the three public scalars by
+ * `RangeCheck64` and the balance. That membership rule is what makes `y`
+ * binding; see `coeffCount` in `core/shape.ts`.
+ */
+export function coeffs(input: FlattenInput): Field[] {
+    const nIn = input.nullifier.length;
+    const nOut = input.out_cm.length;
+
+    // The leading words of the preimage, not a second walk over the same order.
+    // `PubInputs.Transact` orders its pinned members first precisely so this is a
+    // prefix — see `TRANSACT_COEFFS` — and taking it as a slice makes that
+    // structural instead of a property two functions have to keep agreeing on.
+    // Slicing `flatten` also inherits its length and shape validation.
+    return flatten(input).slice(0, 4 + 3 * nIn + 5 * nOut);
 }
 
 /** A curve-point slot is always `(x, y)`; the arity is part of the layout. */
@@ -153,7 +190,8 @@ function requireLength(field: string, value: { length: number }, want: number): 
 
 /**
  * Horner-form polynomial evaluation in BN254 Fr. Mirrors the in-circuit
- * `PolyEval` and on-chain `PubInputs._evalY`.
+ * `PolyEval` and on-chain `PubInputs._finalizeRaw`. Takes `coeffs`'
+ * output, not `flatten`'s.
  */
 export function hornerEval(coeffs: Field[], z: Field): Field {
     let acc = 0n;
@@ -164,7 +202,8 @@ export function hornerEval(coeffs: Field[], z: Field): Field {
     return acc;
 }
 
-export function fiatShamirZ(coeffs: Field[]): Field {
-    const packed = encodeAbiParameters([{ type: "uint256[]" }], [coeffs]);
+/** Takes `flatten`'s output: every logical public input, evaluated or not. */
+export function fiatShamirZ(challenge: Field[]): Field {
+    const packed = encodeAbiParameters([{ type: "uint256[]" }], [challenge]);
     return BigInt(keccak256(packed)) % BN254_FR;
 }

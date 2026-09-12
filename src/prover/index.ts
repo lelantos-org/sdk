@@ -12,6 +12,7 @@
 // Re-exporting it would drag rayon worker glue into every consumer's bundle
 // even with `useWasmProver: false`.
 
+export type { WorkerFactory, WorkerLike } from "../worker/types.js";
 export {
     ARTIFACT_CACHE_NAME,
     type ArtifactCache,

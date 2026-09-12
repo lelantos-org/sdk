@@ -21,9 +21,15 @@ export type {
     AllowanceBatchChain,
     AllowanceTransferChain,
     ChainAdapter,
+    ChainReader,
     NativeEthChain,
 } from "./port.js";
-export { supportsAllowanceBatch, supportsAllowanceTransfer, supportsNativeEth } from "./port.js";
+export {
+    supportsAllowanceBatch,
+    supportsAllowanceTransfer,
+    supportsNativeEth,
+    supportsSigning,
+} from "./port.js";
 export type {
     AssetEntry,
     CancelDepositInputs,
@@ -37,4 +43,6 @@ export {
     NATIVE_ADAPTER_ABI,
     ViemChainAdapter,
     type ViemChainAdapterOpts,
+    ViemChainReader,
+    type ViemChainReaderOpts,
 } from "./viem/index.js";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ChainAdapter } from "../chain/port.js";
-import { assetId, circuitAmount, evmAddress } from "../core/brand.js";
-import { RAY } from "../core/units.js";
+import type { ChainAdapter } from "../../chain/port.js";
+import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
+import { RAY } from "../../core/units.js";
 import {
     type AssetInfo,
     type AssetInfoWithMeta,
@@ -12,7 +12,7 @@ import {
     minAmount,
     parseAmount,
     requireTokenMeta,
-} from "./assets.js";
+} from "./index.js";
 
 // Built through `makeAssetInfo` rather than as a literal, so `scale`,
 // `decimals` and the ladder derived from them are stated once and cannot drift

@@ -1,10 +1,15 @@
 // Deposit transaction logic. Backs `Wallet.deposit`.
 
 import { buildDeposit } from "../bundle/deposit.js";
-import { supportsAllowanceTransfer, supportsNativeEth } from "../chain/port.js";
+import { type ChainAdapter, supportsAllowanceTransfer, supportsNativeEth } from "../chain/port.js";
 import type { EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
 import { safePhase } from "../core/callbacks.js";
-import { DepositAdapterError, type DepositStrategy, InvalidArgumentError } from "../core/errors.js";
+import {
+    assertNever,
+    DepositAdapterError,
+    type DepositStrategy,
+    InvalidArgumentError,
+} from "../core/errors.js";
 import { assertPublicInFits, depositCeiling, depositTotal } from "../core/fees.js";
 import { randomU256 } from "../core/random.js";
 import { decodeAddress } from "../keys/address.js";
@@ -12,12 +17,12 @@ import { getLogger } from "../log/logger.js";
 import { computePiHash } from "../protocol/abi-hash.js";
 import { resolveAmount } from "./amount.js";
 import type { DepositOptions, DepositResult } from "./api.js";
+import type { DepositContext } from "./capability.js";
 import {
     ALLOWANCE_BUFFER_SECS,
     DEFAULT_ASSET,
     PERMIT2_DEFAULT_DEADLINE_SECS,
 } from "./constants.js";
-import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
 import { resolveDepositFee } from "./tx/deposit-fee.js";
 import { freshDepositSlots } from "./tx/steps.js";
@@ -25,17 +30,23 @@ import { freshDepositSlots } from "./tx/steps.js";
 const log = getLogger("lelantos:wallet:deposit");
 
 export async function executeDeposit(
-    ctx: SpendContext,
+    // `DepositContext`, not `SpendContext`: depositing is the one wallet
+    // operation that cannot be expressed without a signing key, and this
+    // signature is where that is stated. `Wallet.deposit` narrows with
+    // `canDeposit` before calling, so the chain layer read below is the same
+    // one the rest of the context holds — already known to sign.
+    ctx: DepositContext,
     args: DepositOptions,
 ): Promise<DepositResult> {
+    const chain = ctx.cfg.chain;
     // Resolve at the boundary: the option type takes a name (id, token address
     // or symbol) and a human-or-exact amount.
     const info = await ctx.resolveAsset(args.asset ?? DEFAULT_ASSET);
     const asset = info.id;
     const amount = resolveAmount(args.amount, info);
     const recipient = decodeAddress(ctx.J, args.to ?? ctx.address);
-    const payer = await ctx.cfg.chain.payerAddress();
-    const assetEntry = await ctx.cfg.chain.fetchAsset(asset);
+    const payer = await chain.payerAddress();
+    const assetEntry = await chain.fetchAsset(asset);
     if (amount <= 0n) {
         throw new InvalidArgumentError("deposit amount must be positive (nonzero)", {
             argument: "amount",
@@ -80,7 +91,7 @@ export async function executeDeposit(
     // is escrowed by `NativeAdapter` — it wraps `msg.value` and the pool
     // pulls against the adapter's own allowance — so naming the sender there
     // reverts `AdapterNotPayer`.
-    const strategy = await pickDepositStrategy(ctx, args, {
+    const strategy = await pickDepositStrategy(chain, args, {
         payer,
         token: assetEntry.token,
         total,
@@ -116,7 +127,7 @@ export async function executeDeposit(
             aux: feeSlot.aux,
         },
     });
-    const { txHash, depositId } = await runDepositStrategy(ctx, strategy, {
+    const { txHash, depositId } = await runDepositStrategy(chain, strategy, {
         built,
         args,
         assetEntry,
@@ -141,7 +152,7 @@ export async function executeDeposit(
 
 /** Order: native ETH > AllowanceTransfer > witness (fallback). */
 async function pickDepositStrategy(
-    ctx: SpendContext,
+    chain: ChainAdapter,
     args: DepositOptions,
     /**
      * Threaded in rather than recomputed: re-deriving `total` here would cost
@@ -150,7 +161,6 @@ async function pickDepositStrategy(
      */
     plan: { payer: EvmAddress; token: EvmAddress; total: TokenAmount },
 ): Promise<DepositStrategy> {
-    const chain = ctx.cfg.chain;
     if (args.asEth) {
         if (!supportsNativeEth(chain)) {
             throw new DepositAdapterError("native", ["submitDepositNative + nativeAdapterAddress"]);
@@ -165,15 +175,15 @@ async function pickDepositStrategy(
             return "allowance";
         }
     }
-    if (!ctx.submitter.submitDeposit && !chain.submitDeposit) {
-        throw new DepositAdapterError("witness", ["submitter.submitDeposit | chain.submitDeposit"]);
+    if (!chain.submitDeposit) {
+        throw new DepositAdapterError("witness", ["submitDeposit"]);
     }
     return "witness";
 }
 
 /** Every branch returns the same `{ txHash, depositId }` shape. */
 async function runDepositStrategy(
-    ctx: SpendContext,
+    chain: ChainAdapter,
     strategy: DepositStrategy,
     plan: {
         built: ReturnType<typeof buildDeposit>;
@@ -183,7 +193,6 @@ async function runDepositStrategy(
     },
 ): Promise<{ txHash: Hex32; depositId?: bigint }> {
     const { built, args, assetEntry, total } = plan;
-    const chain = ctx.cfg.chain;
 
     // `broadcast` fires once the wallet returns a tx hash (tx in mempool);
     // `mined` fires after `tx.wait()` resolves.
@@ -212,7 +221,11 @@ async function runDepositStrategy(
             onSent,
         }).then(emitMined);
     }
-    // witness path
+    // Not `else`: the witness block below is long, and this keeps it at the
+    // function's top level while still failing to compile if a fourth strategy
+    // is added without a branch.
+    if (strategy !== "witness") assertNever(strategy, "deposit strategy");
+
     const deadline =
         args.deadline ?? BigInt(Math.floor(Date.now() / 1000) + PERMIT2_DEFAULT_DEADLINE_SECS);
     const piHash = computePiHash(built.deposit, built.aux, built.feeAux);
@@ -231,20 +244,6 @@ async function runDepositStrategy(
         nonce,
     });
     safePhase(args.onPhase, "submitting");
-    if (ctx.submitter.submitDeposit) {
-        // Relayer path has no mempool visibility; treat the submitter
-        // response as both broadcast and mined.
-        const r = await ctx.submitter.submitDeposit({
-            chainId: ctx.cfg.chainId,
-            deposit: built.deposit,
-            permit2,
-            aux: built.aux,
-            feeAux: built.feeAux,
-        });
-        safePhase(args.onPhase, "broadcast");
-        safePhase(args.onPhase, "mined");
-        return r;
-    }
     return chain.submitDeposit!({
         deposit: built.deposit,
         permit2,

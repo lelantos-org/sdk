@@ -7,7 +7,7 @@
 
 import type { Field, Point } from "../crypto/index.js";
 import type { OutputAux } from "../notes/aux.js";
-import type { AuxOutput, DepositRequest, Permit2Sig } from "./deposit-request.js";
+import type { DepositRequest } from "./deposit-request.js";
 
 /**
  * Spend op the relayer routes on-chain; maps 1:1 to the MASP entry point.
@@ -45,29 +45,6 @@ export interface SubmitTransactPayload {
     pubInputs: TransactPubInputs;
     /** Off-circuit FMD + ciphertext payload, one per output slot. */
     aux: TransactAux[];
-}
-
-/**
- * Deposit-side payload: wallet pre-built DepositRequest + Permit2 signature
- * + per-output FMD/ciphertext. Relayer broadcasts `MASP.deposit`.
- *
- * @internal
- */
-export interface SubmitDepositPayload {
-    chainId: bigint;
-    deposit: DepositRequest;
-    permit2: Permit2Sig;
-    /**
-     * The depositor's note payload.
-     *
-     * A deposit mints two leaves — this one and the note paying whoever
-     * flushes it — so `MASP.deposit` takes an `aux` for each. That is
-     * independent of the transact circuit's shape; the batch circuit binds
-     * each leaf on its own.
-     */
-    aux: AuxOutput;
-    /** The relayer's fee note payload. */
-    feeAux: AuxOutput;
 }
 
 /**

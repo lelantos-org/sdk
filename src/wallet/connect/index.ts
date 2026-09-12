@@ -12,12 +12,6 @@ import { buildConnectProver, defaultChainAdapter } from "../defaults/index.js";
 import { HttpRelayerSubmitter } from "../submitter.js";
 import { Wallet } from "../wallet.js";
 
-/**
- * Marks every sibling key the variant does not own as `?: never`, so
- * mixing two mutually-exclusive variants is a compile error rather than a
- * `WalletConfigError` at runtime.
- */
-
 import { buildKeySource, type ConnectOptionsLoose, detectRuntime } from "./key-source.js";
 
 export type {
@@ -46,6 +40,8 @@ export async function connect(options: ConnectOptions): Promise<Wallet> {
     const chain = await defaultChainAdapter(
         {
             chain: opts.chain,
+            reader: opts.reader,
+            noSigner: opts.noSigner,
             signer: opts.signer,
             provider: opts.provider,
             address: opts.address,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { FmdClient, NullifierChunkOut } from "../services/fmd-server/client.js";
+import type { FmdClient, NullifierChunkOut } from "../services/fmd-server/index.js";
 import { CHUNK_SIZE } from "./chunk-feed.js";
 import { NullifierStore } from "./nullifier-store.js";
 

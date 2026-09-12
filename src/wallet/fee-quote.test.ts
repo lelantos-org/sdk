@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AssetId, CircuitAmount } from "../core/brand.js";
 import { branded } from "../core/brand.js";
 import type { EstimateResponse } from "../protocol/responses.js";
-import type { AssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
 import { quoteFee } from "./fee-quote.js";
 
 const WETH = {

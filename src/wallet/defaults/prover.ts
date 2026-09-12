@@ -27,6 +27,12 @@ async function wasmProverWithFallback(
     // which benches ~2x slower than snarkjs (snarkjs parallelizes
     // internally). Prefer snarkjs there unless wasm was forced explicitly.
     if (!opts.force && detectRuntime() === "browser" && !isCrossOriginIsolated()) {
+        // Logged for the same reason as the catch below: this is a silent
+        // downgrade, and it is the likelier of the two — a page served
+        // without COOP/COEP hits it on every load, with no error anywhere.
+        log.warn("cross-origin isolation off; proving falls back to snarkjs", {
+            fix: "serve with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp",
+        });
         return new SnarkjsProver(paths);
     }
     try {

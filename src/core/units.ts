@@ -8,7 +8,7 @@
 //   token       1500000000000000000n  ERC-20 base units (10 ** decimals)
 //   circuit     1500n                 what every `Wallet` method takes
 //
-// `token = circuit * asset.scale`. See `./wallet/assets.ts` for the
+// `token = circuit * asset.scale`. See `./wallet/assets/` for the
 // asset-aware wrappers (`parseAmount` / `formatAmount`).
 //
 // The two integer spaces are branded (`CircuitAmount`, `TokenAmount`), so the

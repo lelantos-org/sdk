@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InvalidArgumentError } from "../core/errors.js";
 import { classifyRef, describeRef, matchRef } from "./asset-ref.js";
-import type { AssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
 
 const asset = (id: bigint, token: string, symbol?: string): AssetInfo =>
     ({ id, token, scale: 1n, disabled: false, symbol }) as unknown as AssetInfo;

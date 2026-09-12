@@ -1,17 +1,17 @@
-// viem-based `ChainAdapter`.
+// viem-based `ChainAdapter`: the signing half, over `ViemChainReader`.
 //
 // The class is a thin composition over the call modules in this directory:
-// reads, token, deposits, permit2. It owns exactly the shared state — the
-// clients, the two addresses, and the chain-id cache — and delegates
-// everything else.
+// reads, token, deposits, permit2. `ViemChainReader` owns the client, the
+// addresses and every read; this subclass adds an `EthSigner` and the members
+// that sign as the user's EOA or spend its gas.
 //
 // Inputs arrive via an `EthSigner` (browser EIP-1193 wallet or Node private
-// key — see `../signer/`) plus a read RPC URL.
+// key — see `../signer/`) plus a read RPC URL. A caller with no signing key
+// constructs `ViemChainReader` directly and gets a wallet that can spend from
+// the pool but not shield into it.
 
-import { createPublicClient, http, type PublicClient } from "viem";
-import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../../core/brand.js";
+import type { EvmAddress, Hex32, TokenAmount } from "../../core/brand.js";
 import type { EthSigner } from "../../core/signer.js";
-import type { Field } from "../../crypto/index.js";
 import type {
     AuxOutput,
     DepositRequest,
@@ -19,133 +19,39 @@ import type {
     PermitBatch,
     PermitSingle,
 } from "../../protocol/deposit-request.js";
-import { PERMIT2_ADDRESS } from "../../protocol/deposit-request.js";
 import type { ChainAdapter } from "../port.js";
-import type {
-    AssetEntry,
-    CancelDepositInputs,
-    DepositEscrowedRecord,
-    EscrowedDepositView,
-    Permit2SignArgs,
-    TokenMeta,
-} from "../types.js";
-import { addr, type ViemCtx } from "./ctx.js";
+import type { CancelDepositInputs, Permit2SignArgs } from "../types.js";
+import type { ViemCtx } from "./ctx.js";
 import * as deposits from "./deposits.js";
 import * as permit2 from "./permit2.js";
-import * as reads from "./reads.js";
+import { ViemChainReader, type ViemChainReaderOpts } from "./reader.js";
 import * as token from "./token.js";
 
 export { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
+export { ViemChainReader, type ViemChainReaderOpts } from "./reader.js";
 
-export interface ViemChainAdapterOpts {
-    rpcUrl: string;
+export interface ViemChainAdapterOpts extends ViemChainReaderOpts {
     signer: EthSigner;
-    maspAddress: string;
-    permit2Address?: string | undefined;
-    /**
-     * `NativeAdapter` deployed alongside the pool. Required for native-coin
-     * deposits and unshields: MASP is ERC-20 only, so without it those paths
-     * have no entry point and the adapter reports them as unsupported.
-     */
-    nativeAdapterAddress?: string | undefined;
-    chainId?: bigint | undefined;
 }
 
-export class ViemChainAdapter implements ChainAdapter {
-    readonly publicClient: PublicClient;
+export class ViemChainAdapter extends ViemChainReader implements ChainAdapter {
     readonly signer: EthSigner;
     private readonly ctx: ViemCtx;
-    private readonly _maspAddress: EvmAddress;
-    private readonly _permit2Address: EvmAddress;
-    private readonly _nativeAdapterAddress?: EvmAddress | undefined;
-    private readonly chainIdOverride?: bigint | undefined;
-    private cachedChainId?: bigint;
-    /**
-     * Whether this pool answers `yieldState`, remembered after the first
-     * `fetchAsset`.
-     *
-     * Probing is the read itself: a pool without the mixin reverts, and that
-     * costs an eth_call per asset fetched. One `false` here is enough to stop
-     * paying it — the selector cannot appear on a pool that has already been
-     * observed not to have it, since the code at an address does not change.
-     */
-    private poolYields?: boolean;
 
     constructor(opts: ViemChainAdapterOpts) {
-        this.publicClient = createPublicClient({ transport: http(opts.rpcUrl) });
+        super(opts);
         this.signer = opts.signer;
-        this._maspAddress = addr(opts.maspAddress);
-        this._permit2Address = addr(opts.permit2Address ?? PERMIT2_ADDRESS);
-        this._nativeAdapterAddress = opts.nativeAdapterAddress
-            ? addr(opts.nativeAdapterAddress)
-            : undefined;
-        this.chainIdOverride = opts.chainId;
-
-        this.ctx = {
-            publicClient: this.publicClient,
-            signer: this.signer,
-            maspAddress: this._maspAddress,
-            permit2Address: this._permit2Address,
-            nativeAdapterAddress: this._nativeAdapterAddress,
-            chainId: () => this.chainId(),
-        };
-    }
-
-    // ── reads ────────────────────────────────────────────────────────────
-    async chainId(): Promise<bigint> {
-        if (this.chainIdOverride !== undefined) return this.chainIdOverride;
-        if (this.cachedChainId !== undefined) return this.cachedChainId;
-        this.cachedChainId = BigInt(await this.publicClient.getChainId());
-        return this.cachedChainId;
+        // The read context plus the key. Spread rather than rebuilt so the
+        // two can never drift: every address and the chain-id cache are the
+        // ones the reads already use.
+        this.ctx = { ...this.readCtx, signer: this.signer };
     }
 
     payerAddress(): Promise<EvmAddress> {
         return this.signer.getAddress();
     }
 
-    async blockNumber(): Promise<number> {
-        return Number(await this.publicClient.getBlockNumber());
-    }
-
-    /**
-     * The registry entry, with the yield fields folded in when the pool has
-     * them.
-     *
-     * Composed here rather than inside `reads.fetchAsset` so that the
-     * "does this pool yield at all" answer can be remembered across calls:
-     * that is per-pool state, and the pool is what this class is.
-     */
-    async fetchAsset(id: AssetId): Promise<AssetEntry> {
-        const entry = await reads.fetchAsset(this.ctx, id);
-        if (this.poolYields === false) return entry;
-
-        const y = await reads.fetchAssetYield(this.ctx, id);
-        this.poolYields = y !== undefined;
-        return y ? { ...entry, ...y } : entry;
-    }
-    getEscrowed(id: bigint): Promise<EscrowedDepositView | null> {
-        return reads.getEscrowed(this.ctx, id);
-    }
-    fetchDepositEscrowed(id: bigint, fromBlock?: bigint): Promise<DepositEscrowedRecord | null> {
-        return reads.fetchDepositEscrowed(this.ctx, id, fromBlock);
-    }
-    cancelDelay(): Promise<number> {
-        return reads.cancelDelay(this.ctx);
-    }
-    isKnownRoot(root: Field): Promise<boolean> {
-        return reads.isKnownRoot(this.ctx, root);
-    }
-
     // ── tokens ───────────────────────────────────────────────────────────
-    tokenMeta(a: EvmAddress): Promise<TokenMeta> {
-        return token.tokenMeta(this.ctx, a);
-    }
-    tokenBalanceOf(a: EvmAddress, account: EvmAddress): Promise<TokenAmount> {
-        return token.tokenBalanceOf(this.ctx, a, account);
-    }
-    tokenAllowance(a: EvmAddress, owner: EvmAddress, spender: EvmAddress): Promise<TokenAmount> {
-        return token.tokenAllowance(this.ctx, a, owner, spender);
-    }
     tokenApprove(
         a: EvmAddress,
         spender: EvmAddress,
@@ -156,15 +62,6 @@ export class ViemChainAdapter implements ChainAdapter {
     }
     wrapNative(wethAddr: EvmAddress, value: bigint): Promise<{ txHash: Hex32 }> {
         return token.wrapNative(this.ctx, wethAddr, value);
-    }
-    waitTxReceipt(
-        txHash: Hex32,
-        confirmations?: number,
-    ): Promise<{ blockNumber: number; status: number }> {
-        return token.waitTxReceipt(this.ctx, txHash, confirmations);
-    }
-    nativeBalance(account: EvmAddress): Promise<bigint> {
-        return token.nativeBalance(this.ctx, account);
     }
 
     // ── deposit ──────────────────────────────────────────────────────────
@@ -204,19 +101,12 @@ export class ViemChainAdapter implements ChainAdapter {
         return deposits.cancelDepositNative(this.ctx, id, inputs);
     }
 
-    // ── permit2 ──────────────────────────────────────────────────────────
+    // ── permit2 (signing) ────────────────────────────────────────────────
     signPermit2(args: Permit2SignArgs): Promise<Permit2Sig> {
         return permit2.signPermit2(this.ctx, args);
     }
     signPermit2Allowance(permit: PermitSingle): Promise<{ signature: string }> {
         return permit2.signAllowance(this.ctx, permit);
-    }
-    permit2Allowance(
-        tok: EvmAddress,
-        owner: EvmAddress,
-        spender: EvmAddress,
-    ): Promise<{ amount: TokenAmount; expiration: number; nonce: number }> {
-        return permit2.permit2Allowance(this.ctx, tok, owner, spender);
     }
     permit2PermitAllowance(
         args: { owner: EvmAddress; permit: PermitSingle; signature: string },
@@ -232,20 +122,5 @@ export class ViemChainAdapter implements ChainAdapter {
         onTxHash?: (hash: Hex32) => void,
     ): Promise<{ txHash: Hex32 }> {
         return permit2.permit2PermitAllowanceBatch(this.ctx, args, onTxHash);
-    }
-    permit2Nonce(): Promise<bigint> {
-        return permit2.permit2Nonce();
-    }
-    permit2Address(): EvmAddress {
-        return this._permit2Address;
-    }
-
-    // ── addresses ────────────────────────────────────────────────────────
-    async maspAddress(): Promise<EvmAddress> {
-        return this._maspAddress;
-    }
-    /** `undefined` when no `NativeAdapter` is configured for this chain. */
-    nativeAdapterAddress(): EvmAddress | undefined {
-        return this._nativeAdapterAddress;
     }
 }

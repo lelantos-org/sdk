@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assetId, evmAddress } from "../core/brand.js";
 import { RAY } from "../core/units.js";
-import { makeAssetInfo, requireTokenMeta } from "./assets.js";
+import { makeAssetInfo, requireTokenMeta } from "./assets/index.js";
 import { denominationChoices, previewWithdraw } from "./withdraw-preview.js";
 
 const BPS = 20n; // 0.2%, the deployed rate

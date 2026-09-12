@@ -8,6 +8,7 @@
 // proves anything.
 
 import { IS_NODE } from "../core/runtime.js";
+import { getLogger } from "../log/logger.js";
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "../wasm/loader.js";
 import { nodeFileUrlToPath } from "../wasm/node-path.js";
 import {
@@ -15,6 +16,8 @@ import {
     initNodeThreadPool,
     withWorkerGlobals,
 } from "../wasm/rayon/index.js";
+
+const log = getLogger("lelantos:prover:wasm");
 
 /** @internal */
 export interface ProverSession {
@@ -28,6 +31,13 @@ export type ProverCtor = new (zkeyBytes: Uint8Array) => ProverSession;
 export interface ProverModule extends WasmModuleBase {
     ProverSession: ProverCtor;
     initThreadPool?: ((n: number) => Promise<unknown>) | undefined;
+    /**
+     * What rayon reports *inside* the wasm module, which is not the same
+     * question as how many workers `initThreadPool` was given. The prover sizes
+     * its MSM and FFT work from this number, so a pool of 16 that the module
+     * sees as 1 proves at single-threaded speed.
+     */
+    threadCount?: (() => number) | undefined;
 }
 
 /** @internal */
@@ -65,6 +75,11 @@ const proverLoader = createWasmLoader<ProverModule>({
         } else {
             await initBrowserThreadPool(mod, opts);
         }
+        // The pool reports what it was asked for; this reports what the prover
+        // will actually divide its work by. When the two disagree, proving runs
+        // at the lower number and nothing else says so.
+        const effective = mod.threadCount?.();
+        if (effective !== undefined) log.info("prover thread count", { effective });
     },
 });
 

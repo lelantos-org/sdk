@@ -8,17 +8,14 @@
 //! deciding where to optimise, not a wall-clock figure to quote.
 
 use ark_bn254::Fr;
-use ark_relations::r1cs::ConstraintMatrices;
+use taceo_groth16::ConstraintMatrices;
 use wasm_bindgen::prelude::*;
 
 #[cfg(feature = "trace")]
 mod imp {
     use super::*;
 
-    use ark_groth16::r1cs_to_qap::R1CSToQAP;
-    use ark_poly::GeneralEvaluationDomain;
-
-    use crate::qap::CircomReduction;
+    use taceo_groth16::{CircomReduction, R1CSToQAP};
 
     #[wasm_bindgen]
     extern "C" {
@@ -38,13 +35,8 @@ mod imp {
         /// Time the witness map on its own, then start the clock on the proof.
         pub fn start(matrices: &ConstraintMatrices<Fr>, witness: &[Fr]) -> Result<Self, JsValue> {
             let t0 = perf_now();
-            CircomReduction::witness_map_from_matrices::<Fr, GeneralEvaluationDomain<Fr>>(
-                matrices,
-                matrices.num_instance_variables,
-                matrices.num_constraints,
-                witness,
-            )
-            .map_err(crate::jserr)?;
+            CircomReduction::witness_map_from_matrices::<ark_bn254::Bn254>(matrices, witness)
+                .map_err(crate::jserr)?;
             let groth16_start = perf_now();
             Ok(Self {
                 witness_map_ms: groth16_start - t0,

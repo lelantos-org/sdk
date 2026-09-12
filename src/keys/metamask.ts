@@ -4,7 +4,12 @@
 // IMPORTANT: domain MUST NEVER be reused across versions. Bumping
 // `LELANTOS_NSK_DOMAIN.version` invalidates all derived keys.
 
-import { hashTypedData, type TypedDataDomain, type TypedDataParameter } from "viem";
+import {
+    hashStringStruct,
+    type TypedDataDomain,
+    type TypedDataParameter,
+    typedDataDigest,
+} from "../core/eip712.js";
 import { InvalidArgumentError } from "../core/errors.js";
 import { BABYJUB_SUBGROUP_ORDER, reduceWideToField } from "../core/field.js";
 import { hexToBytes } from "../core/hex.js";
@@ -95,12 +100,24 @@ function canonicalSignature(sigHex: string): `0x${string}` {
     return `0x${r}${lowS.toString(16).padStart(64, "0")}`;
 }
 
-/** Recompute the typed-data hash without a signer (tests / verification). */
+/**
+ * The digest a wallet signs, recomputed without a signer.
+ *
+ * Encoded by `core/eip712.ts` rather than viem, so `keys/` carries no runtime
+ * dependency on it. Every member of both structs is a `string`, which is the
+ * one case that encoder covers. `eip712-parity.test.ts` pins the result
+ * byte-for-byte against `viem.hashTypedData`: a drift here derives a different
+ * `nsk` from the same wallet.
+ */
 export function lelantosTypedDataHash(): string {
-    return hashTypedData({
-        domain: LELANTOS_NSK_DOMAIN,
-        types: TYPES as any,
-        primaryType: PRIMARY_TYPE,
-        message: MESSAGE,
-    });
+    return typedDataDigest(
+        hashStringStruct("EIP712Domain(string name,string version)", [
+            LELANTOS_NSK_DOMAIN.name as string,
+            LELANTOS_NSK_DOMAIN.version as string,
+        ]),
+        hashStringStruct(`${PRIMARY_TYPE}(string purpose,string version)`, [
+            MESSAGE.purpose,
+            MESSAGE.version,
+        ]),
+    );
 }

@@ -1,18 +1,8 @@
 // Pluggable transact-bundle submitter.
 
 import type { HttpClientOptions } from "../core/http.js";
-import type {
-    ChainToken,
-    EstimateResponse,
-    RelayerDepositResponse,
-    RelayerSubmitResponse,
-} from "../protocol/responses.js";
-import type {
-    SpendKind,
-    SubmitDepositPayload,
-    SubmitSwapPayload,
-    SubmitTransactPayload,
-} from "../protocol/transact.js";
+import type { ChainToken, EstimateResponse, RelayerSubmitResponse } from "../protocol/responses.js";
+import type { SpendKind, SubmitSwapPayload, SubmitTransactPayload } from "../protocol/transact.js";
 import { RelayerClient } from "../services/relayer/client.js";
 
 /**
@@ -31,13 +21,6 @@ export type EstimateKind = SpendKind | "swap" | "deposit";
 export interface Submitter {
     /** Spend op. Relayer attaches the matching tree_update_batch SNARK + tpi. */
     submit(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse>;
-    /**
-     * Deposit escrow, for a relayer that broadcasts on the wallet's behalf.
-     * Absent on `HttpRelayerSubmitter`, so the default wiring falls back to
-     * `chain.submitDeposit`. Encode the body with `serializeSubmitDeposit`
-     * from `@lelantos-org/sdk/relayer`.
-     */
-    submitDeposit?(payload: SubmitDepositPayload): Promise<RelayerDepositResponse>;
     /** Atomic shielded swap. Required for `Wallet.swap`. */
     submitSwap?(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse>;
     /**

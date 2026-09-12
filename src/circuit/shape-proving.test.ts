@@ -17,10 +17,11 @@ import { describe, expect, it } from "vitest";
 import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import { bundledProverArtifacts, resolveArtifacts } from "../prover/artifacts.js";
 import { prove, verify } from "../prover/snarkjs.js";
+import { circuitSignals, type TransactWitnessBundle } from "./input.js";
 
 interface Vector {
     name: string;
-    witness: Record<string, unknown>;
+    witness: TransactWitnessBundle;
     compression?: { y?: string };
 }
 
@@ -90,7 +91,12 @@ for (const shape of TRANSACT_SHAPES) {
                 const vector = vectorsFor(id)[0];
                 if (!vector) throw new Error(`no vectors for ${id}`);
 
-                const { proof, publicSignals } = await prove(vector.witness, paths);
+                // The vector's witness also carries the challenge-only fields
+                // (addresses, clues, aux digest), which the circuit does not
+                // declare and the witness calculator rejects. Projected the way
+                // the SDK's own prove path does.
+                const signals = { ...circuitSignals(vector.witness) };
+                const { proof, publicSignals } = await prove(signals, paths);
                 expect(await verify(vkey as object, publicSignals, proof)).toBe(true);
 
                 // Slot 0 of the public signals is the PolyEval-compressed `y`

@@ -9,8 +9,8 @@
 // gives for `SpendContext`: these run against an object literal in a test,
 // with no wasm, no chain adapter and no note store.
 
-import { buildNullifierFromNsk, type Field, type Jubjub, type Poseidon } from "../crypto/index.js";
-import type { SpendingKey } from "../keys/keys.js";
+import { buildNullifier, type Field, type Jubjub, type Poseidon } from "../crypto/index.js";
+import type { FullViewingKey, ViewingKey } from "../keys/keys.js";
 import type { Scanner } from "../sync/scanner.js";
 import type { NoteCache } from "./note-cache.js";
 import type { NoteSource } from "./note-source.js";
@@ -23,21 +23,34 @@ import type { TreeStore } from "./tree-store.js";
 export interface SyncContext {
     readonly P: Poseidon;
     readonly J: Jubjub;
-    readonly keys: SpendingKey;
+    /**
+     * Scanning needs only `ivk`, so a `SpendingKey` and either viewing-key tier
+     * satisfy this. {@link SyncContext.nullifiers} separates them.
+     */
+    readonly keys: ViewingKey | FullViewingKey;
 
     readonly cache: NoteCache;
     readonly noteSource: NoteSource;
     readonly scanner: Scanner;
-    readonly treeStore: TreeStore;
+    /** Absent on a watch wallet; the tree is read only to witness a spend. */
+    readonly treeStore?: TreeStore | undefined;
     readonly nullifierStore: NullifierStore;
 
-    /** Note id → nullifier, memoised across passes. See {@link NullifierMemo}. */
-    readonly nullifiers: NullifierMemo;
+    /**
+     * Note id → nullifier, memoised across passes. See {@link NullifierMemo}.
+     *
+     * Absent for an incoming-viewing-key holder, which has no `nk`.
+     * Reconciliation is then skipped and every note reads unspent.
+     */
+    readonly nullifiers?: NullifierMemo | undefined;
 }
 
 /**
  * Note id → nullifier, derived once per note rather than once per note per
  * sync — a reconcile pass costs one Poseidon per *newly seen* note.
+ *
+ * Keyed on `nk`, so a full-viewing-key holder can build one:
+ * `nf = Poseidon(TAG_NF, nk, rho, cm)` requires no spend authority.
  *
  * In memory only. `StoredNote` is the persisted schema, and the
  * notes file carries no `nsk` — so a leaked or backed-up file today links its
@@ -53,14 +66,14 @@ export class NullifierMemo {
 
     constructor(
         private readonly P: Poseidon,
-        private readonly nsk: Field,
+        private readonly nk: Field,
     ) {}
 
     /** This note's nullifier, deriving it only the first time it is asked for. */
     of(n: StoredNote): Field {
         let nf = this.byId.get(n.id);
         if (nf === undefined) {
-            nf = buildNullifierFromNsk(this.P, this.nsk, BigInt(n.rho), BigInt(n.cm));
+            nf = buildNullifier(this.P, this.nk, BigInt(n.rho), BigInt(n.cm));
             this.byId.set(n.id, nf);
         }
         return nf;
@@ -135,7 +148,7 @@ export async function syncAll(ctx: SyncContext, opts?: SyncOpts): Promise<SyncRe
     const signal = opts?.signal;
     const [result] = await Promise.all([
         scanNotes(ctx, opts),
-        ctx.treeStore.sync(signal ? { signal } : {}),
+        ctx.treeStore?.sync(signal ? { signal } : {}) ?? Promise.resolve(),
         ctx.nullifierStore.sync(signal ? { signal } : {}),
     ]);
     // See `syncNotesAndReconcile` for why there is no `refresh()` here.
@@ -150,14 +163,20 @@ export async function syncAll(ctx: SyncContext, opts?: SyncOpts): Promise<SyncRe
  * Purely local: querying the server per nullifier would name the caller's own
  * notes. A stale mirror only ever under-reports spends; it never marks a live
  * note spent.
+ *
+ * A no-op without a {@link NullifierMemo}: with no `nk` there is no nullifier
+ * to look up.
  */
 export async function reconcileSpentOnChain(ctx: SyncContext): Promise<void> {
+    const memo = ctx.nullifiers;
+    if (!memo) return;
+
     const candidates = ctx.cache.notes.filter((n) => !n.spent);
     const spentIds = new Set(
-        candidates.filter((n) => ctx.nullifierStore.has(ctx.nullifiers.of(n))).map((n) => n.id),
+        candidates.filter((n) => ctx.nullifierStore.has(memo.of(n))).map((n) => n.id),
     );
 
-    ctx.nullifiers.retain(new Set(candidates.map((n) => n.id)), spentIds);
+    memo.retain(new Set(candidates.map((n) => n.id)), spentIds);
 
     // A reservation stands in for exactly the answer this pass just fetched,
     // so it is released either way: a note found spent no longer needs one,

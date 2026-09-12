@@ -17,7 +17,7 @@ import {
     hasTokenMeta,
     parseAmount,
     requireTokenMeta,
-} from "../wallet/assets.js";
+} from "../wallet/assets/index.js";
 
 /** Caps in human decimal units, applied per asset. */
 export interface Budget {

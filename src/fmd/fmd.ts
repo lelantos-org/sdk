@@ -123,7 +123,7 @@ function missedOwnNotesPct(gamma: number): number {
 export const FMD_DOMAIN = "lelantos.fmd.v4";
 // `TAG_FMD_BIT` is single-sourced in `crypto/tags.ts` alongside the rest of
 // the table; it must match circuits/src/lib/tags.circom and
-// backend/crates/fmd-crypto/src/clue.rs.
+// backend/crates/common-crypto/src/clue.rs.
 
 export interface FmdDetectionKey {
     x: Field[];

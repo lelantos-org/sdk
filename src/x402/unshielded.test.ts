@@ -4,7 +4,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress, hex32, tokenAmount } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
-import { makeAssetInfo } from "../wallet/assets.js";
+import { makeAssetInfo } from "../wallet/assets/index.js";
 import type { WithdrawResult } from "../wallet/result.js";
 import { deriveEphemeralKey } from "./ephemeral.js";
 import type { PaymentRequirements } from "./types.js";

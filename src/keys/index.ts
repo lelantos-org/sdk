@@ -22,7 +22,10 @@ export {
 } from "./key-source.js";
 export {
     addressFromSpendingKey,
+    addressFromViewingKey,
+    buildFullViewingKey,
     buildSpendingKey,
+    buildViewingKey,
     deriveKeysFromMnemonic,
     deriveKeysFromNsk,
     detectionKeyFor,
@@ -39,3 +42,18 @@ export {
     lelantosTypedDataHash,
     reduceSignatureToScalar,
 } from "./metamask.js";
+// Flat for the same reason: these work with any PRF-capable authenticator.
+export {
+    deriveNskFromPasskey,
+    LELANTOS_PRF_SALT,
+    type PrfEvaluator,
+    prfOutputToNsk,
+} from "./passkey.js";
+export {
+    decodeViewingKey,
+    encodeFullViewingKey,
+    encodeViewingKey,
+    FVK_HRP,
+    IVK_HRP,
+    isFullViewingKey,
+} from "./viewing-key.js";

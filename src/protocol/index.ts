@@ -25,16 +25,12 @@ export type {
     ChainToken,
     EstimateResponse,
     FeeQuote,
-    MerkleProofResponse,
-    RelayerDepositResponse,
     RelayerSubmitResponse,
-    ScannedNote,
     ShieldedFeeTerms,
     YieldStateInfo,
 } from "./responses.js";
 export type {
     SpendKind,
-    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     SwapBlob,

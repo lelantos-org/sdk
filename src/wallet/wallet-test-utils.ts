@@ -120,6 +120,18 @@ export interface FakeNoteSource extends NoteSource {
 export interface TestWalletOpts {
     /** Notes already in the store. */
     notes?: StoredNote[];
+    /**
+     * Root spending key. Default random. Set when the test depends on the
+     * wallet's identity, such as a viewing key that must resolve to it.
+     */
+    nsk?: bigint;
+    /**
+     * Note feed the wallet reads. Default `fakeNoteSource(feedRows)`, whose
+     * rows a stubbed scanner is expected to ignore; pass one to drive a real
+     * scanner over real ciphertexts. The returned `source` is always the
+     * built-in spy, and is left unwired when this is set.
+     */
+    noteSource?: NoteSource;
     /** Nullifiers the mirror reports as spent on chain. */
     spent?: Set<bigint>;
     scanner?: Scanner;
@@ -159,7 +171,7 @@ export async function testWallet(opts: TestWalletOpts = {}) {
         chain: {} as ChainAdapter,
         fmdUrl: "http://fmd.invalid",
         noteStore,
-        noteSource: source,
+        noteSource: opts.noteSource ?? source,
         nullifierStore,
         submitter: {
             submit: async (): Promise<RelayerSubmitResponse> => ({
@@ -170,7 +182,10 @@ export async function testWallet(opts: TestWalletOpts = {}) {
         ...(opts.prover ? { prover: opts.prover } : {}),
     };
 
-    const wallet = await Wallet.create({ type: "nsk", nsk: randomJubjubScalar() }, config);
+    const wallet = await Wallet.create(
+        { type: "nsk", nsk: opts.nsk ?? randomJubjubScalar() },
+        config,
+    );
 
     return { wallet, noteStore, nullifierStore, source, spent };
 }

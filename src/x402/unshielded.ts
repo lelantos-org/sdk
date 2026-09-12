@@ -30,7 +30,7 @@ import { bytesToHex } from "../core/hex.js";
 import { randomBytes } from "../core/random.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
-import type { AssetInfo } from "../wallet/assets.js";
+import type { AssetInfo } from "../wallet/assets/index.js";
 import { DEFAULT_ASSET } from "../wallet/constants.js";
 import type { OnPhase, SpendPhase } from "../wallet/options.js";
 import { deriveEphemeralKey, hostPayerIndex } from "./ephemeral.js";

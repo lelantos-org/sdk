@@ -184,6 +184,15 @@ export interface LinkedAbort {
     abort(reason?: unknown): void;
     /** Detach from the parent. Call on every exit path. */
     dispose(): void;
+    /**
+     * Scope-exit release: detach *and* abort.
+     *
+     * Deliberately not the same as {@link LinkedAbort.dispose}, which only
+     * detaches. Leaving a scope means the work is over, so the speculative
+     * tail should stop too; `dispose` alone is for the caller who still wants
+     * the controller live after unlinking.
+     */
+    [Symbol.dispose](): void;
 }
 
 /**
@@ -205,10 +214,16 @@ export function linkAbort(parent?: AbortSignal | undefined): LinkedAbort {
     const onParentAbort = () => ctrl.abort(parent?.reason);
     parent?.addEventListener("abort", onParentAbort, { once: true });
 
+    const detach = () => parent?.removeEventListener("abort", onParentAbort);
+
     return {
         signal: ctrl.signal,
         abort: (reason?: unknown) => ctrl.abort(reason),
-        dispose: () => parent?.removeEventListener("abort", onParentAbort),
+        dispose: detach,
+        [Symbol.dispose]: () => {
+            detach();
+            ctrl.abort();
+        },
     };
 }
 

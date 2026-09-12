@@ -7,6 +7,7 @@
 // bootstrap glue at module load.
 
 export { type PathCheck, rootFromPath, verifyPath } from "../crypto/path.js";
+export type { WorkerFactory, WorkerLike } from "../worker/types.js";
 export {
     emptyScanStats,
     type ScanHit,
@@ -18,7 +19,6 @@ export { LocalScanner, type Scanner } from "./scanner.js";
 export {
     type BrowserWorkerScannerOpts,
     browserWorkerScanner,
-    type WorkerFactory,
     WorkerPoolScanner,
     type WorkerPoolScannerOpts,
 } from "./worker/pool.js";

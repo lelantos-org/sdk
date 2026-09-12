@@ -24,6 +24,7 @@ export { VERSION } from "./version.js";
 export {
     type AnyWalletError,
     DepositAdapterError,
+    NoDepositAccountError,
     type DepositStrategy,
     EnvironmentError,
     type ErrorContext,
@@ -53,25 +54,35 @@ export {
 // ── nominal types: addresses, hashes, asset ids, amount spaces ───────────
 // Erased at runtime. Values the SDK returns are already branded; the
 // constructors are for turning caller-supplied strings and bigints into them.
+//
+// The `*Like` aliases are the widened forms the SDK accepts as input — brands
+// on the way out, plain primitives on the way in. They are what a consumer
+// needs to type their own wrappers, so they ship alongside the brands.
 export {
     type AssetId,
     assetId,
+    type AssetIdLike,
     type Brand,
     type CircuitAmount,
     circuitAmount,
+    type CircuitAmountLike,
     type EvmAddress,
     evmAddress,
+    type EvmAddressLike,
     type Hex32,
     hex32,
     type ShieldedAddress,
     shieldedAddress,
+    type ShieldedAddressLike,
     type TokenAmount,
     tokenAmount,
+    type ViewingKeyString,
 } from "./core/brand.js";
 
 // ── circuit shape ────────────────────────────────────────────────────────
 export {
     type CircuitShape,
+    challengeWordCount,
     coeffCount,
     DEFAULT_SHAPE,
     TRANSACT_4X6,
@@ -122,17 +133,28 @@ export {
     ADDRESS_HRP,
     type DecodedAddress,
     decodeAddress,
+    decodeViewingKey,
     deriveKeysFromMnemonic,
     deriveKeysFromNsk,
+    deriveNskFromPasskey,
     deriveNskFromSigner,
     detectionKey,
     encodeAddress,
+    encodeFullViewingKey,
+    encodeViewingKey,
+    type FullViewingKey,
+    fullViewingKeyFromSpending,
     generateMnemonic,
     isValidMnemonic,
     type KeySource,
+    LELANTOS_PRF_SALT,
+    type PrfEvaluator,
+    prfOutputToNsk,
     parseAddress,
     resolveNsk,
     type SpendingKey,
+    type ViewingKey,
+    viewingKeyFromSpending,
 } from "./keys/index.js";
 
 // ── chain adapters ───────────────────────────────────────────────────────
@@ -140,6 +162,7 @@ export {
     type AssetEntry,
     type CancelDepositInputs,
     type ChainAdapter,
+    type ChainReader,
     type Eip1193ProviderLike,
     Eip1193Signer,
     type EscrowedDepositView,
@@ -156,9 +179,12 @@ export {
     supportsAllowanceBatch,
     supportsAllowanceTransfer,
     supportsNativeEth,
+    supportsSigning,
     type TokenMeta,
     ViemChainAdapter,
     type ViemChainAdapterOpts,
+    ViemChainReader,
+    type ViemChainReaderOpts,
 } from "./chain/index.js";
 
 // ── prover: the types `connect()` options mention. Backends live at
@@ -167,9 +193,14 @@ export type { Prover, ProverArtifacts, ProverPaths } from "./prover/index.js";
 
 // ── wallet: the entrypoint most callers need ─────────────────────────────
 export {
+    // Every spend takes `amount: AmountLike` and `asset?: AssetRef`; a
+    // consumer cannot type a wrapper over them without these.
+    type AmountLike,
     type AssetInfo,
     type AssetInfoWithMeta,
+    type AssetRef,
     type AwaitCommitmentsOpts,
+    type AwaitCommitmentsResult,
     type CoinSelector,
     type ConnectChainOptions,
     type ConnectExtraOptions,
@@ -182,6 +213,7 @@ export {
     type DepositResult,
     type DirectSelection,
     DEFAULT_ASSET,
+    type FeeQuoteResult,
     type DenominationChoice,
     denominationChoices,
     denominations,
@@ -212,18 +244,26 @@ export {
     type OnPhase,
     parseAmount,
     previewWithdraw,
+    type QuoteFeeArgs,
+    type RefKind,
     requireTokenMeta,
     type RootCheck,
     type SelectionResult,
+    type DepositCapableWallet,
+    type NativeDepositWallet,
+    supportsDeposit,
+    supportsNativeDeposit,
     type SelectOpts,
     SfrtCoinSelector,
     DenominationCoinSelector,
+    type SpendableMax,
     type SpendPhase,
     type ConsolidateHint,
     type StoredNote,
     type Submitter,
     type SwapOptions,
     type SwapResult,
+    type SyncOpts,
     type SyncProgress,
     type SyncResult,
     type SyncStrategy,
@@ -234,6 +274,7 @@ export {
     type TreePersistence,
     TreeStore,
     type TreeStoreState,
+    type WithheldValue,
     type WithdrawPreview,
     type WithdrawPreviewArgs,
     Wallet,
@@ -245,6 +286,15 @@ export {
     type WithdrawOptions,
     type WithdrawResult,
 } from "./wallet/index.js";
+
+// ── quoter: `SwapOptions.quote` is required and typed as `SwapQuote`, so a
+// swap would otherwise force a second import path. The client itself stays
+// at ./quoter.
+export type { SwapQuote } from "./services/quoter/index.js";
+
+// ── worker transport: `fastWallet` requires a `WorkerFactory`, so it is
+// nameable from the same import.
+export type { WorkerFactory, WorkerLike } from "./worker/types.js";
 
 // ── presets ──────────────────────────────────────────────────────────────
 export {

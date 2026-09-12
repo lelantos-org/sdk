@@ -1,26 +1,17 @@
-// Wire-format (de)serializers for the relayer HTTP protocol.
+// Wire-format serializers for the relayer HTTP protocol.
 //
-// Outbound bigint encoding is not uniform, and must not be made uniform: the
-// relayer's Rust DTOs declare the same three fields of the same struct
-// differently.
-//
-//   POST /v1/deposit   DepositRequest.{chainId,publicAssetId,publicIn}
-//                     -> decimal strings (the DTO declares them String)
-//   POST /v1/swap     swap.depositD, same three fields
-//                     -> JSON numbers   (the DTO declares them u64, and
-//                        serde's u64 deserializer rejects strings)
-//
-// Unifying them from the SDK side breaks one endpoint or the other. The choice
-// is explicit at every call site through `u64Num` and `decStr` rather than a
-// bare `Number(...)` or `.toString()`; `codec.test.ts` pins both encodings
-// with golden fixtures.
+// Outbound bigint encoding is not uniform. The relayer's Rust DTOs declare a
+// `DepositRequest`'s `chainId`, `publicAssetId` and `publicIn` as `u64`, and
+// serde's `u64` deserializer rejects strings, so those three go out as JSON
+// numbers while every field element and U256 beside them goes out as a decimal
+// string. The choice is explicit at every call site through `u64Num` and
+// `decStr` rather than a bare `Number(...)` or `.toString()`; `codec.test.ts`
+// pins both encodings with golden fixtures.
 
 import { WireFormatError } from "../../core/errors.js";
 import { bytesToHex } from "../../core/hex.js";
 import type { Point } from "../../crypto/index.js";
-import type { AuxOutput } from "../../protocol/deposit-request.js";
 import type {
-    SubmitDepositPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     SwapBlob,
@@ -105,43 +96,6 @@ function serializeSwapBlob(s: SwapBlob): unknown {
     };
 }
 
-/** @internal */
-export function serializeSubmitDeposit(p: SubmitDepositPayload): unknown {
-    return {
-        chainId: u64Num(p.chainId, "$.chainId"),
-        deposit: {
-            // Decimal strings here — /v1/deposit's DTO declares them String.
-            chainId: decStr(p.deposit.chainId),
-            publicAssetId: decStr(p.deposit.publicAssetId),
-            publicIn: decStr(p.deposit.publicIn),
-            payer: p.deposit.payer,
-            recipient: p.deposit.recipient,
-            outCm: p.deposit.outCm,
-            // The leaf's value commitment and its blinder. Both are fields of
-            // `PubInputs.DepositRequest`, so a relayer cannot rebuild the
-            // struct without them — `rcv` in particular is a private witness
-            // it has no other way to learn.
-            cvDep: [decStr(p.deposit.cvDep[0]), decStr(p.deposit.cvDep[1])],
-            rcv: decStr(p.deposit.rcv),
-            // The relayer's own fee note. It needs every field to rebuild the
-            // escrow digest, and `feeRcv` to build the batch witness for that
-            // leaf.
-            feeIn: decStr(p.deposit.feeIn),
-            feeCm: p.deposit.feeCm,
-            feeCvDep: [decStr(p.deposit.feeCvDep[0]), decStr(p.deposit.feeCvDep[1])],
-            feeRcv: decStr(p.deposit.feeRcv),
-        },
-        permit2: {
-            nonce: decStr(p.permit2.nonce),
-            deadline: decStr(p.permit2.deadline),
-            maxTotal: decStr(p.permit2.maxTotal),
-            signature: p.permit2.signature,
-        },
-        aux: serializeAuxOutput(p.aux),
-        feeAux: serializeAuxOutput(p.feeAux),
-    };
-}
-
 function pointToObj(p: Point): { x: string; y: string } {
     return { x: decStr(p[0]), y: decStr(p[1]) };
 }
@@ -168,16 +122,6 @@ function serializeAux(a: TransactAux): unknown {
     return {
         clueR: pointToObj(a.clueR),
         ephPub: pointToObj(a.ephPub),
-        ciphertext: bytesToHex(a.ciphertext),
-    };
-}
-
-function serializeAuxOutput(a: AuxOutput): unknown {
-    return {
-        clueRx: decStr(a.clueRx),
-        clueRy: decStr(a.clueRy),
-        ephPubX: decStr(a.ephPubX),
-        ephPubY: decStr(a.ephPubY),
         ciphertext: bytesToHex(a.ciphertext),
     };
 }

@@ -33,6 +33,17 @@ export type Hex32 = Brand<`0x${string}`, "Hex32">;
 /** bech32m shielded payment address (`lelantos1…`). */
 export type ShieldedAddress = Brand<`lelantos1${string}`, "ShieldedAddress">;
 
+/**
+ * bech32m viewing key: `lelantosivk1…` (incoming) or `lelantosfvk1…` (full).
+ *
+ * One brand covers both tiers, which are interchangeable as input. The tier is
+ * carried by the decoded value's shape rather than by the string's type.
+ */
+export type ViewingKeyString = Brand<
+    `lelantosivk1${string}` | `lelantosfvk1${string}`,
+    "ViewingKeyString"
+>;
+
 /** MASP registry asset id (`uint64`). */
 export type AssetId = Brand<bigint, "AssetId">;
 

@@ -17,8 +17,17 @@ import {
 import type { OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note, SpentNote } from "../notes/note.js";
 
-/** Public-input slots, in `PubInputs.compress(Transact)` order. */
-export interface CircomPublicInputs {
+/**
+ * The public-input slots the circuit evaluates: `TransactCompressN`'s
+ * coefficients, in `PubInputs.compress(Transact)` order.
+ *
+ * Every one is pinned by a constraint elsewhere in `4x6.circom` — the root by
+ * Merkle membership, the nullifiers and commitments by Poseidon, the value
+ * commitments by `ValueCommit`, the public scalars by `RangeCheck64` and the
+ * balance. That is the membership rule, not an accident of the layout; see
+ * `coeffCount` in `core/shape.ts`.
+ */
+export interface CircomCoeffInputs {
     merkle_root: string;
     nullifier: string[];
     out_cm: string[];
@@ -27,25 +36,40 @@ export interface CircomPublicInputs {
     public_out: string;
     in_cv: string[][];
     out_cv: string[][];
+    /**
+     * Per-output Pedersen value commitment anchoring (asset, value) into the
+     * Merkle leaf.
+     */
+    out_cv_dep: string[][];
+}
+
+/**
+ * Logical public inputs that are **not** circuit signals.
+ *
+ * `4x6.circom` constrains none of them, so as PolyEval coefficients they were
+ * free variables a prover could solve `y = Σ c[k]·z^k` with after reading `z`.
+ * They bind through the challenge instead: `PubInputs.compress` hashes them
+ * into `z`, so a relayer that rewrites one hands the verifier a different
+ * challenge and the proof stops matching. That binding costs no constraint.
+ */
+export interface TransactBinding {
     recipient_address: string;
     chain_id: string;
     payer_address: string;
     relayer_address: string;
-    /**
-     * Per-output Pedersen value commitment anchoring (asset, value) into the
-     * Merkle leaf. Circuit slots 20..23.
-     */
-    out_cv_dep: string[][];
-    /** Per-output FMD clue PIs. Circuit slots 24..29. */
+    /** Per-output FMD clue PIs. */
     out_clue_Rx: string[];
     out_clue_Ry: string[];
     out_clue_bits: string[];
-    /** Digest over the encrypted-note payloads; final slot. */
+    /** Digest over the encrypted-note payloads. */
     out_aux_digest: string;
 }
 
-/** Full witness: the public slots above plus the private ones. */
-export interface CircomTransactInput extends CircomPublicInputs {
+/** Every logical public input: what `flatten` hashes into the challenge. */
+export interface CircomPublicInputs extends CircomCoeffInputs, TransactBinding {}
+
+/** Full witness: the coefficient slots above plus the private ones. */
+export interface CircomTransactInput extends CircomCoeffInputs {
     /** Fiat-Shamir challenge over the logical PIs. */
     z: string;
 
@@ -103,7 +127,57 @@ export interface BuildOpts {
     outputAuxDigest: Field;
 }
 
-export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): CircomTransactInput {
+/**
+ * What a builder produces: the circuit's witness plus the binding fields that
+ * only reach the challenge.
+ *
+ * One object because every consumer needs both — `flatten` to derive `z`, the
+ * prover to prove — and splitting them at the source would make it easy to hash
+ * one transaction and prove another. `circuitSignals` projects it before the
+ * witness calculator, which rejects a key the circuit does not declare.
+ */
+export type TransactWitnessBundle = CircomTransactInput & TransactBinding;
+
+/**
+ * Project a bundle onto the circuit's signal set.
+ *
+ * An explicit pick, not a delete list: a signal added to the circuit and
+ * forgotten here fails to compile rather than being silently defaulted.
+ */
+export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
+    return {
+        z: w.z,
+        merkle_root: w.merkle_root,
+        nullifier: w.nullifier,
+        out_cm: w.out_cm,
+        public_asset_id: w.public_asset_id,
+        public_in: w.public_in,
+        public_out: w.public_out,
+        in_cv: w.in_cv,
+        out_cv: w.out_cv,
+        out_cv_dep: w.out_cv_dep,
+        in_asset: w.in_asset,
+        in_value: w.in_value,
+        in_pk: w.in_pk,
+        in_rho: w.in_rho,
+        in_rcm: w.in_rcm,
+        in_nsk: w.in_nsk,
+        in_rcv: w.in_rcv,
+        in_rcv_dep: w.in_rcv_dep,
+        in_path_elements: w.in_path_elements,
+        in_path_indices: w.in_path_indices,
+        in_is_dummy: w.in_is_dummy,
+        out_asset: w.out_asset,
+        out_value: w.out_value,
+        out_pk: w.out_pk,
+        out_rho: w.out_rho,
+        out_rcm: w.out_rcm,
+        out_rcv: w.out_rcv,
+        out_rcv_dep: w.out_rcv_dep,
+    };
+}
+
+export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): TransactWitnessBundle {
     const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;
     // Shape is read off the arrays: the witness layout is identical for every
     // `Transact(DEPTH, N_IN, N_OUT)` instance, and only the zkey pins N. The

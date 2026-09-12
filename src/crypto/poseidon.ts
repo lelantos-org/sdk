@@ -24,9 +24,6 @@ import { poseidon3 } from "poseidon-lite/poseidon3";
 import { poseidon4 } from "poseidon-lite/poseidon4";
 import { poseidon5 } from "poseidon-lite/poseidon5";
 import { poseidon6 } from "poseidon-lite/poseidon6";
-import { poseidon7 } from "poseidon-lite/poseidon7";
-import { poseidon8 } from "poseidon-lite/poseidon8";
-
 import { FIELD_BYTES, fromBeBytes, writeBeInto } from "../core/bytes.js";
 import { assertField } from "../core/field.js";
 import { getLogger } from "../log/logger.js";
@@ -46,7 +43,13 @@ const WASM_ARITY = 5;
 
 // poseidon-lite exports a fixed-arity function per input width. Parity with
 // circomlibjs `buildPoseidon` (BN254, iden3 constants) is verified by
-// `poseidon.test.ts`. Arity ceiling 8 covers all in-tree callers.
+// `poseidon.test.ts`.
+//
+// Arities 1-6 only. The protocol hashes at 2 (key derivation), 3 (rho,
+// subscription token), 4 (commitment, nullifier, FMD expand), 5 (Merkle node)
+// and 6 (FMD bit); 1 serves the circomlib anchor in
+// `poseidon-vectors.test.ts`. Each arity is a round-constant table emitted as
+// code and reaches every consumer bundle, so widths nothing calls are excluded.
 //
 // The JS backend for every arity, and the fallback for `WASM_ARITY`.
 const JS_TABLE: Record<number, (xs: Field[]) => Field> = {
@@ -56,8 +59,6 @@ const JS_TABLE: Record<number, (xs: Field[]) => Field> = {
     4: poseidon4 as (xs: Field[]) => Field,
     5: poseidon5 as (xs: Field[]) => Field,
     6: poseidon6 as (xs: Field[]) => Field,
-    7: poseidon7 as (xs: Field[]) => Field,
-    8: poseidon8 as (xs: Field[]) => Field,
 };
 
 /**
@@ -117,7 +118,7 @@ export class Poseidon {
         };
         this.hash = (xs) => {
             const fn = table[xs.length];
-            if (!fn) throw new Error(`Poseidon arity ${xs.length} not supported (1..8)`);
+            if (!fn) throw new Error(`Poseidon arity ${xs.length} not supported (1..6)`);
             for (const [i, x] of xs.entries()) assertField(x, `Poseidon input ${i}`);
             return fn(xs);
         };

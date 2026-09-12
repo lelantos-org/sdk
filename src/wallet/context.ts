@@ -9,10 +9,10 @@ import type { Field, Jubjub, Poseidon } from "../crypto/index.js";
 import type { SpendingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
 import type { AssetRef } from "./asset-ref.js";
-import type { AssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
 import type { ResolvedWalletConfig } from "./config.js";
 import type { StoredNote } from "./note-store.js";
-import type { CoinSelector, SelectionResult } from "./selection.js";
+import type { CoinSelector, SelectionResult } from "./selection/index.js";
 import type { Submitter } from "./submitter.js";
 import type { TreeStore } from "./tree-store.js";
 

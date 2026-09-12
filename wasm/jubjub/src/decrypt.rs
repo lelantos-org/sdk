@@ -17,7 +17,9 @@ use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
-use crate::common::{blake2b_12, blake2b_32, decode_subgroup_point, scalar_from_le, FIELD_BYTES};
+use crate::common::{
+    blake2b_12, blake2b_32, cofactor_scalar_from_le, decode_cleared_point, FIELD_BYTES,
+};
 
 const KDF_DOMAIN: &[u8] = b"lelantos.note.kdf.v1";
 const NONCE_DOMAIN: &[u8] = b"lelantos.note.nonce.v1";
@@ -35,27 +37,23 @@ pub fn try_decrypt_note(
         return Err(JsValue::from_str("epk must be 32 bytes"));
     }
 
-    // Small-subgroup guard, ~40% of this function's cost.
+    // Cofactor cleared, not checked. A sender may pick `epk = T + [t]B8` with
+    // `T` in the 8-torsion; under a plain `[ivk]epk` that gives
+    // `shared = [ivk]T + [t]pk_d`, whose second term follows from the published
+    // address and whose first has only eight values — eight crafted notes, one
+    // of which decrypts, would reveal `ivk mod 8`.
     //
-    // Baby-Jubjub is Z_8 x Z_n, so a sender may pick `epk = T + [t]B` with `T`
-    // in the 8-torsion and `t` of their choosing. Then
-    // `shared = [ivk]T + [t]pk_d`, where `[t]pk_d` follows from the recipient's
-    // public address and `[ivk]T` has at most 8 values. Eight crafted notes,
-    // one of which decrypts, therefore reveal `ivk mod 8`.
-    //
-    // Three properties this relies on: the check is the full order-n test
-    // (`[8]epk == O` admits the attack, since `[8]epk = [8t]B != O`); it runs
-    // before any secret-dependent computation (deferring past Poly1305 lets the
-    // crafted note verify and leaves the extra work observable as timing); and
-    // a failure is treated as not-for-me.
+    // `decode_cleared_point` and `cofactor_scalar_from_le` are a pair: together
+    // they compute `[ivk]q` for the prime-order part of `epk`, which is
+    // `[ivk]epk` for an honest point and carries no torsion term otherwise.
     let mut epk_arr = [0u8; FIELD_BYTES];
     epk_arr.copy_from_slice(epk_packed);
-    let epk = match decode_subgroup_point(&epk_arr) {
+    let cleared = match decode_cleared_point(&epk_arr) {
         Some(p) => p,
         None => return Ok(None),
     };
 
-    let shared = epk.mul_scalar(&scalar_from_le(ivk_le));
+    let shared = cleared.mul_scalar(&cofactor_scalar_from_le(ivk_le));
     let shared_packed = Zeroizing::new(shared.compress());
     let key = Zeroizing::new(blake2b_32(&[KDF_DOMAIN, epk_packed, &*shared_packed]));
 

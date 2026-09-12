@@ -3,17 +3,10 @@
 // is injected via `cfg`. Per-tx logic lives in `./{deposit,transfer,
 // withdraw,swap}.ts`; cache + persistence in `./note-cache.ts`.
 
-import { createMutex, sleep } from "../core/async.js";
-import {
-    type AssetId,
-    type AssetIdLike,
-    branded,
-    type CircuitAmount,
-    type Hex32,
-    type ShieldedAddress,
-} from "../core/brand.js";
-import { descendingAtMost, isDenomination, type Ladder } from "../core/denominations.js";
-import { DepositAdapterError } from "../core/errors.js";
+import { supportsSigning } from "../chain/port.js";
+import { createMutex } from "../core/async.js";
+import type { AssetId, AssetIdLike, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
+import { DepositAdapterError, NoDepositAccountError } from "../core/errors.js";
 import { type Jubjub, Poseidon } from "../crypto/index.js";
 import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { type KeySource, resolveNsk } from "../keys/key-source.js";
@@ -38,13 +31,13 @@ import type {
 } from "./api.js";
 import type { AssetRef } from "./asset-ref.js";
 import { AssetRegistry } from "./asset-registry.js";
-import type { AssetInfo } from "./assets.js";
-import { fetchAssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
+import { canDeposit } from "./capability.js";
 import type { ResolvedWalletConfig, WalletConfig } from "./config.js";
+import { autoConsolidate, type ConsolidateHost } from "./consolidate.js";
 import { DEFAULT_ASSET } from "./constants.js";
 import type { SpendContext } from "./context.js";
 import { resolveConfig, validateConfig } from "./defaults/index.js";
-import { executeDeposit } from "./deposit.js";
 import { type FeeQuoteResult, type QuoteFeeArgs, quoteFee } from "./fee-quote.js";
 import {
     type AwaitCommitmentsOpts,
@@ -55,17 +48,16 @@ import {
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore, NotesFile, StoredNote } from "./note-store.js";
 import type { NullifierStore } from "./nullifier-store.js";
-import { toWalletNote } from "./result-builder.js";
+import { balanceOf, balancesOf, filterNotes } from "./read-ops.js";
+import { type RedenominateHost, redenominate } from "./redenominate.js";
 import {
     type CoinSelector,
-    DEFAULT_COOLDOWN_BLOCKS,
     type SelectionResult,
     type SelectOpts,
     type SpendableMax,
     spendableMax,
-} from "./selection.js";
+} from "./selection/index.js";
 import type { Submitter } from "./submitter.js";
-import { executeSwap } from "./swap.js";
 import type { SyncOpts, SyncResult } from "./sync.js";
 import {
     NullifierMemo,
@@ -74,9 +66,7 @@ import {
     syncAll,
     syncNotesAndReconcile,
 } from "./sync-ops.js";
-import { executeTransfer } from "./transfer.js";
 import type { TreeStore } from "./tree-store.js";
-import { executeWithdraw } from "./withdraw.js";
 import {
     type DenominationChoice,
     denominationChoices,
@@ -86,41 +76,15 @@ import {
 
 const log = getLogger("lelantos:wallet");
 
-/**
- * Denominations tried per `redenominate` round before the batch is abandoned.
- *
- * More than one because the relayer's fee comes out of the same cover, so the
- * largest denomination a batch can reach frequently leaves nothing to pay it
- * with; three covers the 2×/2.5× steps of the ladder without proving against
- * hopeless targets indefinitely.
- */
-const LADDER_RETRY_STEPS = 3;
-
-/** Rounds `redenominate` runs unless told otherwise. */
-const DEFAULT_REDENOMINATE_ROUNDS = 4;
-
-/**
- * How long to wait for a consolidated note to clear its spend cooldown.
- *
- * The merged note is unspendable until it is `cooldownBlocks` old, so the
- * caller's retry is pointless before then. A chain that is not producing
- * blocks hits this and logs.
- */
-const COOLDOWN_WAIT_MS = 30_000;
-/**
- * Poll interval while waiting.
- *
- * Coarser than it looks: `ViemChainAdapter.blockNumber()` is cached for
- * `cacheTime` (4s by default), so most polls resolve from that cache rather
- * than the network.
- */
-const COOLDOWN_POLL_MS = 1_000;
-
-export class Wallet implements WalletApi, SpendContext, SyncContext {
+export class Wallet
+    implements WalletApi, SpendContext, SyncContext, RedenominateHost, ConsolidateHost
+{
     readonly P: Poseidon;
     readonly J: Jubjub;
     readonly keys: SpendingKey;
     readonly address: ShieldedAddress;
+    /** Always true: a spending wallet holds `nk` and settles its own spends. */
+    readonly spentKnown = true;
     readonly cfg: ResolvedWalletConfig;
     /** @internal — cache + persistence. Use `wallet.file` for read access. */
     readonly cache: NoteCache;
@@ -197,7 +161,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         this.address = args.address;
         this.cfg = args.cfg;
         this.cache = args.cache;
-        this.nullifiers = new NullifierMemo(args.P, args.keys.nsk);
+        this.nullifiers = new NullifierMemo(args.P, args.keys.nk);
     }
 
     // Convenience constructors live on `connect()`; import it directly. A
@@ -336,31 +300,15 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
     }
 
     notes(filter: NotesFilter = {}): WalletNote[] {
-        return this.cache.notes
-            .filter((n) => {
-                if (filter.spent !== undefined && n.spent !== filter.spent) return false;
-                if (filter.asset !== undefined && BigInt(n.asset) !== filter.asset) return false;
-                return true;
-            })
-            .map(toWalletNote);
+        return filterNotes(this.cache.notes, filter);
     }
 
     balance(asset: AssetIdLike): CircuitAmount {
-        return branded<CircuitAmount>(
-            this.cache.notes
-                .filter((n) => !n.spent && BigInt(n.asset) === asset)
-                .reduce((s, n) => s + BigInt(n.value), 0n),
-        );
+        return balanceOf(this.cache.notes, asset);
     }
 
     balances(): Map<AssetId, CircuitAmount> {
-        const out = new Map<AssetId, CircuitAmount>();
-        for (const n of this.cache.notes) {
-            if (n.spent) continue;
-            const asset = branded<AssetId>(BigInt(n.asset));
-            out.set(asset, branded<CircuitAmount>((out.get(asset) ?? 0n) + BigInt(n.value)));
-        }
-        return out;
+        return balancesOf(this.cache.notes);
     }
 
     /**
@@ -370,20 +318,8 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      * it.
      */
     async asset(ref: AssetRef, opts: { refresh?: boolean } = {}): Promise<AssetInfo> {
-        if (opts.refresh) {
-            // A refresh is only meaningful against the chain registry, which
-            // is the authority on `scale` and `disabled`.
-            const { id } = await this.assets_().resolve(ref);
-            const info = await fetchAssetInfo(
-                this.cfg.chain,
-                id,
-                this.cfg.denominations ?? true,
-                this.cfg.feeBps,
-            );
-            this.assets_().put(info);
-            return info;
-        }
-        return this.assets_().resolve(ref);
+        const registry = this.assets_();
+        return opts.refresh ? registry.refresh(ref) : registry.resolve(ref);
     }
 
     /** Every asset this chain has registered, lowest id first. */
@@ -424,6 +360,14 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      * `cancelDelay` blocks). For native ETH set `asEth: true`.
      */
     async deposit(args: DepositOptions): Promise<DepositResult> {
+        // The one wallet operation that needs an EVM key of its own. A spend
+        // is authorised by the circuit and broadcast by the relayer, but
+        // shielding moves public tokens out of an address that must custody
+        // them and pay the gas — so a wallet whose chain layer cannot sign
+        // has no way to express it. See `supportsDeposit` in `capability.ts`,
+        // which is how a caller asks before it commits to the flow.
+        if (!canDeposit(this)) throw new NoDepositAccountError();
+        const { executeDeposit } = await import("./deposit.js");
         return executeDeposit(this, args);
     }
 
@@ -436,10 +380,12 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         id: bigint,
         inputs: import("../chain/types.js").CancelDepositInputs,
     ): Promise<{ txHash: Hex32 }> {
-        if (!this.cfg.chain.cancelDeposit) {
-            throw new DepositAdapterError("witness", ["cancelDeposit"]);
-        }
-        return this.cfg.chain.cancelDeposit(id, inputs);
+        // Cancelling refunds an escrow to the payer, so it is a transaction
+        // from the same EOA that opened it — the signing half again.
+        const chain = this.cfg.chain;
+        if (!supportsSigning(chain)) throw new NoDepositAccountError();
+        if (!chain.cancelDeposit) throw new DepositAdapterError("witness", ["cancelDeposit"]);
+        return chain.cancelDeposit(id, inputs);
     }
 
     /**
@@ -447,6 +393,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      * mark spent. Throws `InsufficientCoverError` on no 1/2-note cover.
      */
     async transfer(args: TransferOptions): Promise<TransferResult> {
+        const { executeTransfer } = await import("./transfer.js");
         return executeTransfer(this, args);
     }
 
@@ -473,64 +420,8 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      * loop rather than throwing, because a partially-tidied note set is a
      * strictly better position than the one it started from.
      */
-    async redenominate(ref: AssetRef, opts: { maxRounds?: number } = {}): Promise<number> {
-        const info = await this.resolveAsset(ref);
-        // Empty when the token has no ladder, or when the wallet opted out via
-        // `WalletConfig.denominations` — either way there is nothing to conform to.
-        if (info.ladder.length === 0) return 0;
-
-        const maxRounds = opts.maxRounds ?? DEFAULT_REDENOMINATE_ROUNDS;
-        let rounds = 0;
-        while (rounds < maxRounds && (await this.redenominateRound(info.id, info.ladder))) rounds++;
-        return rounds;
-    }
-
-    /**
-     * One re-denomination round: reshape up to `nIn` off-ladder notes.
-     *
-     * `true` when a transfer landed and another round is worth attempting;
-     * `false` when there is nothing left to do, or nothing that can be done.
-     */
-    private async redenominateRound(asset: AssetId, ladder: Ladder): Promise<boolean> {
-        const offLadder = this.notes({ asset, spent: false })
-            .filter((n) => n.value > 0n && !isDenomination(n.value, ladder))
-            .slice(0, this.cfg.shape.nIn);
-        if (offLadder.length === 0) return false;
-
-        const total = offLadder.reduce((sum, n) => sum + n.value, 0n);
-        const only = offLadder.map((n) => n.id);
-
-        // The payee note of a self-transfer is ours too, so it wants to be a
-        // denomination like the change is; `splitChange` handles the rest.
-        //
-        // Largest first, but with fallbacks: the relayer's fee comes out of
-        // this same cover, so the largest denomination `total` can reach
-        // usually leaves no room for it. That is the common case, not the
-        // exceptional one — stopping at the first refusal would make this a
-        // no-op almost every time.
-        for (const target of descendingAtMost(total, ladder, LADDER_RETRY_STEPS)) {
-            try {
-                const result = await this.transfer({
-                    to: this.address,
-                    amount: branded<CircuitAmount>(target),
-                    asset,
-                    selectOpts: { only, maxInputs: this.cfg.shape.nIn },
-                    autoConsolidate: false,
-                });
-                await this.awaitCommitments([...result.ownCommitments]);
-                return true;
-            } catch (err) {
-                log.debug("redenominate: target did not fit, stepping down", {
-                    asset: asset.toString(),
-                    target: target.toString(),
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-        }
-        // Either nothing on the ladder is small enough to place, or every
-        // candidate was refused. Retrying next round would prove against the
-        // same cover it already could not afford.
-        return false;
+    redenominate(ref: AssetRef, opts: { maxRounds?: number } = {}): Promise<number> {
+        return this.resolveAsset(ref).then((info) => redenominate(this, info, opts));
     }
 
     /**
@@ -568,11 +459,13 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
 
     /** Unshield ERC20 to `args.to`. Throws `InsufficientCoverError` on no cover. */
     async withdraw(args: WithdrawOptions): Promise<WithdrawResult> {
+        const { executeWithdraw } = await import("./withdraw.js");
         return executeWithdraw(this, { ...args, asset: args.asset ?? DEFAULT_ASSET }, "withdraw");
     }
 
     /** Unshield to raw ETH via `NativeAdapter.withdrawNative`, which unwraps. */
     async withdrawEth(args: WithdrawEthOptions): Promise<WithdrawResult> {
+        const { executeWithdraw } = await import("./withdraw.js");
         return executeWithdraw(
             this,
             {
@@ -594,6 +487,7 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
      * units of `assetIn`; MASP skims `feeBps` before transferring.
      */
     async swap(args: SwapOptions): Promise<SwapResult> {
+        const { executeSwap } = await import("./swap.js");
         return executeSwap(this, args);
     }
 
@@ -642,92 +536,33 @@ export class Wallet implements WalletApi, SpendContext, SyncContext {
         }
     }
 
-    /**
-     * Self-spend the notes `selection` named into one change note.
-     *
-     * Sends `consolidateSum - 1n` so a 1-unit change note pops out (some
-     * selectors discard zero-value change).
-     *
-     * Three details are what make this actually merge, rather than appear to:
-     *
-     *   * **The notes are pinned.** Passing only an amount let the inner
-     *     selector cover it however it liked — usually with one large note,
-     *     merging none of the dust this was called to merge. `only` restricts
-     *     it to exactly the ids the caller named.
-     *   * **The change note is waited for.** `sync()` alone returns as soon as
-     *     one scan pass completes, which is typically before the relayer's tx
-     *     is mined, so the retry re-selected against a store that did not yet
-     *     contain the merged note.
-     *   * **Its cooldown is waited out.** A note is unspendable until
-     *     `tip - firstSeenBlock >= cooldownBlocks`, so a merge is useless to
-     *     the caller until a block has passed. Waiting here — rather than
-     *     lowering the cooldown for the retry — keeps the property the
-     *     cooldown exists for: spending a change note in the block that
-     *     created it links the two for anyone counting leaves.
-     *
-     * @internal — used by per-tx helper modules for the auto-consolidate fallback.
-     */
-    async autoConsolidate(
-        asset: AssetId,
-        selection: Extract<SelectionResult, { plan: "consolidate-first" }>,
-    ): Promise<void> {
-        const target = branded<CircuitAmount>(
-            selection.consolidateSum > 1n
-                ? selection.consolidateSum - 1n
-                : selection.consolidateSum,
-        );
-        const result = await this.transfer({
-            to: this.address,
-            amount: target,
-            asset,
-            selectOpts: {
-                only: selection.consolidate.map((n) => n.id),
-                // Merging, so use every slot the circuit provides.
-                maxInputs: this.cfg.shape.nIn,
-            },
-            // Inner call must NOT recurse.
-            autoConsolidate: false,
-        });
-        await this.awaitCommitments([...result.ownCommitments]);
-        await this.awaitCooldown(asset, result.ownCommitments);
+    /** `await using wallet = await connect(...)`. Alias for {@link Wallet.dispose}. */
+    [Symbol.asyncDispose](): Promise<void> {
+        return this.dispose();
     }
 
     /**
-     * Block until the merged note has aged past the selector's spend cooldown.
+     * Self-spend the notes `selection` named into one change note, then wait
+     * until that note is stored and past its spend cooldown.
      *
-     * Measured against the note's own `firstSeenBlock`, not against a tip
-     * captured on entry: `awaitCommitments` has already returned by this point,
-     * so the note is in the cache with its block recorded, and indexing lag
-     * often means the tip is *already* far enough ahead. Waiting on "the tip
-     * moves once" instead would burn a block time the common case does not owe.
+     * See `./consolidate.ts` for why each wait is load-bearing.
      *
-     * Returns immediately when the adapter cannot report a block number, or
-     * when the note carries no `firstSeenBlock` — the selector's cooldown is
-     * inert in both cases, so there is nothing to wait for.
+     * @internal — used by per-tx helper modules for the auto-consolidate fallback.
      */
-    private async awaitCooldown(asset: AssetId, cms: readonly string[]): Promise<void> {
-        const cooldown = DEFAULT_COOLDOWN_BLOCKS;
-        const wanted = new Set(cms.map((c) => c.toLowerCase()));
-        const bornAt = this.cache.notes
-            .filter((n) => wanted.has(n.cm.toLowerCase()))
-            .map((n) => n.firstSeenBlock)
-            .filter((b): b is number => b !== undefined);
-        if (bornAt.length === 0) return;
-        const spendableAt = Math.max(...bornAt) + cooldown;
+    autoConsolidate(
+        asset: AssetId,
+        selection: Extract<SelectionResult, { plan: "consolidate-first" }>,
+    ): Promise<void> {
+        return autoConsolidate(this, asset, selection);
+    }
 
-        for (let waited = 0; ; waited += COOLDOWN_POLL_MS) {
-            const tip = await this.cfg.chain.blockNumber?.();
-            if (tip === undefined || tip >= spendableAt) return;
-            if (waited >= COOLDOWN_WAIT_MS) break;
-            await sleep(COOLDOWN_POLL_MS);
-        }
-        // Not fatal: the caller's next selection simply may not see the note,
-        // and it will report insufficient cover rather than doing something
-        // wrong. Worth a line, because on a chain that is not producing blocks
-        // this is the reason consolidation looks like it did nothing.
-        log.warn("chain tip did not advance; a consolidated note may still be in cooldown", {
-            asset: asset.toString(),
-            waitedMs: COOLDOWN_WAIT_MS,
-        });
+    /** {@link RedenominateHost} / {@link ConsolidateHost} — the circuit's input arity. */
+    get maxInputs(): number {
+        return this.cfg.shape.nIn;
+    }
+
+    /** {@link ConsolidateHost} — the chain tip, or `undefined` if unreported. */
+    blockNumber(): Promise<number | undefined> {
+        return this.cfg.chain.blockNumber?.() ?? Promise.resolve(undefined);
     }
 }

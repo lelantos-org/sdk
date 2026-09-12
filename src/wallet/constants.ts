@@ -51,17 +51,3 @@ export const AWAIT_COMMITMENTS_SYNC_LIMIT = 200;
  * without a rescan.
  */
 export const SPEND_RESERVATION_MS = 15 * 60 * 1000;
-
-/**
- * Basis-points denominator. `feeBps` is a uint16 fraction of 10_000;
- * `fee = amount * feeBps / BPS_DENOMINATOR` mirrors `MASP._takeFee`
- * on-chain.
- */
-export const BPS_DENOMINATOR = 10_000n;
-
-/**
- * Mirrors `MASP.PublicInTooLarge` bound at `MASP.sol:413`:
- * `d.publicIn > type(uint48).max` reverts on-chain. The SDK pre-checks
- * against this to surface an actionable error instead of a relayer 500.
- */
-export const PUBLIC_IN_MAX = (1n << 48n) - 1n;

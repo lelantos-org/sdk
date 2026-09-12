@@ -1,6 +1,8 @@
 # sdk/wasm
 
-WASM crates consumed by `@lelantos-org/sdk`. Each crate builds via `wasm-pack` into its own `pkg/` (gitignored). SDK imports the generated JS / `.d.ts` from `sdk/src/**` via relative paths.
+WASM crates consumed by `@lelantos-org/sdk`. Each builds via `wasm-pack` into
+its own `pkg/` (gitignored); `sdk/src/**` imports the generated JS and `.d.ts`
+by relative path.
 
 ## Crates
 
@@ -31,21 +33,44 @@ Wire conventions:
 
 Exports: `base8`, `sub_order_le`, `add_point`, `mul_point_escalar`, `in_subgroup`, `pack_point`, `unpack_point` (+ decrypt / fmd modules).
 
+### `poseidon/`
+Poseidon-5 over BN254, circomlib-compatible. **Arity 5 only** — that is
+`Poseidon(TAG_MERKLE, c0..c3)`, ~349,525 of the calls in a full tree build.
+Every other arity the SDK uses stays on the JS backend, since each width here
+costs a round-constant table in the binary.
+
+`src/poseidon/` is vendored byte-for-byte from
+`backend/crates/common-crypto/src/poseidon/`, so `just drift` catches an edit to
+either side. `tests/vectors/poseidon.json`, asserted by both repos, catches
+semantic drift.
+
+Export: `poseidon5(inputs_be)` — 5 × 32 bytes BE in, 32 bytes BE out.
+
+### `poseidon-params/`
+The slice of `light-poseidon`'s surface the vendored permutation uses. Renamed
+to `light-poseidon` in `poseidon/`'s manifest so the vendored files need no
+edits. Not built to WASM on its own.
+
 ## Build
 
 Requires [`just`](https://github.com/casey/just). `wasm-pack` auto-installed via `cargo install` if missing. Toolchain pinned in `rust-toolchain.toml` (nightly-2025-06-23, `wasm32-unknown-unknown`).
 
 ```bash
-just build         # release, both crates
+just build         # release, all three crates
 just build-dev     # dev (no wasm-opt), faster iteration
 just check         # cargo check workspace, wasm target
 just clippy        # -D warnings
 just fmt / fmt-check
+just drift         # diff poseidon/src/poseidon against the backend copy
+just bench         # criterion benches
+just audit         # cargo audit
 just clean         # cargo clean + rm pkg/
 just size          # show .wasm sizes after build
 ```
 
-Per-crate: `just prover-build`, `just jubjub-build` (and `-dev` variants).
+Per-crate: `just prover-build`, `just jubjub-build`, `just poseidon-build` (and
+`-dev` variants). CI (`.github/workflows/wasm.yml`) runs `fmt-check` and
+`clippy` on changes under `wasm/**`.
 
 ## Output
 

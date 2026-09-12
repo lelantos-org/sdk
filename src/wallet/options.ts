@@ -9,7 +9,7 @@ import type {
 import type { SwapQuote } from "../services/quoter/client.js";
 import type { AmountLike } from "./amount.js";
 import type { AssetRef } from "./asset-ref.js";
-import type { SelectOpts } from "./selection.js";
+import type { SelectOpts } from "./selection/index.js";
 
 export type DepositPhase = "signing" | "submitting" | "broadcast" | "mined";
 export type SpendPhase = "preparing" | "proving" | "submitting";

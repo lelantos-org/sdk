@@ -8,13 +8,13 @@ import { RAY } from "../../core/units.js";
 import type { Field } from "../../crypto/index.js";
 import type { AssetEntry, DepositEscrowedRecord, EscrowedDepositView } from "../types.js";
 import { MASP_ABI, YIELD_VENUE_ABI } from "./abi.js";
-import type { ViemCtx } from "./ctx.js";
+import type { ViemReadCtx } from "./ctx.js";
 import { evmBlockNumber } from "./evm-block.js";
 
 /** `bytes32(0)` — what an unset escrow row reads back as. */
 const ZERO_WORD = `0x${"0".repeat(64)}` as const;
 
-export async function fetchAsset(ctx: ViemCtx, id: AssetId): Promise<AssetEntry> {
+export async function fetchAsset(ctx: ViemReadCtx, id: AssetId): Promise<AssetEntry> {
     // One struct, not five flat returns — viem decodes it to an object.
     //
     // The two fee rates come back with the entry rather than from a second
@@ -58,7 +58,7 @@ const ZERO_ADDRESS = `0x${"0".repeat(40)}` as const;
  * *venue* afterwards is a call to a contract the pool just named, and a failure
  * there is a real fault that must not read as "no yield".
  */
-async function readYieldState(ctx: ViemCtx, id: AssetId) {
+async function readYieldState(ctx: ViemReadCtx, id: AssetId) {
     try {
         return await ctx.publicClient.readContract({
             address: ctx.maspAddress,
@@ -78,7 +78,10 @@ async function readYieldState(ctx: ViemCtx, id: AssetId) {
  * `yieldState` answers both "does this id yield" — `venue` is zero when it does
  * not — and, for one that does, everything except the venue's own position.
  */
-export async function fetchAssetYield(ctx: ViemCtx, id: AssetId): Promise<AssetYield | undefined> {
+export async function fetchAssetYield(
+    ctx: ViemReadCtx,
+    id: AssetId,
+): Promise<AssetYield | undefined> {
     const state = await readYieldState(ctx, id);
     if (!state) return undefined;
 
@@ -107,7 +110,10 @@ export async function fetchAssetYield(ctx: ViemCtx, id: AssetId): Promise<AssetY
     };
 }
 
-export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedDepositView | null> {
+export async function getEscrowed(
+    ctx: ViemReadCtx,
+    id: bigint,
+): Promise<EscrowedDepositView | null> {
     const digest = await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
@@ -120,7 +126,7 @@ export async function getEscrowed(ctx: ViemCtx, id: bigint): Promise<EscrowedDep
 }
 
 /** Whether the pool would accept a proof against `root`. */
-export async function isKnownRoot(ctx: ViemCtx, root: Field): Promise<boolean> {
+export async function isKnownRoot(ctx: ViemReadCtx, root: Field): Promise<boolean> {
     return await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
@@ -129,7 +135,7 @@ export async function isKnownRoot(ctx: ViemCtx, root: Field): Promise<boolean> {
     });
 }
 
-export async function cancelDelay(ctx: ViemCtx): Promise<number> {
+export async function cancelDelay(ctx: ViemReadCtx): Promise<number> {
     return await ctx.publicClient.readContract({
         address: ctx.maspAddress,
         abi: MASP_ABI,
@@ -147,7 +153,7 @@ export async function cancelDelay(ctx: ViemCtx): Promise<number> {
 const DEFAULT_LOG_LOOKBACK_BLOCKS = 3_600n;
 
 export async function fetchDepositEscrowed(
-    ctx: ViemCtx,
+    ctx: ViemReadCtx,
     id: bigint,
     fromBlock?: bigint,
 ): Promise<DepositEscrowedRecord | null> {
@@ -213,7 +219,7 @@ export async function fetchDepositEscrowed(
 }
 
 /** Tip minus {@link DEFAULT_LOG_LOOKBACK_BLOCKS}, floored at genesis. */
-async function defaultFromBlock(ctx: ViemCtx): Promise<bigint> {
+async function defaultFromBlock(ctx: ViemReadCtx): Promise<bigint> {
     const tip = await ctx.publicClient.getBlockNumber();
     return tip > DEFAULT_LOG_LOOKBACK_BLOCKS ? tip - DEFAULT_LOG_LOOKBACK_BLOCKS : 0n;
 }

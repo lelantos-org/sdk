@@ -1,6 +1,7 @@
 // Deposit request builder. Does NOT prove — deposits go through
-// `MASP.deposit` (Permit2 witness). Returns a `BuiltDeposit` for the
-// wallet to sign + POST to `/v1/deposit`.
+// `MASP.deposit` (Permit2 witness). Returns a `BuiltDeposit` the wallet signs
+// and broadcasts itself; the relayer serves no deposit route and picks the
+// escrow up from the `DepositEscrowed` event.
 
 import { buildNoteCommitment, type Field, type Jubjub, type Poseidon } from "../crypto/index.js";
 import type { Note } from "../notes/note.js";

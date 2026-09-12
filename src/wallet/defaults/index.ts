@@ -8,13 +8,13 @@ import type { Jubjub, Poseidon } from "../../crypto/index.js";
 import { LocalScanner } from "../../sync/scanner.js";
 import type { ResolvedWalletConfig, WalletConfig } from "../config.js";
 import { InMemoryNoteStore } from "../note-store.js";
-import { SfrtCoinSelector } from "../selection.js";
+import { SfrtCoinSelector } from "../selection/index.js";
 import {
-    defaultFmdClient,
     defaultNoteSource,
     defaultNullifierStore,
     defaultSubmitter,
     defaultTreeStore,
+    lazyFmdClient,
 } from "./pluggables.js";
 import { defaultProver } from "./prover.js";
 
@@ -25,6 +25,7 @@ export {
     defaultNullifierStore,
     defaultSubmitter,
     defaultTreeStore,
+    lazyFmdClient,
 } from "./pluggables.js";
 export { buildConnectProver, defaultProver, type ProverBuildInputs } from "./prover.js";
 export { validateConfig } from "./validate.js";
@@ -33,17 +34,19 @@ export async function resolveConfig(
     cfg: WalletConfig,
     deps: { P: Poseidon; J: Jubjub },
 ): Promise<ResolvedWalletConfig> {
-    const fmd = defaultFmdClient(cfg);
+    const fmdClient = lazyFmdClient(cfg);
+
     return {
         ...cfg,
         shape: cfg.shape ?? DEFAULT_SHAPE,
         noteStore: cfg.noteStore ?? new InMemoryNoteStore(),
-        noteSource: cfg.noteSource ?? defaultNoteSource(fmd, cfg),
+        noteSource: cfg.noteSource ?? defaultNoteSource(fmdClient(), cfg),
         treeStore:
             cfg.treeStore ??
-            (await defaultTreeStore(fmd, deps.P, cfg.treePersistence, cfg.treeDepth)),
+            (await defaultTreeStore(fmdClient(), deps.P, cfg.treePersistence, cfg.treeDepth)),
         nullifierStore:
-            cfg.nullifierStore ?? (await defaultNullifierStore(fmd, cfg.nullifierPersistence)),
+            cfg.nullifierStore ??
+            (await defaultNullifierStore(fmdClient(), cfg.nullifierPersistence)),
         submitter: cfg.submitter ?? defaultSubmitter(cfg),
         prover: cfg.prover ?? (await defaultProver(cfg)),
         selector: cfg.selector ?? new SfrtCoinSelector(),

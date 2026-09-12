@@ -110,6 +110,16 @@ const ENTRIES = [
         max: 360_240,
     },
     {
+        // `connect` via its own subpath. The spend path sits behind `await
+        // import(...)` in `wallet.ts`, so viem is absent from the eager graph.
+        // `root: connect` measures higher: the root barrel statically
+        // re-exports `ViemChainAdapter`. Both entries track the two import
+        // styles.
+        name: "connect: subpath",
+        source: `export { connect } from "${ROOT}/dist/wallet/connect/index.js";`,
+        max: 245_000,
+    },
+    {
         name: "subpath: errors",
         source: `export { isWalletError } from "${ROOT}/dist/core/errors.js";`,
         max: 4_000,
@@ -120,9 +130,21 @@ const ENTRIES = [
         max: 4_000,
     },
     {
+        // 220_000 -> 150_000, after Poseidon arities 7 and 8 left the JS table
+        // in `crypto/poseidon.ts`. Each arity is a round-constant table emitted
+        // as code, and the protocol hashes at neither width.
         name: "keys: derive + address",
         source: `export { deriveKeysFromMnemonic, encodeAddress } from "${ROOT}/dist/keys/index.js";`,
-        max: 220_000,
+        max: 150_000,
+    },
+    {
+        // The watch-only wallet. Must not reach the prover, the relayer
+        // submitter or the coin selector; `check-layers.mjs` rule 5 covers
+        // direct imports. Its eager graph is the crypto stack and the scan
+        // loop, so it tracks `keys: derive + address`.
+        name: "watch: connectWatch",
+        source: `export { connectWatch } from "${ROOT}/dist/wallet/watch/index.js";`,
+        max: 148_000,
     },
     {
         name: "x402: pay",

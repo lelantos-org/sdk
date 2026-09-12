@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
 import type { WalletApi } from "../wallet/api.js";
-import { makeAssetInfo } from "../wallet/assets.js";
+import { makeAssetInfo } from "../wallet/assets/index.js";
 import type { TransferResult } from "../wallet/result.js";
 import { LELANTOS_POOL, SHIELDED_NAMESPACE, shieldedExact, shieldedNetwork } from "./shielded.js";
 import type { PaymentRequirements } from "./types.js";

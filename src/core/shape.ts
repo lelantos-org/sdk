@@ -65,18 +65,42 @@ export const TRANSACT_SHAPES = [TRANSACT_4X6] as const satisfies readonly Circui
 export const DEFAULT_SHAPE = TRANSACT_4X6;
 
 /**
- * Coefficients `PubInputs.compress` emits for `shape`.
+ * Words `PubInputs.compress` hashes into the Fiat-Shamir challenge `z`.
  *
  * Nine scalar slots — merkle root, the three public amounts, recipient,
  * chainId, payer, relayer, and the aux digest — plus 3 per input (nullifier
  * and the two `in_cv` coordinates) and 8 per output (`out_cm`, `out_cv`,
  * `out_cv_dep`, and three clue slots).
  *
- * 69 at 4×6. `circuit/vectors.test.ts` checks it against the `coeffCount` the
- * circuits package publishes.
+ * 69 at 4×6. This is `flatten`'s output length.
+ */
+export function challengeWordCount(shape: CircuitShape): number {
+    return 9 + 3 * shape.nIn + 8 * shape.nOut;
+}
+
+/**
+ * Coefficients the polynomial `y = Σ c[k]·z^k` is evaluated over: a strict
+ * subset of the challenge words, and `coeffs`' output length.
+ *
+ * Four scalar slots — merkle root and the three public amounts — plus 3 per
+ * input (nullifier and the two `in_cv` coordinates) and 5 per output
+ * (`out_cm`, `out_cv`, `out_cv_dep`). 46 at 4×6.
+ *
+ * The recipient, chainId, payer, relayer, the FMD clue triples and the aux
+ * digest are absent, and that is a soundness requirement rather than a saving.
+ * `PolyEval` is affine in each coefficient and the prover reads `z` before
+ * choosing a witness — the contract derives it from calldata the prover wrote —
+ * so a coefficient the circuit does not constrain is one linear equation in one
+ * unknown: solve it and arbitrary calldata verifies against a proof of an
+ * unrelated transaction. Those 23 fields carry no in-circuit constraint, so they
+ * are hashed into `z` and never evaluated, which binds them against a tampering
+ * relayer at no cost.
+ *
+ * `circuit/vectors.test.ts` checks both counts against what the circuits
+ * package publishes.
  */
 export function coeffCount(shape: CircuitShape): number {
-    return 9 + 3 * shape.nIn + 8 * shape.nOut;
+    return 4 + 3 * shape.nIn + 5 * shape.nOut;
 }
 
 /** `"4x6"` — the name the circuits package builds artifacts under. */

@@ -17,7 +17,7 @@ import type {
 } from "../../protocol/deposit-request.js";
 import type { Permit2SignArgs } from "../types.js";
 import { PERMIT2_PERMIT_ABI, PERMIT2_PERMIT_BATCH_ABI, PERMIT2_VIEW_ABI } from "./abi.js";
-import { addr, hex, type ViemCtx } from "./ctx.js";
+import { addr, hex, type ViemCtx, type ViemReadCtx } from "./ctx.js";
 import { waitTxReceipt } from "./token.js";
 
 export async function signPermit2(ctx: ViemCtx, args: Permit2SignArgs): Promise<Permit2Sig> {
@@ -61,7 +61,7 @@ export async function signAllowanceBatch(
 }
 
 export async function permit2Allowance(
-    ctx: ViemCtx,
+    ctx: ViemReadCtx,
     token: EvmAddress,
     owner: EvmAddress,
     spender: EvmAddress,

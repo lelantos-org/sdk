@@ -3,11 +3,15 @@
 // Witness construction and the public-input compression the on-chain
 // verifier mirrors. Nothing here proves anything; `bundle/` does that.
 
-export { type FlattenInput, fiatShamirZ, flatten, hornerEval } from "./compression.js";
+export { coeffs, type FlattenInput, fiatShamirZ, flatten, hornerEval } from "./compression.js";
 export {
     type BuildOpts,
+    type CircomCoeffInputs,
     type CircomPublicInputs,
     type CircomTransactInput,
+    circuitSignals,
+    type TransactBinding,
+    type TransactWitnessBundle,
     toCircomInput,
 } from "./input.js";
 export {

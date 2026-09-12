@@ -4,6 +4,8 @@
 //
 // Two sections:
 //   primitives — the wasm curve ops in isolation, where sync time is spent.
+//                `inSubgroup` is no longer on the decrypt path; it is kept as
+//                the cost the cofactor clearing replaced.
 //   scan       — end-to-end `scanNotes` throughput at a few hit rates.
 //
 // Scalars are full-width (mod BABYJUB_SUBGROUP_ORDER, ~251 bits). `mul_scalar`
@@ -13,7 +15,13 @@
 // (see `src/sync/scanner.ts`). It shares `decompress` and `in_subgroup` with
 // trial-decrypt and tracks the same optimisations.
 
-import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../src/crypto/index.js";
+import {
+    BABYJUB_SUBGROUP_ORDER,
+    buildNoteCommitment,
+    type Field,
+    Jubjub,
+    Poseidon,
+} from "../src/crypto/index.js";
 import {
     fmdClueKeyFromRoot,
     fmdExpandDetectionKey,
@@ -90,7 +98,7 @@ async function main(): Promise<void> {
     const detection = fmdExpandDetectionKey(J, P, me.dk, 5);
     const eveFlag = fmdExpandFlagKey(J, P, fmdClueKeyFromRoot(J, eve.dk), 5);
     const clues = Array.from({ length: N }, (_, i) => fmdFlag(J, P, eveFlag, scalar(i + 5000)));
-    const foreign = buildBatch(J, N, 0, me.pk_d, eve.pk_d);
+    const foreign = buildBatch(J, P, N, 0, me, eve);
 
     console.log("\nper-note");
     console.log("=".repeat(48));
@@ -109,18 +117,18 @@ async function main(): Promise<void> {
         `  decode share of decrypt    ${((100 * (dec + sub)) / decrypt).toFixed(0).padStart(7)}%`,
     );
     console.log(`  fmdTest / decrypt          ${(fmd / decrypt).toFixed(2).padStart(8)}x`);
-    // Trial-decrypt performs two 251-bit scalar mults: the subgroup check on
-    // epk and the ECDH. Together they set the floor for this path.
-    console.log(
-        `  2x scalar mult share       ${((100 * (sub + mul)) / decrypt).toFixed(0).padStart(7)}%`,
-    );
+    // Trial-decrypt performs one 251-bit scalar mult, the ECDH. `epk`'s cofactor
+    // is cleared by three doublings rather than tested with a second mult, so
+    // `inSubgroup` above is reported for reference and is no longer on this
+    // path — see `wasm/jubjub/src/decrypt.rs`.
+    console.log(`  ECDH mult share            ${((100 * mul) / decrypt).toFixed(0).padStart(7)}%`);
 
     console.log("\nend-to-end scan");
     console.log("=".repeat(48));
     const scanner = new LocalScanner(J, P);
     const batch = 1000;
     for (const minePercent of [0, 5]) {
-        const inputs = buildBatch(J, batch, minePercent / 100, me.pk_d, eve.pk_d);
+        const inputs = buildBatch(J, P, batch, minePercent / 100, me, eve);
         await scanner.scan(me.ivk, inputs.slice(0, 100));
         const t = performance.now();
         const hits = await scanner.scan(me.ivk, inputs);
@@ -135,25 +143,28 @@ async function main(): Promise<void> {
 
 function buildBatch(
     J: Jubjub,
+    P: Poseidon,
     n: number,
     mineFrac: number,
-    minePkD: ReturnType<typeof buildSpendingKey>["pk_d"],
-    evePkD: ReturnType<typeof buildSpendingKey>["pk_d"],
+    mine: ReturnType<typeof buildSpendingKey>,
+    eve: ReturnType<typeof buildSpendingKey>,
 ): ScanInput[] {
     const mineCount = Math.round(n * mineFrac);
     const inputs: ScanInput[] = [];
     for (let i = 0; i < n; i++) {
+        const owner = i < mineCount ? mine : eve;
+        const payload = {
+            asset: 1n,
+            value: BigInt(i + 1),
+            rho: BigInt(i + 1000),
+            rcm: BigInt(i + 2000),
+            rcvDep: BigInt(i + 3000),
+        };
         const enc = encryptNote({
             J,
-            recipientPkD: i < mineCount ? minePkD : evePkD,
+            recipientPkD: owner.pk_d,
             esk: scalar(i + 1),
-            plaintext: encodeNotePayload({
-                asset: 1n,
-                value: BigInt(i + 1),
-                rho: BigInt(i + 1000),
-                rcm: BigInt(i + 2000),
-                rcvDep: BigInt(i + 3000),
-            }),
+            plaintext: encodeNotePayload(payload),
         });
         // Clue bits are a wire prefix on the ciphertext; scanNotes strips them.
         const bits = new Uint8Array([i & 0x1f]);
@@ -161,7 +172,10 @@ function buildBatch(
         inputs.push({
             ciphertext: wire,
             epk: enc.epk,
-            cm: BigInt(i),
+            // The real commitment. `scanNotes` rebuilds it from the decrypted
+            // plaintext and rejects a mismatch, so a placeholder here would
+            // make every "mine" note a `cmMismatch` and report no hits.
+            cm: buildNoteCommitment(P, { ...payload, pk: owner.pk }),
             leafIndex: i,
             blockNumber: i,
         });

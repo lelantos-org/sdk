@@ -1,10 +1,11 @@
 // Signer ports. Interfaces only — implementations live in `chain/signer/`.
 //
 // At tier 0 so `keys/` and `protocol/` can name an `EthSigner` without
-// depending on the chain adapter that provides one.
+// depending on the chain adapter that provides one — and, via `./eip712.js`,
+// without viem appearing in this module's emitted declarations.
 
-import type { TypedDataDomain, TypedDataParameter } from "viem";
 import type { EvmAddress, Hex32 } from "./brand.js";
+import type { TypedDataDomain, TypedDataParameter } from "./eip712.js";
 
 /** Minimal signer the SDK needs from any wallet. */
 export interface EthSigner {

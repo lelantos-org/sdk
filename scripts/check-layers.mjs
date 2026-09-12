@@ -12,6 +12,8 @@
 //   3. No leaf module below tier 3 may import a domain BARREL. Worker and
 //      wasm bundles pull the whole barrel's graph; leaf imports keep them
 //      small. (Root index.ts and each dir's own index.ts are exempt.)
+//   5. `wallet/watch/` may not import the spend path, so a viewer does not
+//      download the prover.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve as resolvePath, dirname } from "node:path";
@@ -75,6 +77,32 @@ const IMPORT_RE = /(?:^|\n)\s*(?:import|export)[\s\S]{0,400}?from\s+"([^"]+)"/g;
 const DYNAMIC_RE = /import\(\s*(?:\/\*[^*]*\*\/\s*)?"([^"]+)"\s*\)/g;
 const EXPORT_STAR_RE = /^\s*export\s+\*\s+from\s+"/m;
 
+/**
+ * Modules `wallet/watch/` must not import.
+ *
+ * A watch wallet cannot sign, so none is reachable at runtime. `wallet.ts` is
+ * listed because it statically reaches the per-tx modules and the prover.
+ *
+ * Direct imports only; `bundle-budget.mjs` measures the transitive graph.
+ *
+ * An entry ending in `/` forbids the whole directory, so splitting a listed
+ * module into one does not silently unforbid its parts.
+ */
+const WATCH_FORBIDDEN = [
+    "wallet/wallet.ts",
+    "wallet/submitter.ts",
+    "wallet/selection/",
+    "wallet/tree-store.ts",
+    "wallet/deposit.ts",
+    "wallet/transfer.ts",
+    "wallet/withdraw.ts",
+    "wallet/swap.ts",
+    "wallet/withdraw-preview.ts",
+    "wallet/fee-quote.ts",
+    "wallet/connect/index.ts",
+    "wallet/defaults/prover.ts",
+];
+
 const problems = [];
 
 // Rule 4: every directory under `src/` carries an explicit tier.
@@ -118,6 +146,18 @@ for (const abs of walk(SRC)) {
         if (targetTier > tier) {
             problems.push(
                 `${rel} (tier ${tier}) imports ${targetRel} (tier ${targetTier}) — upward dependency`,
+            );
+        }
+
+        // Rule 5: the watch-only entry point must not reach the spend path.
+        if (
+            rel.startsWith("wallet/watch/") &&
+            (WATCH_FORBIDDEN.some((f) => (f.endsWith("/") ? targetRel.startsWith(f) : f === targetRel)) ||
+                targetRel.startsWith("prover/"))
+        ) {
+            problems.push(
+                `${rel} imports ${targetRel} — \`wallet/watch/\` must not reach the spend path ` +
+                    "(see WATCH_FORBIDDEN in this script)",
             );
         }
 

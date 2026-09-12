@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InvalidArgumentError } from "../core/errors.js";
 import { resolveAmount } from "./amount.js";
-import type { AssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
 
 // 6-decimal token at scale 100: one circuit unit is 100 base units, i.e.
 // 0.0001 of a token.

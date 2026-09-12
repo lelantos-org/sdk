@@ -11,34 +11,31 @@ export { bitAt, packBits, unpackBits } from "./bits.js";
 // below. SDK code imports it from `./brand.js` directly.
 export {
     type AssetId,
+    type AssetIdLike,
     assetId,
     type Brand,
     type CircuitAmount,
+    type CircuitAmountLike,
     circuitAmount,
     type EvmAddress,
+    type EvmAddressLike,
     evmAddress,
     type Hex32,
     hex32,
     type ShieldedAddress,
+    type ShieldedAddressLike,
     shieldedAddress,
     type TokenAmount,
     tokenAmount,
+    type ViewingKeyString,
 } from "./brand.js";
 export { FIELD_BYTES, fromLeBytes, toLeBytes } from "./bytes.js";
 export { safeCall, safePhase } from "./callbacks.js";
-export {
-    arr,
-    arrN,
-    bigintFrom,
-    bool,
-    hexBytes,
-    int,
-    mapArr,
-    obj,
-    opt,
-    str,
-    tuple2,
-} from "./decode.js";
+// The `decode.js` combinators (`arr`/`obj`/`str`/`int`/…) are deliberately not
+// published: they are INBOUND-ONLY wire validators with names generic enough
+// to collide in a consumer's module scope, and nothing outside the SDK builds
+// on them.
+export { bigintFrom, hexBytes } from "./decode.js";
 export {
     type Decomposition,
     type DenominationPolicy,
@@ -68,6 +65,7 @@ export {
     type NetworkFailureCode,
     NetworkNotDeployedError,
     type NetworkTimeoutCode,
+    NoDepositAccountError,
     PermitRejectedError,
     ProverArtifactsFailedError,
     ProverArtifactsMissingError,
@@ -92,6 +90,7 @@ export {
     type FeeRates,
     PUBLIC_IN_MAX,
     resolveFeeRates,
+    unitFee,
     type WithdrawNet,
     type WithdrawNetArgs,
     withdrawNet,
@@ -131,6 +130,7 @@ export {
 } from "./random.js";
 export {
     type CircuitShape,
+    challengeWordCount,
     coeffCount,
     DEFAULT_SHAPE,
     shapeId,

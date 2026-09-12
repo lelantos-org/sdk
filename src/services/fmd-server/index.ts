@@ -4,11 +4,11 @@
 // `token` that `WalletConfig.syncStrategy = { kind: "matches" }` requires, so
 // they are public despite having no in-SDK caller.
 
+export { FmdClient } from "./client.js";
 export {
     type CommitmentChunkEntry,
     type CommitmentChunkOut,
     type CreateSubscriptionInput,
-    FmdClient,
     type FmdHead,
     type FmdMatchOut,
     type FmdNoteOut,
@@ -17,4 +17,4 @@ export {
     GAMMA_MIN,
     type NullifierChunkOut,
     type SubscriptionOut,
-} from "./client.js";
+} from "./wire.js";

@@ -7,7 +7,7 @@
 
 import type { AssetId, CircuitAmount } from "../core/brand.js";
 import { assetId, branded } from "../core/brand.js";
-import type { AssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
 import type { SpendContext } from "./context.js";
 import type { EstimateKind } from "./submitter.js";
 

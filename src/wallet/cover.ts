@@ -12,7 +12,12 @@ import type { AssetId, CircuitAmount } from "../core/brand.js";
 import { InsufficientCoverError } from "../core/errors.js";
 import type { ConsolidateHint } from "../core/note-record.js";
 import type { StoredNote } from "./note-store.js";
-import type { CoinSelector, ConsolidateFirst, DirectSelection, SelectOpts } from "./selection.js";
+import type {
+    CoinSelector,
+    ConsolidateFirst,
+    DirectSelection,
+    SelectOpts,
+} from "./selection/index.js";
 
 /**
  * Consolidation rounds before giving up.

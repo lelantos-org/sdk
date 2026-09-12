@@ -3,11 +3,14 @@
 Client SDK for the Lelantos MASP: shielded deposits, transfers, withdrawals,
 note sync, and balances.
 
-The package exposes three layers:
+The package exposes four layers:
 
 - **Wallet API** — `connect()` returns a `Wallet` implementing `WalletApi`, with
   single-call `deposit` / `transfer` / `withdraw` / `sync` / `balance`. This is
   the root barrel, and it is all most applications import.
+- **Watch-only wallet** — `connectWatch()` from `@lelantos-org/sdk/watch`
+  returns a `WatchWallet` built from a viewing key: the same sync, notes and
+  balances, with no spend surface. See [Watch-only](#watch-only).
 - **Pluggable interfaces** — `ChainAdapter`, `NoteSource`, `Submitter`,
   `Prover`, `CoinSelector`, and `NoteStore` can each be replaced independently.
 - **Primitives** — keys, FMD, note encryption, witness builders, and the prover
@@ -42,11 +45,13 @@ Consumers need a token with the `read:packages` scope.
    npm install @lelantos-org/sdk @lelantos-org/circuits
    ```
 
-   `@lelantos-org/circuits` is an optional peer dependency. When present,
-   `connect()` resolves prover artifacts automatically on Node. Browser callers
-   pass `proverArtifacts: { circuit, zkey }` to `connect()` instead; see the
-   [browser guide](https://docs.lelantos.xyz/guide/browser) for the bundler
-   asset-import pattern.
+   All peer dependencies are optional:
+
+   | Peer | Needed for |
+   | ---- | ---------- |
+   | `@lelantos-org/circuits` | Prover artifacts, auto-resolved on Node. Browser callers pass `proverArtifacts: { circuit, zkey }` to `connect()` instead — see the [browser guide](https://docs.lelantos.xyz/guide/browser). |
+   | `viem` | The default `ChainAdapter` and signers. Not required to read: `@lelantos-org/sdk/watch` and the key and crypto subpaths do not reach it. |
+   | `snarkjs`, `circom_runtime` | The fallback JS prover, used when the WASM one cannot load. |
 
 3. In CI, pass the auto-provisioned `GITHUB_TOKEN`:
 
@@ -96,15 +101,113 @@ into flag-key points to attach a clue; deriving the detection scalars from it is
 a discrete log. Holding an address therefore lets you pay someone, not watch
 them.
 
-> **Legacy `sswap1…` and `sswap2…` addresses are rejected.** The HRP identifies
-> the format, so superseded strings fail fast on the HRP check. The oldest
-> format (`sswap1…`) additionally published `dk` itself, which handed the
-> detection capability to everyone holding the address: any holder could test
-> every on-chain clue and enumerate the recipient's incoming notes at a 2^-γ
-> false-positive rate. There is no compatibility path — any legacy string that
-> got past the HRP check would still fail the `ck` curve checks. Clues already
-> on chain remain testable against an `sswap1…` address that was published, so
-> treat those receipts as public.
+> **Legacy `sswap1…` and `sswap2…` addresses are rejected**, on the HRP check
+> and again on the `ck` curve checks. There is no compatibility path.
+>
+> `sswap1…` published `dk` itself, so any holder of such an address can test
+> every on-chain clue and enumerate that recipient's incoming notes at a 2^-γ
+> false-positive rate. Clues already on chain stay testable: treat receipts to a
+> published `sswap1…` address as public.
+
+## Watch-only
+
+A viewing key reads an account without being able to spend from it. The tier is
+read from the key: `lelantosivk1…` decrypts incoming notes, `lelantosfvk1…` also
+resolves which are spent.
+
+```ts
+import { encodeFullViewingKey, fullViewingKeyFromSpending } from "@lelantos-org/sdk";
+import { connectWatch } from "@lelantos-org/sdk/watch";
+
+const key = encodeFullViewingKey(fullViewingKeyFromSpending(wallet.keys));
+
+const watch = await connectWatch({ network: "anvil", viewingKey: key });
+await watch.sync();
+watch.balance(weth.id);
+watch.spentKnown; // false for an incoming key: balance is gross received
+```
+
+`WatchWallet` implements `ReadOnlyWalletApi`; `deposit`, `transfer`, `withdraw`
+and `swap` are absent from the type. The entry point reaches neither the prover
+nor viem, so a read-only integration installs neither.
+
+> **A viewing key cannot be revoked.** `ivk` is fixed by the spending key, so a
+> holder reads every note the account receives from then on. Moving the funds to
+> a new account is the only way to withdraw the capability.
+
+## Browser setup
+
+Three things a browser build needs beyond `npm install`. All three fail
+quietly rather than loudly, so they are worth doing up front.
+
+### 1. Cross-origin isolation
+
+The prover and the scanner pool use wasm threads (`SharedArrayBuffer`), which
+browsers gate behind cross-origin isolation. Serve the app with:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Without these, `crossOriginIsolated` is `false` and the threaded paths throw.
+
+### 2. Do not pre-bundle the SDK
+
+Bundlers that rewrite the wasm-pack glue's `new URL('<crate>_bg.wasm',
+import.meta.url)` produce a path that does not exist at runtime. The SDK
+catches that and falls back to slower JS — so the symptom is not an error, it
+is a wallet roughly 10x slower over the ~350K hashes of a cold tree build.
+
+In Vite:
+
+```ts
+export default defineConfig({
+    optimizeDeps: { exclude: ["@lelantos-org/sdk"] },
+    worker: { format: "es" },
+});
+```
+
+Every degradation of this kind is logged, and SDK logging is off until you
+install a sink — so turn it on, at least in development. Records are forwarded
+from the scanner workers too, which is where this particular failure lands:
+
+```ts
+import { configureLogging, consoleSink } from "@lelantos-org/sdk";
+
+configureLogging({ level: "warn", sink: consoleSink() });
+```
+
+If your bundler rewrites `#wasm/*` and excluding the package is not an option,
+pass a `wasm: { … }` loader to `connect()` instead, so the modules resolve
+through the asset pipeline.
+
+### 3. Spawn workers from your own call site
+
+Use `fastWallet`, and write the `new Worker(...)` expression inline — bundlers
+emit a worker chunk only for that literal form.
+
+```ts
+import { fastWallet } from "@lelantos-org/sdk";
+
+const wallet = await fastWallet({
+    network: "base",
+    provider: window.ethereum,
+    address,
+    rpcUrl,
+    proverArtifacts: { circuit, zkey },
+    pool: {
+        worker: () =>
+            new Worker(new URL("@lelantos-org/sdk/scanner-worker", import.meta.url), {
+                type: "module",
+            }),
+    },
+});
+```
+
+Call `wallet.dispose()` when abandoning a wallet — on disconnect, account
+switch or network switch. The workers are live threads and do not go away when
+the wallet goes out of scope.
 
 ## Browser CSP
 
@@ -112,9 +215,28 @@ WASM modules are loaded through ESM dynamic `import()`; neither `new Function`
 nor `eval` is used. Allow `'wasm-unsafe-eval'` in the `script-src` directive;
 nothing else is required under the default CSP.
 
-If a bundler rewrites the package's `#wasm/*` subpath imports, pass a
-`wasm: { … }` loader to `connect()` so the runtime resolves the modules through
-the bundler's asset pipeline.
+## Source layout
+
+`src/` is a dependency ladder: a module may import from its own tier or below,
+never above. `check:layers` enforces it, and the tiers below are the table that
+script holds.
+
+| Tier | Directories | What lives there |
+| ---- | ----------- | ---------------- |
+| 0 | `core/`, `log/`, `worker/`, `wasm/` | Brands, field arithmetic, decoding, HTTP, fees, denominations, logging, wasm + worker plumbing. No protocol knowledge. |
+| 1–2 | `crypto/`, `fmd/`, `keys/`, `notes/` | Poseidon/Jubjub, FMD clues, key derivation and addresses, note encoding and encryption. |
+| 3 | `protocol/`, `circuit/` | Wire structs the contract and relayer agree on, and the circuit witness built from them. |
+| 4 | `chain/`, `permit2/`, `prover/`, `services/` | The EVM adapter, Permit2 signing, Groth16 proving, and the HTTP clients (relayer, FMD server, quoter). |
+| 5 | `bundle/`, `sync/` | Transaction bundles, and the scanner that finds notes. |
+| 6 | `wallet/` | `Wallet` and everything it drives: selection, assets, per-tx flows, stores. |
+| 7 | `presets/`, `x402/`, `index.ts` | Deployment presets, the x402 payment mechanisms, the root barrel. |
+
+Two conventions inside a directory: a module too large to read in one sitting
+becomes a directory with an `index.ts` barrel (`wallet/selection/`,
+`wallet/assets/`), and a service splits into `wire.ts` (shapes), `decode.ts`
+(validation) and `client.ts` (routes). No barrel uses `export *` — every name a
+subpath publishes is written out, which is what keeps `api-surface.json`
+meaningful.
 
 ## Development
 
@@ -124,6 +246,20 @@ npm run build     # tsc → dist/
 npm run check     # biome lint + format
 npm run typecheck # tsc --noEmit, source and tests
 ```
+
+CI enforces more than the four above. Each has its own script, and all run on
+every pull request:
+
+| Script | Enforces |
+| ------ | -------- |
+| `check:api` | Exported names match `api-surface.json`. Update with `-- --update`. |
+| `check:layers` | Tier ladder, no `export *`, `wallet/watch/` clear of the spend path. |
+| `check:browser-safe` | No `node:*` imports under `src/`. |
+| `check:entropy` | No `Math.random`; randomness routes through `core/random.ts`. |
+| `check:wasm-imports` | Every `#wasm/*` subpath is imported literally. |
+| `check:bundle-size` / `check:bundle-budget` | Total `dist/` size, and the eager graph of each entry point. |
+| `check:publish` / `check:pack` | publint + attw, and that `exports` resolves in a packed tarball. |
+| `check:audit` | No advisory at any level in the production tree. |
 
 ## Stability
 

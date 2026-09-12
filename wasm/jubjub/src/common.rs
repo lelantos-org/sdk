@@ -7,7 +7,7 @@ use blake2::{Blake2b, Digest};
 use num_bigint::{BigInt, Sign};
 
 use crate::curve::{decompress_point, fr_one, fr_zero, Point};
-use crate::sub_order;
+use crate::{inv8, sub_order};
 
 pub const FIELD_BYTES: usize = 32;
 
@@ -26,15 +26,41 @@ pub fn in_subgroup(p: &Point) -> bool {
     is_identity(&p.mul_scalar(sub_order()))
 }
 
-/// Decompress a 32B circomlibjs-packed point and verify it lies in the
-/// prime-order subgroup. Returns `None` on parse fail or off-subgroup —
-/// callers in fused paths treat both as "not for me".
-pub fn decode_subgroup_point(packed: &[u8; FIELD_BYTES]) -> Option<Point> {
+/// Read a 32B LE scalar and pair it with [`decode_cleared_point`].
+///
+/// `k · 8^-1 mod n`, so that `[k·8^-1]([8]p)` is `[k]q` for the prime-order part
+/// `q` of `p`. Kept beside [`scalar_from_le`] so both forms of the JS↔WASM
+/// scalar boundary live together.
+pub fn cofactor_scalar_from_le(bytes: &[u8]) -> BigInt {
+    (scalar_from_le(bytes) * inv8()) % sub_order()
+}
+
+/// `[8]p`, by three doublings.
+///
+/// Not `mul_scalar(8)`: that builds the full 16-entry window table whatever the
+/// scalar, which costs more than the doublings it saves at this width.
+fn mul_by_cofactor(p: &Point) -> Point {
+    p.projective().double().double().double().affine()
+}
+
+/// Decompress a packed point and clear its cofactor, rejecting the identity.
+///
+/// Baby-Jubjub is `Z_8 x Z_n`, so a packed point may carry an 8-torsion term:
+/// `p = T + q`. `[8]p` annihilates `T`, and a scalar carrying the matching
+/// `8^-1` (see [`cofactor_scalar_from_le`]) undoes the cofactor on `q`. The
+/// pair yields `[k]q` — equal to `[k]p` when `p` is honest, and free of the
+/// torsion term when it is not.
+///
+/// An identity result means `p` was pure torsion, whose shared secret is the
+/// identity for *every* key: one note that decrypts in every wallet and is
+/// readable by any observer. Refused.
+pub fn decode_cleared_point(packed: &[u8; FIELD_BYTES]) -> Option<Point> {
     let p = decompress_point(*packed).ok()?;
-    if in_subgroup(&p) {
-        Some(p)
-    } else {
+    let cleared = mul_by_cofactor(&p);
+    if is_identity(&cleared) {
         None
+    } else {
+        Some(cleared)
     }
 }
 

@@ -8,7 +8,7 @@ import { WalletConfigError } from "../core/errors.js";
 import { resolveAmount } from "./amount.js";
 import type { WithdrawOptions, WithdrawResult } from "./api.js";
 import type { AssetRef } from "./asset-ref.js";
-import { withdrawNetFor } from "./assets.js";
+import { withdrawNetFor } from "./assets/index.js";
 import type { SpendContext } from "./context.js";
 import { makeTransactionResult } from "./result-builder.js";
 import { feeSlots, resolveFee } from "./tx/fee.js";

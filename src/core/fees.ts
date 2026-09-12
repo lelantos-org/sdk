@@ -23,6 +23,25 @@ export function applyFee(amount: bigint, feeBps: bigint): bigint {
     return (amount * feeBps) / BPS_DENOMINATOR;
 }
 
+/**
+ * Fee on a count of normalized units, rounded **up** — mirrors `Fees.unitFee`.
+ *
+ * The plain path multiplies `scale` in before dividing, so it floors at
+ * base-unit granularity; {@link applyFee} is that path. A yield asset charges
+ * its fee in units instead, so that the escrow digest stays index-free, and one
+ * unit is worth `scale` base units — flooring there would discard up to a whole
+ * `scale` per operation and charge nothing at all below
+ * `BPS_DENOMINATOR / feeBps` units (at 25 bps, any amount under 400). The pool
+ * rounds up to close that window, so every yield-branch quote here has to as
+ * well: quoting a unit low is not a display nit, it is a Permit2 pull the pool
+ * refuses.
+ */
+export function unitFee(units: bigint, feeBps: bigint): bigint {
+    const num = units * feeBps;
+    if (num === 0n) return 0n;
+    return (num - 1n) / BPS_DENOMINATOR + 1n;
+}
+
 /** An asset's two protocol fee rates, in basis points. */
 export interface FeeRates {
     /** Charged **on top of** the principal on a shield. */
@@ -107,16 +126,17 @@ export interface WithdrawNet {
  * interchangeable: they round at different points, so the wrong one misreports
  * the net by up to a unit.
  *
- *   plain  the fee is taken from the converted token amount
- *   yield  the fee is taken in normalized units *before* conversion, which is
- *          what keeps `_drainDeposit` index-free and the escrow digest stable
+ *   plain  the fee is taken from the converted token amount, floored
+ *   yield  the fee is taken in normalized units *before* conversion and
+ *          rounded up (`YieldOps._unshield` → `Fees.unitFee`), which is what
+ *          keeps `_drainDeposit` index-free and the escrow digest stable
  */
 export function withdrawNet(args: WithdrawNetArgs): WithdrawNet {
     const { publicOut, feeBps, scale, index = RAY, yieldEnabled = false } = args;
     const toTokens = (units: bigint): bigint => (units * scale * index) / RAY;
 
     if (yieldEnabled) {
-        const feeNorm = applyFee(publicOut, feeBps);
+        const feeNorm = unitFee(publicOut, feeBps);
         const net = toTokens(publicOut - feeNorm);
         return { net, fee: toTokens(publicOut) - net };
     }
@@ -150,9 +170,10 @@ export interface DepositTotalArgs {
  *
  *   plain  fee is taken on the converted token amount, as
  *          `MASP._computeAmounts` does
- *   yield  fee is taken in normalized units and the *total* is converted once,
- *          rounding up — which is what keeps `_drainDeposit` index-free and the
- *          escrow digest stable
+ *   yield  fee is taken in normalized units — itself rounded up, as
+ *          `YieldOps._deposit` does through `Fees.unitFee` — and the *total* is
+ *          converted once, rounding up again; both are what keep
+ *          `_drainDeposit` index-free and the escrow digest stable
  *
  * The yield branch converts with `rate`, never with the reported index: that
  * index is floored on chain, so a charge sized through it can land below what
@@ -175,7 +196,7 @@ export function depositTotal(args: DepositTotalArgs): TokenAmount {
             { argument: "rate" },
         );
     }
-    const units = publicIn + applyFee(publicIn, depositBps) + feeIn;
+    const units = publicIn + unitFee(publicIn, depositBps) + feeIn;
     return toTokenUnitsAtRate(branded<CircuitAmount>(units), scale, rate, { round: "up" });
 }
 

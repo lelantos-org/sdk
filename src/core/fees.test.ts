@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { tokenAmount } from "./brand.js";
 import { InvalidArgumentError } from "./errors.js";
-import { depositCeiling, depositTotal, withdrawNet } from "./fees.js";
+import { applyFee, depositCeiling, depositTotal, unitFee, withdrawNet } from "./fees.js";
 import { RAY } from "./units.js";
+
+// `Fees.unitFee` on chain. A yield asset charges in normalized units, where a
+// floored fee is free money below `BPS_DENOMINATOR / feeBps` units — and, more
+// sharply, a quote a unit short is a Permit2 pull the pool refuses.
+describe("unitFee", () => {
+    it("agrees with the floored fee when the division is exact", () => {
+        expect(unitFee(1_000_000n, 20n)).toBe(2_000n);
+        expect(unitFee(1_000_000n, 20n)).toBe(applyFee(1_000_000n, 20n));
+    });
+
+    it("rounds up the moment it is inexact", () => {
+        expect(unitFee(1_000_001n, 20n)).toBe(2_001n); // floors to 2_000
+        expect(unitFee(1n, 20n)).toBe(1n); // floors to 0
+    });
+
+    it("charges nothing at a zero rate or a zero amount", () => {
+        expect(unitFee(1_000_000n, 0n)).toBe(0n);
+        expect(unitFee(0n, 20n)).toBe(0n);
+    });
+
+    it("never undercharges relative to the floored fee, nor by more than a unit", () => {
+        for (const units of [0n, 1n, 7n, 399n, 400n, 401n, 1_000_003n]) {
+            for (const bps of [0n, 1n, 20n, 25n, 2_000n]) {
+                const floored = applyFee(units, bps);
+                expect(unitFee(units, bps)).toBeGreaterThanOrEqual(floored);
+                expect(unitFee(units, bps)).toBeLessThanOrEqual(floored + 1n);
+            }
+        }
+    });
+});
 
 // `publicOut` is the GROSS: `MASP._unshieldLeg` skims the fee out of what
 // leaves the pool rather than charging it on top. These pin the two branches
@@ -44,6 +74,18 @@ describe("withdrawNet", () => {
         expect(withdrawNet({ publicOut: D, feeBps: BPS, scale: 1n, yieldEnabled: false }).net).toBe(
             998_000_000n,
         );
+    });
+
+    it("rounds a yield asset's unit fee up, as `Fees.unitFee` does", () => {
+        // 1 unit at 20 bps is 0.002 units of fee: the pool still charges one,
+        // so the recipient gets nothing rather than the whole unit back.
+        expect(withdrawNet({ publicOut: 1n, feeBps: BPS, scale: 1n, yieldEnabled: true })).toEqual({
+            net: 0n,
+            fee: 1n,
+        });
+        // The plain branch floors on the converted amount, so it keeps it.
+        const plain = withdrawNet({ publicOut: 1n, feeBps: BPS, scale: 1n, yieldEnabled: false });
+        expect(plain).toEqual({ net: 1n, fee: 0n });
     });
 
     it("and the two branches are NOT interchangeable once rounding bites", () => {
@@ -139,6 +181,23 @@ describe("depositTotal", () => {
         });
         // 7 * 1_000_003 / 1_000_000 = 7.000021 → 8, so the payer covers it.
         expect(total).toBe(8n);
+    });
+
+    // `YieldOps._deposit` sizes the escrow with `Fees.unitFee`, so a quote that
+    // floors is short by a unit and the Permit2 pull reverts.
+    it("rounds a yield asset's unit fee up before converting", () => {
+        const rate = { gross: 1_000_000n, supply: 1_000_000n }; // unity: isolate the fee
+        const total = depositTotal({
+            publicIn: 1n,
+            feeIn: 0n,
+            depositBps: BPS,
+            scale: 1n,
+            yieldEnabled: true,
+            rate,
+        });
+        expect(total).toBe(2n); // 1 principal + ceil(1 * 20 / 10_000) = 1
+        // The plain branch floors on the converted amount, and charges nothing.
+        expect(depositTotal({ publicIn: 1n, feeIn: 0n, depositBps: BPS, scale: 1n })).toBe(1n);
     });
 
     it("is the plain arithmetic when the venue has earned nothing yet", () => {

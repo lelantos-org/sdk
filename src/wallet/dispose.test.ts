@@ -17,6 +17,18 @@ describe("Wallet.dispose", () => {
         expect(prover.dispose).toHaveBeenCalledOnce();
     });
 
+    it("releases at scope exit via `await using`", async () => {
+        const scanner = { scan: async () => [], dispose: vi.fn(async () => undefined) };
+        const { wallet } = await testWallet({ scanner });
+
+        {
+            await using scoped = wallet;
+            expect(scoped.address).toBeDefined();
+        }
+
+        expect(scanner.dispose).toHaveBeenCalledOnce();
+    });
+
     it("is idempotent", async () => {
         const scanner = { scan: async () => [], dispose: vi.fn(async () => undefined) };
         const { wallet } = await testWallet({ scanner });

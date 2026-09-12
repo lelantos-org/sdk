@@ -27,13 +27,69 @@ export interface ServeOptions<M extends MethodMap> {
     logRateLimit?: number;
 }
 
-/** Install the message handler. Call once, at worker top level. */
+/**
+ * The worker global, or `undefined` where it is not the message port.
+ *
+ * In a browser worker `globalThis` is the scope. Under `node:worker_threads`
+ * it is not: messages arrive on `parentPort`, and `globalThis` carries an
+ * `addEventListener` that never receives them.
+ */
+function globalScope(): WorkerScopeLike | undefined {
+    const g = globalThis as unknown as Partial<WorkerScopeLike>;
+    return typeof g.postMessage === "function" ? (g as WorkerScopeLike) : undefined;
+}
+
+// Specifier held in a variable so `check-browser-safe.mjs` sees no `node:`
+// import, as in `wasm/rayon/node-worker.ts`.
+const NODE_WORKER_THREADS = "node:worker_threads";
+
+/**
+ * `parentPort` behind the same shape as a browser worker scope.
+ *
+ * Node delivers `message` through an `EventEmitter` whose listener takes the
+ * data directly, so it is wrapped into the `{ data }` envelope the handler
+ * expects. Messages posted before the listener attaches stay queued on the
+ * port, so installing asynchronously loses none.
+ */
+async function nodeScope(): Promise<WorkerScopeLike | undefined> {
+    const { parentPort } = (await import(/* @vite-ignore */ NODE_WORKER_THREADS)) as {
+        parentPort: {
+            postMessage(msg: unknown, transfer?: readonly unknown[]): void;
+            on(type: string, cb: (data: unknown) => void): void;
+        } | null;
+    };
+    if (!parentPort) return undefined;
+    return {
+        postMessage: (msg, transfer) => parentPort.postMessage(msg, transfer),
+        addEventListener: (type, cb) => parentPort.on(type, (data) => cb({ data })),
+    };
+}
+
+/**
+ * Install the message handler. Call once, at worker top level.
+ *
+ * Resolves synchronously in a browser worker. Under Node the port is reached
+ * through a dynamic import, so the handler installs on a later tick.
+ */
 export function serveWorkerRpc<M extends MethodMap>(
     handlers: Handlers<M>,
     opts: ServeOptions<M> = {},
 ): void {
-    const scope = opts.scope ?? (globalThis as unknown as WorkerScopeLike);
+    const scope = opts.scope ?? globalScope();
+    if (scope) {
+        install(scope, handlers, opts);
+        return;
+    }
+    void nodeScope().then((port) => {
+        if (port) install(port, handlers, opts);
+    });
+}
 
+function install<M extends MethodMap>(
+    scope: WorkerScopeLike,
+    handlers: Handlers<M>,
+    opts: ServeOptions<M>,
+): void {
     if (opts.forwardLogs) installLogForwarder(scope, opts.logRateLimit ?? 200);
 
     const onMessage = async (ev: { data: unknown }): Promise<void> => {

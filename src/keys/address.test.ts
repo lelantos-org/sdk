@@ -1,10 +1,15 @@
 import { bech32m } from "bech32";
+import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
 import { InvalidArgumentError, isWalletError } from "../core/errors.js";
+import { BN254_FR } from "../core/field.js";
 import { FIELD_BYTES, toLeBytes } from "../crypto/bytes.js";
 import { Jubjub, Poseidon } from "../crypto/index.js";
 import { ADDRESS_HRP, decodeAddress, encodeAddress } from "./address.js";
 import { addressFromSpendingKey, buildSpendingKey } from "./keys.js";
+
+/** A non-zero canonical field element, as every root key scalar must be. */
+const nskArb = fc.bigInt({ min: 1n, max: BN254_FR - 1n });
 
 describe("bech32m address", () => {
     let P: Poseidon;
@@ -127,5 +132,20 @@ describe("bech32m address", () => {
             expect(err).toBeInstanceOf(InvalidArgumentError);
             expect((err as InvalidArgumentError).message).not.toContain(bad);
         }
+    });
+
+    it("round-trips all three halves for any nsk", () => {
+        // Covers the scalar space, where an offset slip in the 96-byte payload
+        // would show.
+        fc.assert(
+            fc.property(nskArb, (n) => {
+                const sk = buildSpendingKey(P, J, n);
+                const decoded = decodeAddress(J, addressFromSpendingKey(J, sk));
+                expect(decoded.pk).toBe(sk.pk);
+                expect(decoded.pk_d).toEqual(sk.pk_d);
+                expect(decoded.ck).toEqual(sk.ck);
+            }),
+            { numRuns: 30 },
+        );
     });
 });

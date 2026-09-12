@@ -1,13 +1,24 @@
 // Chain-adapter construction from `connect()` inputs.
 
 import type { DeployedNetworkPreset } from "../../chain/networks.js";
-import type { ChainAdapter } from "../../chain/port.js";
+import type { ChainReader } from "../../chain/port.js";
 import { evmAddress } from "../../core/brand.js";
 import { WalletConfigError } from "../../core/errors.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
 
 export interface ChainAdapterInputs {
-    chain?: ChainAdapter | undefined;
+    chain?: ChainReader | undefined;
+    /** Pre-built read-only layer; caller owns construction. No deposits. */
+    reader?: ChainReader | undefined;
+    /**
+     * Build a read-only `ViemChainReader` from `rpcUrl` alone.
+     *
+     * For a wallet that holds no EVM key — a passkey, say. Spending out of the
+     * pool needs no signer, so this is a complete chain layer for transfer,
+     * withdraw and swap; only deposit is out of reach, and it refuses at the
+     * call rather than here.
+     */
+    noSigner?: boolean | undefined;
     /** Pre-built signer (EIP-1193 wrapper, private key signer, etc.). */
     signer?: EthSigner | undefined;
     /**
@@ -34,15 +45,34 @@ export interface ChainAdapterInputs {
 export async function defaultChainAdapter(
     inputs: ChainAdapterInputs,
     preset: DeployedNetworkPreset,
-): Promise<ChainAdapter> {
+): Promise<ChainReader> {
     if (inputs.chain) return inputs.chain;
+    if (inputs.reader) return inputs.reader;
+
+    if (inputs.noSigner) {
+        if (!inputs.rpcUrl) {
+            throw new WalletConfigError([
+                "`rpcUrl` required when building a read-only chain layer",
+            ]);
+        }
+        const { ViemChainReader } = await import("../../chain/viem/index.js");
+        return new ViemChainReader({
+            rpcUrl: inputs.rpcUrl,
+            maspAddress: preset.maspAddress,
+            chainId: preset.chainId,
+            permit2Address: preset.permit2Address,
+            nativeAdapterAddress: preset.nativeAdapterAddress,
+        });
+    }
 
     const errs: string[] = [];
     if (!inputs.rpcUrl) {
         errs.push("`rpcUrl` required when building chain adapter (or pass a pre-built `chain`)");
     }
     if (!inputs.signer && !(inputs.provider && inputs.address) && !inputs.privateKey) {
-        errs.push("pass one of `chain`, `signer`, `{provider,address}`, or `privateKey`");
+        errs.push(
+            "pass one of `chain`, `reader`, `noSigner`, `signer`, `{provider,address}`, or `privateKey`",
+        );
     }
     if (errs.length) throw new WalletConfigError(errs);
 
@@ -67,6 +97,7 @@ export async function defaultChainAdapter(
         maspAddress: preset.maspAddress,
         chainId: preset.chainId,
         permit2Address: preset.permit2Address,
+        nativeAdapterAddress: preset.nativeAdapterAddress,
     });
 }
 

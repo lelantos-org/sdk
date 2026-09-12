@@ -42,6 +42,8 @@ export interface WorkerRpc<M extends MethodMap> {
     ): Promise<M[K]["result"]>;
     /** Reject everything in flight and terminate the worker. */
     dispose(reason?: string): void;
+    /** Alias for {@link WorkerRpc.dispose}, for `using rpc = createWorkerRpc(...)`. */
+    [Symbol.dispose](): void;
     /** False once the worker has crashed or been disposed. */
     readonly alive: boolean;
 }
@@ -238,6 +240,10 @@ export function createWorkerRpc<M extends MethodMap>(
             alive = false;
             failAll((method) => rpcError("WORKER_CRASHED", `${name}: ${reason}`, { method }));
             worker.terminate();
+        },
+
+        [Symbol.dispose](): void {
+            this.dispose();
         },
     };
 }

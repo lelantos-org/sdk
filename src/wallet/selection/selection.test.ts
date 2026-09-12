@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assetId, circuitAmount } from "../core/brand.js";
-import { randomBelow } from "../core/random.js";
-import { SPEND_RESERVATION_MS } from "./constants.js";
-import type { StoredNote } from "./note-store.js";
-import { type SelectOpts, selectNotes, spendableMax } from "./selection.js";
-import { type StoredNoteOpts, storedNote } from "./wallet-test-utils.js";
+import { assetId, circuitAmount } from "../../core/brand.js";
+import { randomBelow } from "../../core/random.js";
+import { SPEND_RESERVATION_MS } from "../constants.js";
+import type { StoredNote } from "../note-store.js";
+import { type StoredNoteOpts, storedNote } from "../wallet-test-utils.js";
+import { type SelectOpts, selectNotes, spendableMax } from "./index.js";
 
 const note = (id: string, value: bigint, opts: StoredNoteOpts = {}): StoredNote =>
     storedNote(id, value, opts);

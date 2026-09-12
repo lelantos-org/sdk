@@ -10,19 +10,20 @@
 // which is what keeps a wallet configured against a bare RPC — no relayer, no
 // token list — working exactly as it did before.
 
-import type { ChainAdapter } from "../chain/port.js";
+import type { ChainReader } from "../chain/port.js";
 import { type AssetId, assetId } from "../core/brand.js";
+import { cmpBigint } from "../core/compare.js";
 import { type DenominationPolicy, resolveLadder } from "../core/denominations.js";
 import { InvalidArgumentError } from "../core/errors.js";
 import { type FeeOverride, type FeeRates, resolveFeeRates } from "../core/fees.js";
 import { RAY } from "../core/units.js";
 import type { ChainToken } from "../protocol/responses.js";
 import { type AssetRef, classifyRef, describeRef, matchRef } from "./asset-ref.js";
-import { type AssetInfo, fetchAssetInfo } from "./assets.js";
+import { type AssetInfo, fetchAssetInfo } from "./assets/index.js";
 
 /** Where a registry's token list comes from. */
 export interface AssetRegistrySource {
-    chain: ChainAdapter;
+    chain: ChainReader;
     /**
      * Whether assets resolve with a withdrawal ladder. Defaults to `true`;
      * `false` opts out entirely. Applied here so nothing downstream of
@@ -115,7 +116,7 @@ export class AssetRegistry {
     /** Everything the registry knows, lowest id first. */
     async list(): Promise<AssetInfo[]> {
         await this.load();
-        return [...this.byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        return [...this.byId.values()].sort((a, b) => cmpBigint(a.id, b.id));
     }
 
     /**
@@ -144,6 +145,24 @@ export class AssetRegistry {
             return info;
         }
         throw new InvalidArgumentError(this.unknown(ref), { argument: "asset" });
+    }
+
+    /**
+     * Re-read `ref` from the chain registry, replacing the cached entry.
+     *
+     * Reads the chain registry rather than the token list, which carries
+     * neither `scale` nor `disabled`.
+     */
+    async refresh(ref: AssetRef): Promise<AssetInfo> {
+        const { id } = await this.resolve(ref);
+        const info = await fetchAssetInfo(
+            this.src.chain,
+            id,
+            this.src.denominations ?? true,
+            this.src.feeBps,
+        );
+        this.put(info);
+        return info;
     }
 
     /** Seed or replace what the registry knows about `id`. */

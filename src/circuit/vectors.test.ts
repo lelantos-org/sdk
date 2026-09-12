@@ -22,7 +22,7 @@ import { keccak256, toBytes } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bitAt } from "../core/bits.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "../core/field.js";
-import { coeffCount, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
+import { challengeWordCount, coeffCount, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
@@ -50,7 +50,7 @@ import {
 } from "../crypto/index.js";
 import { loadWasmJubjub, wasmDescribe } from "../crypto/wasm-test-utils.js";
 import { fmdFlag, fmdFlagKeyFromDetection } from "../fmd/index.js";
-import { fiatShamirZ, flatten, hornerEval } from "./compression.js";
+import { coeffs, fiatShamirZ, flatten, hornerEval } from "./compression.js";
 import { toCircomInput } from "./input.js";
 
 // ── vector schema ────────────────────────────────────────────────────────
@@ -70,7 +70,14 @@ interface CircuitMeta {
     id: string;
     template: string;
     shape: { depth: number; nIn?: number; nOut?: number; maxL?: number };
+    /** Words the polynomial evaluates into `y`. */
     coeffCount: number;
+    /**
+     * Words hashed into `z`. A superset of `coeffCount` for transact, equal to
+     * it for the batch circuit, whose coefficients are all pinned. Published
+     * from circuits v0.14.0, which this suite requires.
+     */
+    challengeWords: number;
     layout: string[];
     layoutDigest: string;
 }
@@ -124,7 +131,10 @@ interface TransactWitness {
 }
 
 interface Compression {
+    /** The leading words of `challenge`: what `y` evaluates. */
     coeffs: string[];
+    /** Every word hashed into `z` (circuits >= v0.14.0). */
+    challenge: string[];
     z: string;
     y: string;
 }
@@ -324,6 +334,11 @@ describe("installed circuit vectors", () => {
 // dumps the same list from its Lean model and hashes it into `layoutDigest`;
 // reproducing the digest here proves the two orderings agree name-for-name,
 // not merely in length.
+/**
+ * The POLYNOMIAL's slots, which is what `circuit.layout` names — not the
+ * challenge preimage. The four address words, the clue triples and the aux
+ * digest are hashed into `z` and never evaluated, so they are absent here.
+ */
 function slotLabels(nIn: number, nOut: number): string[] {
     const labels = ["merkleRoot"];
     for (let i = 0; i < nIn; i++) labels.push(`nullifier ${i}`);
@@ -331,10 +346,7 @@ function slotLabels(nIn: number, nOut: number): string[] {
     labels.push("publicAssetId", "publicIn", "publicOut");
     for (let i = 0; i < nIn; i++) labels.push(`inCvX ${i}`, `inCvY ${i}`);
     for (let j = 0; j < nOut; j++) labels.push(`outCvX ${j}`, `outCvY ${j}`);
-    labels.push("recipient", "chainId", "payer", "relayer");
     for (let j = 0; j < nOut; j++) labels.push(`outCvDepX ${j}`, `outCvDepY ${j}`);
-    for (let j = 0; j < nOut; j++) labels.push(`clueRx ${j}`, `clueRy ${j}`, `clueBits ${j}`);
-    labels.push("auxDigest");
     return labels;
 }
 
@@ -350,10 +362,20 @@ describe.each(TRANSACT)("transact $id public-input layout", ({ file }) => {
         expect(digest).toBe(file.circuit.layoutDigest);
     });
 
-    it("emits 9 + 3·N_IN + 8·N_OUT coefficients", () => {
-        // `coeffCount` in core/shape.ts must reproduce what the package publishes.
+    it("evaluates 4 + 3·N_IN + 5·N_OUT coefficients and hashes 9 + 3·N_IN + 8·N_OUT", () => {
+        // `coeffCount` and `challengeWordCount` in core/shape.ts must reproduce
+        // what the package publishes.
+        //
+        // The two differ by 23 at 4x6 — the address words, the clue triples and
+        // the aux digest — and that is a soundness requirement. `PolyEval` is
+        // affine in each coefficient and the prover reads `z` before choosing a
+        // witness, so a coefficient the circuit does not constrain is one linear
+        // equation in one unknown. Those 23 carry no constraint, so they are
+        // hashed into `z` and never evaluated.
         expect(file.circuit.coeffCount).toBe(coeffCount({ nIn, nOut }));
-        expect(flatten(file.vectors[0]!.witness)).toHaveLength(file.circuit.coeffCount);
+        expect(file.circuit.challengeWords).toBe(challengeWordCount({ nIn, nOut }));
+        expect(coeffs(file.vectors[0]!.witness)).toHaveLength(file.circuit.coeffCount);
+        expect(flatten(file.vectors[0]!.witness)).toHaveLength(file.circuit.challengeWords);
     });
 });
 
@@ -541,13 +563,15 @@ wasmDescribe("transact vectors", () => {
                         }
                     });
 
-                    it("flattens to the circuit's coefficient vector", () => {
-                        const coeffs = flatten(w);
-                        expect(coeffs).toEqual(v.compression.coeffs.map(f));
+                    it("flattens to the challenge preimage and its coefficient prefix", () => {
+                        expect(flatten(w)).toEqual(v.compression.challenge.map(f));
+                        expect(coeffs(w)).toEqual(v.compression.coeffs.map(f));
                     });
 
-                    it("derives z by Fiat-Shamir over the coefficients", () => {
-                        expect(fiatShamirZ(v.compression.coeffs.map(f))).toBe(f(v.compression.z));
+                    it("derives z by Fiat-Shamir over the whole challenge", () => {
+                        expect(fiatShamirZ(v.compression.challenge.map(f))).toBe(
+                            f(v.compression.z),
+                        );
                         expect(w.z).toBe(v.compression.z);
                     });
 

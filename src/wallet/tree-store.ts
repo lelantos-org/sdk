@@ -17,7 +17,7 @@ import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleNode, type MerkleProof, MerkleTree } from "../crypto/merkle.js";
 import type { IsKnownRoot } from "../crypto/path.js";
 import { getLogger } from "../log/logger.js";
-import type { FmdClient } from "../services/fmd-server/client.js";
+import type { FmdClient } from "../services/fmd-server/index.js";
 import {
     chunkOf,
     maxChunksFor,
@@ -48,15 +48,41 @@ export interface TreeStoreState {
 /**
  * Plug in any storage backend to persist the Merkle tree across page loads.
  *
+ * `TreeStoreState.leaves` is `bigint[]`, so a JSON backend must encode it —
+ * `JSON.stringify` throws `TypeError: Do not know how to serialize a BigInt`.
+ * Encode as `0x`-prefixed hex: `BigInt` accepts both decimal and hex spellings,
+ * so a bare hex string whose digits are all decimal would read back as a
+ * different number. A structured-clone backend (IndexedDB) stores `bigint`
+ * directly and needs none of this.
+ *
  * @example
  * ```ts
  * class MyPersistence implements TreePersistence {
- *     async load() { return JSON.parse(localStorage.getItem("tree") ?? "null"); }
- *     async save(state) { localStorage.setItem("tree", JSON.stringify(state)); }
+ *     async load() {
+ *         const raw = localStorage.getItem("tree");
+ *         if (raw === null) return null;
+ *         const { leaves, syncedCount } = JSON.parse(raw) as {
+ *             leaves: string[];
+ *             syncedCount: number;
+ *         };
+ *         return { leaves: leaves.map(BigInt), syncedCount };
+ *     }
+ *     async save(state: TreeStoreState) {
+ *         localStorage.setItem(
+ *             "tree",
+ *             JSON.stringify({
+ *                 leaves: state.leaves.map((v) => `0x${v.toString(16)}`),
+ *                 syncedCount: state.syncedCount,
+ *             }),
+ *         );
+ *     }
  *     async clear() { localStorage.removeItem("tree"); }
  * }
  * const wallet = await connect({ ..., treePersistence: new MyPersistence() });
  * ```
+ *
+ * The example drops `nodes` on save, which is legal — see
+ * {@link TreeStoreState.nodes} for what that costs.
  */
 export interface TreePersistence {
     load(): Promise<TreeStoreState | null>;

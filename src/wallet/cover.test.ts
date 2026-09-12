@@ -3,8 +3,8 @@ import { assetId, circuitAmount } from "../core/brand.js";
 import { InsufficientCoverError } from "../core/errors.js";
 import { ensureCover } from "./cover.js";
 import type { StoredNote } from "./note-store.js";
-import type { CoinSelector, SelectionResult, SelectOpts } from "./selection.js";
-import { selectNotes } from "./selection.js";
+import type { CoinSelector, SelectionResult, SelectOpts } from "./selection/index.js";
+import { selectNotes } from "./selection/index.js";
 import { storedNote } from "./wallet-test-utils.js";
 
 const note = (id: string, value: bigint, firstSeenBlock?: number): StoredNote =>

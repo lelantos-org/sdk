@@ -6,12 +6,12 @@ import { branded, type EvmAddress, type Hex32, type TokenAmount } from "../../co
 import { safeCall } from "../../core/callbacks.js";
 import type { TokenMeta } from "../types.js";
 import { ERC20_ABI, WETH_DEPOSIT_ABI } from "./abi.js";
-import { addr, type ViemCtx } from "./ctx.js";
+import { addr, type ViemCtx, type ViemReadCtx } from "./ctx.js";
 
 /** Overall cap on a receipt wait. viem polls forever without one. */
 const RECEIPT_TIMEOUT_MS = 300_000;
 
-export async function tokenMeta(ctx: ViemCtx, token: EvmAddress): Promise<TokenMeta> {
+export async function tokenMeta(ctx: ViemReadCtx, token: EvmAddress): Promise<TokenMeta> {
     const [symbol, decimals] = await Promise.all([
         ctx.publicClient.readContract({
             address: addr(token),
@@ -28,7 +28,7 @@ export async function tokenMeta(ctx: ViemCtx, token: EvmAddress): Promise<TokenM
 }
 
 export async function tokenBalanceOf(
-    ctx: ViemCtx,
+    ctx: ViemReadCtx,
     token: EvmAddress,
     account: EvmAddress,
 ): Promise<TokenAmount> {
@@ -43,7 +43,7 @@ export async function tokenBalanceOf(
 }
 
 export async function tokenAllowance(
-    ctx: ViemCtx,
+    ctx: ViemReadCtx,
     token: EvmAddress,
     owner: EvmAddress,
     spender: EvmAddress,
@@ -90,7 +90,7 @@ export async function wrapNative(
 }
 
 export async function waitTxReceipt(
-    ctx: ViemCtx,
+    ctx: ViemReadCtx,
     txHash: Hex32,
     confirmations = 1,
 ): Promise<{ blockNumber: number; status: number }> {
@@ -106,6 +106,6 @@ export async function waitTxReceipt(
     };
 }
 
-export async function nativeBalance(ctx: ViemCtx, account: EvmAddress): Promise<bigint> {
+export async function nativeBalance(ctx: ViemReadCtx, account: EvmAddress): Promise<bigint> {
     return ctx.publicClient.getBalance({ address: account });
 }

@@ -8,8 +8,7 @@ import { InternalError } from "../../core/errors.js";
 import type { Field } from "../../crypto/index.js";
 import { getLogger } from "../../log/logger.js";
 import { createWorkerRpc, type WorkerRpc } from "../../worker/client.js";
-import { spawnModuleWorker } from "../../worker/spawn.js";
-import type { WorkerLike } from "../../worker/types.js";
+import type { WorkerFactory } from "../../worker/types.js";
 import type { ScanHit, ScanInput } from "../scan.js";
 import type { Scanner } from "../scanner.js";
 import {
@@ -25,8 +24,6 @@ const log = getLogger("lelantos:sync:pool");
 /** Wasm init can involve a network fetch; scanning is CPU-bound per chunk. */
 const INIT_TIMEOUT_MS = 30_000;
 const SCAN_TIMEOUT_MS = 60_000;
-
-export type WorkerFactory = () => WorkerLike;
 
 export interface WorkerPoolScannerOpts {
     factory: WorkerFactory;
@@ -164,6 +161,11 @@ export class WorkerPoolScanner implements Scanner {
         for (const s of this.slots) s.rpc.dispose("pool disposed");
         this.slots = [];
     }
+
+    /** Alias for {@link WorkerPoolScanner.dispose}. */
+    [Symbol.asyncDispose](): Promise<void> {
+        return this.dispose();
+    }
 }
 
 function defaultPoolSize(): number {
@@ -174,13 +176,13 @@ function defaultPoolSize(): number {
 }
 
 export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "factory"> {
-    /** `new URL("@lelantos-org/sdk/scanner-worker", import.meta.url)` */
-    workerUrl: string | URL;
+    /** Spawns one worker; called once per pool slot. See {@link WorkerFactory}. */
+    worker: WorkerFactory;
 }
 
 export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPoolScanner {
     return new WorkerPoolScanner({
-        factory: () => spawnModuleWorker(opts.workerUrl),
+        factory: opts.worker,
         size: opts.size,
         chunkSize: opts.chunkSize,
         wasm: opts.wasm,

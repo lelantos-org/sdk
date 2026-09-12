@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ChainReader } from "../../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { NetworkError } from "../../core/errors.js";
 import { randomJubjubScalar } from "../../core/random.js";
@@ -22,7 +23,25 @@ const SHAPES = TRANSACT_SHAPES.map((shape) => ({ id: shapeId(shape), shape }));
 const RELAYER_ADDR = "0x0000000000000000000000000000000000000001";
 const NATIVE_ADAPTER_ADDR = "0x00000000000000000000000000000000000ada9e";
 
-async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE) {
+/**
+ * The smallest chain layer that satisfies `ChainReader`.
+ *
+ * Named as its interface, not cast: it is the claim under test in
+ * "spends against a chain layer that cannot sign".
+ */
+const BARE_READER: ChainReader = {
+    chainId: async () => 31337n,
+    maspAddress: async () => evmAddress("0x0000000000000000000000000000000000000002"),
+    fetchAsset: async () => {
+        throw new Error("fixture: the spend path resolves assets through the registry");
+    },
+};
+
+async function makeCtx(
+    notes: StoredNote[],
+    shape: CircuitShape = DEFAULT_SHAPE,
+    chain: unknown = { nativeAdapterAddress: () => NATIVE_ADAPTER_ADDR },
+) {
     const P = await Poseidon.build();
     const J = await WasmJubjub.build();
     const keys = buildSpendingKey(P, J, randomJubjubScalar());
@@ -69,7 +88,7 @@ async function makeCtx(notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE)
             relayerAddress: RELAYER_ADDR,
             feeBps: 0n,
             shape,
-            chain: { nativeAdapterAddress: () => NATIVE_ADAPTER_ADDR },
+            chain,
         },
         prover,
         submitter: {
@@ -125,6 +144,24 @@ describe("executeTransfer", () => {
         expect(res.sent).toBe(30n);
         expect(res.change).toBe(70n);
         expect(treeStore.syncVerified).toHaveBeenCalledOnce();
+    });
+
+    it("spends against a chain layer that cannot sign", async () => {
+        // The executable form of the whole capability argument: a transfer
+        // proves ownership in the circuit and hands the proof to the relayer,
+        // which broadcasts it and pays the gas. Nothing on the signing half of
+        // the port is reached, so a wallet holding no EVM key — a passkey —
+        // can do this. Deposit is the operation that cannot, and
+        // `capability.test.ts` draws that line at the type level.
+        const notes = [storedNote("01", 100n)];
+        const { ctx, submitted, markedSpent } = await makeCtx(notes, DEFAULT_SHAPE, BARE_READER);
+        const { address: recipient } = await makeCtx([]);
+
+        const res = await executeTransfer(ctx, { to: recipient, amount: circuitAmount(30n) });
+
+        expect(submitted).toHaveLength(1);
+        expect(markedSpent).toEqual([["01"]]);
+        expect(res.sent).toBe(30n);
     });
 
     it("credits only the change slots when sending to someone else", async () => {

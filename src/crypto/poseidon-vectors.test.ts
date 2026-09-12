@@ -1,7 +1,7 @@
 // Cross-implementation Poseidon parity, SDK side.
 //
 // The same `tests/vectors/poseidon.json` is asserted by the Rust backend in
-// `backend/crates/fmd-crypto/tests/poseidon_vectors.rs`. Both files must stay
+// `backend/crates/common-crypto/tests/poseidon_vectors.rs`. Both files must stay
 // byte-identical; `scripts/gen-poseidon-vectors.ts` writes both copies.
 //
 // `anchors` are the digests circomlibjs publishes, so this ties the SDK to
@@ -25,10 +25,23 @@ const vectorFile = resolve(
     dirname(fileURLToPath(import.meta.url)),
     "../../tests/vectors/poseidon.json",
 );
-const { anchors, vectors } = JSON.parse(readFileSync(vectorFile, "utf8")) as {
+const parsed = JSON.parse(readFileSync(vectorFile, "utf8")) as {
     anchors: Vector[];
     vectors: Vector[];
 };
+
+/**
+ * Highest arity the SDK's table serves. See `poseidon.ts`.
+ *
+ * The shared vector file covers the Rust crate's wider range, so rows above
+ * this width are skipped here and asserted by `backend/crates/common-crypto`.
+ */
+const MAX_ARITY = 6;
+const served = (v: Vector) => v.inputs.length <= MAX_ARITY;
+
+const anchors = parsed.anchors.filter(served);
+const vectors = parsed.vectors.filter(served);
+const skipped = parsed.anchors.length + parsed.vectors.length - anchors.length - vectors.length;
 
 describe("poseidon vectors", () => {
     let P: Poseidon;
@@ -39,6 +52,21 @@ describe("poseidon vectors", () => {
     it("has vectors to check", () => {
         expect(anchors.length).toBeGreaterThan(0);
         expect(vectors.length).toBeGreaterThan(0);
+    });
+
+    it("skips only widths the table does not serve", () => {
+        // Guards the filter: a change to `MAX_ARITY` or to the file's contents
+        // must be deliberate rather than silently reduce coverage.
+        expect(skipped).toBe(2);
+        for (const v of [...anchors, ...vectors]) {
+            expect(v.inputs.length).toBeLessThanOrEqual(MAX_ARITY);
+        }
+    });
+
+    it("rejects an arity the table does not serve", () => {
+        expect(() => P.hash(Array.from({ length: MAX_ARITY + 1 }, (_, i) => BigInt(i)))).toThrow(
+            /not supported/,
+        );
     });
 
     it.each(

@@ -4,7 +4,6 @@ import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
 import { loadWasmProver } from "./load-wasm-prover.js";
 import type { ProverPaths } from "./types.js";
 
-/** @internal */
 export interface PreloadOpts {
     /**
      * Warm the prover wasm too. Default true. Set false on read-only wallets
@@ -16,9 +15,12 @@ export interface PreloadOpts {
 
 /**
  * Build all WASM modules used by the SDK. Returns once they're ready for
- * hot-path use. Safe to call before `Wallet.create`.
+ * hot-path use.
  *
- * @internal
+ * Optional — `connect()` warms eagerly by default. Call it directly to move
+ * the cost somewhere you control, such as behind a splash screen or on a
+ * route transition before the user reaches a spend form. Idempotent: modules
+ * cache themselves after the first build, so a later `connect()` reuses them.
  */
 export async function preloadWasm(opts: PreloadOpts = {}): Promise<void> {
     const tasks: Promise<unknown>[] = [WasmJubjub.build()];

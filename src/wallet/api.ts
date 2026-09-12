@@ -1,14 +1,15 @@
 // Public Wallet API interface. Options live in `./options.ts`, results in
 // `./result.ts`. `Wallet` in `./wallet.ts` is the default impl.
 
-import type { ChainAdapter } from "../chain/port.js";
+import type { ChainReader } from "../chain/port.js";
 import type { CancelDepositInputs } from "../chain/types.js";
 import type { AssetId, AssetIdLike, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
-import type { SpendingKey } from "../keys/keys.js";
+import type { FullViewingKey, SpendingKey, ViewingKey } from "../keys/keys.js";
 import type { Prover } from "../prover/types.js";
 import type { Scanner } from "../sync/scanner.js";
+import type { AmountLike } from "./amount.js";
 import type { AssetRef } from "./asset-ref.js";
-import type { AssetInfo } from "./assets.js";
+import type { AssetInfo } from "./assets/index.js";
 import type { FeeQuoteResult, QuoteFeeArgs } from "./fee-quote.js";
 import type { AwaitCommitmentsOpts, AwaitCommitmentsResult } from "./note-cache.js";
 import type { NoteSource } from "./note-source.js";
@@ -34,52 +35,66 @@ import type {
     SelectOpts,
     SpendableMax,
     WithheldValue,
-} from "./selection.js";
+} from "./selection/index.js";
 import type { Submitter } from "./submitter.js";
 import type { SyncOpts, SyncResult } from "./sync.js";
+import type { DenominationChoice, WithdrawPreview } from "./withdraw-preview.js";
 
 /**
- * The high-level wallet surface. `Wallet` in `./wallet.ts` is the shipped
- * implementation; depend on this interface to keep tests mockable.
+ * What a wallet can answer from the notes it has scanned.
+ *
+ * Satisfied by `Wallet`, which adds the spend surface, and by `WatchWallet` in
+ * `./watch/`, built from a viewing key. Depend on it for code that reports on
+ * an account without spending from it.
  *
  * **Amounts are always in circuit units** — `tokenBaseUnits = amount *
  * asset.scale`. Use `wallet.asset(id)` plus `parseAmount` / `formatAmount`
  * from `./assets.js` to move between circuit units and what a user types.
  *
- * Typical lifecycle:
- *
  * ```ts
- * const wallet = await connect({ network: "anvil", privateKey, rpcUrl });
- * await wallet.sync();                              // notes + Merkle tree
- * const weth = requireTokenMeta(await wallet.asset(assetId(1n)));
- * await wallet.deposit({ asset: weth.id, amount: parseAmount("0.25", weth) });
+ * const wallet = await connectWatch({ network: "anvil", viewingKey });
  * await wallet.sync();
- * wallet.balance(weth.id);
+ * wallet.balance(assetId(1n));
+ * wallet.spentKnown;   // false ⇒ balance is gross received, not remaining
  * ```
  */
-export interface WalletApi {
-    /** This wallet's shielded `lelantos1…` address (bech32m). */
+export interface ReadOnlyWalletApi {
+    /** The shielded `lelantos1…` address this wallet watches (bech32m). */
     readonly address: ShieldedAddress;
-    readonly keys: SpendingKey;
+    /**
+     * The viewing capability this wallet holds. A {@link SpendingKey} satisfies
+     * it; {@link WalletApi} narrows it to one.
+     */
+    readonly keys: ViewingKey | FullViewingKey;
     readonly noteStore: NoteStore;
-    /** Cast to a concrete adapter type for adapter-specific accessors. */
-    readonly chain: ChainAdapter;
     readonly noteSource: NoteSource;
-    readonly submitter: Submitter;
-    readonly prover: Prover;
     readonly scanner: Scanner;
-    readonly selector: CoinSelector;
+
+    /**
+     * Whether this wallet can distinguish a spent note from an unspent one.
+     *
+     * `false` for an incoming-viewing-key holder, which has no `nk` and cannot
+     * recompute nullifiers. Every note then reads unspent, and `balance` is the
+     * gross amount received.
+     */
+    readonly spentKnown: boolean;
 
     // --- sync ----------------------------------------------------------------
 
     /** Pull encrypted notes only. Sufficient for balance display; does not sync the Merkle tree. */
     syncNotes(opts?: SyncOpts): Promise<SyncResult>;
-    /** Fetch new Merkle commitment chunks and rebuild the local tree. Required before spending. */
-    syncTree(): Promise<void>;
     /**
-     * Pull notes and sync the tree in parallel. Convenience wrapper around `syncNotes` + `syncTree`.
+     * Pull notes and the spent set in parallel, plus the commitment feed on a
+     * wallet that keeps a Merkle tree, then reconcile which local notes are
+     * now spent.
      */
     sync(opts?: SyncOpts): Promise<SyncResult>;
+    /**
+     * Fetch new spent-nullifier chunks into the local set. Idempotent —
+     * resumes from its own cursor. A stale mirror only ever under-reports
+     * spends; it never marks a live note spent.
+     */
+    syncNullifiers(): Promise<void>;
     refresh(): Promise<void>;
     /**
      * Poll until every commitment in `cms` is in the local store.
@@ -103,6 +118,62 @@ export interface WalletApi {
     asset(ref: AssetRef, opts?: { refresh?: boolean }): Promise<AssetInfo>;
     /** Every asset registered on this chain, lowest id first. */
     assets(): Promise<AssetInfo[]>;
+
+    // --- maintenance ---------------------------------------------------------
+
+    /**
+     * Drop notes flagged `spent: true` from the underlying store. Returns
+     * the number of notes pruned. Balance is unaffected; this only shrinks
+     * the on-disk file. Live notes and reconcile state are preserved.
+     */
+    compact(): Promise<{ removed: number }>;
+    /**
+     * Release scanner workers and any prover worker this wallet built.
+     *
+     * A `WorkerPoolScanner` holds 2–8 workers, each with its own wasm heap, so
+     * an app that rebuilds its wallet on an account or network switch must
+     * call this or leak a pool per switch. Idempotent; the wallet must not be
+     * used afterwards.
+     */
+    dispose(): Promise<void>;
+    /**
+     * Alias for {@link ReadOnlyWalletApi.dispose}, so a caller on a runtime
+     * with `Symbol.asyncDispose` can write `await using wallet = await
+     * connect(...)` and let scope exit release the workers.
+     */
+    [Symbol.asyncDispose](): Promise<void>;
+}
+
+/**
+ * The high-level wallet surface. `Wallet` in `./wallet.ts` is the shipped
+ * implementation; depend on this interface to keep tests mockable.
+ *
+ * Everything it adds over {@link ReadOnlyWalletApi} either builds a proof or
+ * supplies the key material to authorise one.
+ *
+ * Typical lifecycle:
+ *
+ * ```ts
+ * const wallet = await connect({ network: "anvil", privateKey, rpcUrl });
+ * await wallet.sync();                              // notes + Merkle tree
+ * const weth = requireTokenMeta(await wallet.asset(assetId(1n)));
+ * await wallet.deposit({ asset: weth.id, amount: parseAmount("0.25", weth) });
+ * await wallet.sync();
+ * wallet.balance(weth.id);
+ * ```
+ */
+export interface WalletApi extends ReadOnlyWalletApi {
+    /** Spend authority. Narrows {@link ReadOnlyWalletApi.keys}. */
+    readonly keys: SpendingKey;
+    /** Cast to a concrete adapter type for adapter-specific accessors. */
+    readonly chain: ChainReader;
+    readonly submitter: Submitter;
+    readonly prover: Prover;
+    readonly selector: CoinSelector;
+
+    /** Fetch new Merkle commitment chunks and rebuild the local tree. Required before spending. */
+    syncTree(): Promise<void>;
+
     /**
      * What relaying `kind` costs and which assets can pay for it, checked
      * against this wallet's balances. Empty when the relayer charges nothing.
@@ -126,6 +197,24 @@ export interface WalletApi {
      */
     spendableMax(asset: AssetId, opts?: SelectOpts): Promise<SpendableMax>;
     selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult;
+    /**
+     * What a withdrawal of `amount` would actually deliver, before running it.
+     *
+     * ```ts
+     * const p = await wallet.previewWithdraw({ asset: "USDC", amount: "1000" });
+     * p.netFormatted; // "998" — what actually arrives
+     * p.onLadder;     // true
+     * ```
+     */
+    previewWithdraw(args: {
+        amount: AmountLike;
+        asset?: AssetRef | undefined;
+    }): Promise<WithdrawPreview>;
+    /**
+     * The asset's withdrawal denominations, labelled for a picker. Empty for
+     * an asset with no ladder, where any amount is as good as any other.
+     */
+    withdrawDenominations(ref?: AssetRef): Promise<DenominationChoice[]>;
 
     // --- spend ---------------------------------------------------------------
 
@@ -148,23 +237,18 @@ export interface WalletApi {
     cancelDeposit(id: bigint, inputs: CancelDepositInputs): Promise<{ txHash: Hex32 }>;
     markSpent(noteIds: string[]): Promise<void>;
     /**
-     * Drop notes flagged `spent: true` from the underlying store. Returns
-     * the number of notes pruned. Balance is unaffected; this only shrinks
-     * the on-disk file. Live notes and reconcile state are preserved.
-     */
-    compact(): Promise<{ removed: number }>;
-    /**
-     * Release scanner workers and any prover worker this wallet built.
+     * Re-split notes that sit off the asset's denomination ladder, so future
+     * spends can be covered by on-ladder notes. Returns the number of rounds
+     * run; zero means the asset has no ladder, or nothing was off it.
      *
-     * A `WorkerPoolScanner` holds 2–8 workers, each with its own wasm heap, so
-     * an app that rebuilds its wallet on an account or network switch must
-     * call this or leak a pool per switch. Idempotent; the wallet must not be
-     * used afterwards.
+     * Best-effort: a round that cannot find cover stops the loop rather than
+     * throwing, because a partially-tidied note set is a strictly better
+     * position than the one it started from.
      */
-    dispose(): Promise<void>;
+    redenominate(ref: AssetRef, opts?: { maxRounds?: number }): Promise<number>;
 }
 
-export type { AssetInfo, AssetInfoWithMeta } from "./assets.js";
+export type { AssetInfo, AssetInfoWithMeta } from "./assets/index.js";
 // Re-exported for backwards compatibility with `./api.js` imports.
 export type {
     DepositOptions,

@@ -35,6 +35,7 @@ export const WALLET_ERROR_CODES = [
     "PROVER_ARTIFACTS_FAILED",
     "PERMIT_REJECTED",
     "DEPOSIT_ADAPTER",
+    "NO_DEPOSIT_ACCOUNT",
     "TX_MINING",
     "SELECTION",
     "X402_PAYMENT",
@@ -372,6 +373,29 @@ export class PermitRejectedError extends WalletError<"PERMIT_REJECTED"> {
 /** Deposit path the SDK can take, given what the chain adapter implements. */
 export type DepositStrategy = "native" | "allowance" | "witness";
 
+/**
+ * The wallet holds no EVM account, so it cannot shield value into the pool.
+ *
+ * Distinct from {@link DepositAdapterError}, which reports an adapter that
+ * could sign but does not implement a path. Nothing here is missing or
+ * upgradeable: spending out of the pool is authorised by the circuit and paid
+ * for by the relayer, but a deposit moves public tokens out of an address that
+ * has to custody them and pay gas, and this wallet has no such address. Ask
+ * `supportsDeposit(wallet)` before offering the action.
+ */
+export class NoDepositAccountError extends WalletError<"NO_DEPOSIT_ACCOUNT"> {
+    constructor(opts?: WalletErrorOptions) {
+        super(
+            "NO_DEPOSIT_ACCOUNT",
+            "this wallet has no Ethereum account to deposit from — its chain layer is " +
+                "read-only, so it can transfer, withdraw and swap but cannot add funds. " +
+                "Connect a signing wallet to deposit.",
+            opts,
+        );
+        this.name = "NoDepositAccountError";
+    }
+}
+
 /** Adapter/Submitter cannot satisfy the requested deposit path. */
 export class DepositAdapterError extends WalletError<"DEPOSIT_ADAPTER"> {
     readonly strategy: DepositStrategy;
@@ -465,6 +489,23 @@ export class InternalError extends WalletError<"INTERNAL"> {
     }
 }
 
+/**
+ * Assert a union has been handled exhaustively.
+ *
+ * Call it where a discriminated union's variants have all been consumed. A
+ * variant added later stops `x` narrowing to `never`, so the call fails to
+ * compile. The runtime throw covers only values arriving from untyped input.
+ *
+ * ```ts
+ * if (s === "native") return a();
+ * if (s === "allowance") return b();
+ * assertNever(s, "deposit strategy");
+ * ```
+ */
+export function assertNever(x: never, what: string): never {
+    throw new InternalError(`unhandled ${what}: ${String(x)}`);
+}
+
 // --- Narrowing ---------------------------------------------------------------
 
 /**
@@ -494,6 +535,7 @@ export type AnyWalletError =
     | InsufficientCoverError
     | PermitRejectedError
     | DepositAdapterError
+    | NoDepositAccountError
     | SelectionError
     | X402PaymentError
     | TxMiningError

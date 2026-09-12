@@ -206,6 +206,11 @@ export class DepositStream {
         this.markClosed();
     }
 
+    /** Alias for {@link DepositStream.close}, for `using stream = ...`. */
+    [Symbol.dispose](): void {
+        this.close();
+    }
+
     /**
      * Register a one-shot close callback. Returns an unregister function.
      *

@@ -5,8 +5,7 @@
 // with the scanner pool.
 
 import { createWorkerRpc, type WorkerRpc } from "../worker/client.js";
-import { spawnModuleWorker } from "../worker/spawn.js";
-import type { WorkerLike } from "../worker/types.js";
+import type { WorkerFactory, WorkerLike } from "../worker/types.js";
 import { resolveArtifacts } from "./artifacts.js";
 import type { ProveResult, Prover, ProverArtifacts, ProverPaths } from "./types.js";
 import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
@@ -18,8 +17,6 @@ import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
  */
 const PRELOAD_TIMEOUT_MS = 180_000;
 const PROVE_TIMEOUT_MS = 180_000;
-
-export type { WorkerLike };
 
 export interface WorkerProverOpts extends WorkerSetup {
     /** Worker running `@lelantos-org/sdk/prover-worker`. */
@@ -64,12 +61,12 @@ export class WorkerProver implements Prover {
 }
 
 export interface BrowserWorkerProverOpts extends WorkerSetup {
-    /** `new URL("@lelantos-org/sdk/prover-worker", import.meta.url)` */
-    workerUrl: string | URL;
+    /** Spawns the worker. See {@link WorkerFactory}. */
+    worker: WorkerFactory;
     paths: ProverPaths | ProverArtifacts;
 }
 
 /** Spawns the Worker and returns a `WorkerProver`. */
-export function browserWorkerProver({ workerUrl, ...opts }: BrowserWorkerProverOpts): WorkerProver {
-    return new WorkerProver({ worker: spawnModuleWorker(workerUrl), ...opts });
+export function browserWorkerProver({ worker, ...opts }: BrowserWorkerProverOpts): WorkerProver {
+    return new WorkerProver({ worker: worker(), ...opts });
 }

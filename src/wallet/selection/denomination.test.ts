@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { assetId, circuitAmount } from "../core/brand.js";
-import type { StoredNote } from "./note-store.js";
-import { DenominationCoinSelector, SfrtCoinSelector } from "./selection.js";
+import { assetId, circuitAmount } from "../../core/brand.js";
+import type { StoredNote } from "../note-store.js";
+import { DenominationCoinSelector, SfrtCoinSelector } from "./index.js";
 
 const ASSET = assetId(1n);
 

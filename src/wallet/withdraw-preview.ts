@@ -23,7 +23,7 @@ import {
     nearestDenomination,
     requireTokenMeta,
     withdrawNetFor,
-} from "./assets.js";
+} from "./assets/index.js";
 
 /** Input to {@link previewWithdraw}. */
 export interface WithdrawPreviewArgs {

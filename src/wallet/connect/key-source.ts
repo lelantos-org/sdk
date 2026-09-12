@@ -1,6 +1,6 @@
 // Turning `ConnectOptions` into a `KeySource`, and detecting the runtime.
 
-import type { ChainAdapter } from "../../chain/port.js";
+import type { ChainAdapter, ChainReader } from "../../chain/port.js";
 import { WalletConfigError } from "../../core/errors.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
 import type { KeySource } from "../../keys/key-source.js";
@@ -30,6 +30,8 @@ export type ConnectOptionsLoose = ConnectExtraOptions & {
     signature?: string;
     nsk?: bigint;
     chain?: ChainAdapter;
+    reader?: ChainReader;
+    noSigner?: boolean;
     signer?: EthSigner;
     provider?: Eip1193ProviderLike;
     address?: `0x${string}`;
@@ -48,7 +50,8 @@ export { detectRuntime } from "../../core/runtime.js";
  * chain layer supplies it where it can: a `privateKey` derives one through a
  * domain-separated reduction, and a `signer` or `provider` derives one from a
  * single EIP-712 signature. A pre-built `chain` adapter cannot, since it
- * exposes no signing key, so that combination still needs an explicit source.
+ * exposes no signing key, so that combination still needs an explicit source —
+ * as do `reader` and `noSigner`, which hold no key at all.
  */
 export async function buildKeySource(
     opts: ConnectOptionsLoose,

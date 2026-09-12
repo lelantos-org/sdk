@@ -38,11 +38,15 @@ import {
 import { encodeAddress } from "./address.js";
 import { mnemonicToAccountKey } from "./hd.js";
 
-export interface SpendingKey {
-    nsk: Field;
+/**
+ * Incoming viewing key: detects and decrypts this account's incoming notes.
+ *
+ * Grants neither spend authority nor spend visibility. The latter requires
+ * `nk`, which derives from `nsk` rather than `ivk`. See {@link FullViewingKey}.
+ */
+export interface ViewingKey {
     ivk: Field;
-    nk: Field;
-    pk: Field;
+    /** ECDH target, `(ivk mod q) · Base8`. Public; goes in the address. */
     pk_d: Point;
     /** FMD root detection secret. Never publish — see `ck`. */
     dk: Field;
@@ -50,44 +54,79 @@ export interface SpendingKey {
     ck: Point;
 }
 
-/** @internal */
-// Sufficient to trial-decrypt and detect; NOT to spend, NOT to see spends.
-export interface ViewingKey {
-    ivk: Field;
-    pk_d: Point;
-    dk: Field;
-    ck: Point;
-}
-
-/** @internal */
-// Adds nk: holder can also detect which notes have been spent on chain.
-// Still NOT sufficient to spend.
+/**
+ * Adds `nk`, with which the holder recomputes nullifiers and so determines
+ * which of the account's notes are spent on chain. Grants no spend authority.
+ */
 export interface FullViewingKey extends ViewingKey {
     nk: Field;
 }
 
+/** Full spend authority. A `SpendingKey` satisfies any API that only reads. */
+export interface SpendingKey extends FullViewingKey {
+    /** Root secret. Never leaves the owner. */
+    nsk: Field;
+    /** Scalar binding the note commitment, `Poseidon(TAG_PK, ivk)`. */
+    pk: Field;
+}
+
 export function buildSpendingKey(P: Poseidon, J: Jubjub, nsk: Field): SpendingKey {
     const ivk = deriveIvk(P, nsk);
-    const dk = deriveDk(P, ivk);
+    // `pk_d`, `dk` and `ck` come from `buildViewingKey`: one derivation for
+    // both key kinds, so an account cannot end up with two addresses.
     return {
+        ...buildViewingKey(P, J, ivk),
         nsk,
-        ivk,
         nk: deriveNk(P, nsk),
         pk: derivePkFromIvk(P, ivk),
+    };
+}
+
+/**
+ * Build an incoming viewing key from `ivk`.
+ *
+ * `pk_d`, `dk` and `ck` are functions of `ivk` and are derived here, so a
+ * serialized viewing key need carry only the scalar.
+ */
+export function buildViewingKey(P: Poseidon, J: Jubjub, ivk: Field): ViewingKey {
+    const dk = deriveDk(P, ivk);
+    return {
+        ivk,
         pk_d: J.mulPointEscalar(J.base8, ivk % BABYJUB_SUBGROUP_ORDER),
         dk,
         ck: fmdClueKeyFromRoot(J, dk),
     };
 }
 
-/** @internal */
+/** As {@link buildViewingKey}, with the `nk` that grants spend visibility. */
+export function buildFullViewingKey(P: Poseidon, J: Jubjub, ivk: Field, nk: Field): FullViewingKey {
+    return { ...buildViewingKey(P, J, ivk), nk };
+}
+
+/**
+ * The address a viewing key watches.
+ *
+ * An address is `pk_d || pk || ck`, each derivable from `ivk`, so a holder can
+ * name the account it views and a caller can check a key against a stated
+ * address.
+ */
+export function addressFromViewingKey(P: Poseidon, J: Jubjub, vk: ViewingKey): ShieldedAddress {
+    return encodeAddress(J, vk.pk_d, derivePkFromIvk(P, vk.ivk), vk.ck);
+}
+
+/**
+ * Narrow a spending key to the incoming-viewing capability.
+ *
+ * Copies the fields: a `SpendingKey` is assignable to `ViewingKey`, so a cast
+ * compiles but leaves `nsk` on the object at runtime.
+ */
 export function viewingKeyFromSpending(sk: SpendingKey): ViewingKey {
     return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, ck: sk.ck };
 }
 
-/** @internal */
+/** As {@link viewingKeyFromSpending}, plus the `nk` that reveals spends. */
 export function fullViewingKeyFromSpending(sk: SpendingKey): FullViewingKey {
-    return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, ck: sk.ck, nk: sk.nk };
+    return { ...viewingKeyFromSpending(sk), nk: sk.nk };
 }
 
 /** @internal */

@@ -3,7 +3,11 @@
     "target": "ES2023",
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "lib": ["ES2023", "DOM"],
+    // `ESNext.Disposable` is types-only: it declares `Symbol.dispose` /
+    // `Symbol.asyncDispose` so the aliases on `Wallet`, `WorkerRpc` and friends
+    // typecheck. It emits nothing. It also declares `DisposableStack`, which is
+    // a much newer runtime global — do not reach for that one here.
+    "lib": ["ES2023", "DOM", "ESNext.Disposable"],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,

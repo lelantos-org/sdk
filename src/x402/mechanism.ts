@@ -6,7 +6,7 @@
 // extra member is invisible to `client.register(...)`.
 
 import type { CircuitAmount } from "../core/brand.js";
-import type { AssetInfo } from "../wallet/assets.js";
+import type { AssetInfo } from "../wallet/assets/index.js";
 import type { PaymentRequirements, SchemeNetworkClient } from "./types.js";
 
 /**

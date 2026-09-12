@@ -19,8 +19,8 @@
 // holds; an unmatched ref is an error, never a different asset.
 
 import { type AssetId, type AssetIdLike, assetId } from "../core/brand.js";
-import { InvalidArgumentError } from "../core/errors.js";
-import type { AssetInfo } from "./assets.js";
+import { assertNever, InvalidArgumentError } from "../core/errors.js";
+import type { AssetInfo } from "./assets/index.js";
 
 /**
  * How a caller names an asset: its MASP id, its ERC-20 address, or its symbol.
@@ -97,6 +97,9 @@ export function matchRef(known: readonly AssetInfo[], ref: AssetRef): AssetInfo 
             return hits[0];
         }
     }
+    // `matchRef` returns `AssetInfo | undefined`, so an unhandled variant would
+    // otherwise fall out as "no match" rather than as a mistake.
+    return assertNever(want, "asset ref kind");
 }
 
 /** Human description of a ref, for error messages. */

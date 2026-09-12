@@ -16,7 +16,7 @@
 import type { CircuitAmount, CircuitAmountLike } from "../core/brand.js";
 import { circuitAmount } from "../core/brand.js";
 import { InvalidArgumentError } from "../core/errors.js";
-import { type AssetInfo, parseAmount } from "./assets.js";
+import { type AssetInfo, parseAmount } from "./assets/index.js";
 
 /**
  * An amount, either exact circuit units (`bigint`) or a human decimal amount

@@ -5,7 +5,7 @@
 
 import type { Eip1193ProviderLike, EthSigner } from "../../chain/eth-signer.js";
 import type { NetworkName, NetworkPreset } from "../../chain/networks.js";
-import type { ChainAdapter } from "../../chain/port.js";
+import type { ChainAdapter, ChainReader } from "../../chain/port.js";
 import type { WasmConfig } from "../../configure-wasm.js";
 import type { DenominationPolicy } from "../../core/denominations.js";
 import type { FeeOverride } from "../../core/fees.js";
@@ -17,7 +17,7 @@ import type { SyncStrategy } from "../config.js";
 import type { NoteSource } from "../note-source.js";
 import type { NoteStore } from "../note-store.js";
 import type { NullifierPersistence, NullifierStore } from "../nullifier-store.js";
-import type { CoinSelector } from "../selection.js";
+import type { CoinSelector } from "../selection/index.js";
 import type { Submitter } from "../submitter.js";
 import type { TreePersistence, TreeStore } from "../tree-store.js";
 
@@ -55,7 +55,14 @@ export type ConnectKeyOptions =
     | Only<{ signature: string }, KeyOptionKeys>
     | Only<{ nsk: bigint }, KeyOptionKeys>;
 
-type ChainOptionKeys = "chain" | "signer" | "provider" | "address" | "privateKey";
+type ChainOptionKeys =
+    | "chain"
+    | "reader"
+    | "noSigner"
+    | "signer"
+    | "provider"
+    | "address"
+    | "privateKey";
 
 /**
  * How transactions reach the chain — pick exactly one shape. Everything
@@ -67,6 +74,26 @@ export type ConnectChainOptions =
               /** Pre-built `ChainAdapter`; caller owns construction. */
               chain: ChainAdapter;
               rpcUrl?: string | undefined;
+          },
+          ChainOptionKeys
+      >
+    | Only<
+          {
+              /**
+               * Pre-built read-only layer. Everything but deposit works: a
+               * spend is authorised by the circuit and broadcast by the
+               * relayer, so it never needs a key of its own.
+               */
+              reader: ChainReader;
+              rpcUrl?: string | undefined;
+          },
+          ChainOptionKeys
+      >
+    | Only<
+          {
+              /** Let the SDK build the read-only layer from `rpcUrl` alone. */
+              noSigner: true;
+              rpcUrl: string;
           },
           ChainOptionKeys
       >
@@ -183,8 +210,16 @@ type NoKeyOptions = { [K in KeyOptionKeys]?: never };
  *
  * A pre-built `chain` adapter is absent by design — it owns its signer and
  * exposes nothing to derive from, so it still needs an explicit key source.
+ * `reader` and `noSigner` are absent for the stronger reason that there is no
+ * key there at all: those layers must be paired with an explicit `mnemonic`,
+ * `signature` or `nsk`. A passkey wallet takes the last of these — derive the
+ * key with `deriveNskFromPasskey` and pass the result, which is also what lets
+ * an application cache it for the session.
  */
-type SelfKeyingChainOptions = Exclude<ConnectChainOptions, { chain: ChainAdapter }>;
+type SelfKeyingChainOptions = Exclude<
+    ConnectChainOptions,
+    { chain: ChainAdapter } | { reader: ChainReader } | { noSigner: true }
+>;
 
 /**
  * Everything `connect()` accepts: a chain layer, optionally an explicit key

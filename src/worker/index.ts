@@ -12,13 +12,13 @@ export {
 } from "./client.js";
 export { fromWireError, rpcError, toWireError } from "./error-wire.js";
 export { type Handlers, type ServeOptions, serveWorkerRpc } from "./serve.js";
-export { spawnModuleWorker } from "./spawn.js";
 export type {
     MethodMap,
     MethodSpec,
     RpcRequest,
     RpcResponse,
     WireError,
+    WorkerFactory,
     WorkerLike,
     WorkerScopeLike,
 } from "./types.js";

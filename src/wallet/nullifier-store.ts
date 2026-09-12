@@ -18,7 +18,7 @@
 
 import { WireFormatError } from "../core/errors.js";
 import type { Field } from "../crypto/index.js";
-import type { FmdClient, NullifierChunkOut } from "../services/fmd-server/client.js";
+import type { FmdClient, NullifierChunkOut } from "../services/fmd-server/index.js";
 import { CHUNK_SIZE, chunkOf, type PagingOpts, type PagingStop, pageChunks } from "./chunk-feed.js";
 
 /**
@@ -48,6 +48,12 @@ export interface NullifierStoreState {
 
 /**
  * Plug in any storage backend to persist the spent set across page loads.
+ *
+ * `NullifierStoreState.nullifiers` is `bigint[]`, so a JSON backend must encode
+ * it — `JSON.stringify` throws `TypeError: Do not know how to serialize a
+ * BigInt`. See `TreePersistence` in `./tree-store.ts` for a worked encode and
+ * decode; the same `0x`-hex convention applies. A structured-clone backend
+ * (IndexedDB) stores `bigint` directly and needs none of this.
  *
  * @example
  * ```ts

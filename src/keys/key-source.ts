@@ -1,4 +1,4 @@
-// Key-source resolver: mnemonic / EIP-712 sig / raw nsk → nsk field
+// Key-source resolver: mnemonic / EIP-712 sig / passkey PRF / raw nsk → nsk field
 // element. Callers persist the source, never the derived nsk.
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
@@ -10,6 +10,7 @@ import { keccakExpand } from "../core/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
 import { mnemonicToAccountKey } from "./hd.js";
 import { reduceSignatureToScalar } from "./metamask.js";
+import { prfOutputToNsk } from "./passkey.js";
 
 export type KeySource =
     | {
@@ -20,6 +21,11 @@ export type KeySource =
       }
     | { type: "signature"; signature: string }
     | { type: "privateKey"; hex: string }
+    /**
+     * Raw WebAuthn PRF output, 32 bytes. The ceremony that produced it is the
+     * caller's; see `passkey.ts` for why PRF and not the assertion signature.
+     */
+    | { type: "passkeyPrf"; prf: Uint8Array }
     | { type: "nsk"; nsk: Field };
 
 /**
@@ -50,6 +56,10 @@ export function resolveNsk(source: KeySource): Field {
             return reduceSignatureToScalar(source.signature);
         case "privateKey":
             return hexPrivateKeyToNsk(source.hex);
+        case "passkeyPrf":
+            // Length and domain separation are enforced by `prfOutputToNsk`,
+            // which owns the PRF encoding.
+            return prfOutputToNsk(source.prf);
         case "nsk":
             // The only source that is not the output of a reduction, so it is
             // the only one that can be out of range. `nsk = 0` gives

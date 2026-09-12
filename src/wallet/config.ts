@@ -1,6 +1,6 @@
 // Wallet runtime configuration. Every external dependency is pluggable.
 
-import type { ChainAdapter } from "../chain/port.js";
+import type { ChainReader } from "../chain/port.js";
 import type { DenominationPolicy } from "../core/denominations.js";
 import type { FeeOverride } from "../core/fees.js";
 import type { CircuitShape } from "../core/shape.js";
@@ -9,7 +9,7 @@ import type { Scanner } from "../sync/scanner.js";
 import type { NoteSource } from "./note-source.js";
 import type { NoteStore } from "./note-store.js";
 import type { NullifierPersistence, NullifierStore } from "./nullifier-store.js";
-import type { CoinSelector } from "./selection.js";
+import type { CoinSelector } from "./selection/index.js";
 import type { Submitter } from "./submitter.js";
 import type { TreePersistence, TreeStore } from "./tree-store.js";
 
@@ -34,7 +34,7 @@ export interface WalletConfig {
     shape?: CircuitShape | undefined;
     /** SNARK-bound; must equal relayer pipeline signer or contract reverts. */
     relayerAddress: string;
-    chain: ChainAdapter;
+    chain: ChainReader;
     /**
      * Replaces the protocol fee rates the pool reports, for every asset.
      * 1 bp = 0.01%.

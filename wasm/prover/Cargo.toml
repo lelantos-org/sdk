@@ -9,11 +9,12 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["parallel"]
+# `taceo-groth16` depends on rayon unconditionally, so this no longer decides
+# whether rayon is linked — only whether a thread pool is started and whether the
+# ark crates use their parallel paths.
 parallel = [
-    "ark-ec/parallel",
     "ark-ff/parallel",
     "ark-groth16/parallel",
-    "ark-poly/parallel",
     "ark-std/parallel",
     "dep:rayon",
     "dep:wasm-bindgen-rayon",
@@ -23,17 +24,31 @@ parallel = [
 # console. Computes the map twice per proof, so a trace build is slower than a
 # release build and its wall-clock numbers are not comparable. Never ship it:
 # `just prover-build` overwrites `pkg/` with a clean release build.
+#
+# On the native side the same measurement put the MSMs at 86% of proving time and
+# the six size-2^17 FFTs at 14%; this is how to check that holds in a browser.
 trace = []
 
 [dependencies]
-ark-bn254 = { version = "0.5", default-features = false, features = ["curve"] }
-ark-ec = { version = "0.5", default-features = false }
-ark-ff = { version = "0.5", default-features = false }
-ark-poly = { version = "0.5", default-features = false }
-ark-serialize = { version = "0.5", default-features = false }
-ark-std = { version = "0.5", default-features = false }
-ark-groth16 = { version = "0.5", default-features = false }
-ark-relations = { version = "0.5", default-features = false }
+# The prover is `taceo-groth16`, not `ark-groth16`: on the native side the same
+# swap measured ~1.7x on a circuit of this size, and the gap is in the MSMs.
+# `ark-ec` 0.6 shards an MSM into `num_threads / 2` chunks and sizes the Pippenger
+# window from the chunk rather than the input, so more threads means a smaller
+# window and more bucket work — which is exactly the wrong shape for a browser
+# that may have anywhere from 1 to 16 workers. It also accumulates buckets in
+# affine form with batched inversion, and runs all five MSMs concurrently.
+#
+# It uses no `rayon::ThreadPoolBuilder`, only `current_num_threads` and parallel
+# iterators, so it works under `wasm-bindgen-rayon` as-is. It also supplies the
+# `ConstraintMatrices` that `ark-relations` 0.6 dropped.
+#
+# ark 0.5 -> 0.6 came with it: `taceo-groth16` is 0.6-only.
+taceo-groth16 = "0.2.1"
+ark-bn254 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-ff = { version = "0.6", default-features = false }
+ark-serialize = { version = "0.6", default-features = false }
+ark-std = { version = "0.6", default-features = false }
+ark-groth16 = { version = "0.6", default-features = false }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 console_error_panic_hook = "0.1"

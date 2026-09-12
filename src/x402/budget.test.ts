@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assetId, branded, type CircuitAmount, evmAddress } from "../core/brand.js";
-import type { AssetInfoWithMeta } from "../wallet/assets.js";
-import { makeAssetInfo, requireTokenMeta } from "../wallet/assets.js";
+import type { AssetInfoWithMeta } from "../wallet/assets/index.js";
+import { makeAssetInfo, requireTokenMeta } from "../wallet/assets/index.js";
 import { BudgetLedger } from "./budget.js";
 
 /** scale 10^15 → one circuit unit is 0.001 of an 18-decimal token. */

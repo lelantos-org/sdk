@@ -1,6 +1,14 @@
 export { type AmountLike, resolveAmount } from "./amount.js";
-export { type AssetRef, classifyRef, matchRef } from "./asset-ref.js";
+export { type AssetRef, classifyRef, matchRef, type RefKind } from "./asset-ref.js";
 export { AssetRegistry, type AssetRegistrySource } from "./asset-registry.js";
+export {
+    canDeposit,
+    type DepositCapableWallet,
+    type DepositContext,
+    type NativeDepositWallet,
+    supportsDeposit,
+    supportsNativeDeposit,
+} from "./capability.js";
 export { type FeeOption, type FeeQuoteResult, type QuoteFeeArgs, quoteFee } from "./fee-quote.js";
 // The wallet: the orchestration layer most callers use directly.
 //
@@ -15,6 +23,7 @@ export type {
     DepositResult,
     NotesFilter,
     OnPhase,
+    ReadOnlyWalletApi,
     SpendPhase,
     SwapOptions,
     SwapResult,
@@ -44,7 +53,7 @@ export {
     parseAmount,
     requireTokenMeta,
     withdrawNetFor,
-} from "./assets.js";
+} from "./assets/index.js";
 export type { SyncStrategy, WalletConfig } from "./config.js";
 export {
     type ConnectChainOptions,
@@ -54,7 +63,12 @@ export {
     connect,
 } from "./connect/index.js";
 export { DEFAULT_ASSET } from "./constants.js";
-export { type AwaitCommitmentsOpts, awaitCommitments, NoteCache } from "./note-cache.js";
+export {
+    type AwaitCommitmentsOpts,
+    type AwaitCommitmentsResult,
+    awaitCommitments,
+    NoteCache,
+} from "./note-cache.js";
 export {
     FmdMatchesNoteSource,
     FmdNoteSource,
@@ -89,7 +103,7 @@ export {
     SfrtCoinSelector,
     type SpendableMax,
     type WithheldValue,
-} from "./selection.js";
+} from "./selection/index.js";
 export { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 export { sizeBNote } from "./swap.js";
 export {

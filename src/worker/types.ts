@@ -6,6 +6,14 @@
 // parameters stay bivariant under `strictFunctionTypes`, which lets one
 // interface accept both a DOM `Worker` (transfer list `Transferable[]`) and a
 // `node:worker_threads` Worker (`TransferListItem[]`) without an `any`.
+//
+// The handler slots below cannot use method syntax — they are nullable
+// properties, not methods — so they take `(ev: any)`. A narrower parameter
+// makes them contravariant and a DOM `Worker` stops satisfying the interface:
+// `onmessage: ((ev: MessageEvent) => any) | null` is not assignable to
+// `((ev: { data: unknown }) => void) | null`, because `{ data: unknown }` is
+// not assignable to `MessageEvent`. That is why every browser consumer was
+// writing `as unknown as WorkerLike`. `types.test.ts` pins both directions.
 
 import type { LogLevel } from "../log/logger.js";
 
@@ -22,12 +30,30 @@ export interface WorkerLike {
     // is assignable to it, but a DOM worker`s void is not assignable to a
     // union containing Promise.
     terminate(): void;
-    onmessage?: (((ev: { data: unknown }) => void) | null) | undefined;
-    onerror?: (((ev: unknown) => void) | null) | undefined;
-    onmessageerror?: (((ev: unknown) => void) | null) | undefined;
+    onmessage?: (((ev: any) => void) | null) | undefined;
+    onerror?: (((ev: any) => void) | null) | undefined;
+    onmessageerror?: (((ev: any) => void) | null) | undefined;
     addEventListener?(type: string, cb: (ev: any) => void): void;
     on?(event: string, cb: (arg: any) => void): void;
 }
+
+/**
+ * Spawns a worker. Callers write the `new Worker(...)` expression at their own
+ * call site: bundlers emit a worker chunk only for that literal form, and a
+ * URL threaded through a helper is invisible to them — Vite inlines a small
+ * worker entry as a `data:` URL under `build.assetsInlineLimit`, whose
+ * relative imports then fail at runtime. A factory also accommodates the other
+ * spellings a bundler may require (`import W from "…?worker"`, then
+ * `() => new W()`), and it is what lets `WorkerPoolScanner` respawn a dead
+ * worker.
+ *
+ * ```ts
+ * () => new Worker(new URL("@lelantos-org/sdk/scanner-worker", import.meta.url), {
+ *     type: "module",
+ * })
+ * ```
+ */
+export type WorkerFactory = () => WorkerLike;
 
 /** The worker-side global, as seen from inside a module worker. */
 export interface WorkerScopeLike {

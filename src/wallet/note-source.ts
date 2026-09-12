@@ -1,7 +1,7 @@
 // Pluggable encrypted-note feed.
 
 import type { MerkleProof } from "../crypto/merkle.js";
-import type { FmdClient, FmdNoteOut } from "../services/fmd-server/client.js";
+import type { FmdClient, FmdNoteOut } from "../services/fmd-server/index.js";
 import type { ScanInput } from "../sync/scan.js";
 
 export interface ListNotesOpts {

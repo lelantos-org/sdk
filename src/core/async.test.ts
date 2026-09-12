@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     createKeyedMutex,
     createMutex,
+    type LinkedAbort,
     linkAbort,
     memoAsync,
     retry,
@@ -290,5 +291,27 @@ describe("linkAbort", () => {
         child.abort();
         expect(child.signal.aborted).toBe(true);
         expect(() => child.dispose()).not.toThrow();
+    });
+
+    it("detaches and aborts on scope exit", () => {
+        // `[Symbol.dispose]` is the stronger of the two: leaving the scope ends
+        // the work, so the speculative tail must stop as well. `dispose()` only
+        // unlinks, and is for a caller that still wants the controller live.
+        const parent = new AbortController();
+        let child!: LinkedAbort;
+        {
+            using scoped = linkAbort(parent.signal);
+            child = scoped;
+            expect(scoped.signal.aborted).toBe(false);
+        }
+
+        expect(child.signal.aborted).toBe(true);
+        expect(parent.signal.aborted).toBe(false);
+
+        // Detached: a later parent abort does not reach it (it is already
+        // aborted, so assert the reason was not replaced).
+        const reason: unknown = child.signal.reason;
+        parent.abort(new Error("parent gone after scope"));
+        expect(child.signal.reason).toBe(reason);
     });
 });

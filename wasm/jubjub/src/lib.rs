@@ -96,6 +96,18 @@ pub(crate) fn sub_order() -> &'static BigInt {
     })
 }
 
+/// `8^-1 mod n`, for cofactor-cleared ECDH. See `common::decode_cleared_point`.
+pub(crate) fn inv8() -> &'static BigInt {
+    static V: OnceLock<BigInt> = OnceLock::new();
+    V.get_or_init(|| {
+        BigInt::parse_bytes(
+            b"2394026564107420727433200628387514462817212225638746351800188703329891451411",
+            10,
+        )
+        .unwrap()
+    })
+}
+
 // --------- exported API ---------
 
 #[wasm_bindgen]

@@ -1,4 +1,12 @@
-// The `ChainAdapter` port and its capability subtypes.
+// The `ChainAdapter` port, its read-only half, and their capability subtypes.
+//
+// The port is split in two. `ChainReader` is everything a chain can answer
+// without a signing key; `ChainAdapter` adds the members that put a
+// transaction on chain from the user's own EOA. The split is not cosmetic: a
+// spend proves in the circuit and is broadcast by the relayer, so the spend
+// path never leaves `ChainReader`, while a deposit cannot be expressed without
+// `ChainAdapter`. A wallet backed by a passkey has the former and not the
+// latter.
 //
 // Most members are optional: an adapter implements the deposit paths its
 // chain supports. The `supports*` guards below are how callers discover
@@ -22,19 +30,27 @@ import type {
 } from "./types.js";
 
 /**
- * Adapters MUST be deterministic w.r.t. constructor inputs (no hidden
+ * Everything a chain can answer without a signing key.
+ *
+ * This is the whole surface the spend path uses: `executeTransfer` touches
+ * none of it, `executeWithdraw` reads `nativeAdapterAddress`, and the selector
+ * and tree sync read `blockNumber` and `isKnownRoot`. `fetchAsset` is required
+ * rather than optional because every amount the wallet formats, every fee it
+ * quotes and every asset it names resolves through the registry — a wallet
+ * that cannot read it has no UI, only a spend it cannot describe.
+ *
+ * Implementations MUST be deterministic w.r.t. constructor inputs (no hidden
  * global state).
  */
-export interface ChainAdapter {
+export interface ChainReader {
     chainId(): Promise<bigint>;
-    /** Signer's eth address (== `pi.payer` for deposit). */
-    payerAddress(): Promise<EvmAddress>;
     /** Used as the Permit2 `spender`. */
     maspAddress(): Promise<EvmAddress>;
     /**
      * `NativeAdapter` address, or `undefined` where none is deployed. It is
      * the `payer` a native deposit must name, so the deposit builder needs it
-     * before it builds the request. Optional.
+     * before it builds the request. Also read by `withdrawEth`, which is a
+     * relayed spend — hence a read, not part of the signing half. Optional.
      */
     nativeAdapterAddress?(): EvmAddress | undefined;
     /**
@@ -43,6 +59,68 @@ export interface ChainAdapter {
      * with the entry that defines them. 0 bps disables a leg's fee.
      */
     fetchAsset(id: AssetId): Promise<AssetEntry>;
+    /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */
+    permit2Allowance?(
+        token: EvmAddress,
+        owner: EvmAddress,
+        spender: EvmAddress,
+    ): Promise<{ amount: TokenAmount; expiration: number; nonce: number }>;
+    /** `MASP.escrowed(id)` — null if flushed/cancelled. Optional. */
+    getEscrowed?(id: bigint): Promise<EscrowedDepositView | null>;
+    /** Blocks before `cancelDeposit` is allowed. Optional. */
+    cancelDelay?(): Promise<number>;
+    /**
+     * Free slot in Permit2's unordered nonce bitmap. Optional; adapters
+     * returning a deterministic nonce can omit.
+     */
+    permit2Nonce?(): Promise<bigint>;
+    /** Optional. CLIs/UIs feature-check before calling. */
+    tokenMeta?(tokenAddr: EvmAddress): Promise<TokenMeta>;
+    tokenBalanceOf?(tokenAddr: EvmAddress, account: EvmAddress): Promise<TokenAmount>;
+    /** Wei. Optional. */
+    nativeBalance?(account: EvmAddress): Promise<bigint>;
+    tokenAllowance?(
+        tokenAddr: EvmAddress,
+        owner: EvmAddress,
+        spender: EvmAddress,
+    ): Promise<TokenAmount>;
+    /** Optional; adapters that don't use Permit2 omit. */
+    permit2Address?(): EvmAddress;
+    /**
+     * Whether the pool would accept a proof against `root`, from the 64-root
+     * ring it keeps. The authority the commitment mirror only approximates.
+     *
+     * Optional, like the reads around it: an adapter that cannot reach the pool
+     * leaves the mirror as the last word.
+     */
+    isKnownRoot?: IsKnownRoot;
+    /**
+     * Current chain tip. Feeds `SelectOpts.tipBlock`, without which the
+     * selector's spend cooldown is inert. Names no address and no topic.
+     * Optional.
+     */
+    blockNumber?(): Promise<number>;
+    /** Returns block number + receipt status (1 = success, 0 = revert). */
+    waitTxReceipt?(
+        txHash: Hex32,
+        confirmations?: number,
+    ): Promise<{ blockNumber: number; status: number }>;
+}
+
+/**
+ * A reader that also holds a signing key.
+ *
+ * Everything here either signs as the user's EOA or spends its gas, which is
+ * why it is the deposit half: shielding value moves public tokens out of an
+ * address that must both custody them and pay for the transaction. Narrow to
+ * it with {@link supportsSigning} before reaching for any of these.
+ *
+ * Adapters MUST be deterministic w.r.t. constructor inputs (no hidden
+ * global state).
+ */
+export interface ChainAdapter extends ChainReader {
+    /** Signer's eth address (== `pi.payer` for deposit). */
+    payerAddress(): Promise<EvmAddress>;
     /**
      * Sign Permit2 `PermitWitnessTransferFrom` witness-bound to
      * `piHash = keccak256(abi.encode(DepositRequest, aux))`.
@@ -90,12 +168,6 @@ export interface ChainAdapter {
         feeAux: AuxOutput;
         onSent?: (txHash: Hex32) => void;
     }): Promise<{ txHash: Hex32; depositId: bigint }>;
-    /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */
-    permit2Allowance?(
-        token: EvmAddress,
-        owner: EvmAddress,
-        spender: EvmAddress,
-    ): Promise<{ amount: TokenAmount; expiration: number; nonce: number }>;
     /**
      * Submit pre-signed `PermitSingle` via `IAllowanceTransfer.permit`.
      * Anyone can submit; relayer-gasless variants may override. Optional.
@@ -138,54 +210,14 @@ export interface ChainAdapter {
         id: bigint,
         inputs: Omit<CancelDepositInputs, "payer">,
     ): Promise<{ txHash: Hex32 }>;
-    /** `MASP.escrowed(id)` — null if flushed/cancelled. Optional. */
-    getEscrowed?(id: bigint): Promise<EscrowedDepositView | null>;
-    /** Blocks before `cancelDeposit` is allowed. Optional. */
-    cancelDelay?(): Promise<number>;
-    /**
-     * Free slot in Permit2's unordered nonce bitmap. Optional; adapters
-     * returning a deterministic nonce can omit.
-     */
-    permit2Nonce?(): Promise<bigint>;
-    /** Optional. CLIs/UIs feature-check before calling. */
-    tokenMeta?(tokenAddr: EvmAddress): Promise<TokenMeta>;
-    tokenBalanceOf?(tokenAddr: EvmAddress, account: EvmAddress): Promise<TokenAmount>;
-    /** Wei. Optional. */
-    nativeBalance?(account: EvmAddress): Promise<bigint>;
-    tokenAllowance?(
-        tokenAddr: EvmAddress,
-        owner: EvmAddress,
-        spender: EvmAddress,
-    ): Promise<TokenAmount>;
     tokenApprove?(
         tokenAddr: EvmAddress,
         spender: EvmAddress,
         amount: TokenAmount,
         onTxHash?: (hash: Hex32) => void,
     ): Promise<{ txHash: Hex32 }>;
-    /** Optional; adapters that don't use Permit2 omit. */
-    permit2Address?(): EvmAddress;
     /** `WETH9.deposit{value}`. Optional. */
     wrapNative?(wethAddr: EvmAddress, value: bigint): Promise<{ txHash: Hex32 }>;
-    /**
-     * Whether the pool would accept a proof against `root`, from the 64-root
-     * ring it keeps. The authority the commitment mirror only approximates.
-     *
-     * Optional, like the reads around it: an adapter that cannot reach the pool
-     * leaves the mirror as the last word.
-     */
-    isKnownRoot?: IsKnownRoot;
-    /**
-     * Current chain tip. Feeds `SelectOpts.tipBlock`, without which the
-     * selector's spend cooldown is inert. Names no address and no topic.
-     * Optional.
-     */
-    blockNumber?(): Promise<number>;
-    /** Returns block number + receipt status (1 = success, 0 = revert). */
-    waitTxReceipt?(
-        txHash: Hex32,
-        confirmations?: number,
-    ): Promise<{ blockNumber: number; status: number }>;
 }
 
 /**
@@ -226,7 +258,28 @@ export type NativeEthChain = ChainAdapter &
 export type AllowanceBatchChain = AllowanceTransferChain &
     Required<Pick<ChainAdapter, "signPermit2AllowanceBatch" | "permit2PermitAllowanceBatch">>;
 
-export function supportsAllowanceBatch(c: ChainAdapter): c is AllowanceBatchChain {
+/**
+ * Whether this reader also signs — the gate in front of every deposit path.
+ *
+ * Both members are required on {@link ChainAdapter}, so their presence is what
+ * separates the two halves of the port.
+ *
+ * This is the primitive, for code holding a bare chain layer. If you hold a
+ * wallet, ask `supportsDeposit(wallet)` from `@lelantos-org/sdk/wallet`
+ * instead — same question, one fewer hop, and it narrows the wallet rather
+ * than the layer inside it.
+ */
+export function supportsSigning(c: ChainReader): c is ChainAdapter {
+    // `Partial`, not `ChainAdapter`: this probes for absence, so the cast must
+    // not assert the very members it is about to test for.
+    const a = c as Partial<ChainAdapter>;
+    return typeof a.payerAddress === "function" && typeof a.signPermit2 === "function";
+}
+
+// The three guards below need no cast: the predicate on the left of `&&`
+// narrows `c` to `ChainAdapter` for the rest of the expression, and every
+// member they test is optional there.
+export function supportsAllowanceBatch(c: ChainReader): c is AllowanceBatchChain {
     return (
         supportsAllowanceTransfer(c) &&
         !!c.signPermit2AllowanceBatch &&
@@ -234,8 +287,9 @@ export function supportsAllowanceBatch(c: ChainAdapter): c is AllowanceBatchChai
     );
 }
 
-export function supportsAllowanceTransfer(c: ChainAdapter): c is AllowanceTransferChain {
+export function supportsAllowanceTransfer(c: ChainReader): c is AllowanceTransferChain {
     return (
+        supportsSigning(c) &&
         !!c.submitDepositAuthorized &&
         !!c.permit2Allowance &&
         !!c.permit2PermitAllowance &&
@@ -243,8 +297,8 @@ export function supportsAllowanceTransfer(c: ChainAdapter): c is AllowanceTransf
     );
 }
 
-export function supportsNativeEth(c: ChainAdapter): c is NativeEthChain {
+export function supportsNativeEth(c: ChainReader): c is NativeEthChain {
     // The address is what the deposit builder needs as `payer`, so an adapter
     // that can encode the call but cannot name the contract is not usable.
-    return !!c.submitDepositNative && !!c.nativeAdapterAddress?.();
+    return supportsSigning(c) && !!c.submitDepositNative && !!c.nativeAdapterAddress?.();
 }

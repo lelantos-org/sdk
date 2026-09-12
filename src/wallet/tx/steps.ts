@@ -21,7 +21,7 @@ import type { SpendContext } from "../context.js";
 import { inputsCtx } from "../context.js";
 import { ensureCover } from "../cover.js";
 import { buildInputSlots } from "../inputs.js";
-import type { DirectSelection, SelectOpts } from "../selection.js";
+import type { DirectSelection, SelectOpts } from "../selection/index.js";
 import type { ResolvedFee } from "./fee.js";
 
 const log = getLogger("lelantos:wallet:spend");
