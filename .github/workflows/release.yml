@@ -16,10 +16,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: rui314/setup-mold@v1
+      # The nightly is pinned once, in `wasm/rust-toolchain.toml`; rustup
+      # honours it for every cargo call under `wasm/`, so restating it here
+      # could only drift from it.
+      - name: Read pinned toolchain
+        id: toolchain
+        run: |
+          channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' wasm/rust-toolchain.toml)
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2025-06-23
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rust-src
           target: wasm32-unknown-unknown
           rustflags: ""

@@ -144,7 +144,7 @@ Two consequences worth knowing:
   witness that does not match the proving key cannot produce a verifying proof,
   so failing at the call beats failing at the verifier.
 - It requires Rust 1.90, which is why `wasm/rust-toolchain.toml` moved from
-  `nightly-2025-06-23` to `nightly-2026-04-27`.
+  `nightly-2025-06-23` to `nightly-2025-09-01`.
 
 ## File formats
 

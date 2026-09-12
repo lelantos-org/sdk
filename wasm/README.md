@@ -53,7 +53,7 @@ edits. Not built to WASM on its own.
 
 ## Build
 
-Requires [`just`](https://github.com/casey/just). `wasm-pack` auto-installed via `cargo install` if missing. Toolchain pinned in `rust-toolchain.toml` (nightly-2025-06-23, `wasm32-unknown-unknown`).
+Requires [`just`](https://github.com/casey/just). `wasm-pack` auto-installed via `cargo install` if missing. Toolchain pinned in `rust-toolchain.toml` — channel, components and `wasm32-unknown-unknown`, all in that one file, which is also what CI reads.
 
 ```bash
 just build         # release, all three crates

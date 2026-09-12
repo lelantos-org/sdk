@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { circuitSignals, type TransactWitnessBundle } from "../circuit/index.js";
 import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import { configureLogging } from "../log/logger.js";
 import { bundledProverArtifacts, resolveArtifacts } from "./artifacts.js";
@@ -50,18 +51,43 @@ async function pathsFor(shape: CircuitShape): Promise<ProverPaths | null> {
     }
 }
 
+/**
+ * Project a witness onto the circuit's declared signals.
+ *
+ * The packaged vectors carry the challenge-only fields too — the addresses,
+ * the clue slots and the aux digest — because those are logical public inputs
+ * that hash into `z`. They are not circuit signals, and the witness calculator
+ * rejects a key the circuit does not declare (`Signal recipient_address not
+ * found`). `circuitSignals` is the same projection the SDK's own prove path
+ * applies in `bundle/common.ts`.
+ *
+ * A hand-made `bench/public/input.<id>.json` is already signal-only, so it is
+ * passed through untouched rather than picked at and left with `undefined`
+ * holes.
+ */
+function toSignals(raw: Record<string, unknown>): Record<string, unknown> {
+    if (!("recipient_address" in raw)) return raw;
+    return { ...circuitSignals(raw as unknown as TransactWitnessBundle) };
+}
+
 function inputFor(shape: CircuitShape): Record<string, unknown> | null {
     const id = shapeId(shape);
     const override = fileURLToPath(
         new URL(`../../../bench/public/input.${id}.json`, import.meta.url),
     );
     if (existsSync(override)) {
-        return JSON.parse(readFileSync(override, "utf8")) as Record<string, unknown>;
+        // Named, because an override built against an older circuit fails as a
+        // bare `Assert Failed ... in template Transact` with nothing pointing
+        // at the file that caused it. CI has no override and proves the
+        // packaged vector.
+        process.stdout.write(`[bench] ${id}: using override input ${override}\n`);
+        return toSignals(JSON.parse(readFileSync(override, "utf8")) as Record<string, unknown>);
     }
     const corpus = packaged<{ vectors?: { witness: Record<string, unknown> }[] }>(
         `@lelantos-org/circuits/vectors/transact-${id}.json`,
     );
-    return corpus?.vectors?.[0]?.witness ?? null;
+    const witness = corpus?.vectors?.[0]?.witness;
+    return witness ? toSignals(witness) : null;
 }
 
 const CASES = await Promise.all(

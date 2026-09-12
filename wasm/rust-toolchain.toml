@@ -1,4 +1,14 @@
+# The one place the nightly is pinned.
+#
+# rustup honours this file for every cargo invocation under `wasm/`, so a
+# second pin in a workflow can only drift from it — which is exactly how
+# `just fmt-check` came to run on a toolchain that had no `cargo-fmt`. The
+# workflows read the channel back out of this file rather than restating it.
+#
+# `rustfmt` and `clippy` are listed here, not just in CI, so that a freshly
+# auto-installed toolchain can run `just fmt-check` / `just clippy` locally
+# without a separate `rustup component add`.
 [toolchain]
 channel = "nightly-2025-09-01"
-components = ["rust-src"]
+components = ["rust-src", "rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
