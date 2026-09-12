@@ -17,7 +17,7 @@ export {
     stripClueBitsPrefix,
     withClueBitsPrefix,
 } from "./codec.js";
-export { decryptNote, encryptNote } from "./encrypt.js";
+export { decryptNote, type EncryptArgs, encryptNote } from "./encrypt.js";
 export type { EncryptedNote, Note, SpentNote } from "./note.js";
 export {
     freshNoteRandomness,

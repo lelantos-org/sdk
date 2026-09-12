@@ -43,7 +43,7 @@ async function resolveProverPaths(config: {
 }
 
 /**
- * Everything {@link connect} takes, plus the scanner worker pool. Network
+ * Everything {@link ConnectOptions} carries, plus the scanner worker pool. Network
  * resolution, key derivation, chain adapter and prover are `connect`'s, so a
  * browser call is not a longer call than a Node one.
  */
@@ -73,7 +73,7 @@ export type FastWalletOpts = ConnectOptions & {
 };
 
 /**
- * Browser wallet: {@link connect} plus a `WorkerPoolScanner`, so note scanning
+ * Browser wallet: `connect` plus a `WorkerPoolScanner`, so note scanning
  * runs off the main thread.
  *
  * Disposes the pool if construction fails — the workers are live threads, each

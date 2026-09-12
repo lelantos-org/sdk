@@ -45,4 +45,5 @@ export {
     type ViemChainAdapterOpts,
     ViemChainReader,
     type ViemChainReaderOpts,
+    type ViemReadCtx,
 } from "./viem/index.js";

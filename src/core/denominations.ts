@@ -128,7 +128,7 @@ export interface LadderInputs {
     scale: bigint;
     /**
      * ERC-20 decimals, when the adapter could resolve them. Absent narrows
-     * nothing — see {@link ASSET_WINDOW_DECADES}.
+     * nothing — see {@link universalLadder}, which places the window.
      */
     decimals?: number | undefined;
 }

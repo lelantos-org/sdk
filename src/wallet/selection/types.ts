@@ -60,7 +60,8 @@ export interface SelectOpts {
      * An integer picker rather than a float, because the tiebreak's whole job
      * is to be uniform — scaling a float over `n` buckets makes them unequal
      * unless `n` is a power of two, and the fingerprint this defends against is
-     * exactly a skew in which note gets picked. Defaults to {@link randomBelow}.
+     * exactly a skew in which note gets picked. Defaults to `randomBelow`, from
+     * `@lelantos-org/sdk/core`.
      */
     pick?: ((n: number) => number) | undefined;
 }
@@ -104,7 +105,7 @@ export interface WithheldValue {
      *
      * The odd one out: the other three need time, this one needs a
      * consolidation. `partitionSpendable` cannot see it — it depends on
-     * `maxInputs` — so it stays `0n` until {@link spendableMax} fills it in.
+     * `maxInputs` — so it stays `0n` until `Wallet.spendableMax` fills it in.
      */
     slots: bigint;
 }

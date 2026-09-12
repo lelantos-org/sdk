@@ -32,7 +32,7 @@ const context = memoAsync<CryptoContext>(async () => {
  * instantiated once however many code paths race for it. Nothing is built at
  * import time: a bundle that never calls this never pays for it.
  *
- * A failed build is not cached — see {@link memoAsync}. A caller that races
+ * A failed build is not cached — see `memoAsync` in `core/async.ts`. A caller that races
  * ahead of `configureJubjubWasm`, or one transient import failure, would
  * otherwise brick the wallet for the lifetime of the process.
  */

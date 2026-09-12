@@ -26,7 +26,7 @@
 //   client.register(shieldedNetwork(chainId), shieldedExact(wallet));
 //   client.register(`eip155:${chainId}`,      unshieldedExact(wallet));
 
-export { type Budget, BudgetLedger } from "./budget.js";
+export { type Budget, BudgetLedger, type BudgetReservation } from "./budget.js";
 export { deriveEphemeralKey } from "./ephemeral.js";
 export { type PayingFetch, type PaymentRecord, type X402Options, x402 } from "./fetch.js";
 export type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";

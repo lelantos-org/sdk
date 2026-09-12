@@ -25,6 +25,9 @@ export {
 } from "./jubjub-wasm/index.js";
 export { type MerkleProof, MerkleTree } from "./merkle.js";
 export { buildNullifier, buildNullifierFromNsk } from "./nullifier.js";
+// `ChainAdapter.isKnownRoot` and `TreeVerifyOpts.isKnownRoot` are both typed
+// as this, so it has to be nameable.
+export type { IsKnownRoot } from "./path.js";
 export type { Field, PoseidonBackend, PoseidonWasmLoader } from "./poseidon.js";
 export { configurePoseidonWasm, Poseidon } from "./poseidon.js";
 export { buildRho } from "./rho.js";

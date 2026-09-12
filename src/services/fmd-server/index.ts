@@ -10,6 +10,7 @@ export {
     type CommitmentChunkOut,
     type CreateSubscriptionInput,
     type FmdHead,
+    type FmdMatchesPage,
     type FmdMatchOut,
     type FmdNoteOut,
     type FmdTreeState,

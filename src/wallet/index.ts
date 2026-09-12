@@ -9,6 +9,9 @@ export {
     supportsDeposit,
     supportsNativeDeposit,
 } from "./capability.js";
+// Chunk paging is how both the tree and the nullifier set catch up, and both
+// summaries report a `PagingStop`. `MAX_CHUNKS` is the default bound.
+export { MAX_CHUNKS, maxChunksFor, type PagingOpts, type PagingStop } from "./chunk-feed.js";
 export { type FeeOption, type FeeQuoteResult, type QuoteFeeArgs, quoteFee } from "./fee-quote.js";
 // The wallet: the orchestration layer most callers use directly.
 //
@@ -54,7 +57,7 @@ export {
     requireTokenMeta,
     withdrawNetFor,
 } from "./assets/index.js";
-export type { SyncStrategy, WalletConfig } from "./config.js";
+export type { ResolvedWalletConfig, SyncStrategy, WalletConfig } from "./config.js";
 export {
     type ConnectChainOptions,
     type ConnectExtraOptions,
@@ -62,7 +65,13 @@ export {
     type ConnectOptions,
     connect,
 } from "./connect/index.js";
+// `ConsolidateHost`, `SpendContext`, `SyncContext` and `RedenominateHost` are
+// the capability interfaces the wallet satisfies for its own operations.
+// `Wallet` is exported with methods typed against them, so a caller cannot
+// name those signatures without them.
+export type { ConsolidateHost } from "./consolidate.js";
 export { DEFAULT_ASSET } from "./constants.js";
+export type { SpendContext } from "./context.js";
 export {
     type AwaitCommitmentsOpts,
     type AwaitCommitmentsResult,
@@ -93,6 +102,7 @@ export {
     type NullifierSyncOpts,
     type NullifierSyncSummary,
 } from "./nullifier-store.js";
+export type { RedenominateHost } from "./redenominate.js";
 export {
     type CoinSelector,
     type ConsolidateFirst,
@@ -104,7 +114,7 @@ export {
     type SpendableMax,
     type WithheldValue,
 } from "./selection/index.js";
-export { HttpRelayerSubmitter, type Submitter } from "./submitter.js";
+export { type EstimateKind, HttpRelayerSubmitter, type Submitter } from "./submitter.js";
 export { sizeBNote } from "./swap.js";
 export {
     type NoteSink,
@@ -112,14 +122,21 @@ export {
     type SyncOpts,
     type SyncProgress,
     type SyncResult,
+    type SyncStop,
     syncWallet,
 } from "./sync.js";
+// `SyncContext.nullifiers` is a `NullifierMemo`, so the context cannot be
+// assembled without it.
+export { NullifierMemo, type SyncContext } from "./sync-ops.js";
 export {
     type MerkleNode,
     type RootCheck,
     type TreePersistence,
     TreeStore,
     type TreeStoreState,
+    type TreeSyncOpts,
+    type TreeSyncSummary,
+    type TreeVerifyOpts,
 } from "./tree-store.js";
 export { Wallet } from "./wallet.js";
 export {

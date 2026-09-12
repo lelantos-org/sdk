@@ -12,7 +12,9 @@ import type { DepositRequest } from "./deposit-request.js";
 /**
  * Spend op the relayer routes on-chain; maps 1:1 to the MASP entry point.
  *
- * @internal
+ * Not `@internal` like the payload types below it: `RelayerClient.estimateSpend`
+ * takes one, and `QuoteFeeArgs.kind` is an `EstimateKind` widened from it, so a
+ * caller cannot type either call without naming it.
  */
 export type SpendKind = "transfer" | "withdraw" | "withdrawNative";
 

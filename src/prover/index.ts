@@ -12,6 +12,9 @@
 // Re-exporting it would drag rayon worker glue into every consumer's bundle
 // even with `useWasmProver: false`.
 
+// `ProverWasmLoader` is a `WasmLoaderOverride<ProverModule>`; overriding the
+// loader means naming both halves.
+export type { WasmLoaderOverride, WasmModuleBase } from "../wasm/loader.js";
 export type { WorkerFactory, WorkerLike } from "../worker/types.js";
 export {
     ARTIFACT_CACHE_NAME,
@@ -39,6 +42,7 @@ export type { Groth16Proof, ProveResult, Prover, ProverPaths } from "./types.js"
 export {
     configureProverThreads,
     configureProverWasm,
+    type ProverModule,
     type ProverWasmLoader,
 } from "./wasm-loader.js";
 export {

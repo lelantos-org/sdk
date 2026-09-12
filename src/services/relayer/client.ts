@@ -75,7 +75,7 @@ export class RelayerClient {
      *
      * The quote is advisory: it is not signed, and the relayer re-derives the
      * requirement when the spend arrives. Pay at least
-     * {@link FeeQuote.circuitAmount}; the relayer's `graceBps` is what absorbs
+     * `FeeQuote.circuitAmount`; the relayer's `graceBps` is what absorbs
      * the drift in between.
      */
     async estimateSpend(chainId: bigint | number, kind: SpendKind): Promise<EstimateResponse> {

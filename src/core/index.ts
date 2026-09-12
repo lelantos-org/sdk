@@ -49,6 +49,9 @@ export {
     resolveLadder,
     universalLadder,
 } from "./denominations.js";
+// EIP-712 shapes. `EthSigner.signTypedData` takes them, so a caller writing
+// their own signer has to be able to name them.
+export type { TypedDataDomain, TypedDataParameter } from "./eip712.js";
 export {
     type AnyWalletError,
     attachContext,
@@ -110,11 +113,17 @@ export {
     hexToBigint,
     hexToBytes,
 } from "./hex.js";
-export { createHttpClient, type HttpClient, type HttpClientOptions } from "./http.js";
+export {
+    createHttpClient,
+    type HttpClient,
+    type HttpClientOptions,
+    PRIVACY_REQUEST_DEFAULTS,
+} from "./http.js";
 export {
     createJsonClient,
     type JsonClient,
     type JsonClientOptions,
+    type JsonRequestOptions,
     type QueryParams,
 } from "./json-client.js";
 export { decodeStoredNote, type NoteRecord, type StoredNote } from "./note-record.js";

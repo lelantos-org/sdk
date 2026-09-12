@@ -26,6 +26,8 @@ export {
     buildFullViewingKey,
     buildSpendingKey,
     buildViewingKey,
+    type DerivedWalletKeys,
+    type DeriveFromMnemonicOpts,
     deriveKeysFromMnemonic,
     deriveKeysFromNsk,
     detectionKeyFor,

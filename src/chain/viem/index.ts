@@ -28,6 +28,9 @@ import { ViemChainReader, type ViemChainReaderOpts } from "./reader.js";
 import * as token from "./token.js";
 
 export { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
+// `ViemChainReader.readCtx` is protected, not private: a subclass reaching for
+// it has to be able to name its type.
+export type { ViemReadCtx } from "./ctx.js";
 export { ViemChainReader, type ViemChainReaderOpts } from "./reader.js";
 
 export interface ViemChainAdapterOpts extends ViemChainReaderOpts {
