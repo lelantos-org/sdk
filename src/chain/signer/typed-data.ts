@@ -7,25 +7,31 @@
 import type { TypedDataDomain } from "viem";
 import { bigintToHex } from "../../core/hex.js";
 
+/** `EIP712Domain` fields in the order EIP-712 declares them, which fixes the separator's encoding. */
+const DOMAIN_FIELDS = [
+    ["name", "string"],
+    ["version", "string"],
+    ["chainId", "uint256"],
+    ["verifyingContract", "address"],
+    ["salt", "bytes32"],
+] as const;
+
+/** The `EIP712Domain` type entries for the fields `domain` sets. */
 export function domainTypes(domain: TypedDataDomain) {
-    const out: { name: string; type: string }[] = [];
-    if (domain.name !== undefined) out.push({ name: "name", type: "string" });
-    if (domain.version !== undefined) out.push({ name: "version", type: "string" });
-    if (domain.chainId !== undefined) out.push({ name: "chainId", type: "uint256" });
-    if (domain.verifyingContract !== undefined) {
-        out.push({ name: "verifyingContract", type: "address" });
-    }
-    if (domain.salt !== undefined) out.push({ name: "salt", type: "bytes32" });
-    return out;
+    return DOMAIN_FIELDS.filter(([name]) => domain[name] !== undefined).map(([name, type]) => ({
+        name,
+        type,
+    }));
 }
 
+/** `domain` as JSON-safe values, in the order {@link domainTypes} declares them. */
 export function serialisableDomain(domain: TypedDataDomain): Record<string, unknown> {
     const out: Record<string, unknown> = {};
-    if (domain.name !== undefined) out.name = domain.name;
-    if (domain.version !== undefined) out.version = domain.version;
-    if (domain.chainId !== undefined) out.chainId = bigintToHex(BigInt(domain.chainId));
-    if (domain.verifyingContract !== undefined) out.verifyingContract = domain.verifyingContract;
-    if (domain.salt !== undefined) out.salt = domain.salt;
+    for (const [name] of DOMAIN_FIELDS) {
+        const value = domain[name];
+        if (value === undefined) continue;
+        out[name] = name === "chainId" ? bigintToHex(BigInt(value)) : value;
+    }
     return out;
 }
 

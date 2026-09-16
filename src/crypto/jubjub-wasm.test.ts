@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { WasmJubjub } from "./jubjub-wasm/index.js";
+import { Jubjub } from "./jubjub-wasm/index.js";
 
-// Fixtures captured from circomlibjs `buildPedersenHash` against
-// asset_gen.circom layout: TAG_ASSET=7 || asset_id_le(8B), then
-// `babyJub.unpackPoint(...)`. Locks the in-wasm Pedersen port to the
-// circuit's byte stream.
+// Fixtures captured from circomlibjs `buildPedersenHash` with the asset_gen.circom layout:
+// TAG_ASSET=7 || asset_id_le(8B), then `babyJub.unpackPoint(...)`. Pins the wasm Pedersen port to
+// the circuit's byte stream.
 const ASSET_GEN_VECTORS: ReadonlyArray<{ assetId: bigint; x: bigint; y: bigint }> = [
     {
         assetId: 0n,
@@ -33,9 +32,9 @@ const ASSET_GEN_VECTORS: ReadonlyArray<{ assetId: bigint; x: bigint; y: bigint }
     },
 ];
 
-describe("WasmJubjub.hashToAssetGen", () => {
+describe("Jubjub.hashToAssetGen", () => {
     it("matches circomlibjs Pedersen output byte-for-byte", async () => {
-        const j = await WasmJubjub.build();
+        const j = await Jubjub.build();
         for (const v of ASSET_GEN_VECTORS) {
             const [x, y] = j.hashToAssetGen(v.assetId);
             expect(x, `x mismatch for asset_id=${v.assetId}`).toBe(v.x);
@@ -44,7 +43,7 @@ describe("WasmJubjub.hashToAssetGen", () => {
     });
 
     it("rejects asset_id >= 2^64", async () => {
-        const j = await WasmJubjub.build();
+        const j = await Jubjub.build();
         expect(() => j.hashToAssetGen(1n << 64n)).toThrow(/< 2\^64/);
     });
 });

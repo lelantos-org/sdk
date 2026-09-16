@@ -1,19 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { assetId, circuitAmount } from "../../core/brand.js";
-import type { StoredNote } from "../note-store.js";
+import { storedNote } from "../../test-utils/wallet.js";
 import { DenominationCoinSelector, SfrtCoinSelector } from "./index.js";
 
 const ASSET = assetId(1n);
-
-function note(id: string, value: bigint): StoredNote {
-    return { id, asset: ASSET.toString(), value: value.toString(), spent: false } as StoredNote;
-}
 
 const sel = new DenominationCoinSelector();
 
 describe("DenominationCoinSelector", () => {
     it("pays a denomination exactly, leaving no change to re-split", () => {
-        const notes = [note("a", 1_000_000_000n), note("b", 5_000_000_000n)];
+        const notes = [storedNote("a", 1_000_000_000n), storedNote("b", 5_000_000_000n)];
         const r = sel.select(notes, ASSET, circuitAmount(1_000_000_000n));
         expect(r.plan).toBe("direct");
         if (r.plan !== "direct") throw new Error("expected direct");
@@ -22,7 +18,11 @@ describe("DenominationCoinSelector", () => {
     });
 
     it("combines notes to hit the target exactly", () => {
-        const notes = [note("a", 500_000_000n), note("b", 500_000_000n), note("c", 5_000_000_000n)];
+        const notes = [
+            storedNote("a", 500_000_000n),
+            storedNote("b", 500_000_000n),
+            storedNote("c", 5_000_000_000n),
+        ];
         const r = sel.select(notes, ASSET, circuitAmount(1_000_000_000n));
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.sum).toBe(1_000_000_000n);
@@ -31,9 +31,9 @@ describe("DenominationCoinSelector", () => {
 
     it("prefers the smallest exact cover", () => {
         const notes = [
-            note("one", 1_000_000_000n),
-            note("half1", 500_000_000n),
-            note("half2", 500_000_000n),
+            storedNote("one", 1_000_000_000n),
+            storedNote("half1", 500_000_000n),
+            storedNote("half2", 500_000_000n),
         ];
         const r = sel.select(notes, ASSET, circuitAmount(1_000_000_000n));
         if (r.plan !== "direct") throw new Error("expected direct");
@@ -41,9 +41,9 @@ describe("DenominationCoinSelector", () => {
     });
 
     it("randomises among equally-sized exact covers", () => {
-        // Determinism here would make selection predictable from a public note
-        // set, which is the property SFRT's tiebreak exists to deny.
-        const notes = [note("a", 1_000_000_000n), note("b", 1_000_000_000n)];
+        // Determinism would make selection predictable from a public note set,
+        // which SFRT's tiebreak is designed to prevent.
+        const notes = [storedNote("a", 1_000_000_000n), storedNote("b", 1_000_000_000n)];
         const first = sel.select(notes, ASSET, circuitAmount(1_000_000_000n), { pick: () => 0 });
         const second = sel.select(notes, ASSET, circuitAmount(1_000_000_000n), { pick: () => 1 });
         if (first.plan !== "direct" || second.plan !== "direct") throw new Error("direct");
@@ -51,7 +51,7 @@ describe("DenominationCoinSelector", () => {
     });
 
     it("falls through to SFRT when no exact cover exists", () => {
-        const notes = [note("a", 5_000_000_000n)];
+        const notes = [storedNote("a", 5_000_000_000n)];
         const target = circuitAmount(1_000_000_000n);
         const mine = sel.select(notes, ASSET, target);
         const sfrt = new SfrtCoinSelector().select(notes, ASSET, target);
@@ -59,44 +59,46 @@ describe("DenominationCoinSelector", () => {
     });
 
     it("honours dust, cooldown and `only` exactly as SFRT does", () => {
-        // The exact-cover pass must not reach a note the spendability rules
-        // excluded, or it would spend something SFRT would have refused.
-        const notes = [note("a", 1_000_000_000n), note("b", 1_000_000_000n)];
+        // The exact-cover pass must not select a note the spendability rules
+        // exclude.
+        const notes = [storedNote("a", 1_000_000_000n), storedNote("b", 1_000_000_000n)];
         const r = sel.select(notes, ASSET, circuitAmount(1_000_000_000n), { only: ["b"] });
         if (r.plan !== "direct") throw new Error("expected direct");
         expect(r.notes.map((n) => n.id)).toEqual(["b"]);
     });
 
     it("ignores notes of another asset", () => {
-        // Falls through to SFRT, which reports the same failure it always has:
-        // the exact-cover pass must not manufacture a cover from notes the
-        // spendability rules already rejected.
-        const other = { ...note("x", 1_000_000_000n), asset: "9" } as StoredNote;
+        // Falls through to SFRT's failure; the exact-cover pass must not build a
+        // cover from notes the spendability rules reject.
+        const other = storedNote("x", 1_000_000_000n, { asset: 9n });
         expect(() => sel.select([other], ASSET, circuitAmount(1_000_000_000n))).toThrow(
-            /no spendable notes/,
+            expect.objectContaining({ code: "INSUFFICIENT_BALANCE", available: 0n }),
         );
     });
 });
 
 describe("DenominationCoinSelector search bounds", () => {
     it("stays fast on a large note set with no exact cover", () => {
-        // The expensive case is the one that finds nothing: without a node
-        // budget this walks C(n, 4) and never increments the found counter.
-        const many = Array.from({ length: 400 }, (_, i) => note(`n${i}`, 1_000_000n + BigInt(i)));
+        // Without a node budget this walks C(n, 4) and never increments the
+        // found counter.
+        const many = Array.from({ length: 400 }, (_, i) =>
+            storedNote(`n${i}`, 1_000_000n + BigInt(i)),
+        );
         const target = circuitAmount(7n); // unreachable: below every note
         const started = performance.now();
-        // `pick` pinned on both sides: SFRT randomises its tiebreak, so two
-        // independent calls are not comparable without it.
+        // `pick` is pinned on both calls because SFRT randomises its tiebreak.
         const r = sel.select(many, ASSET, target, { pick: () => 0 });
         expect(performance.now() - started).toBeLessThan(500);
-        // Falls through to SFRT, which answers as it always would.
+        // Falls through to SFRT.
         expect(r).toEqual(new SfrtCoinSelector().select(many, ASSET, target, { pick: () => 0 }));
     });
 
     it("still finds an exact cover hiding in a large set", () => {
-        const many = Array.from({ length: 200 }, (_, i) => note(`n${i}`, 1_000_000n + BigInt(i)));
+        const many = Array.from({ length: 200 }, (_, i) =>
+            storedNote(`n${i}`, 1_000_000n + BigInt(i)),
+        );
         const r = sel.select(
-            [...many, note("exact", 5_000_000_000n)],
+            [...many, storedNote("exact", 5_000_000_000n)],
             ASSET,
             circuitAmount(5_000_000_000n),
         );

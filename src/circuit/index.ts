@@ -1,22 +1,8 @@
 // Tier 3 — the circuit contract.
 //
 // Witness construction and the public-input compression the on-chain
-// verifier mirrors. Nothing here proves anything; `bundle/` does that.
+// verifier mirrors. Proving happens in `bundle/`.
 
-export { coeffs, type FlattenInput, fiatShamirZ, flatten, hornerEval } from "./compression.js";
-export {
-    type BuildOpts,
-    type CircomCoeffInputs,
-    type CircomPublicInputs,
-    type CircomTransactInput,
-    circuitSignals,
-    type TransactBinding,
-    type TransactWitnessBundle,
-    toCircomInput,
-} from "./input.js";
-export {
-    type DummyBlinders,
-    dummyInputAt,
-    type SpendableCachedNote,
-    toSpentNoteFromPath,
-} from "./spent-note.js";
+export { fiatShamirZ, flatten } from "./compression.js";
+export { circuitSignals, type TransactWitnessBundle, toCircomInput } from "./input.js";
+export { dummyInputAt, type SpendableCachedNote, toSpentNoteFromPath } from "./spent-note.js";

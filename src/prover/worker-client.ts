@@ -1,28 +1,27 @@
 // Client-side `Prover` that posts work to a Web Worker running the
-// `@lelantos-org/sdk/prover-worker` entrypoint.
+// `@lelantos-org/sdk/workers/prover` entrypoint.
 //
-// Correlation, timeouts and crash handling come from `src/worker/`, shared
+// Correlation, timeouts and crash handling come from `src/runtime/rpc/`, shared
 // with the scanner pool.
 
-import { createWorkerRpc, type WorkerRpc } from "../worker/client.js";
-import type { WorkerFactory, WorkerLike } from "../worker/types.js";
-import { resolveArtifacts } from "./artifacts.js";
+import { createWorkerRpc, type WorkerRpc } from "../runtime/rpc/client.js";
+import type { WorkerFactory, WorkerLike } from "../runtime/rpc/types.js";
+import { resolveArtifacts } from "./artifact-paths.js";
 import type { ProveResult, Prover, ProverArtifacts, ProverPaths } from "./types.js";
 import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
 
 /**
- * Proving is minutes-long by design and the artifact fetch is ~29 MB at
- * `DEFAULT_SHAPE`, so these are generous. Neither is retried: a retried
- * three-minute prove is a six-minute frozen UI.
+ * Proving can take minutes and the artifact fetch is ~52 MB at `DEFAULT_SHAPE`, hence the long
+ * deadlines. Neither call is retried, since a retry doubles an already long wait.
  */
 const PRELOAD_TIMEOUT_MS = 180_000;
 const PROVE_TIMEOUT_MS = 180_000;
 
 export interface WorkerProverOpts extends WorkerSetup {
-    /** Worker running `@lelantos-org/sdk/prover-worker`. */
+    /** Worker running `@lelantos-org/sdk/workers/prover`. */
     worker: WorkerLike;
-    /** Artifact URLs. Sent to the worker on first `prove()` and cached there. */
-    paths: ProverPaths | ProverArtifacts;
+    /** Circuit artifacts. Sent to the worker on first `prove()` and cached there. */
+    artifacts: ProverArtifacts;
 }
 
 export class WorkerProver implements Prover {
@@ -31,9 +30,9 @@ export class WorkerProver implements Prover {
     private readonly setup: WorkerSetup;
 
     constructor(opts: WorkerProverOpts) {
-        this.paths = resolveArtifacts(opts.paths);
+        this.paths = resolveArtifacts(opts.artifacts);
         // The worker has its own module realm and cannot read the caller's
-        // module-level configuration; these ride along on every request.
+        // module-level configuration, so these are sent with every request.
         this.setup = { threads: opts.threads, cacheArtifacts: opts.cacheArtifacts };
         this.rpc = createWorkerRpc<ProverMethods>(opts.worker, {
             name: "prover",
@@ -47,8 +46,8 @@ export class WorkerProver implements Prover {
 
     /**
      * Warm the worker (build `WasmProver`, fetch zkey + wasm, init rayon).
-     * Call ahead of the first deposit/transfer to avoid 5–10s of setup
-     * latency mid-transaction.
+     * Call before the first deposit/transfer to avoid 5–10s of setup latency
+     * mid-transaction.
      */
     preload(): Promise<void> {
         return this.rpc.call("preload", { paths: this.paths, ...this.setup });
@@ -63,7 +62,7 @@ export class WorkerProver implements Prover {
 export interface BrowserWorkerProverOpts extends WorkerSetup {
     /** Spawns the worker. See {@link WorkerFactory}. */
     worker: WorkerFactory;
-    paths: ProverPaths | ProverArtifacts;
+    artifacts: ProverArtifacts;
 }
 
 /** Spawns the Worker and returns a `WorkerProver`. */

@@ -14,13 +14,9 @@
 // and throws when it is unavailable rather than degrading. The allowlist below
 // is for the genuine non-security uses.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..");
-const SRC = join(ROOT, "src");
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { ROOT, SRC, walk } from "./lib/package.mjs";
 
 const PATTERNS = [
     { re: /\bMath\s*\.\s*random\b/, what: "Math.random" },
@@ -41,21 +37,6 @@ const ALLOW = new Map([
 /** @type {Array<{file: string, line: number, what: string, text: string}>} */
 const hits = [];
 
-function walk(dir) {
-    for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-        const st = statSync(full);
-        if (st.isDirectory()) {
-            walk(full);
-        } else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) {
-            // Tests included on purpose: a test that seeds a shuffle with
-            // Math.random is asserting the wrong thing, and a test helper is
-            // one import away from shipping.
-            scan(full);
-        }
-    }
-}
-
 function scan(file) {
     const rel = relative(ROOT, file);
     if (ALLOW.has(rel)) return;
@@ -71,7 +52,9 @@ function scan(file) {
     }
 }
 
-walk(SRC);
+// Tests included on purpose: a test that seeds a shuffle with Math.random is asserting the wrong
+// thing, and a test helper is one import away from shipping.
+for (const file of walk(SRC)) if (file.endsWith(".ts") && !file.endsWith(".d.ts")) scan(file);
 
 if (hits.length > 0) {
     console.error(`check-entropy: ${hits.length} non-cryptographic random source(s) under src/:`);

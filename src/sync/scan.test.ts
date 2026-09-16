@@ -11,9 +11,8 @@ import { clueBitsToPrefix, encodeNotePayload, type NotePayload } from "../notes/
 import { encryptNote } from "../notes/encrypt.js";
 import { emptyScanStats, type ScanInput, scanNotes } from "./scan.js";
 
-// First coverage of the scan loop. The commitment check is the reason this
-// file exists: everything else here was already correct, but a hit's `cm` came
-// from the feed and nothing reproduced it locally.
+// Scan loop coverage, focused on the local commitment check: a hit's `cm` comes
+// from the feed and must be reproduced from the plaintext.
 
 describe("scanNotes", () => {
     let P: Poseidon;
@@ -70,10 +69,10 @@ describe("scanNotes", () => {
     });
 
     it("rejects a note committed under a different pk", () => {
-        // The grief case: anyone who knows the address can encrypt a payload to
-        // it while committing on chain under someone else's `pk`. The wallet
-        // decrypts it, so without the check it lands in the balance and fails
-        // only at spend time, after a full prove, with nothing to explain it.
+        // Griefing: anyone who knows the address can encrypt a payload to it
+        // while committing on chain under another `pk`. Without the check it
+        // would enter the balance and fail only at spend time, after a full
+        // prove.
         const note = payload(500n);
         const stats = emptyScanStats();
         const hits = scanNotes(J, P, me.ivk, [input(note, { pk: eve.pk })], stats);

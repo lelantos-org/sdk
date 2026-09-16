@@ -1,41 +1,45 @@
 // Enforces the dependency ladder and barrel discipline in src/.
 //
-// Without this the structure re-rots on the first convenient import. The
-// eight layering inversions this refactor removed were each individually
-// reasonable at the time; nothing was watching the whole.
+// Without this the structure re-rots on the first convenient import: each layering inversion is
+// individually reasonable at the time, and nothing else watches the whole.
 //
-// Three rules:
+// Rules:
 //   1. No module may import from a HIGHER tier.
-//   2. No `export *` in any barrel — package.json#exports has no wildcard,
-//      so a barrel forwarding blindly is what makes @internal symbols
-//      public API.
-//   3. No leaf module below tier 3 may import a domain BARREL. Worker and
-//      wasm bundles pull the whole barrel's graph; leaf imports keep them
-//      small. (Root index.ts and each dir's own index.ts are exempt.)
-//   5. `wallet/watch/` may not import the spend path, so a viewer does not
-//      download the prover.
+//   2. No `export *` in any barrel — package.json#exports has no wildcard, so a barrel forwarding
+//      blindly is what makes @internal symbols public API.
+//   3. No leaf module below tier 3 may import another domain's BARREL. Worker and wasm bundles pull
+//      the whole barrel's graph; leaf imports keep them small.
+//   4. Every directory under `src/` carries an explicit tier.
+//   5. `wallet/watch/` may not import the spend path, so a viewer does not download the prover.
+//   6. `errors/` imports only `core/` (and itself), so every layer — `core/` included — can throw a
+//      typed error without an upward or domain dependency.
+//   7. `wallet/ops/*` (one module per operation) never imports another operation, so an operation
+//      composes others only through `WalletContext` hooks bound by the wallet shell. The one
+//      exception is `swap.ts` → `swap-escrow.ts`, its own second leg. `wallet/tx/` (the pipeline
+//      operations share) and `wallet/context.ts` import no operation at all, nor the shell.
+//   8. `entry/*` (the published subpaths) holds only `export { … } from` statements naming modules
+//      outside `entry/`, and nothing outside `entry/` imports an entry. The published surface is
+//      then exactly the list in those files, each name forwarded once from where it is declared.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve as resolvePath, dirname } from "node:path";
-
-const SRC = new URL("../src/", import.meta.url).pathname;
+import { dirname, join, relative, resolve } from "node:path";
+import { SRC, shippedSources, ts } from "./lib/package.mjs";
 
 /**
  * First path segment -> tier.
  *
- * Every directory under `src/` must appear here. The tier-7 default exists for
- * new files inside a listed directory, not for whole modules: an unlisted
- * module is checked against nothing and can silently acquire any dependency it
- * likes, which is the failure this script exists to prevent. `check` below
- * fails on an unlisted directory rather than defaulting it.
+ * Every directory under `src/` must appear here (rule 4). An unlisted module would be checked
+ * against nothing and could silently acquire any dependency it likes, which is the failure this
+ * script exists to prevent.
  */
 const TIERS = {
     core: 0,
+    // Split by domain; imports only `core/` (rule 6).
+    errors: 0,
     log: 0,
-    worker: 0,
-    wasm: 0,
-    // Ambient `.d.ts` declarations for untyped dependencies. Tier 0: they
-    // declare types and import nothing, so anything may reference them.
+    // Environment probes, worker RPC transport (`runtime/rpc/`) and wasm loaders (`runtime/wasm/`).
+    runtime: 0,
+    // Ambient `.d.ts` declarations for untyped dependencies: they import nothing.
     "types-ambient": 0,
     crypto: 1,
     fmd: 2,
@@ -50,128 +54,146 @@ const TIERS = {
     bundle: 5,
     sync: 5,
     wallet: 6,
-    presets: 7,
     x402: 7,
+    // The published subpaths (`.`, `./advanced`, `./protocol`, …), rule 8.
+    entry: 7,
+    // Shared test fixtures; never shipped, so never walked.
+    "test-utils": 7,
 };
 
-/** `wasm/loader.ts` is tier 0, but the rayon glue may reach for logging. */
-const TIER_OF_FILE = (rel) => {
-    const seg = rel.split("/")[0];
-    if (rel === "index.ts") return 7;
+/** Tier of a `src/`-relative path: its first segment, plus the root-level files. */
+function tierOf(rel) {
     // Aggregates the crypto + prover wasm loaders; sits just under wallet.
     if (rel === "configure-wasm.ts") return 5;
     if (rel === "version.ts") return 0;
-    return TIERS[seg] ?? 7;
-};
-
-function walk(dir, out = []) {
-    for (const name of readdirSync(dir)) {
-        const p = join(dir, name);
-        if (statSync(p).isDirectory()) walk(p, out);
-        else if (p.endsWith(".ts") && !p.endsWith(".d.ts")) out.push(p);
-    }
-    return out;
+    return TIERS[rel.split("/")[0]];
 }
 
-const IMPORT_RE = /(?:^|\n)\s*(?:import|export)[\s\S]{0,400}?from\s+"([^"]+)"/g;
-const DYNAMIC_RE = /import\(\s*(?:\/\*[^*]*\*\/\s*)?"([^"]+)"\s*\)/g;
-const EXPORT_STAR_RE = /^\s*export\s+\*\s+from\s+"/m;
+const OPS = "wallet/ops/";
+const OP_EXCEPTIONS = new Set(["wallet/ops/swap.ts -> wallet/ops/swap-escrow.ts"]);
+/** Rule 7: what the pipeline and the context sit below. */
+const ABOVE_TX = [OPS, "wallet/create.ts", "wallet/connect/"];
 
 /**
- * Modules `wallet/watch/` must not import.
+ * Modules `wallet/watch/` must not import (rule 5), besides all of `prover/`.
  *
- * A watch wallet cannot sign, so none is reachable at runtime. `wallet.ts` is
- * listed because it statically reaches the per-tx modules and the prover.
- *
- * Direct imports only; `bundle-budget.mjs` measures the transitive graph.
- *
- * An entry ending in `/` forbids the whole directory, so splitting a listed
- * module into one does not silently unforbid its parts.
+ * A watch wallet cannot sign, so none is reachable at runtime. `wallet/create.ts` is listed because
+ * it statically reaches the per-tx modules and the prover. Direct imports only; `bundle-budget.mjs`
+ * measures the transitive graph. An entry ending in `/` forbids the whole directory, so splitting a
+ * listed module into one does not silently unforbid its parts.
  */
 const WATCH_FORBIDDEN = [
-    "wallet/wallet.ts",
-    "wallet/submitter.ts",
+    "prover/",
+    "wallet/create.ts",
+    "services/relayer/submitter.ts",
     "wallet/selection/",
-    "wallet/tree-store.ts",
-    "wallet/deposit.ts",
-    "wallet/transfer.ts",
-    "wallet/withdraw.ts",
-    "wallet/swap.ts",
-    "wallet/withdraw-preview.ts",
-    "wallet/fee-quote.ts",
+    "sync/tree-store.ts",
+    // Every operation and the shared spend steps.
+    "wallet/ops/",
+    "wallet/tx/",
     "wallet/connect/index.ts",
     "wallet/defaults/prover.ts",
 ];
 
+const matches = (list, rel) => list.some((f) => (f.endsWith("/") ? rel.startsWith(f) : f === rel));
+
 const problems = [];
 
-// Rule 4: every directory under `src/` carries an explicit tier.
-//
-// Without this the tier-7 default silently adopts a whole new module — as it
-// had for `x402`, 2.9k lines checked against nothing. Tier 7 happened to be
-// right there, which is the point: nothing would have said otherwise.
 for (const name of readdirSync(SRC)) {
-    if (!statSync(join(SRC, name)).isDirectory()) continue;
-    if (!(name in TIERS)) {
+    if (statSync(join(SRC, name)).isDirectory() && !(name in TIERS)) {
         problems.push(
             `src/${name}/ has no entry in TIERS — add one (see the table in this script)`,
         );
     }
 }
 
-for (const abs of walk(SRC)) {
-    const rel = relative(SRC, abs);
-    if (rel.endsWith(".test.ts") || rel.endsWith(".bench.ts") || rel.includes("test-utils")) {
-        continue;
-    }
-    const src = readFileSync(abs, "utf8");
-    const tier = TIER_OF_FILE(rel);
+for (const { abs, rel } of shippedSources()) {
+    const text = readFileSync(abs, "utf8");
+    const tier = tierOf(rel) ?? 7;
     const isBarrel = rel.endsWith("index.ts");
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
 
-    if (isBarrel && EXPORT_STAR_RE.test(src)) {
+    if (isBarrel && sf.statements.some((st) => ts.isExportDeclaration(st) && !st.exportClause)) {
         problems.push(`${rel}: uses \`export *\` — forward names explicitly`);
     }
+    if (rel.startsWith("entry/")) checkEntry(rel, sf, text);
 
-    const specs = new Set();
-    for (const m of src.matchAll(IMPORT_RE)) specs.add(m[1]);
-    for (const m of src.matchAll(DYNAMIC_RE)) specs.add(m[1]);
-
-    for (const spec of specs) {
+    for (const { fileName: spec } of ts.preProcessFile(text, true, true).importedFiles) {
         if (!spec.startsWith(".")) continue;
-        const targetAbs = resolvePath(dirname(abs), spec).replace(/\.js$/, ".ts");
-        const targetRel = relative(SRC, targetAbs);
-        if (targetRel.startsWith("..")) continue;
+        const target = relative(SRC, resolve(dirname(abs), spec)).replace(/\.js$/, ".ts");
+        if (target.startsWith("..")) continue;
+        const targetTier = tierOf(target) ?? 7;
 
-        const targetTier = TIER_OF_FILE(targetRel);
         if (targetTier > tier) {
             problems.push(
-                `${rel} (tier ${tier}) imports ${targetRel} (tier ${targetTier}) — upward dependency`,
+                `${rel} (tier ${tier}) imports ${target} (tier ${targetTier}) — upward dependency`,
             );
         }
-
-        // Rule 5: the watch-only entry point must not reach the spend path.
+        if (rel.startsWith("errors/") && !/^(errors|core)\//.test(target)) {
+            problems.push(`${rel} imports ${target} — \`errors/\` may import only \`core/\``);
+        }
         if (
-            rel.startsWith("wallet/watch/") &&
-            (WATCH_FORBIDDEN.some((f) => (f.endsWith("/") ? targetRel.startsWith(f) : f === targetRel)) ||
-                targetRel.startsWith("prover/"))
+            rel.startsWith(OPS) &&
+            target.startsWith(OPS) &&
+            !OP_EXCEPTIONS.has(`${rel} -> ${target}`)
         ) {
             problems.push(
-                `${rel} imports ${targetRel} — \`wallet/watch/\` must not reach the spend path ` +
+                `${rel} imports ${target} — an operation may not import another; compose ` +
+                    "through a `WalletContext` hook bound in `wallet/create.ts`",
+            );
+        }
+        if (
+            (rel.startsWith("wallet/tx/") || rel === "wallet/context.ts") &&
+            matches(ABOVE_TX, target)
+        ) {
+            problems.push(
+                `${rel} imports ${target} — \`wallet/tx/\` and \`wallet/context.ts\` sit below the operations`,
+            );
+        }
+        if (rel.startsWith("wallet/watch/") && matches(WATCH_FORBIDDEN, target)) {
+            problems.push(
+                `${rel} imports ${target} — \`wallet/watch/\` must not reach the spend path ` +
                     "(see WATCH_FORBIDDEN in this script)",
             );
         }
-
-        // Rule 3: keep worker/wasm graphs small below the protocol tier.
-        // Only cross-DOMAIN barrel imports count — reaching for a sibling
-        // barrel inside your own domain pulls nothing extra.
-        // `crypto/jubjub-wasm/index.ts` is one module's entry point, not a
-        // domain barrel — importing it pulls exactly that module.
-        const importsBarrel =
-            targetRel.endsWith("/index.ts") && targetRel.split("/").length === 2;
-        const crossDomain = targetRel.split("/")[0] !== rel.split("/")[0];
+        if (target.startsWith("entry/") && !rel.startsWith("entry/")) {
+            problems.push(
+                `${rel} imports ${target} — only package.json#exports may point at an entry`,
+            );
+        }
+        // Rule 3: only a cross-domain `<dir>/index.ts` counts. `crypto/jubjub-wasm/index.ts` is
+        // one module's entry point, not a domain barrel.
+        const importsBarrel = target.endsWith("/index.ts") && target.split("/").length === 2;
+        const crossDomain = target.split("/")[0] !== rel.split("/")[0];
         if (importsBarrel && crossDomain && !isBarrel && tier <= 2 && targetTier <= 2) {
             problems.push(
-                `${rel} imports the barrel ${targetRel} — use a leaf import to keep worker bundles small`,
+                `${rel} imports the barrel ${target} — use a leaf import to keep worker bundles small`,
+            );
+        }
+    }
+}
+
+/** Rule 8: an entry is a list of `export { … } from "<module outside entry/>"`. */
+function checkEntry(rel, sf, text) {
+    for (const st of sf.statements) {
+        const spec =
+            ts.isExportDeclaration(st) &&
+            st.exportClause &&
+            st.moduleSpecifier &&
+            ts.isStringLiteral(st.moduleSpecifier)
+                ? st.moduleSpecifier.text
+                : undefined;
+        if (!spec) {
+            const head = text.slice(st.getStart(sf)).split("\n")[0].slice(0, 60);
+            problems.push(
+                `${rel}: \`${head}\` — an entry holds only \`export { … } from\` statements`,
+            );
+            continue;
+        }
+        const target = relative(SRC, resolve(SRC, "entry", spec));
+        if (target.startsWith("entry/") || target.startsWith("..")) {
+            problems.push(
+                `${rel} forwards from ${target} — an entry forwards from src/ modules outside entry/`,
             );
         }
     }
@@ -183,4 +205,4 @@ if (problems.length > 0) {
     console.error(`\n${problems.length} problem(s). See scripts/check-layers.mjs for the rules.`);
     process.exit(1);
 }
-console.log("check-layers: OK — tier ladder holds, no `export *`");
+console.log("check-layers: OK — tier ladder holds, no `export *`, entries only forward");

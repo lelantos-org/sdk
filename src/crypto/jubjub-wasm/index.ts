@@ -2,6 +2,7 @@
 // Wire conventions: `sdk/wasm/jubjub/src/lib.rs`.
 
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../../core/bytes.js";
+import { InvalidArgumentError } from "../../errors/config.js";
 import { H_BASE, type Point } from "../jubjub.js";
 import type { Field } from "../poseidon.js";
 import { ensureInit, w } from "./loader.js";
@@ -10,24 +11,17 @@ import { bytesToPoint, pointToBytes } from "./point-codec.js";
 export { configureJubjubWasm, type JubjubWasmLoader } from "./loader.js";
 
 /** @internal */
-export class WasmJubjub {
+export class Jubjub {
     private constructor(
-        private readonly _base8: Point,
-        private readonly _order: bigint,
+        readonly base8: Point,
+        readonly order: bigint,
     ) {}
 
-    static async build(): Promise<WasmJubjub> {
+    static async build(): Promise<Jubjub> {
         await ensureInit();
         const base8 = bytesToPoint(w().base8());
         const order = fromLeBytes(w().sub_order_le());
-        return new WasmJubjub(base8, order);
-    }
-
-    get base8(): Point {
-        return this._base8;
-    }
-    get order(): bigint {
-        return this._order;
+        return new Jubjub(base8, order);
     }
 
     addPoint(a: Point, b: Point): Point {
@@ -38,7 +32,7 @@ export class WasmJubjub {
     mulPointEscalar(p: Point, scalar: Field): Point {
         const out = w().mul_point_escalar(
             pointToBytes(p),
-            toLeBytes(scalar % this._order, FIELD_BYTES),
+            toLeBytes(scalar % this.order, FIELD_BYTES),
         );
         return bytesToPoint(out);
     }
@@ -58,7 +52,9 @@ export class WasmJubjub {
 
     hashToAssetGen(assetId: Field): Point {
         if (assetId >= 1n << 64n) {
-            throw new Error("asset_id must be < 2^64 for HashToAssetGen parity");
+            throw new InvalidArgumentError("asset_id must be < 2^64 for HashToAssetGen parity", {
+                argument: "assetId",
+            });
         }
         const out = w().hash_to_asset_gen(toLeBytes(assetId, 8));
         return bytesToPoint(out);
@@ -73,7 +69,7 @@ export class WasmJubjub {
 
     tryDecryptNote(ivk: Field, epkPacked: Uint8Array, ciphertext: Uint8Array): Uint8Array | null {
         const out = w().try_decrypt_note(
-            toLeBytes(ivk % this._order, FIELD_BYTES),
+            toLeBytes(ivk % this.order, FIELD_BYTES),
             epkPacked,
             ciphertext,
         );

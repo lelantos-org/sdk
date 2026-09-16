@@ -25,8 +25,8 @@
 import type { ShieldedAddress } from "../core/brand.js";
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import { deriveDk, deriveIvk, deriveNk, derivePkFromIvk } from "../crypto/derive.js";
-import type { Jubjub, Point } from "../crypto/jubjub.js";
-import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
+import type { Point } from "../crypto/jubjub.js";
+import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { type Field, Poseidon } from "../crypto/poseidon.js";
 import {
     assertDetectionGamma,
@@ -34,7 +34,7 @@ import {
     type FmdDetectionKey,
     fmdClueKeyFromRoot,
     fmdExpandDetectionKey,
-} from "../fmd/fmd.js";
+} from "../fmd/keys.js";
 import { encodeAddress } from "./address.js";
 import { mnemonicToAccountKey } from "./hd.js";
 
@@ -141,7 +141,7 @@ export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddr
  * Releasing these releases the root detection secret permanently: `h_i` is
  * public, so any single `x_i` yields `dk = x_i - h_i`.
  *
- * `gamma` is capped at `FMD_SENDER_GAMMA`, not `GAMMA_MAX`: a longer key tests
+ * `gamma` is capped at `FMD_DEFAULT_GAMMA`, not `GAMMA_MAX`: a longer key tests
  * clue bits senders never set and discards the wallet's own notes.
  */
 export function detectionKeyFor(
@@ -169,7 +169,7 @@ export async function deriveKeysFromNsk(
     deps?: { P?: Poseidon | undefined; J?: Jubjub | undefined },
 ): Promise<DerivedWalletKeys> {
     const P = deps?.P ?? (await Poseidon.build());
-    const J = deps?.J ?? (await WasmJubjub.build());
+    const J = deps?.J ?? (await Jubjub.build());
     const keys = buildSpendingKey(P, J, nsk);
     return { keys, address: addressFromSpendingKey(J, keys) };
 }

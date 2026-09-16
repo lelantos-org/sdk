@@ -6,7 +6,6 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         include: ["src/**/*.bench.ts"],
-        exclude: ["node_modules", "dist", "wasm/**/pkg/**"],
         pool: "forks",
         // The `trace`-feature prover logs its per-phase split via `console.log`
         // from inside wasm. Vitest's interceptor drops those, which is the same

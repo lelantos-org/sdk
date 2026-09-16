@@ -1,16 +1,17 @@
 // `NETWORKS` asserts its address literals as `EvmAddress` rather than running
 // them through `evmAddress()`, so the table stays a pure declaration. These
-// tests are what make that assertion true.
+// tests verify that assertion.
 
 import { describe, expect, it } from "vitest";
 import { evmAddress } from "../core/brand.js";
-import { isWalletError } from "../core/errors.js";
+import { isWalletError } from "../errors/guard.js";
 import {
     type DeployedNetworkName,
     isNetworkDeployed,
     NETWORKS,
     type NetworkName,
     type NetworkPreset,
+    type PlaceholderNetworkPreset,
     resolveNetwork,
 } from "./networks.js";
 
@@ -18,8 +19,14 @@ const names = Object.keys(NETWORKS) as NetworkName[];
 
 describe("NETWORKS", () => {
     it.each(names)("%s declares well-formed addresses", (name) => {
-        const p: NetworkPreset = NETWORKS[name];
-        for (const addr of [p.maspAddress, p.relayerAddress, p.permit2Address]) {
+        const p: NetworkPreset | PlaceholderNetworkPreset = NETWORKS[name];
+        for (const addr of [
+            p.maspAddress,
+            p.relayerAddress,
+            p.permit2Address,
+            p.nativeAdapterAddress,
+            p.swapWrapperAddress,
+        ]) {
             if (addr !== null && addr !== undefined) {
                 expect(() => evmAddress(addr)).not.toThrow();
             }
@@ -27,9 +34,10 @@ describe("NETWORKS", () => {
     });
 
     it.each(names)("%s declares parseable service URLs", (name) => {
-        const p: NetworkPreset = NETWORKS[name];
-        expect(() => new URL(p.relayerUrl)).not.toThrow();
-        expect(() => new URL(p.fmdUrl)).not.toThrow();
+        const p: NetworkPreset | PlaceholderNetworkPreset = NETWORKS[name];
+        for (const url of [p.relayerUrl, p.fmdUrl, p.quoterUrl, p.rpcUrl]) {
+            if (url !== undefined) expect(() => new URL(url)).not.toThrow();
+        }
     });
 
     it("marks a preset deployed exactly when both addresses are present", () => {
@@ -41,10 +49,9 @@ describe("NETWORKS", () => {
 });
 
 describe("DeployedNetworkName", () => {
-    // The type is derived from the `maspAddress: null` literals, so it tracks
-    // the table automatically. This pins the runtime side of that agreement:
-    // every name the type admits resolves to a deployed preset.
-    const deployed: DeployedNetworkName[] = ["anvil", "localnet", "base", "arbitrum", "mainnet"];
+    // The type is derived from the `maspAddress: null` literals. This pins the
+    // runtime side: every name the type admits resolves to a deployed preset.
+    const deployed: DeployedNetworkName[] = ["anvil", "base", "arbitrum", "mainnet"];
 
     it.each(deployed)("%s resolves to a deployed preset", (name) => {
         expect(isNetworkDeployed(resolveNetwork(name))).toBe(true);
@@ -54,6 +61,25 @@ describe("DeployedNetworkName", () => {
         for (const name of names) {
             if (deployed.includes(name as DeployedNetworkName)) continue;
             expect(isNetworkDeployed(NETWORKS[name])).toBe(false);
+        }
+    });
+});
+
+describe("anvil", () => {
+    // `backend/stack`: relayer on 3003, fmd-webserver on 3001, tree depth 11.
+    it("points at the backend stack's ports and ships an RPC endpoint", () => {
+        expect(NETWORKS.anvil).toMatchObject({
+            relayerUrl: "http://localhost:3003",
+            fmdUrl: "http://localhost:3001",
+            rpcUrl: "http://localhost:8545",
+            treeDepth: 11,
+        });
+    });
+
+    it("public networks ship no RPC endpoint", () => {
+        for (const name of names) {
+            if (name === "anvil") continue;
+            expect((NETWORKS[name] as { rpcUrl?: string }).rpcUrl).toBeUndefined();
         }
     });
 });
@@ -68,9 +94,9 @@ describe("resolveNetwork", () => {
         expect(() => resolveNetwork("nope" as NetworkName)).toThrow(/unknown network/);
     });
 
-    // A preset name comes from application config, so an unknown one is
-    // wiring the caller can fix — the case `WalletConfigError` exists for.
-    // It threw a bare `Error`, which `isWalletError` does not see.
+    // A preset name comes from application config, so an unknown one is a
+    // caller wiring error, which `WalletConfigError` covers and `isWalletError`
+    // recognises.
     it("reports an unknown name as a typed config error", () => {
         let thrown: unknown;
         try {

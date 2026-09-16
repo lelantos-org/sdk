@@ -7,11 +7,10 @@ import { TAG_NF } from "./tags.js";
 // Takes nk directly so FVK holders (nk without nsk) can recompute nullifiers.
 // Use buildNullifierFromNsk for the spending-key path.
 //
-// `cm` is in the preimage so the nullifier identifies the exact note. Without
-// it two notes sharing a rho share a nullifier, and spending either bricks the
-// other — the faerie-gold attack. Deposit-path rho is caller-chosen and output
-// rho is publicly derivable from nullifier[0], so rho alone is not safe to key
-// on.
+// `cm` is in the preimage so the nullifier identifies the exact note. Without it, two notes
+// sharing a rho share a nullifier and spending either makes the other unspendable (the faerie-gold
+// attack). Deposit-path rho is caller-chosen and output rho is publicly derivable from
+// nullifier[0], so rho alone is not safe to key on.
 export function buildNullifier(P: Poseidon, nk: Field, rho: Field, cm: Field): Field {
     return P.hash([TAG_NF, nk, rho, cm]);
 }

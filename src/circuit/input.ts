@@ -1,5 +1,5 @@
 // The transact circuit witness. Shape-agnostic: the arity is read off the
-// input arrays; 2×2 is the deployed instance.
+// input arrays; 4×6 is the deployed instance.
 //
 // `CircomTransactInput` is a named interface, shared by `flatten` and
 // `extractPubInputs`, so neither needs a cast or a re-parse of the same shape.
@@ -14,6 +14,7 @@ import {
     type Point,
     type Poseidon,
 } from "../crypto/index.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import type { OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note, SpentNote } from "../notes/note.js";
 
@@ -21,11 +22,11 @@ import type { Note, SpentNote } from "../notes/note.js";
  * The public-input slots the circuit evaluates: `TransactCompressN`'s
  * coefficients, in `PubInputs.compress(Transact)` order.
  *
- * Every one is pinned by a constraint elsewhere in `4x6.circom` — the root by
+ * Every one is pinned by a constraint elsewhere in `4x6.circom`: the root by
  * Merkle membership, the nullifiers and commitments by Poseidon, the value
  * commitments by `ValueCommit`, the public scalars by `RangeCheck64` and the
- * balance. That is the membership rule, not an accident of the layout; see
- * `coeffCount` in `core/shape.ts`.
+ * balance. Being pinned is the membership rule; see `coeffCount` in
+ * `protocol/shape.ts`.
  */
 export interface CircomCoeffInputs {
     merkle_root: string;
@@ -46,17 +47,22 @@ export interface CircomCoeffInputs {
 /**
  * Logical public inputs that are **not** circuit signals.
  *
- * `4x6.circom` constrains none of them, so as PolyEval coefficients they were
- * free variables a prover could solve `y = Σ c[k]·z^k` with after reading `z`.
- * They bind through the challenge instead: `PubInputs.compress` hashes them
- * into `z`, so a relayer that rewrites one hands the verifier a different
- * challenge and the proof stops matching. That binding costs no constraint.
+ * `4x6.circom` constrains none of them, so as PolyEval coefficients they would
+ * be free variables a prover could solve `y = Σ c[k]·z^k` with after reading
+ * `z`. They are bound through the challenge instead: `PubInputs.compress`
+ * hashes them into `z`, so a relayer that rewrites one produces a different
+ * challenge and the proof no longer matches. This binding costs no constraint.
  */
 export interface TransactBinding {
     recipient_address: string;
     chain_id: string;
     payer_address: string;
     relayer_address: string;
+    /**
+     * Commitment to what the spend's funds are used for. `SwapWrapper.swap`
+     * requires the swap intent's hash; zero for every other spend.
+     */
+    intent_hash: string;
     /** Per-output FMD clue PIs. */
     out_clue_Rx: string[];
     out_clue_Ry: string[];
@@ -115,14 +121,22 @@ export interface BuildOpts {
      * SNARK to prevent front-running by other relayers.
      */
     relayerAddress?: Field;
+    /**
+     * `PubInputs.Transact.intentHash`: for a swap's withdraw leg,
+     * `swapIntentHash` over the swap's output, floor, venue, deadline and
+     * refund owner, which `SwapWrapper.swap` recomputes. Bound through the
+     * challenge so whoever submits the swap cannot change them. Ignored by
+     * every other spend; defaults to 0n.
+     */
+    intentHash?: Field;
     // SnarkCompression Fiat-Shamir challenge. Tests default to 1n; in prod
     // the contract derives it from a transcript over the logical PIs.
     z?: Field;
     /**
      * `auxDigest(aux)` over the outputs' encrypted-note payloads. Required
      * rather than defaulted: the contract always recomputes this slot from
-     * calldata, so a caller that silently passed 0 would build a witness the
-     * verifier rejects. See `auxDigest` in `protocol/abi-hash.ts`.
+     * calldata, so a default of 0 would build a witness the verifier rejects.
+     * See `auxDigest` in `protocol/abi-hash.ts`.
      */
     outputAuxDigest: Field;
 }
@@ -131,18 +145,18 @@ export interface BuildOpts {
  * What a builder produces: the circuit's witness plus the binding fields that
  * only reach the challenge.
  *
- * One object because every consumer needs both — `flatten` to derive `z`, the
- * prover to prove — and splitting them at the source would make it easy to hash
- * one transaction and prove another. `circuitSignals` projects it before the
- * witness calculator, which rejects a key the circuit does not declare.
+ * One object because consumers need both (`flatten` to derive `z`, the prover
+ * to prove), and splitting them would make it possible to hash one transaction
+ * and prove another. `circuitSignals` projects it before the witness
+ * calculator, which rejects keys the circuit does not declare.
  */
 export type TransactWitnessBundle = CircomTransactInput & TransactBinding;
 
 /**
  * Project a bundle onto the circuit's signal set.
  *
- * An explicit pick, not a delete list: a signal added to the circuit and
- * forgotten here fails to compile rather than being silently defaulted.
+ * An explicit pick, not a delete list: a circuit signal missing here fails to
+ * compile instead of being defaulted.
  */
 export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
     return {
@@ -181,13 +195,17 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
     const { inputs, outputs, publicAssetId, publicIn, publicOut, merkleRoot } = opts;
     // Shape is read off the arrays: the witness layout is identical for every
     // `Transact(DEPTH, N_IN, N_OUT)` instance, and only the zkey pins N. The
-    // deployed circuit is 2×2; `core/shape.ts` describes what a wider shape
-    // additionally needs.
-    if (inputs.length === 0) throw new Error("need at least one input slot");
-    if (outputs.length === 0) throw new Error("need at least one output slot");
+    // deployed circuit is 4×6; `protocol/shape.ts` describes the shapes.
+    if (inputs.length === 0) {
+        throw new InvalidArgumentError("need at least one input slot", { argument: "inputs" });
+    }
+    if (outputs.length === 0) {
+        throw new InvalidArgumentError("need at least one output slot", { argument: "outputs" });
+    }
     if (opts.outputClues.length !== outputs.length) {
-        throw new Error(
+        throw new InvalidArgumentError(
             `outputClues has ${opts.outputClues.length} entries, expected ${outputs.length}`,
+            { argument: "outputClues" },
         );
     }
 
@@ -195,6 +213,7 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
     const chainId = opts.chainId ?? 0n;
     const payerAddress = opts.payerAddress ?? 0n;
     const relayerAddress = opts.relayerAddress ?? 0n;
+    const intentHash = opts.intentHash ?? 0n;
 
     const outCm = outputs.map((o) => buildNoteCommitment(P, o));
     const inCv: Point[] = inputs.map((i) =>
@@ -210,48 +229,51 @@ export function toCircomInput(P: Poseidon, J: Jubjub, opts: BuildOpts): Transact
     );
 
     const z = opts.z ?? 1n;
+    // Decimal strings of one field across every item, and of each point's coordinates.
+    const col = <T, K extends keyof T>(items: readonly T[], key: K) =>
+        items.map((item) => String(item[key]));
+    const points = (ps: readonly Point[]) => ps.map((p) => p.map(String));
 
     return {
         z: z.toString(),
         merkle_root: merkleRoot.toString(),
-        nullifier: inputs.map((i) => i.nf.toString()),
-        out_cm: outCm.map((c) => c.toString()),
+        nullifier: col(inputs, "nf"),
+        out_cm: outCm.map(String),
         public_asset_id: publicAssetId.toString(),
         public_in: publicIn.toString(),
         public_out: publicOut.toString(),
-        in_cv: inCv.map((p) => [p[0].toString(), p[1].toString()]),
-        out_cv: outCv.map((p) => [p[0].toString(), p[1].toString()]),
+        in_cv: points(inCv),
+        out_cv: points(outCv),
         recipient_address: recipientAddress.toString(),
         chain_id: chainId.toString(),
         payer_address: payerAddress.toString(),
         relayer_address: relayerAddress.toString(),
-        out_cv_dep: outCvDep.map((p) => [p[0].toString(), p[1].toString()]),
+        intent_hash: intentHash.toString(),
+        out_cv_dep: points(outCvDep),
 
-        in_asset: inputs.map((i) => i.asset.toString()),
-        in_value: inputs.map((i) => i.value.toString()),
-        in_pk: inputs.map((i) => i.pk.toString()),
-        in_rho: inputs.map((i) => i.rho.toString()),
-        in_rcm: inputs.map((i) => i.rcm.toString()),
-        in_nsk: inputs.map((i) => i.nsk.toString()),
-        in_rcv: inputs.map((i) => i.rcv.toString()),
-        in_rcv_dep: inputs.map((i) => i.rcvDep.toString()),
-        in_path_elements: inputs.map((i) =>
-            i.pathElements.map((level) => level.map((e) => e.toString())),
-        ),
-        in_path_indices: inputs.map((i) => i.pathIndices.map((b) => b.toString())),
+        in_asset: col(inputs, "asset"),
+        in_value: col(inputs, "value"),
+        in_pk: col(inputs, "pk"),
+        in_rho: col(inputs, "rho"),
+        in_rcm: col(inputs, "rcm"),
+        in_nsk: col(inputs, "nsk"),
+        in_rcv: col(inputs, "rcv"),
+        in_rcv_dep: col(inputs, "rcvDep"),
+        in_path_elements: inputs.map((i) => i.pathElements.map((level) => level.map(String))),
+        in_path_indices: inputs.map((i) => i.pathIndices.map(String)),
         in_is_dummy: inputs.map((i) => (i.isDummy ? "1" : "0")),
 
-        out_asset: outputs.map((o) => o.asset.toString()),
-        out_value: outputs.map((o) => o.value.toString()),
-        out_pk: outputs.map((o) => o.pk.toString()),
-        out_rho: outputs.map((o) => o.rho.toString()),
-        out_rcm: outputs.map((o) => o.rcm.toString()),
-        out_rcv: outputs.map((o) => o.rcv.toString()),
-        out_rcv_dep: outputs.map((o) => o.rcvDep.toString()),
+        out_asset: col(outputs, "asset"),
+        out_value: col(outputs, "value"),
+        out_pk: col(outputs, "pk"),
+        out_rho: col(outputs, "rho"),
+        out_rcm: col(outputs, "rcm"),
+        out_rcv: col(outputs, "rcv"),
+        out_rcv_dep: col(outputs, "rcvDep"),
 
-        out_clue_bits: opts.outputClues.map((c) => c.clueBits.toString()),
-        out_clue_Rx: opts.outputClues.map((c) => c.clueRx.toString()),
-        out_clue_Ry: opts.outputClues.map((c) => c.clueRy.toString()),
+        out_clue_bits: col(opts.outputClues, "clueBits"),
+        out_clue_Rx: col(opts.outputClues, "clueRx"),
+        out_clue_Ry: col(opts.outputClues, "clueRy"),
 
         out_aux_digest: opts.outputAuxDigest.toString(),
     };

@@ -1,14 +1,16 @@
 // Pool of scanner workers, one RPC client per worker.
 //
-// Correlation, timeouts and crash handling all come from `src/worker/`, so
+// Correlation, timeouts and crash handling all come from `src/runtime/rpc/`, so
 // concurrent `runOne` calls on one worker stay correlated and a dead worker
 // rejects its in-flight calls rather than leaving them pending.
 
-import { InternalError } from "../../core/errors.js";
 import type { Field } from "../../crypto/index.js";
+import { InternalError } from "../../errors/base.js";
+import { InvalidArgumentError } from "../../errors/config.js";
 import { getLogger } from "../../log/logger.js";
-import { createWorkerRpc, type WorkerRpc } from "../../worker/client.js";
-import type { WorkerFactory } from "../../worker/types.js";
+import { hardwareConcurrency } from "../../runtime/detect.js";
+import { createWorkerRpc, type WorkerRpc } from "../../runtime/rpc/client.js";
+import type { WorkerFactory } from "../../runtime/rpc/types.js";
 import type { ScanHit, ScanInput } from "../scan.js";
 import type { Scanner } from "../scanner.js";
 import {
@@ -46,7 +48,11 @@ export class WorkerPoolScanner implements Scanner {
 
     constructor(opts: WorkerPoolScannerOpts) {
         const size = opts.size ?? defaultPoolSize();
-        if (size < 1) throw new RangeError("WorkerPoolScanner: size must be >= 1");
+        if (size < 1) {
+            throw new InvalidArgumentError("WorkerPoolScanner: size must be >= 1", {
+                argument: "size",
+            });
+        }
         this.factory = opts.factory;
         this.chunkSize = opts.chunkSize;
         this.wasm = opts.wasm;
@@ -59,18 +65,16 @@ export class WorkerPoolScanner implements Scanner {
             timeouts: { init: INIT_TIMEOUT_MS, scan: SCAN_TIMEOUT_MS },
         });
         const ready = rpc.call("init", this.wasm ? { wasm: this.wasm } : {});
-        // `ready` is only awaited inside `runChunk`, so a pool that is
-        // disposed — or whose owner never scans — would leave this rejection
-        // unobserved and trip Node's `unhandledRejection`. Marking it handled
-        // here does not swallow it: `runChunk` still awaits the same promise
-        // and still sees the failure.
+        // `ready` is only awaited inside `runChunk`, so a pool that is disposed
+        // or never scans would trip Node's `unhandledRejection`. Marking it
+        // handled does not swallow it: `runChunk` awaits the same promise.
         ready.catch(() => {});
         return { rpc, ready };
     }
 
     /**
      * Replace a dead worker. The scan that killed it is not retried: its input
-     * buffers were transferred and are now detached, so a resend would scan
+     * buffers were transferred and are detached, so a resend would scan
      * empty ciphertexts and report no hits.
      */
     private recycle(index: number): void {
@@ -92,18 +96,14 @@ export class WorkerPoolScanner implements Scanner {
         const ivkStr = ivk.toString();
         log.debug("scanning", { notes: inputs.length, chunks: chunks.length, workers: n });
 
-        // One in-flight scan per slot, pulling from a shared queue, rather
-        // than dispatching every chunk at once.
+        // One in-flight scan per slot, pulling from a shared queue.
         //
-        // A worker handles its messages serially, so dispatching N chunks to
-        // one slot did not make it faster — it made all N share a single
-        // `SCAN_TIMEOUT_MS` while queued behind each other. A large sync with
-        // a small `chunkSize` therefore timed out chunks that had done no work
-        // yet, and `recycle` then discarded a perfectly healthy worker.
+        // A worker handles messages serially, so queuing several chunks on one
+        // slot would make queued chunks consume `SCAN_TIMEOUT_MS` before doing
+        // any work, and `recycle` would then discard a healthy worker.
         //
-        // Pulling also load-balances: a slot that finishes early takes the
-        // next chunk instead of idling while a slower one works through a
-        // fixed share.
+        // Pulling also load-balances: a slot that finishes early takes the next
+        // chunk instead of idling.
         const partials: ScanHit[][] = new Array(chunks.length);
         let nextChunk = 0;
         const runner = async (slotIndex: number): Promise<void> => {
@@ -140,12 +140,11 @@ export class WorkerPoolScanner implements Scanner {
                 { ivk, inputs: wireInputs },
                 {
                     transfer,
-                    // Carried into any thrown error: which leaves failed is
-                    // the first thing a scan diagnosis needs.
-                    context: {
+                    // Attached to any thrown error to identify the failed leaves.
+                    details: {
                         chunk: chunkIndex,
-                        leafFrom: chunk[0]?.leafIndex,
-                        leafTo: chunk[chunk.length - 1]?.leafIndex,
+                        leafFrom: chunk[0]?.leafIndex ?? -1,
+                        leafTo: chunk[chunk.length - 1]?.leafIndex ?? -1,
                         notes: chunk.length,
                     },
                 },
@@ -169,10 +168,7 @@ export class WorkerPoolScanner implements Scanner {
 }
 
 function defaultPoolSize(): number {
-    const hw =
-        (globalThis as { navigator?: { hardwareConcurrency?: number | undefined } }).navigator
-            ?.hardwareConcurrency ?? 4;
-    return Math.max(2, Math.min(8, hw));
+    return Math.max(2, Math.min(8, hardwareConcurrency()));
 }
 
 export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "factory"> {
@@ -181,10 +177,5 @@ export interface BrowserWorkerScannerOpts extends Omit<WorkerPoolScannerOpts, "f
 }
 
 export function browserWorkerScanner(opts: BrowserWorkerScannerOpts): WorkerPoolScanner {
-    return new WorkerPoolScanner({
-        factory: opts.worker,
-        size: opts.size,
-        chunkSize: opts.chunkSize,
-        wasm: opts.wasm,
-    });
+    return new WorkerPoolScanner({ ...opts, factory: opts.worker });
 }

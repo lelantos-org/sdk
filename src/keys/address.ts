@@ -5,8 +5,8 @@
 //        || pk   (32 B, little-endian field scalar — note-commitment binding)
 //        || ck   (32 B, Baby-Jubjub packed — FMD clue key)
 //
-// HRP carries the format version: bumping it invalidates old strings and
-// lets format changes fail-fast.
+// The HRP carries the format version: changing it invalidates existing strings, so format
+// changes fail fast.
 //
 // `pk = Poseidon(TAG_PK, ivk)` is exposed so any sender can construct a
 // valid note commitment for the recipient. Spend authority remains gated
@@ -25,16 +25,16 @@
 
 import { bech32m } from "bech32";
 import { branded, type ShieldedAddress } from "../core/brand.js";
-import { InvalidArgumentError } from "../core/errors.js";
+import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../core/bytes.js";
 import { assertField } from "../core/field.js";
-import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
+import { InvalidArgumentError } from "../errors/config.js";
 
 export const ADDRESS_HRP = "lelantos";
-/** @internal */
-export const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
-const BECH32_LIMIT = 256;
+const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
+/** Length cap passed to `bech32m`, above its 90-character default. @internal */
+export const BECH32_LIMIT = 256;
 
 export interface DecodedAddress {
     pk_d: Point;
@@ -55,27 +55,29 @@ export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): Shi
 /**
  * Decode a payment address, validating both point slots.
  *
- * Every failure is an {@link InvalidArgumentError}: an address reaching here is
- * something a user typed, pasted or was handed by a payee, so a malformed one
- * is the caller's to report — not an SDK invariant. `bech32m.decode` throws its
- * library's own untyped error on a bad checksum or charset, which is why the
- * whole body is wrapped rather than only the checks below it.
+ * Every failure is an `InvalidArgumentError` (`INVALID_ARGUMENT`), since addresses are user input. The whole
+ * body is wrapped because `bech32m.decode` throws an untyped error on a bad checksum or charset.
  *
- * The address itself is left out of the message: it reaches application logs
- * verbatim, and an address names a payee.
+ * The address is omitted from the message: error text reaches application logs verbatim, and an
+ * address identifies a payee.
  */
 export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
+    return rethrowBech32(() => decode(J, addr), "invalid shielded address", "address");
+}
+
+/**
+ * Run a bech32m decode, typing what `bech32m` throws untyped (a bad checksum or charset) as
+ * `InvalidArgumentError`. The library's message quotes the input ("Invalid checksum for
+ * lelantos1…"), so it is kept on `cause` rather than in the message.
+ *
+ * @internal
+ */
+export function rethrowBech32<T>(decode: () => T, what: string, argument: string): T {
     try {
-        return decode(J, addr);
+        return decode();
     } catch (err) {
         if (err instanceof InvalidArgumentError) throw err;
-        // The bech32 layer's own message quotes the whole address back
-        // ("Invalid checksum for lelantos1…"), so it is kept on `cause` rather
-        // than forwarded into a message that reaches logs.
-        throw new InvalidArgumentError("invalid shielded address: not valid bech32m", {
-            argument: "address",
-            cause: err,
-        });
+        throw new InvalidArgumentError(`${what}: not valid bech32m`, { argument, cause: err });
     }
 }
 
@@ -98,11 +100,9 @@ function decode(J: Jubjub, addr: string): DecodedAddress {
     }
 
     const pk_d = unpackChecked(J, payload.slice(0, FIELD_BYTES), "pk_d");
-    // The two point slots are validated by `unpackChecked`; the scalar slot
-    // needs its own range check. An unreduced `pk` decodes cleanly and the
-    // sender then commits to `pk mod r`, while the recipient derives a
-    // canonical `pk` from their `ivk` — a note the sender believes delivered
-    // and the recipient cannot spend.
+    // The scalar slot needs its own range check. An unreduced `pk` would make the sender commit
+    // to `pk mod r` while the recipient derives a canonical `pk` from `ivk`, producing a note the
+    // recipient cannot spend.
     const pk = fromLeBytes(payload.slice(FIELD_BYTES, 2 * FIELD_BYTES));
     assertField(pk, "address pk");
     const ck = unpackChecked(J, payload.slice(2 * FIELD_BYTES), "ck");

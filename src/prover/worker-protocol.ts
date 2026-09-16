@@ -1,15 +1,14 @@
-// Prover worker wire types — the payload shapes only. Transport is
-// `src/worker/`; the client and the worker entry both depend on this module.
+// Prover worker payload types. Transport lives in `src/runtime/rpc/`; the client and
+// the worker entry both depend on this module.
 
 import type { ProveResult, ProverPaths } from "./types.js";
 
 /**
  * Settings that must reach the worker's own module realm.
  *
- * The worker never sees the caller's module-level configuration, so anything
- * serializable that a caller can set on the main thread has to travel here
- * too. Both are honoured only on the FIRST request — the thread pool and the
- * prover session are built once and reused.
+ * The worker cannot see the caller's module-level configuration, so
+ * serializable main-thread settings are sent here. Both are honoured only on
+ * the first request, since the thread pool and prover session are built once.
  */
 export interface WorkerSetup {
     /** Pin rayon thread count. */
@@ -22,12 +21,12 @@ export interface WorkerSetup {
     cacheArtifacts?: boolean | undefined;
 }
 
-export interface ProveParams extends WorkerSetup {
+interface ProveParams extends WorkerSetup {
     paths: ProverPaths;
     input: Record<string, unknown>;
 }
 
-export interface PreloadParams extends WorkerSetup {
+interface PreloadParams extends WorkerSetup {
     paths: ProverPaths;
 }
 

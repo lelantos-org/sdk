@@ -1,10 +1,8 @@
-// x402 v2 HTTP transport: the protocol travels in base64-JSON headers.
+// x402 v2 HTTP transport: the protocol is carried in base64-JSON headers.
 //
-// Isolated from the payment logic because it is pure wire handling — no
-// wallet, no policy — and because getting the encoding wrong fails in ways
-// that look like a server bug.
+// Wire handling only; no wallet or policy logic.
 
-import { X402PaymentError } from "../core/errors.js";
+import { X402PaymentError } from "../errors/x402.js";
 import { unsupported } from "./requirements.js";
 import {
     HEADER_PAYMENT_REQUIRED,
@@ -13,41 +11,41 @@ import {
     type PaymentPayload,
     type PaymentRequired,
     type SettleResponse,
+    X402_VERSION,
 } from "./types.js";
 
 /**
- * Read the offer document from a 402.
+ * Read the offer document from a 402's `PAYMENT-REQUIRED` header.
  *
- * v2 carries it in the `PAYMENT-REQUIRED` header. A body-carried document is
- * accepted too: v1 put it there and many servers still do, so the fallback
- * avoids reporting "no accepts[]" for an otherwise well-formed 402.
+ * @throws {X402PaymentError} `unsupported-requirements` when the header is
+ * missing, has no `accepts[]`, or names another protocol version.
  */
-export async function readPaymentRequired(res: Response, url: string): Promise<PaymentRequired> {
+export function readPaymentRequired(res: Response, url: string): PaymentRequired {
     const header = res.headers.get(HEADER_PAYMENT_REQUIRED);
-    if (header) {
-        const decoded = decodeBase64Json<PaymentRequired>(header, url, HEADER_PAYMENT_REQUIRED);
-        if (Array.isArray(decoded.accepts)) return decoded;
+    const decoded = header
+        ? decodeBase64Json<PaymentRequired>(header, url, HEADER_PAYMENT_REQUIRED)
+        : undefined;
+    if (!decoded || !Array.isArray(decoded.accepts)) {
+        throw new X402PaymentError(
+            "unsupported-requirements",
+            `x402: ${url} answered 402 without a usable ${HEADER_PAYMENT_REQUIRED} header`,
+            { resource: url },
+        );
     }
-
-    const body = await res
-        .clone()
-        .json()
-        .catch(() => undefined);
-    if (body && Array.isArray((body as PaymentRequired).accepts)) {
-        return body as PaymentRequired;
+    if (decoded.x402Version !== X402_VERSION) {
+        throw new X402PaymentError(
+            "unsupported-requirements",
+            `x402: ${url} offers protocol version ${String(decoded.x402Version)}; ` +
+                `only ${X402_VERSION} is supported`,
+            { resource: url },
+        );
     }
-
-    throw new X402PaymentError(
-        "unsupported-requirements",
-        `x402: ${url} answered 402 without a usable ${HEADER_PAYMENT_REQUIRED} header ` +
-            "or `accepts[]` body",
-        { resource: url },
-    );
+    return decoded;
 }
 
 /**
  * Read the server's settlement receipt from a paid response. Absent or
- * malformed both yield `undefined` — a bad receipt must never fail a request
+ * malformed receipts yield `undefined`; a bad receipt must not fail a request
  * that has already been paid for.
  */
 export function readSettlement(res: Response): SettleResponse | undefined {
@@ -63,9 +61,8 @@ export function readSettlement(res: Response): SettleResponse | undefined {
 /**
  * Copy of `req` carrying the payment header.
  *
- * Takes a `Request` rather than a `RequestInit` because the retry must
- * reproduce the original call exactly: rebuilding from `init` loses the
- * method, body and headers of a caller that passed a `Request`.
+ * Takes a `Request` rather than a `RequestInit` so the retry reproduces the
+ * original method, body and headers exactly.
  *
  * Consumes `req`'s body, so this must be the last use of it.
  */
@@ -79,9 +76,9 @@ export function withPaymentRequest(req: Request, payload: PaymentPayload): Reque
  * Lowercased hostname of a resource URL, or the URL unchanged when it does not
  * parse.
  *
- * The unit of x402 identity: budgets are enforced per host and the ephemeral
- * payer is derived per host. Also the granularity used in logs, since a full
- * URL records the request path an agent paid for.
+ * The unit of x402 identity: budgets are enforced and the ephemeral payer is
+ * derived per host. Also used in logs, since a full URL would record the paid
+ * request path.
  */
 export function hostOf(url: string): string {
     try {
@@ -92,8 +89,8 @@ export function hostOf(url: string): string {
 }
 
 // --- base64 JSON --------------------------------------------------------------
-// `btoa`/`atob` are byte-oriented, so JSON is UTF-8 encoded first — a
-// resource description with a non-ASCII character would otherwise throw.
+// `btoa`/`atob` are byte-oriented, so JSON is UTF-8 encoded first; `btoa`
+// throws on non-Latin-1 characters.
 
 export function encodeBase64Json(value: unknown): string {
     const bytes = new TextEncoder().encode(JSON.stringify(value));

@@ -1,10 +1,11 @@
 import { bech32m } from "bech32";
 import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
-import { InvalidArgumentError, isWalletError } from "../core/errors.js";
+import { FIELD_BYTES, toLeBytes } from "../core/bytes.js";
 import { BN254_FR } from "../core/field.js";
-import { FIELD_BYTES, toLeBytes } from "../crypto/bytes.js";
 import { Jubjub, Poseidon } from "../crypto/index.js";
+import { InvalidArgumentError } from "../errors/config.js";
+import { isWalletError } from "../errors/guard.js";
 import { ADDRESS_HRP, decodeAddress, encodeAddress } from "./address.js";
 import { addressFromSpendingKey, buildSpendingKey } from "./keys.js";
 
@@ -34,8 +35,7 @@ describe("bech32m address", () => {
         const payload = new Uint8Array(
             bech32m.fromWords(bech32m.decode(addressFromSpendingKey(J, sk), 256).words),
         );
-        // The root detection secret must not appear in any 32-byte slot, in
-        // either byte order.
+        // The root detection secret must not appear in any 32-byte slot, in either byte order.
         const dkLe = toLeBytes(sk.dk);
         const dkBe = Uint8Array.from(dkLe).reverse();
         for (let off = 0; off < payload.length; off += FIELD_BYTES) {
@@ -58,8 +58,7 @@ describe("bech32m address", () => {
     });
 
     it("rejects a payload with a field scalar in the `ck` slot", () => {
-        // Same 96-byte length, so the length check passes and only the point
-        // validation rejects it.
+        // Same 96-byte length, so only point validation rejects it.
         const sk = buildSpendingKey(P, J, 7n);
         const payload = new Uint8Array(3 * FIELD_BYTES);
         payload.set(J.packPoint(sk.pk_d), 0);
@@ -92,10 +91,8 @@ describe("bech32m address", () => {
         expect(() => decodeAddress(J, addr)).toThrow(/\bck (not|is)\b/);
     });
 
-    // An address is user input — typed, pasted, or handed over by a payee — so
-    // every way it can be wrong has to reach the caller as something they can
-    // branch on. The bech32 layer throws its library's own untyped error,
-    // which must be wrapped rather than propagated.
+    // Addresses are user input, so every malformed case must surface as a typed error. The
+    // bech32 library throws an untyped error, which must be wrapped.
     it("reports every malformed address as INVALID_ARGUMENT", () => {
         const sk = buildSpendingKey(P, J, 1n);
         const good = addressFromSpendingKey(J, sk);
@@ -116,7 +113,7 @@ describe("bech32m address", () => {
             expect(isWalletError(thrown, "INVALID_ARGUMENT"), `for ${JSON.stringify(addr)}`).toBe(
                 true,
             );
-            // Narrowed by the guard above; `argument` names what to blame.
+            // Narrows the type; `argument` names the offending input.
             if (!isWalletError(thrown, "INVALID_ARGUMENT")) throw new Error("unreachable");
             expect(thrown.argument).toBe("address");
         }
@@ -135,8 +132,7 @@ describe("bech32m address", () => {
     });
 
     it("round-trips all three halves for any nsk", () => {
-        // Covers the scalar space, where an offset slip in the 96-byte payload
-        // would show.
+        // Covers the scalar space, exposing any offset error in the 96-byte payload.
         fc.assert(
             fc.property(nskArb, (n) => {
                 const sk = buildSpendingKey(P, J, n);

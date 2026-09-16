@@ -1,8 +1,8 @@
 // The shapes fmd-webserver returns, as domain values.
 //
 // Types only: no decoding, no HTTP. `./decode.ts` builds these from raw JSON
-// and `./client.ts` is what asks for them, so a module that merely names a
-// response — a store, a test fixture — imports nothing else.
+// and `./client.ts` fetches them, so a module that only names a response (a
+// store, a test fixture) imports nothing else.
 
 import type { Field } from "../../crypto/index.js";
 
@@ -16,8 +16,8 @@ export interface FmdTreeState {
 /**
  * The two watermarks a wallet syncs against.
  *
- * Polled far more often than anything else, so it carries only what a client
- * needs to decide whether the expensive reads are worth making.
+ * Polled more often than any other route, so it carries only what a client
+ * needs to decide whether to make the expensive reads.
  */
 export interface FmdHead {
     chainId: number;
@@ -37,8 +37,8 @@ export interface FmdNoteOut {
      * way `babyJub.packPoint` packs one: 32 bytes of `y` little-endian with
      * the high bit of the last byte carrying `sign(x)`.
      *
-     * Bytes, not a `Point`: this is exactly what `decryptNote` wants as `epk`,
-     * so nothing on this path ever unpacks it.
+     * Bytes, not a `Point`: `decryptNote` takes this form as `epk`, so nothing
+     * on this path unpacks it.
      */
     epk: Uint8Array;
 }
@@ -50,15 +50,16 @@ export interface FmdMatchOut extends FmdNoteOut {}
  * A page of matches plus the subscription's backfill watermark.
  *
  * `matches` is filled from both ends at once: the indexer's live tick inserts
- * rows for notes at the head while its backfill walks history upward. So the
- * highest `id` in a page is NOT a safe resume cursor — rows below it may still
- * be pending, and a cursor placed above the gap would skip them permanently.
+ * rows for notes at the head while its backfill walks history upward. The
+ * highest `id` in a page is therefore NOT a safe resume cursor: rows below it
+ * may still be pending, and a cursor placed above the gap would skip them
+ * permanently.
  *
  * `backfilledThroughNoteId` is the highest note id already scanned against
  * this subscription's key; a persisted cursor must be clamped to it. Rows
- * above it are still delivered, so a new note never waits for a backfill —
- * they are simply re-delivered until the watermark passes them, which
- * `addHits` dedupes by `cm`.
+ * above it are still delivered, so a new note never waits for a backfill; they
+ * are re-delivered until the watermark passes them, and `addHits` dedupes them
+ * by `cm`.
  */
 export interface FmdMatchesPage {
     matches: FmdMatchOut[];
@@ -91,7 +92,7 @@ export interface CommitmentChunkEntry {
      * roughly threefold on the wire.
      *
      * The client does not derive leaves from primary data, so a wrong value
-     * here yields a wrong root — a rejected transaction, not a loss of funds.
+     * here yields a wrong root: a rejected transaction, not a loss of funds.
      * `TreeStore.verifyRoot` catches it.
      */
     leafHash: Field;
@@ -100,7 +101,7 @@ export interface CommitmentChunkEntry {
 export interface CommitmentChunkOut {
     chunkId: number;
     entries: CommitmentChunkEntry[];
-    /** `false` marks the tail chunk — the client stops paging here. */
+    /** `false` marks the tail chunk, where the client stops paging. */
     isComplete: boolean;
 }
 
@@ -128,7 +129,7 @@ export interface NullifierChunkOut {
 export const GAMMA_MIN = 1;
 // Mirrors the server's declared range. Two lower limits bind first:
 // `AuxValidation.sol` masks the on-chain clue-bits field to 0x3FFF, so bits
-// 14-15 are never set, and senders pack only `FMD_SENDER_GAMMA` bits. The
+// 14-15 are never set, and senders pack only `FMD_DEFAULT_GAMMA` bits. The
 // effective limit is `assertDetectionGamma`.
 export const GAMMA_MAX = 16;
 

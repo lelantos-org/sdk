@@ -1,12 +1,11 @@
 // End-to-end shape check: prove a shipped golden witness with the matching
 // proving key and verify it against the matching verification key.
 //
-// `vectors.test.ts` already checks that the SDK's `flatten` reproduces each
-// vector's `y`. That pins the SDK to the vectors. This pins the vectors to the
-// *compiled circuit*: the `y` a real proof emits as its public signal has to
-// be the same value. Together they close the triangle, which is what makes a
-// wider shape trustworthy — a 42-coefficient layout that the SDK and the
-// vectors agree on is still wrong if the circuit numbers its slots otherwise.
+// `vectors.test.ts` pins the SDK's `flatten` to each vector's `y`. This test
+// pins the vectors to the compiled circuit: the `y` a real proof emits as its
+// public signal must match. Both are needed, since a coefficient layout the SDK
+// and vectors agree on is still wrong if the circuit orders its slots
+// differently.
 //
 // Skipped when a shape's artifacts are absent: the wasm and zkey come from the
 // companion package, and an SDK-only checkout has neither.
@@ -14,8 +13,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
-import { bundledProverArtifacts, resolveArtifacts } from "../prover/artifacts.js";
+import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../protocol/shape.js";
+import { bundledProverArtifacts, resolveArtifacts } from "../prover/artifact-paths.js";
 import { prove, verify } from "../prover/snarkjs.js";
 import { circuitSignals, type TransactWitnessBundle } from "./input.js";
 
@@ -30,7 +29,7 @@ interface Vector {
  * package is absent or does not export it.
  *
  * `import.meta.resolve` is typed as optional here for the same reason
- * `prover/artifacts.ts` casts it: the DOM lib does not declare it, and it is
+ * `prover/artifact-paths.ts` casts it: the DOM lib does not declare it, and it is
  * only guaranteed synchronous from Node 20.6.
  */
 function resolvePackageFile(spec: string): string | null {
@@ -53,9 +52,9 @@ function vkeyFor(id: string): unknown | null {
 }
 
 /**
- * The shape's golden vectors. Unlike the artifacts these are not optional —
- * `vectors.test.ts` fails hard without them — so an unresolvable spec throws
- * rather than silently skipping this suite too.
+ * The shape's golden vectors. Unlike the artifacts these are required
+ * (`vectors.test.ts` fails without them), so an unresolvable spec throws
+ * instead of skipping.
  */
 function vectorsFor(id: string): Vector[] {
     const spec = `@lelantos-org/circuits/vectors/transact-${id}.json`;
@@ -69,7 +68,7 @@ async function pathsFor(shape: CircuitShape) {
     try {
         const paths = resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape }));
         // `resolveArtifacts` yields `file://` hrefs for the companion package,
-        // which `existsSync` does not understand — convert before probing.
+        // which `existsSync` does not accept; convert before probing.
         const onDisk = (p: string) => existsSync(p.startsWith("file:") ? fileURLToPath(p) : p);
         return onDisk(paths.wasmPath) && onDisk(paths.zkeyPath) ? paths : null;
     } catch {
@@ -93,8 +92,8 @@ for (const shape of TRANSACT_SHAPES) {
 
                 // The vector's witness also carries the challenge-only fields
                 // (addresses, clues, aux digest), which the circuit does not
-                // declare and the witness calculator rejects. Projected the way
-                // the SDK's own prove path does.
+                // declare and the witness calculator rejects. Projected as in the
+                // SDK prove path.
                 const signals = { ...circuitSignals(vector.witness) };
                 const { proof, publicSignals } = await prove(signals, paths);
                 expect(await verify(vkey as object, publicSignals, proof)).toBe(true);

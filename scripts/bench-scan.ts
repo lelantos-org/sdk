@@ -22,13 +22,8 @@ import {
     Jubjub,
     Poseidon,
 } from "../src/crypto/index.js";
-import {
-    fmdClueKeyFromRoot,
-    fmdExpandDetectionKey,
-    fmdExpandFlagKey,
-    fmdFlag,
-    fmdTest,
-} from "../src/fmd/index.js";
+import { fmdFlag, fmdTest } from "../src/fmd/clue.js";
+import { fmdClueKeyFromRoot, fmdExpandDetectionKey, fmdExpandFlagKey } from "../src/fmd/keys.js";
 import { buildSpendingKey } from "../src/keys/keys.js";
 import { clueBitsToPrefix, encodeNotePayload, withClueBitsPrefix } from "../src/notes/codec.js";
 import { encryptNote } from "../src/notes/encrypt.js";

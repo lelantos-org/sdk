@@ -2,22 +2,17 @@
 //
 // An agent chooses its own purchases, so the risk to bound is an unbounded run
 // of individually valid payments. Every check runs before any wallet method is
-// called, so a refusal never leaves value in flight and
-// `X402PaymentError.reason` always means nothing happened.
+// called, so a refusal never leaves value in flight and an
+// `X402PaymentError.reason` from these checks means no payment was made.
 //
-// Limits are written in human decimal units and interpreted per asset:
-// `{ total: "5" }` means five of each distinct asset paid, not five across all
-// of them. Assets are not comparable without a price oracle.
+// Limits are in human decimal units, applied per asset: `{ total: "5" }` means
+// five of each asset paid, not five across all assets (assets are not
+// comparable without a price oracle).
 
 import { branded, type CircuitAmount } from "../core/brand.js";
-import { X402PaymentError } from "../core/errors.js";
-import {
-    type AssetInfo,
-    formatAmount,
-    hasTokenMeta,
-    parseAmount,
-    requireTokenMeta,
-} from "../wallet/assets/index.js";
+import { X402PaymentError } from "../errors/x402.js";
+import { formatAmount, isYieldUnits, parseAmount } from "../wallet/assets/amount.js";
+import { type AssetInfo, hasTokenMeta, requireTokenMeta } from "../wallet/assets/index.js";
 
 /** Caps in human decimal units, applied per asset. */
 export interface Budget {
@@ -28,11 +23,6 @@ export interface Budget {
 }
 
 /**
- * Enforces {@link Budget} and the host allowlist, and remembers what has
- * been spent. One ledger per `x402()` call — the totals are the payer's
- * lifetime, not the process's.
- */
-/**
  * A payment that has passed the limits and is being minted.
  *
  * Exactly one of `commit` / `release` must be called; both are idempotent, so
@@ -41,13 +31,17 @@ export interface Budget {
 export interface BudgetReservation {
     /** The payment landed: move the hold into recorded spend. */
     commit(): void;
-    /** The payment did not happen: give the headroom back. */
+    /** The payment did not happen: return the held amount. */
     release(): void;
 }
 
+/**
+ * Enforces {@link Budget} and the host allowlist, and tracks spend. One ledger
+ * per `x402()` call; totals cover the payer's lifetime, not the process's.
+ */
 export class BudgetLedger {
     private readonly totals = new Map<bigint, bigint>();
-    /** Reserved but not yet committed — see {@link BudgetLedger.reserve}. */
+    /** Reserved but not yet committed; see {@link BudgetLedger.reserve}. */
     private readonly held = new Map<bigint, bigint>();
     private readonly hosts?: ReadonlySet<string> | undefined;
 
@@ -85,7 +79,11 @@ export class BudgetLedger {
      */
     assertWithinLimits(amount: CircuitAmount, asset: AssetInfo, resource?: string): void {
         const meta = requireTokenMeta(asset);
-        const perRequest = parseAmount(this.budget.perRequest ?? this.budget.total, meta);
+        // A cap never grows by rounding: exact on a plain asset, floored on a yield asset.
+        const round = isYieldUnits(meta) ? "down" : "exact";
+        const perRequest = parseAmount(this.budget.perRequest ?? this.budget.total, meta, {
+            round,
+        });
         if (amount > perRequest) {
             throw new X402PaymentError(
                 "per-request-limit",
@@ -94,9 +92,9 @@ export class BudgetLedger {
                 { resource },
             );
         }
-        const total = parseAmount(this.budget.total, meta);
-        // Reservations included: a payment being minted right now is spend the
-        // wallet has committed to, even though it has not landed yet.
+        const total = parseAmount(this.budget.total, meta, { round });
+        // Includes reservations: a payment being minted counts as spend before
+        // it lands.
         const already = (this.totals.get(asset.id) ?? 0n) + (this.held.get(asset.id) ?? 0n);
         if (already + amount > total) {
             throw new X402PaymentError(
@@ -112,15 +110,12 @@ export class BudgetLedger {
     /**
      * Check the limits and hold `amount` against them in one step.
      *
-     * Checking and recording separately is not enough: minting a payment takes
-     * seconds (a Groth16 prove, then a submit), and nothing held the ledger
-     * across that await — so N concurrent payments all passed the check before
-     * any of them recorded, and the budget was enforced against a total that
-     * ignored every payment still in flight. With `{ total: "5" }` and 1-unit
-     * payments, twenty concurrent calls all went through.
+     * Minting a payment takes seconds (a Groth16 prove, then a submit), so
+     * checking and recording separately would let concurrent payments all pass
+     * the check before any is recorded, exceeding the budget.
      *
      * The reservation is synchronous and counts toward the limits until it is
-     * committed or released, so a concurrent caller sees it.
+     * committed or released, so concurrent callers see it.
      *
      * @throws {X402PaymentError} `per-request-limit` or `budget-exceeded`
      */
@@ -150,9 +145,9 @@ export class BudgetLedger {
 }
 
 /**
- * Human amount when the asset has known decimals, raw circuit units when it
- * does not. Only the message needs this fallback — a limit that needed
- * decimals has already been rejected by `requireTokenMeta`.
+ * Human amount when the asset has known decimals, raw circuit units otherwise.
+ * The fallback is for messages only; limits without decimals are already
+ * rejected by `requireTokenMeta`.
  */
 function describe(amount: bigint, asset: AssetInfo): string {
     return hasTokenMeta(asset)

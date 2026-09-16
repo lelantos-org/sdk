@@ -9,21 +9,19 @@
 
 import type { PublicClient } from "viem";
 import { branded, type EvmAddress } from "../../core/brand.js";
-import type { EthSigner } from "../../core/signer.js";
+import type { EthSigner } from "../../keys/signer.js";
 
 /**
- * The shared state a read needs. No signer: the reads in `reads.ts`, and the
- * balance/allowance/receipt half of `token.ts`, are exactly what a wallet with
- * no EVM key can still do.
+ * State needed for reads. Carries no signer: the reads in `reads.ts` and the
+ * balance/allowance/receipt functions in `token.ts` work without an EVM key.
  */
 export interface ViemReadCtx {
     readonly publicClient: PublicClient;
     readonly maspAddress: EvmAddress;
     readonly permit2Address: EvmAddress;
     /**
-     * `NativeAdapter`, when one is deployed for this pool. Undefined on a
-     * chain without it, which is what makes the native-coin paths optional:
-     * the pool is ERC-20 only, so there is no fallback entry point to try.
+     * `NativeAdapter` deployed for this pool, if any. When undefined, native-coin
+     * paths are unavailable: the pool is ERC-20 only and has no fallback entry point.
      */
     readonly nativeAdapterAddress?: EvmAddress | undefined;
     /** Resolves the chain id, caching after the first RPC round trip. */

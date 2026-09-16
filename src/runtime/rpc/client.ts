@@ -1,0 +1,278 @@
+// Shared worker RPC client.
+//
+// One persistent message listener plus an id-keyed pending map, so concurrent
+// calls on the same worker stay correlated. Supplies per-call timeouts,
+// structured error propagation, and `error`/`messageerror` handling that
+// rejects everything in flight rather than leaving it pending forever.
+
+import { EnvironmentError } from "../../errors/config.js";
+import { emitRecord, getLogger, type LogRecord, loggingConfig } from "../../log/logger.js";
+import { fromWireError, rpcError } from "./error-wire.js";
+import type { MethodMap, RpcControl, RpcRequest, RpcResponse, WorkerLike } from "./types.js";
+
+const log = getLogger("lelantos:worker:rpc");
+
+interface CallOptions {
+    /** Buffers to transfer rather than copy. See {@link createWorkerRpc}. */
+    transfer?: readonly unknown[] | undefined;
+    /** Overrides the per-method default. */
+    timeoutMs?: number | undefined;
+    signal?: AbortSignal | undefined;
+    /** Merged into the thrown error's `details` (chunk range, leaf ids, etc.). */
+    details?: Readonly<Record<string, string | number | boolean>> | undefined;
+}
+
+interface WorkerRpcOptions {
+    /** Per-method deadline, ms. Methods absent here are not timed out. */
+    timeouts?: Record<string, number> | undefined;
+    /** Label used in log records. */
+    name?: string | undefined;
+    /**
+     * Handles `{kind:"log"}` records forwarded by the worker. Defaults to
+     * replaying them into the local sink; see {@link RpcControl}.
+     */
+    onLogRecord?: ((record: unknown) => void) | undefined;
+}
+
+export interface WorkerRpc<M extends MethodMap> {
+    call<K extends keyof M & string>(
+        method: K,
+        params: M[K]["params"],
+        opts?: CallOptions,
+    ): Promise<M[K]["result"]>;
+    /** Reject everything in flight and terminate the worker. */
+    dispose(reason?: string): void;
+    /** Alias for {@link WorkerRpc.dispose}, for `using rpc = createWorkerRpc(...)`. */
+    [Symbol.dispose](): void;
+    /** False once the worker has crashed or been disposed. */
+    readonly alive: boolean;
+}
+
+interface Pending {
+    resolve: (v: unknown) => void;
+    reject: (e: unknown) => void;
+    method: string;
+    timer?: ReturnType<typeof setTimeout> | undefined;
+    onAbort?: (() => void) | undefined;
+    signal?: AbortSignal | undefined;
+}
+
+/**
+ * Wrap a worker in a typed request/response client.
+ *
+ * Buffers passed via `opts.transfer` are detached: the caller must not touch
+ * them afterwards, and a transferred request can never be re-sent.
+ */
+export function createWorkerRpc<M extends MethodMap>(
+    worker: WorkerLike,
+    opts: WorkerRpcOptions = {},
+): WorkerRpc<M> {
+    const pending = new Map<number, Pending>();
+    const name = opts.name ?? "worker";
+    let nextId = 1;
+    let alive = true;
+
+    const settle = (id: number): Pending | undefined => {
+        const p = pending.get(id);
+        if (!p) return undefined;
+        pending.delete(id);
+        if (p.timer) clearTimeout(p.timer);
+        if (p.onAbort && p.signal) p.signal.removeEventListener("abort", p.onAbort);
+        return p;
+    };
+
+    const failAll = (mk: (method: string) => Error): void => {
+        for (const id of [...pending.keys()]) {
+            const p = settle(id);
+            p?.reject(mk(p.method));
+        }
+    };
+
+    const onMessage = (ev: { data: unknown }): void => {
+        const msg = ev?.data as RpcResponse | undefined;
+        if (!msg) return;
+        if ("kind" in msg && msg.kind === "log") {
+            if (opts.onLogRecord) opts.onLogRecord(msg.record);
+            else emitRecord(msg.record as LogRecord);
+            return;
+        }
+        if (!("id" in msg)) return;
+        const p = settle(msg.id);
+        if (!p) return; // late response to a timed-out or disposed call
+        if (msg.ok) p.resolve(msg.result);
+        else p.reject(fromWireError(msg.error));
+    };
+
+    const onError = (ev: unknown): void => {
+        alive = false;
+        const detail = (ev as { message?: string | undefined })?.message ?? "worker error";
+        log.error("worker crashed; failing all in-flight calls", {
+            name,
+            detail,
+            inFlight: pending.size,
+        });
+        failAll((method) =>
+            rpcError("WORKER_CRASHED", `${name}: ${detail}`, { method, cause: ev }),
+        );
+    };
+
+    // A structured-clone failure on the response rejects every in-flight call
+    // rather than dropping the message and hanging the caller.
+    const onMessageError = (ev: unknown): void => {
+        // Marked dead like `onError`: the undeserialisable response's id is
+        // unrecoverable, so every in-flight call fails and a transport that can
+        // drop replies must not accept new work.
+        alive = false;
+        log.error("worker message could not be deserialised", { name });
+        failAll((method) =>
+            rpcError("WORKER_FAILED", `${name}: response could not be deserialised`, {
+                method,
+                cause: ev,
+            }),
+        );
+    };
+
+    attach(worker, onMessage, onError, onMessageError, name);
+
+    // See `RpcControl`. Posting before the worker script evaluates is safe
+    // because messages queue until its listener is installed. A later
+    // `configureLogging` is not re-propagated, so configure before spawning.
+    const { level, namespaces } = loggingConfig();
+    if (level !== "silent") {
+        worker.postMessage({ kind: "log-config", level, namespaces } satisfies RpcControl);
+    }
+
+    return {
+        get alive() {
+            return alive;
+        },
+
+        call<K extends keyof M & string>(
+            method: K,
+            params: M[K]["params"],
+            callOpts: CallOptions = {},
+        ): Promise<M[K]["result"]> {
+            // Captured before the await so the thrown error's stack points
+            // at the caller, not at the transport's promise constructor.
+            const site = new Error(`worker rpc ${method}`);
+
+            if (!alive) {
+                return Promise.reject(
+                    rpcError("WORKER_CRASHED", `${name}: worker is no longer running`, {
+                        method,
+                        site,
+                        details: callOpts.details,
+                    }),
+                );
+            }
+
+            // `addEventListener("abort", …)` never fires on an already-aborted
+            // signal. Without this check the request would stay pending until
+            // its method timeout, or indefinitely, since `timeouts` is
+            // per-method and optional.
+            const abortReason = () =>
+                callOpts.signal?.reason ?? new Error(`${name}: ${method} aborted`);
+            if (callOpts.signal?.aborted) return Promise.reject(abortReason());
+
+            const id = nextId++;
+            const timeoutMs = callOpts.timeoutMs ?? opts.timeouts?.[method];
+
+            return new Promise<M[K]["result"]>((resolve, reject) => {
+                const entry: Pending = {
+                    resolve: resolve as (v: unknown) => void,
+                    reject,
+                    method,
+                };
+
+                if (timeoutMs !== undefined) {
+                    entry.timer = setTimeout(() => {
+                        settle(id);
+                        reject(
+                            rpcError("WORKER_TIMEOUT", `${name}: ${method} timed out`, {
+                                method,
+                                site,
+                                details: { ...callOpts.details, timeoutMs },
+                            }),
+                        );
+                    }, timeoutMs);
+                }
+
+                if (callOpts.signal) {
+                    entry.signal = callOpts.signal;
+                    entry.onAbort = () => {
+                        settle(id);
+                        reject(abortReason());
+                    };
+                    callOpts.signal.addEventListener("abort", entry.onAbort, { once: true });
+                }
+
+                pending.set(id, entry);
+
+                const req: RpcRequest = { id, method, params };
+                try {
+                    worker.postMessage(req, callOpts.transfer);
+                } catch (err) {
+                    settle(id);
+                    reject(
+                        rpcError("WORKER_FAILED", `${name}: could not post ${method}`, {
+                            method,
+                            cause: err,
+                            site,
+                            details: callOpts.details,
+                        }),
+                    );
+                }
+            }).catch((err) => {
+                // Attach call details to remote failures too.
+                if (callOpts.details && err && typeof err === "object" && "code" in err) {
+                    const e = err as { details?: Record<string, string | number | boolean> };
+                    e.details = { ...e.details, ...callOpts.details };
+                }
+                throw err;
+            });
+        },
+
+        dispose(reason = "disposed"): void {
+            alive = false;
+            failAll((method) => rpcError("WORKER_CRASHED", `${name}: ${reason}`, { method }));
+            worker.terminate();
+        },
+
+        [Symbol.dispose](): void {
+            this.dispose();
+        },
+    };
+}
+
+function attach(
+    worker: WorkerLike,
+    onMessage: (ev: { data: unknown }) => void,
+    onError: (ev: unknown) => void,
+    onMessageError: (ev: unknown) => void,
+    name: string,
+): void {
+    if (typeof worker.addEventListener === "function") {
+        worker.addEventListener("message", onMessage);
+        worker.addEventListener("error", onError);
+        worker.addEventListener("messageerror", onMessageError);
+        return;
+    }
+    // node:worker_threads: an EventEmitter with neither onmessage nor onerror,
+    // so assigning `onmessage` would never deliver a message.
+    if (typeof worker.on === "function") {
+        worker.on("message", (data: unknown) => onMessage({ data }));
+        worker.on("error", onError);
+        worker.on("messageerror", onMessageError);
+        return;
+    }
+    if ("onmessage" in worker) {
+        worker.onmessage = onMessage;
+        worker.onerror = onError;
+        worker.onmessageerror = onMessageError;
+        return;
+    }
+    throw new EnvironmentError(
+        `${name}: worker exposes neither addEventListener, on, nor onmessage — ` +
+            "cannot receive responses",
+    );
+}

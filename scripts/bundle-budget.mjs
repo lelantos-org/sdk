@@ -1,154 +1,132 @@
 #!/usr/bin/env node
-// Per-entry eager-bundle budgets.
+// Size budgets for the built package.
 //
-// `check-bundle-size.mjs` measures all of `dist/`, which says nothing about
-// what an application actually downloads. This one bundles representative
-// imports with esbuild and measures the *eager* graph: the entry chunk plus
-// every chunk reachable from it by static import. Code behind a dynamic
-// import lands in its own chunk and is reported separately.
+// Two measures, both gated:
 //
-// Budgets are minified bytes, not gzipped. Raise one deliberately, the same
-// way as in `check-bundle-size.mjs`, and prefer to understand a regression
-// first — the usual causes are a CommonJS dependency that cannot be
+//   - dist total: every emitted JS file under `dist/` (no `.d.ts`, maps or wasm). A coarse "did
+//     something unexpected land in dist" tripwire. `build` strips comments, so this is code.
+//   - per-entry eager graph: esbuild bundles a representative import and measures the entry chunk
+//     plus every chunk reachable from it by static import. Code behind a dynamic import lands in
+//     its own chunk and is reported as lazy. `forbid` also walks the module graph itself.
+//
+// Budgets are minified bytes, not gzipped; figures print in KiB. Raise one deliberately, and
+// understand a regression first — the usual causes are a CommonJS dependency that cannot be
 // tree-shaken and a static import of something that should be lazy.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { build } from "esbuild";
+import { DIST, ROOT, ts, walk } from "./lib/package.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..");
+/** Budget for all emitted JS under `dist/`. */
+const DIST_MAX = 513_024; // 501 KiB
 
 /**
- * `source` is bundled as-is; `max` is the eager budget in bytes.
+ * Modules the spend path owns. An app entry must reach them only through a dynamic import, so a
+ * caller who never spends never downloads them.
+ */
+const SPEND_PATH = [
+    "bundle/spend.js",
+    "wallet/tx/run-spend.js",
+    "wallet/tx/steps.js",
+    "wallet/ops/swap.js",
+    "wallet/ops/quote-swap.js",
+    // The wallet object's spend and quote methods, loaded on their first call.
+    "wallet/surface/spend.js",
+    // The deposit family: quote/deposit, cancel, Permit2 setup, and their surface.
+    "wallet/surface/deposit.js",
+    "wallet/ops/deposit.js",
+    "wallet/ops/cancel-deposit.js",
+    "wallet/ops/deposit-allowance.js",
+    "bundle/deposit.js",
+];
+
+/**
+ * Prover backends and their glue. The root and watch entries reach a prover only through
+ * `connect`'s lazy handle (`wallet/defaults/prover.ts` → `await import(...)`), so these must stay
+ * out of their static graphs too.
+ */
+const PROVER_PATH = ["prover/wasm-prover.js", "prover/snarkjs.js", "prover/worker-client.js"];
+
+/**
+ * `source` is bundled as-is; `max` is the eager budget in bytes. `forbid` lists `dist/`-relative
+ * modules that must not appear in the static import graph of `module` (followed through
+ * `import`/`export … from`, never `import()`), independent of how well esbuild shakes.
  *
- * The subpath entries are the ones to keep honest — they are what a
- * cost-sensitive consumer should import, and they shake down to almost
- * nothing.
- *
- * The root-barrel numbers are large for a reason that is *this harness*, not
- * the package. `splitting: true` makes esbuild preserve symbols across chunk
- * boundaries, which inhibits its own tree-shaking; the entry chunk then
- * statically imports shared chunks holding code only the lazy paths use.
- * Measured both ways, `export { isWalletError } from "@lelantos-org/sdk"` is:
- *
- *     splitting: true   340,693 B   (what this script reports)
- *     splitting: false      664 B   (what the static graph actually costs)
- *
- * 664 bytes is the honest figure — the barrel is 11 lines of pure re-exports
- * and shakes fine. So the root entries do *not* retain ~306 KB of viem for
- * nothing, and there is no architectural bug to chase there. What they measure
- * is an upper bound under a bundler configuration that shakes worse than the
- * vite/rollup pipeline a consumer actually uses.
- *
- * Splitting is still the right mode here: it is what separates eager from
- * lazy, and dropping it would inline every dynamic import instead (`connect`
- * measures 1,151,206 B that way — worse, and no longer a statement about what
- * loads first). Keep the budgets as a ratchet against *relative* growth; do
- * not read them as bytes a browser downloads.
+ * The eager figure is an upper bound, not bytes a browser downloads. `splitting: true` is what
+ * separates eager from lazy, but it also makes esbuild preserve symbols across chunk boundaries,
+ * so an entry chunk can statically import shared chunks holding code only the lazy paths use.
+ * `unsplit` (reported, never gated) is the same import bundled without splitting: the true static
+ * cost for an entry that reaches no dynamic import, and an inflated one for an entry that does.
+ * Keep the budgets as a ratchet against relative growth.
  */
 const ENTRIES = [
     {
-        // Raised from 650_000 in the 0.31 line, the second time this entry has
-        // been tipped by a small change landing on exhausted slack:
-        //
-        //     c0e0bb5, before the feature work   627,542 B
-        //     the same tree without syncVerified 649,994 B
-        //     with it                            650,741 B
-        //
-        // The lesson of those numbers is that the previous grant was too
-        // generous: ~10 KB of slack absorbed 22 KB of growth across two weeks
-        // with nobody looking, and the entry was only re-examined once it
-        // tipped. So this ceiling sits just above the measurement rather than a
-        // round number above it — the next regression should trip while it is
-        // still attributable to one commit.
-        //
-        // Nothing here moves off the eager graph by rearranging it: `connect`
-        // statically reaches `tx/steps`, `withdraw`, `transfer` and `swap`, so
-        // the whole spend path is eager already. Shrinking this entry means
-        // making that path lazy, which is an architectural change and not a
-        // budget edit — and is what a third raise should be spent on instead.
-        //
-        // Note this number is inflated by the harness (see the header) — treat
-        // a rise in it as a signal to compare against the previous commit, not
-        // as a literal download size.
-        //
-        // 653_000 → 663_240 (+10 KiB). This is the third raise the note above
-        // said should be spent on making the spend path lazy instead, so it is
-        // margin taken on credit rather than a re-baseline: the architectural
-        // fix is still owed.
-        //
-        // What happened in between is worth recording, because the raw numbers
-        // mislead. The entry tipped at 654.9 KB, and only ~0.9 KB of that was
-        // new source — the rest was three copies of `@noble/curves` (root, and
-        // nested under `viem` and `ox`) that had drifted into the lockfile.
-        // `npm dedupe` collapsed them and the entry fell to 629.3 KB, back
-        // inside the old ceiling. So this grant is not paying for growth that
-        // has happened; it is restoring the slack the previous note complained
-        // was too thin at ~0.5%.
-        //
-        // A corollary for the next person: when this trips, diff the lockfile
-        // before reading it as source growth. A duplicated transitive
-        // dependency moves this number far more than a feature does.
         name: "root: connect",
-        source: `export { connect } from "${ROOT}/dist/index.js";`,
-        max: 663_240,
+        source: `export { connect } from "${ROOT}/dist/entry/index.js";`,
+        max: 255_000,
+        module: "dist/entry/index.js",
+        forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
     {
-        // 350_000 → 360_240 (+10 KiB), for the same reason and from the same
-        // event as `root: connect` above: the duplicate `@noble/curves` copies
-        // took this to 352.0 KB, and deduping returned it to 326.4 KB.
-        //
-        // `unsplit` for this entry is 0.7 KB, so what it measures is almost
-        // entirely import-graph reach rather than the code a caller asked for.
-        // That makes it sensitive to dependency shape in a way the subpath
-        // entries below are not — which is exactly why both are kept.
         name: "root: errors only",
-        source: `export { isWalletError } from "${ROOT}/dist/index.js";`,
-        max: 360_240,
+        source: `export { isWalletError } from "${ROOT}/dist/entry/index.js";`,
+        max: 24_000,
+        module: "dist/entry/index.js",
+        forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
     {
-        // `connect` via its own subpath. The spend path sits behind `await
-        // import(...)` in `wallet.ts`, so viem is absent from the eager graph.
-        // `root: connect` measures higher: the root barrel statically
-        // re-exports `ViemChainAdapter`. Both entries track the two import
-        // styles.
-        name: "connect: subpath",
-        source: `export { connect } from "${ROOT}/dist/wallet/connect/index.js";`,
-        max: 245_000,
+        // Formatting a balance must stay cheap: `wallet/assets/amount.ts` bundles no registry code.
+        name: "root: amounts",
+        source: `export { formatAmount, parseAmount } from "${ROOT}/dist/entry/index.js";`,
+        max: 24_000,
     },
     {
-        name: "subpath: errors",
-        source: `export { isWalletError } from "${ROOT}/dist/core/errors.js";`,
-        max: 4_000,
+        // The watch-only wallet. Must not reach the prover, the relayer submitter or the coin
+        // selector; `check-layers.mjs` rule 5 covers direct imports. Its eager graph is the crypto
+        // stack and the scan loop, so it tracks `primitives: keys`.
+        name: "watch: connectWatch",
+        source: `export { connectWatch } from "${ROOT}/dist/entry/watch.js";`,
+        max: 148_000,
+        module: "dist/entry/watch.js",
+        forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
     {
-        name: "subpath: networks",
-        source: `export { NETWORKS } from "${ROOT}/dist/chain/networks.js";`,
-        max: 4_000,
-    },
-    {
-        // 220_000 -> 150_000, after Poseidon arities 7 and 8 left the JS table
-        // in `crypto/poseidon.ts`. Each arity is a round-constant table emitted
-        // as code, and the protocol hashes at neither width.
-        name: "keys: derive + address",
-        source: `export { deriveKeysFromMnemonic, encodeAddress } from "${ROOT}/dist/keys/index.js";`,
+        // Key derivation and address encoding: the crypto stack's eager graph.
+        name: "primitives: keys",
+        source: `export { deriveKeysFromMnemonic, encodeAddress } from "${ROOT}/dist/entry/primitives.js";`,
         max: 150_000,
     },
     {
-        // The watch-only wallet. Must not reach the prover, the relayer
-        // submitter or the coin selector; `check-layers.mjs` rule 5 covers
-        // direct imports. Its eager graph is the crypto stack and the scan
-        // loop, so it tracks `keys: derive + address`.
-        name: "watch: connectWatch",
-        source: `export { connectWatch } from "${ROOT}/dist/wallet/watch/index.js";`,
-        max: 148_000,
+        // Pure arithmetic: none of the bundle builders `./protocol` also forwards.
+        name: "protocol: fees",
+        source: `export { depositTotals, withdrawNet } from "${ROOT}/dist/entry/protocol.js";`,
+        max: 2_500,
+    },
+    {
+        name: "services: relayer",
+        source: `export { RelayerClient } from "${ROOT}/dist/entry/services.js";`,
+        max: 10_500,
+    },
+    {
+        // `createWallet` keeps the spend path lazy like `connect`; `./advanced` statically forwards
+        // the viem adapter and the signers, which the split harness shares into the entry chunk.
+        name: "advanced: createWallet",
+        source: `export { createWallet } from "${ROOT}/dist/entry/advanced.js";`,
+        max: 250_000,
+        module: "dist/entry/advanced.js",
+        forbid: SPEND_PATH,
+    },
+    {
+        // The worker-backed prover a browser app imports; the wasm/snarkjs backends load lazily.
+        name: "prover: WorkerProver",
+        source: `export { WorkerProver } from "${ROOT}/dist/entry/prover.js";`,
+        max: 18_000,
     },
     {
         name: "x402: pay",
-        source: `export { x402 } from "${ROOT}/dist/x402/index.js";`,
+        source: `export { x402 } from "${ROOT}/dist/entry/x402.js";`,
         max: 100_000,
     },
     {
@@ -158,12 +136,27 @@ const ENTRIES = [
     },
 ];
 
-const tmp = mkdtempSync(join(tmpdir(), "lelantos-budget-"));
+const kib = (n) => `${(n / 1024).toFixed(1)} KiB`;
 let failed = false;
 
+if (!existsSync(DIST)) {
+    console.error("bundle-budget: dist/ missing. Run `npm run build` first.");
+    process.exit(1);
+}
+
+const emitted = walk(DIST).filter((f) => !/\.(d\.ts|map|wasm)$/.test(f));
+const distBytes = emitted.reduce((n, f) => n + statSync(f).size, 0);
+failed ||= distBytes > DIST_MAX;
+console.log(
+    `${distBytes <= DIST_MAX ? "ok  " : "FAIL"}  ${"dist total".padEnd(24)} ` +
+        `${kib(distBytes).padStart(15)} / ${kib(DIST_MAX).padStart(10)}   ${emitted.length} files`,
+);
+
+const tmp = mkdtempSync(join(tmpdir(), "lelantos-budget-"));
 try {
     for (const entry of ENTRIES) {
-        const file = join(tmp, `${entry.name.replace(/\W+/g, "-")}.js`);
+        const slug = entry.name.replace(/\W+/g, "-");
+        const file = join(tmp, `${slug}.js`);
         writeFileSync(file, entry.source);
 
         const bundleOnce = (splitting, tag) =>
@@ -174,25 +167,20 @@ try {
                 platform: "browser",
                 minify: true,
                 splitting,
-                outdir: join(tmp, "out", `${entry.name.replace(/\W+/g, "-")}-${tag}`),
+                outdir: join(tmp, "out", `${slug}-${tag}`),
                 external: ["node:*"],
                 metafile: true,
                 logLevel: "error",
             });
 
-        const result = await bundleOnce(true, "split");
-        // Same graph without splitting: esbuild shakes at the symbol level and
-        // the result is the true static cost. Reported, never gated — for an
-        // entry that reaches a dynamic import it inlines that code instead, so
-        // it is a floor for some entries and a ceiling for others.
+        const outs = (await bundleOnce(true, "split")).metafile.outputs;
         const flatBytes = Object.values((await bundleOnce(false, "flat")).metafile.outputs).reduce(
             (n, o) => n + o.bytes,
             0,
         );
 
-        const outs = result.metafile.outputs;
-        // esbuild reports `entryPoint` relative to cwd, and a dynamic import
-        // gets its own `entryPoint` too — match our probe by basename.
+        // esbuild reports `entryPoint` relative to cwd, and a dynamic import gets its own
+        // `entryPoint` too — match our probe by basename.
         const probe = basename(file);
         const start = Object.keys(outs).find((k) => outs[k].entryPoint?.endsWith(probe));
         if (!start) throw new Error(`bundle-budget: no output chunk for ${probe}`);
@@ -202,14 +190,21 @@ try {
             .filter(([k]) => !eager.has(k) && k.endsWith(".js"))
             .reduce((n, [, v]) => n + v.bytes, 0);
 
-        const ok = eagerBytes <= entry.max;
+        const reached = entry.module
+            ? forbiddenStaticImports(join(ROOT, entry.module), entry.forbid ?? [])
+            : [];
+
+        const ok = eagerBytes <= entry.max && reached.length === 0;
         failed ||= !ok;
         console.log(
             `${ok ? "ok  " : "FAIL"}  ${entry.name.padEnd(24)} ` +
-                `eager ${kb(eagerBytes).padStart(9)} / ${kb(entry.max).padStart(9)}` +
-                `   lazy ${kb(lazyBytes).padStart(9)}` +
-                `   unsplit ${kb(flatBytes).padStart(9)}`,
+                `eager ${kib(eagerBytes).padStart(9)} / ${kib(entry.max).padStart(10)}` +
+                `   lazy ${kib(lazyBytes).padStart(10)}` +
+                `   unsplit ${kib(flatBytes).padStart(10)}`,
         );
+        for (const { module, via } of reached) {
+            console.log(`      statically imports ${module}\n        via ${via.join(" <- ")}`);
+        }
     }
 } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -217,12 +212,56 @@ try {
 
 if (failed) {
     console.error(
-        "\nbundle-budget: FAIL — an entry grew past its eager budget.\n" +
-            "Find the cause with `--metafile` and esbuild's analyzer before raising a limit.",
+        "\nbundle-budget: FAIL — dist or an entry grew past its budget, or an entry statically imports the spend path.\n" +
+            "Find the cause with `--metafile` and esbuild's analyzer before raising a limit; " +
+            "reach a forbidden module through `await import(...)` instead.",
     );
     process.exit(1);
 }
 console.log("bundle-budget: OK");
+
+/**
+ * Forbidden modules reachable from `entry` through static imports, each with the import chain that
+ * reaches it.
+ *
+ * Follows every relative `import`/`export … from` in the emitted JS; `import()` is not a statement,
+ * so lazy edges are skipped by construction. Deliberately not esbuild's metafile, whose import
+ * lists are already tree-shaken (the package declares `sideEffects`), so an unused re-export of the
+ * spend path would not show up there.
+ */
+function forbiddenStaticImports(entry, forbid) {
+    if (forbid.length === 0) return [];
+    const parent = new Map([[entry, null]]);
+    const stack = [entry];
+    while (stack.length) {
+        const cur = stack.pop();
+        const sf = ts.createSourceFile(
+            cur,
+            readFileSync(cur, "utf8"),
+            ts.ScriptTarget.Latest,
+            false,
+            ts.ScriptKind.JS,
+        );
+        for (const st of sf.statements) {
+            if (!ts.isImportDeclaration(st) && !ts.isExportDeclaration(st)) continue;
+            const spec = st.moduleSpecifier;
+            if (!spec || !ts.isStringLiteral(spec) || !spec.text.startsWith(".")) continue;
+            const next = resolve(dirname(cur), spec.text);
+            if (parent.has(next) || !existsSync(next)) continue;
+            parent.set(next, cur);
+            stack.push(next);
+        }
+    }
+    const out = [];
+    for (const module of parent.keys()) {
+        const hit = forbid.find((f) => module.endsWith(`/${f}`));
+        if (!hit) continue;
+        const via = [];
+        for (let c = parent.get(module); c; c = parent.get(c)) via.push(relative(ROOT, c));
+        out.push({ module: hit, via });
+    }
+    return out;
+}
 
 /** Chunks reachable from `start` by static import — what the browser fetches first. */
 function staticClosure(outs, start) {
@@ -237,8 +276,4 @@ function staticClosure(outs, start) {
         }
     }
     return seen;
-}
-
-function kb(n) {
-    return `${(n / 1024).toFixed(1)} KB`;
 }

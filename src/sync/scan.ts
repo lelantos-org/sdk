@@ -31,12 +31,12 @@ export interface ScanHit extends NotePayload {
 }
 
 /**
- * Per-scan tallies. They are what distinguishes a systematic decode failure
- * from an empty result; the log line alone cannot.
+ * Per-scan tallies, which distinguish a systematic decode failure from an
+ * empty result.
  */
 export interface ScanStats {
     scanned: number;
-    /** ECDH/ChaCha tag mismatch — expected for notes that are not ours. */
+    /** ECDH/ChaCha tag mismatch; expected for notes addressed to other keys. */
     notOurs: number;
     /** Tag verified but the plaintext was not a NotePayload. Should be 0. */
     decodeFailed: number;
@@ -70,9 +70,8 @@ export function scanNotes(
     inputs: ScanInput[],
     stats?: ScanStats,
 ): ScanHit[] {
-    // `pk` is not transmitted — the recipient reconstructs it from their own
-    // `ivk` — so it is derived once here and used to reproduce each hit's
-    // commitment below.
+    // `pk` is not transmitted; it is derived once from `ivk` to reproduce each
+    // hit's commitment.
     const pk = derivePkFromIvk(P, ivk);
     const hits: ScanHit[] = [];
     for (const inp of inputs) {
@@ -91,15 +90,13 @@ export function scanNotes(
                 if (stats) stats.zeroValue++;
                 continue;
             }
-            // The feed supplies `cm`; nothing else on this path checks that it
-            // is the commitment this plaintext actually opens. Without the
-            // check a note that decrypts but was committed under a different
-            // `pk` is stored, counted in the balance, and offered to the
-            // selector — then fails at spend time, after a full Groth16
-            // prove, because `toSpentNoteFromPath` recomputes `cm` from
-            // `(asset, value, ownPk, rho, rcm)` and gets a value that is not
-            // the leaf at `leafIndex`. One Poseidon-4 per hit — and hits are
-            // rare — buys a local rejection with a counter instead.
+            // The feed supplies `cm`, and this is the only check that the
+            // plaintext opens it. Without it, a note committed under a different
+            // `pk` would be stored, counted in the balance and selected, then
+            // fail at spend time after a full Groth16 prove, because
+            // `toSpentNoteFromPath` recomputes `cm` from
+            // `(asset, value, ownPk, rho, rcm)` and it does not match the leaf at
+            // `leafIndex`. The cost is one Poseidon-4 per hit.
             if (buildNoteCommitment(P, { ...payload, pk }) !== inp.cm) {
                 if (stats) stats.cmMismatch++;
                 if (log.enabled("debug")) {
@@ -119,8 +116,8 @@ export function scanNotes(
             if (stats) stats.hits++;
         } catch (err) {
             // One corrupt note must not abort a scan, but a decode failure
-            // after a verified ChaCha tag means the payload encoding has
-            // drifted — a protocol bug worth surfacing.
+            // after a verified ChaCha tag indicates a payload encoding mismatch,
+            // so it is counted and logged.
             if (stats) stats.decodeFailed++;
             if (log.enabled("debug")) {
                 log.debug("note decrypted but failed to decode", {

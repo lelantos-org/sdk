@@ -1,63 +1,69 @@
 import { describe, expect, it, vi } from "vitest";
-import { testWallet } from "./wallet-test-utils.js";
+import { testWallet } from "../test-utils/wallet.js";
 
-// `Scanner.dispose` existed with no caller anywhere, and `WorkerPoolScanner`
-// spawns 2-8 workers per wallet — so an app rebuilding its wallet on an
-// account or network switch leaked a whole pool, and its wasm heaps, each time.
+// Ownership: a wallet disposes only what the SDK built. A caller-supplied `Scanner` / `Prover` may
+// be shared across wallets (webapp: one tab-wide `WorkerProver`), so `dispose()` and a failed build
+// must leave it running. Built resources (a `ProverConfig` prover, a `{ workers }` pool) are the
+// wallet's and are released with it.
 
-describe("Wallet.dispose", () => {
-    it("releases the scanner and the prover", async () => {
-        const scanner = { scan: async () => [], dispose: vi.fn(async () => undefined) };
-        const prover = { prove: async () => ({}) as never, dispose: vi.fn(async () => undefined) };
-        const { wallet } = await testWallet({ scanner, prover });
+const built = vi.hoisted(() => ({
+    dispose: vi.fn(async () => undefined),
+    preload: vi.fn(async () => undefined),
+}));
+vi.mock("../prover/worker-client.js", () => ({
+    WorkerProver: class {
+        prove = async () => ({}) as never;
+        preload = built.preload;
+        dispose = built.dispose;
+    },
+}));
 
-        await wallet.dispose();
+const WORKER_CONFIG = {
+    artifacts: { circuit: "/c.wasm", zkey: "/c.zkey" },
+    worker: () => ({}) as never,
+};
 
-        expect(scanner.dispose).toHaveBeenCalledOnce();
-        expect(prover.dispose).toHaveBeenCalledOnce();
-    });
-
-    it("releases at scope exit via `await using`", async () => {
-        const scanner = { scan: async () => [], dispose: vi.fn(async () => undefined) };
-        const { wallet } = await testWallet({ scanner });
-
-        {
-            await using scoped = wallet;
-            expect(scoped.address).toBeDefined();
-        }
-
-        expect(scanner.dispose).toHaveBeenCalledOnce();
-    });
-
-    it("is idempotent", async () => {
-        const scanner = { scan: async () => [], dispose: vi.fn(async () => undefined) };
-        const { wallet } = await testWallet({ scanner });
+describe("wallet.dispose", () => {
+    // A caller-supplied scanner and prover, and `await using`, are covered in `connect/connect.test.ts`.
+    it("releases a prover it built from a ProverConfig", async () => {
+        built.dispose.mockClear();
+        const { wallet } = await testWallet({ prover: WORKER_CONFIG });
+        await wallet.warmProver();
 
         await wallet.dispose();
-        await wallet.dispose();
 
-        expect(scanner.dispose).toHaveBeenCalledOnce();
+        expect(built.dispose).toHaveBeenCalledOnce();
     });
 
     it("works on backends that hold nothing", async () => {
         // `dispose` is optional on both ports: the in-process scanner and the
-        // snarkjs prover have nothing a GC will not reclaim.
+        // snarkjs prover hold only GC-reclaimable resources.
         const { wallet } = await testWallet({ scanner: { scan: async () => [] } });
         await expect(wallet.dispose()).resolves.toBeUndefined();
     });
 
-    it("still releases the prover when the scanner throws", async () => {
-        const scanner = {
-            scan: async () => [],
-            dispose: vi.fn(async () => {
-                throw new Error("worker already gone");
-            }),
-        };
-        const prover = { prove: async () => ({}) as never, dispose: vi.fn(async () => undefined) };
-        const { wallet } = await testWallet({ scanner, prover });
+    it("does not start a prover build just to dispose it", async () => {
+        built.dispose.mockClear();
+        const { wallet } = await testWallet({ prover: WORKER_CONFIG });
+        await wallet.dispose();
+        expect(built.dispose).not.toHaveBeenCalled();
+    });
+});
 
-        // Settled, not raced: one backend failing must not strand the other.
-        await expect(wallet.dispose()).resolves.toBeUndefined();
-        expect(prover.dispose).toHaveBeenCalledOnce();
+describe("createWallet failure", () => {
+    it("leaves a caller-supplied scanner and prover running", async () => {
+        const scanner = { scan: async () => [], dispose: vi.fn(async () => undefined) };
+        const prover = { prove: async () => ({}) as never, dispose: vi.fn(async () => undefined) };
+        const noteStore = {
+            load: async () => {
+                throw new Error("disk gone");
+            },
+            save: async () => undefined,
+        };
+
+        await expect(testWallet({ scanner, prover, noteStore })).rejects.toThrow(/disk gone/);
+
+        expect(scanner.dispose).not.toHaveBeenCalled();
+        expect(prover.dispose).not.toHaveBeenCalled();
     });
 });

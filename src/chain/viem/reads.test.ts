@@ -1,13 +1,11 @@
+import { createPublicClient, custom } from "viem";
 import { describe, expect, it } from "vitest";
 import { assetId, branded, type EvmAddress } from "../../core/brand.js";
-import { RAY } from "../../core/units.js";
+import { WireFormatError } from "../../errors/network.js";
+import { RAY } from "../../protocol/units.js";
 import type { ViemCtx } from "./ctx.js";
+import { chainError } from "./errors.js";
 import { fetchAssetYield } from "./reads.js";
-
-// A pool that predates the yield mixin has no `yieldState` selector, and every
-// asset on it is a plain one. That reverting call is the only signal there is,
-// so it has to read as "no yield" rather than as a failed asset fetch —
-// otherwise the SDK stops working against every pool deployed so far.
 
 const MASP = branded<EvmAddress>("0x0000000000000000000000000000000000000a11");
 const VENUE = branded<EvmAddress>("0x000000000000000000000000000000000000e4ee");
@@ -21,8 +19,7 @@ interface Call {
 
 /**
  * A pool that answers `yieldState` with `state` and the venue with `lent`,
- * recording every read. A `state` of `undefined` is the pre-mixin pool: the
- * selector is not there, so the call reverts.
+ * recording every read.
  */
 function stubPool(state: unknown, lent?: bigint): { ctx: ViemCtx; calls: Call[] } {
     const calls: Call[] = [];
@@ -32,7 +29,6 @@ function stubPool(state: unknown, lent?: bigint): { ctx: ViemCtx; calls: Call[] 
             readContract: async (args: Call) => {
                 calls.push({ address: args.address, functionName: args.functionName });
                 if (args.functionName !== "yieldState") return lent;
-                if (state === undefined) throw new Error("execution reverted: no such function");
                 return state;
             },
         },
@@ -53,21 +49,13 @@ const yieldingState = {
 };
 
 describe("fetchAssetYield", () => {
-    it("reads as no-yield when the pool has no mixin", async () => {
-        const { ctx, calls } = stubPool(undefined);
-
-        expect(await fetchAssetYield(ctx, ID)).toBeUndefined();
-        // The revert is the answer; nothing follows it.
-        expect(calls).toHaveLength(1);
-    });
-
     it("reports a plain id on a yield pool without pricing it", async () => {
         const { ctx, calls } = stubPool({ ...yieldingState, venue: ZERO_ADDRESS });
 
-        // `RAY` and no rate, not the index the pool happened to return: nothing
-        // is outstanding against a venue that was never bound.
+        // `RAY` and no rate, not the index the pool returns: nothing is
+        // outstanding against an unbound venue.
         expect(await fetchAssetYield(ctx, ID)).toEqual({ index: RAY, yieldEnabled: false });
-        // No venue to ask, so the second call is not made.
+        // No venue, so no second call.
         expect(calls.map((c) => c.functionName)).toEqual(["yieldState"]);
     });
 
@@ -77,14 +65,91 @@ describe("fetchAssetYield", () => {
         expect(await fetchAssetYield(ctx, ID)).toEqual({
             index: yieldingState.index,
             yieldEnabled: true,
-            // gross = what the venue holds + what the pool held back.
-            // supply = the depositors' units *and* the accrued performance fee's;
-            // dropping the fee leg would price the rest above what the pool pays.
+            // gross = venue holdings + pool idle balance.
+            // supply = depositors' units plus the accrued performance fee's;
+            // omitting the fee leg would price the rest above what the pool pays.
             rate: { gross: 1_100n, supply: 1_000n },
         });
         expect(calls).toEqual([
             { address: MASP, functionName: "yieldState" },
             { address: VENUE, functionName: "totalAssets" },
         ]);
+    });
+});
+
+describe("fetchAssetYield failure handling", () => {
+    /** A real viem client whose `eth_call` is answered by `onCall`, so errors are viem's own. */
+    function viemPool(onCall: () => unknown): ViemCtx {
+        const publicClient = createPublicClient({
+            transport: custom(
+                {
+                    request: async ({ method }: { method: string }) => {
+                        if (method !== "eth_call") throw new Error(`unexpected ${method}`);
+                        return onCall();
+                    },
+                    // viem's own retries would only slow the failure cases down.
+                },
+                { retryCount: 0 },
+            ),
+        });
+        return { maspAddress: MASP, publicClient } as unknown as ViemCtx;
+    }
+
+    it("propagates a revert instead of reading it as no-yield", async () => {
+        const ctx = viemPool(() => {
+            throw Object.assign(new Error("execution reverted"), { code: 3, data: "0x" });
+        });
+        await expect(fetchAssetYield(ctx, ID)).rejects.toThrow();
+    });
+
+    it("propagates a transport failure instead of reading it as no-yield", async () => {
+        const ctx = viemPool(() => {
+            throw new TypeError("fetch failed");
+        });
+        // Read as "no yield", a yield asset would be priced at RAY for the wallet's life.
+        await expect(fetchAssetYield(ctx, ID)).rejects.toThrow(/fetch failed/);
+    });
+
+    it("propagates a rate limit", async () => {
+        const ctx = viemPool(() => {
+            throw Object.assign(new Error("Too Many Requests"), { code: 429 });
+        });
+        await expect(fetchAssetYield(ctx, ID)).rejects.toThrow();
+    });
+});
+
+describe("chainError", () => {
+    it("classifies what the viem adapter's calls throw", () => {
+        const transport = Object.assign(new Error("fetch failed"), { name: "HttpRequestError" });
+        expect(chainError("fetchAsset", transport)).toMatchObject({
+            code: "RPC_FAILED",
+            method: "fetchAsset",
+            retryable: true,
+            cause: transport,
+        });
+
+        const revert = Object.assign(new Error("reverted"), {
+            name: "ContractFunctionRevertedError",
+        });
+        expect(chainError("fetchAsset", revert)).toMatchObject({
+            code: "RPC_FAILED",
+            retryable: false,
+        });
+
+        const timeout = Object.assign(new Error("timed out"), {
+            name: "WaitForTransactionReceiptTimeoutError",
+        });
+        expect(chainError("submitDeposit", timeout)).toMatchObject({
+            code: "TX_MINING",
+            retryable: true,
+        });
+
+        expect(chainError("signPermit2", { code: 4001 }, "sign-permit")).toMatchObject({
+            code: "USER_REJECTED",
+            action: "sign-permit",
+        });
+
+        const typed = new WireFormatError("$.logs", "two logs");
+        expect(chainError("fetchDepositEscrowed", typed)).toBe(typed);
     });
 });

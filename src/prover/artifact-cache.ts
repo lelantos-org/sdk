@@ -1,16 +1,15 @@
 // Persistent storage for the proving artifacts.
 //
-// The default shape is 4x4, whose zkey is ~40 MB. Without persistence that
-// download repeats on every page load *and* every worker spawn: the in-memory
-// map in `./artifacts.ts` is per-JS-realm, and the prover worker has its own
-// realm, so it never shares with the main thread.
+// The default shape's zkey is ~48 MB. The in-memory memo in
+// `./artifact-bytes.ts` is per JS realm and the prover worker has its own realm, so
+// without persistence the download repeats on every page load and worker spawn.
 //
-// The Cache API fixes both at once — it is origin-scoped, so a worker read hits
-// the entry the window wrote. It is also available in both Window and Worker
-// contexts, which `localStorage` and (portably) OPFS are not.
+// The Cache API is origin-scoped (a worker read hits the entry the window
+// wrote) and available in both Window and Worker contexts, unlike
+// `localStorage` and (portably) OPFS.
 //
-// Nothing here may throw. A cache is an optimisation; a storage failure must
-// degrade to a network fetch, never to a failed proof.
+// Nothing here may throw: a storage failure must degrade to a network fetch,
+// never to a failed proof.
 
 import { isHttpUrl } from "../core/url.js";
 import { getLogger } from "../log/logger.js";
@@ -20,15 +19,13 @@ const log = getLogger("lelantos:prover:cache");
 /**
  * Persistence port for artifact bytes, keyed by absolute URL.
  *
- * Implement this to store artifacts somewhere other than the Cache API —
- * IndexedDB, OPFS, an Electron userData directory — and install it with
- * `configureArtifactCache`.
+ * Implement this to store artifacts outside the Cache API (IndexedDB, OPFS, an
+ * Electron userData directory) and install it with `configureArtifactCache`.
  *
- * Unlike the wallet-tier ports (`NoteStore`, `TreePersistence`), **neither
- * method may throw**: those persist state whose loss is a correctness problem,
- * whereas a cache is an optimisation and a storage failure must degrade to a
- * network fetch. They are also `get`/`put` rather than `load`/`save` because
- * this port is keyed — it holds one entry per artifact URL, not one document.
+ * Unlike the wallet-tier ports (`NoteStore`, `TreePersistence`), whose data
+ * loss is a correctness problem, **neither method may throw**: a storage
+ * failure must degrade to a network fetch. The port is keyed (one entry per
+ * artifact URL), hence `get`/`put` rather than `load`/`save`.
  */
 export interface ArtifactCache {
     /** Cached bytes for `url`, or `null` on a miss. Must not throw. */
@@ -38,8 +35,8 @@ export interface ArtifactCache {
 }
 
 /**
- * Cache name. Versioned so a future format change can orphan old entries
- * rather than misread them; `clearArtifactCache` only clears the current one.
+ * Cache name. Versioned so a format change orphans existing entries rather than
+ * misreading them; `clearArtifactCache` clears only the current version.
  */
 export const ARTIFACT_CACHE_NAME = "lelantos-prover-v1";
 
@@ -53,16 +50,15 @@ function available(): boolean {
  *
  * Entries are keyed by the exact artifact URL, so **the URL is the version**.
  * Proving keys are immutable per circuits release; serve a new release under a
- * new path (or call {@link clearArtifactCache}) rather than expecting
- * revalidation. There is no conditional request here: a
- * round-trip on every load would defeat the point.
+ * new path (or call {@link clearArtifactCache}). Entries are never revalidated,
+ * to avoid a round-trip on every load.
  */
 export function cacheApiArtifactCache(): ArtifactCache | null {
     if (!available()) return null;
     return {
         async get(url) {
-            // The Cache API stores `Request`s, which must be http(s). The
-            // built-in caller already filters, so this guards direct users.
+            // The Cache API stores `Request`s, which must be http(s). Guards
+            // direct callers; the built-in caller already filters.
             if (!isHttpUrl(url)) return null;
             try {
                 const cache = await caches.open(ARTIFACT_CACHE_NAME);
@@ -80,8 +76,8 @@ export function cacheApiArtifactCache(): ArtifactCache | null {
             try {
                 const cache = await caches.open(ARTIFACT_CACHE_NAME);
                 // `BodyInit` excludes SharedArrayBuffer-backed views. These
-                // bytes always come from `fetch` or `readFile`, never from the
-                // rayon shared heap, so the narrowing holds.
+                // bytes come from `fetch` or `readFile`, never the rayon shared
+                // heap, so the narrowing is sound.
                 const body = bytes as Uint8Array<ArrayBuffer>;
                 await cache.put(
                     url,
@@ -93,7 +89,7 @@ export function cacheApiArtifactCache(): ArtifactCache | null {
                     }),
                 );
             } catch (err) {
-                // QuotaExceededError is the expected one at tens of MB per shape.
+                // Typically QuotaExceededError, at tens of MB per shape.
                 log.warn("artifact cache write failed", { url, bytes: bytes.length, err });
             }
         },
@@ -102,7 +98,7 @@ export function cacheApiArtifactCache(): ArtifactCache | null {
 
 /**
  * Drop every cached artifact. Use after publishing new proving keys under
- * URLs that did not change, or to reclaim the ~90 MB all three shapes occupy.
+ * unchanged URLs, or to reclaim the ~52 MB the artifacts occupy.
  *
  * Resolves to `false` when there was nothing to delete or the Cache API is
  * unavailable.

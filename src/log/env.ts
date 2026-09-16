@@ -1,9 +1,8 @@
 // Environment-variable knobs, read as a pure function.
 //
-// Nothing here runs at import time — `connect()` calls `loggingFromEnv()`
-// once and passes the result to `configureLogging`. That preserves
-// `sideEffects: false` and leaves programmatic configuration in charge when
-// both are present.
+// Nothing runs at import time: `connect()` calls `loggingFromEnv()` once and passes the result to
+// `configureLogging`. This preserves `sideEffects: false` and lets programmatic configuration take
+// precedence when both are present.
 //
 // | Variable                          | Effect                                    |
 // |-----------------------------------|-------------------------------------------|
@@ -13,9 +12,8 @@
 // | LELANTOS_PROVER_ARTIFACTS_DIR      | artifact lookup dir (not a log knob)      |
 // | LELANTOS_DEBUG                     | rayon worker bootstrap only — see below   |
 //
-// `wasm/rayon/bootstrap.mjs` is a raw asset spawned by Node before any SDK
-// module loads, so it cannot use this table; it reads `LELANTOS_DEBUG`
-// directly. That is the one documented exception.
+// Exception: `runtime/wasm/rayon/bootstrap.mjs` is a raw asset spawned by Node before any SDK module
+// loads, so it reads `LELANTOS_DEBUG` directly.
 
 import type { LoggingConfig, LogLevel } from "./logger.js";
 
@@ -27,8 +25,7 @@ function env(name: string): string | undefined {
 }
 
 /**
- * Logging configuration implied by the environment, or `null` when no
- * logging variables are set. Never reads anything at import time.
+ * Logging configuration implied by the environment, or `null` when no logging variables are set.
  */
 export function loggingFromEnv(): LoggingConfig | null {
     const namespaces = env("LELANTOS_LOG");

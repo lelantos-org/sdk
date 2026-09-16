@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// Sync src/version.ts from package.json#version. Runs as `prebuild`.
-// Keeps `VERSION` export aligned with the published package version
-// without manual edits.
+// Sync src/version.ts from package.json#version. Runs first in `build` and `typecheck`, so the
+// `VERSION` export stays aligned with the published package version without manual edits.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

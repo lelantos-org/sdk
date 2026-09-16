@@ -16,9 +16,9 @@ export interface RelayerSubmitResponse {
  * {@link address}; a chain that omits it charges nothing. There is no
  * `required` flag, because a flag could disagree with the object's presence.
  *
- * Terms only — no amount. An amount moves with the gas price and an oracle
- * rate, and `/chains` is a boot registry held behind a 60s cache; ask
- * `/v1/spend/estimate` for the live number.
+ * Terms only, no amount: an amount moves with the gas price and an oracle rate,
+ * and `/chains` is a boot registry behind a 60s cache. `/v1/spend/estimate`
+ * returns the live amount.
  *
  * @internal
  */
@@ -68,8 +68,20 @@ export interface ChainInfo {
      * rejects work on this chain until it restarts.
      */
     desynced: boolean;
-    /** EIP-55 checksummed relayer signer, to bind into the SNARK. */
+    /**
+     * EIP-55 checksummed submitter, to bind into the SNARK as `pi.relayer`.
+     * The relayer's `Bundler` contract where it bundles, so not necessarily the
+     * EOA that signs its transactions.
+     */
     relayerAddress: string;
+    /**
+     * EIP-55 checksummed account the relayer offers as a swap's `refundTo`
+     * when the wallet has no EVM account of its own. Distinct from
+     * {@link relayerAddress}: the `Bundler` cannot move a refunded token, so a
+     * cancelled escrow refunded there is stuck. Absent when the relayer has no
+     * refund account configured.
+     */
+    refundAddress?: string;
     nativeAdapterAddress?: string;
     swapWrapperAddress?: string;
     chainName?: string;
@@ -78,8 +90,8 @@ export interface ChainInfo {
      *
      * This is the URL offered to the user's wallet via
      * `wallet_addEthereumChain`, so it must stay a general-purpose endpoint the
-     * wallet can use for everything — including writes and its own background
-     * polling. Do not point it at the read proxy: see {@link readRpcUrl}.
+     * wallet can use for everything, including writes and background polling.
+     * Do not point it at the read proxy; see {@link readRpcUrl}.
      */
     rpcUrl?: string;
     /**
@@ -131,10 +143,9 @@ export interface ChainToken {
      * Present iff the pool routes this asset's balance to a yield venue.
      *
      * Absent means plain custody, where a circuit unit is worth `scale` base
-     * units forever — and also covers a relayer predating the yield mixin.
-     * Absent for a *yielding* asset the relayer has not priced yet, which is
-     * deliberate: `scale` is not a safe fallback there, it is wrong by whatever
-     * the venue has already earned.
+     * units permanently. Also absent for a
+     * *yielding* asset the relayer has not priced yet: `scale` is not a safe
+     * fallback there, as it is off by whatever the venue has earned.
      */
     yieldState?: YieldStateInfo;
 }
@@ -154,13 +165,13 @@ export interface YieldStateInfo {
     /**
      * `gross * RAY / (supply * scale)`, for display.
      *
-     * Floored on chain, so it must not be used to size a payment — convert with
-     * `gross` and `supply`, which is how the pool itself does it.
+     * Floored on chain, so it must not be used to size a payment; convert with
+     * `gross` and `supply`, as the pool does.
      */
     index: string;
     /**
-     * The venue is no longer being supplied. Existing backing is unaffected:
-     * the asset degrades to zero-yield custody, still fully backed.
+     * The venue is not being supplied. Existing backing is unaffected: the
+     * asset degrades to zero-yield custody, still fully backed.
      */
     halted: boolean;
 }
@@ -180,7 +191,7 @@ export interface ChainsResponse {
  *
  * @internal
  */
-export interface FeeQuote {
+export interface RelayerFeeQuote {
     tokenSymbol: string;
     /** 0x-prefixed ERC-20 address. */
     tokenAddress: string;
@@ -193,9 +204,8 @@ export interface FeeQuote {
      * {@link amount} rounded **up** to a whole circuit unit — the exact `value`
      * to put in the fee note.
      *
-     * Rounded server-side because rounding down would underpay by up to one
-     * whole unit and be refused, and because two implementations of the same
-     * rounding drift apart.
+     * Rounded server-side so there is a single implementation of the rounding;
+     * rounding down would underpay by up to one unit and be refused.
      */
     circuitAmount?: string;
 }
@@ -209,7 +219,7 @@ export interface EstimateResponse {
     markupBps: number;
     /** Unix seconds (relayer clock) when the quote was produced. */
     quotedAt: number;
-    fees: FeeQuote[];
+    fees: RelayerFeeQuote[];
     /**
      * Where to send the fee note. Absent means this chain charges nothing and
      * a spend without a fee output is still relayed.

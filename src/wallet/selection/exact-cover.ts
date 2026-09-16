@@ -1,37 +1,33 @@
-// Zero-change cover search: subsets that pay the target EXACTLY.
+// Zero-change cover search: subsets that pay the target exactly.
 //
-// Worth its own budget because the expensive case is the one that finds
-// nothing, and worth its own module because it is optional — every caller
-// falls back to SFRT when no exact cover exists.
+// Optional: every caller falls back to SFRT when no exact cover is found.
 
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { cmpBigint } from "../../core/compare.js";
 import { randomBelow } from "../../core/random.js";
-import { DEFAULT_SHAPE } from "../../core/shape.js";
 import { getLogger } from "../../log/logger.js";
-import type { StoredNote } from "../note-store.js";
+import { DEFAULT_SHAPE } from "../../protocol/shape.js";
+import type { StoredNote } from "../notes/note-store.js";
 import { partitionSpendable, spendRules } from "./spendability.js";
 import type { DirectSelection, SelectOpts } from "./types.js";
 
 const log = getLogger("lelantos:wallet:selection");
 
 /**
- * Exact covers collected before the search settles for what it has.
+ * Exact covers collected before the search stops.
  *
- * The cap is on *found* covers so that a wallet holding many identical notes
- * stops early rather than enumerating every equivalent subset of them.
+ * Caps found covers so a wallet with many identical notes does not enumerate
+ * every equivalent subset.
  */
 const MAX_EXACT_COVERS = 64;
 
 /**
  * Nodes the exact-cover search may visit before abandoning the attempt.
  *
- * Separate from {@link MAX_EXACT_COVERS} because the expensive case is the one
- * that finds *nothing*: a target no subset reaches makes the walk explore
- * combinations without ever incrementing the found counter, and `C(n, 4)` over
- * a few hundred notes is far past what belongs on a spend path. Exhausting the
- * budget is not an error — the caller falls through to SFRT, which is the same
- * answer it would have given anyway.
+ * Separate from {@link MAX_EXACT_COVERS} because the expensive case finds
+ * nothing: an unreachable target never increments the found counter, and
+ * `C(n, 4)` over a few hundred notes is too slow for a spend path. Exhausting
+ * the budget is not an error; the caller falls back to SFRT.
  */
 const MAX_EXACT_NODES = 20_000;
 
@@ -79,15 +75,12 @@ function exactSubsets(values: readonly bigint[], target: bigint, size: number): 
 /**
  * A cover summing to exactly `target`, or `undefined` when none was found.
  *
- * Exact means **zero change**, which is worth reaching for beyond saving an
- * output slot: change is what lands off the withdrawal ladder and has to be
- * re-split before it can be withdrawn, so a spend producing none avoids the
- * problem rather than managing it.
+ * Exact means zero change. Change can land off the withdrawal ladder and need
+ * re-splitting before withdrawal, so a spend with none avoids that.
  *
- * Smallest cover first, then a uniform pick among equally-sized alternatives.
- * The randomness is not decoration — always taking the same exact cover would
- * make selection deterministic given a public note set, which is the property
- * SFRT's tiebreak exists to deny.
+ * Smallest cover size first, then a uniform pick among covers of that size.
+ * Always taking the same exact cover would make selection deterministic given
+ * a public note set, which SFRT's tiebreak is designed to prevent.
  */
 export function exactCover(
     all: readonly StoredNote[],
@@ -114,8 +107,8 @@ export function exactCover(
             };
         }
         if (exhausted) {
-            // Wider sizes search a strictly larger space, so they will exhaust
-            // too. Hand over to SFRT now rather than burning the budget again.
+            // Wider sizes search a strictly larger space and would exhaust too,
+            // so fall back to SFRT immediately.
             log.debug("exact-cover search hit its node budget; falling back", {
                 asset: asset.toString(),
                 target: target.toString(),

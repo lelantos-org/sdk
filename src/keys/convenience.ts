@@ -1,13 +1,11 @@
 // Context-free wrappers over the key and FMD primitives.
 //
-// The primitives take explicit `Poseidon` / `Jubjub` instances because the
-// worker and benchmark paths supply their own. Application code has no reason
-// to know those types exist, so these wrappers resolve the shared context
-// (`cryptoContext`) and are what the root barrel exports.
+// The primitives take explicit `Poseidon` / `Jubjub` instances because the worker and benchmark
+// paths supply their own. These wrappers resolve the shared `cryptoContext` instead and are the
+// variants the root barrel exports.
 
 import { cryptoContext } from "../crypto/context.js";
-import type { FmdDetectionKey } from "../fmd/fmd.js";
-import { FMD_DEFAULT_GAMMA } from "../fmd/fmd.js";
+import { FMD_DEFAULT_GAMMA, type FmdDetectionKey } from "../fmd/keys.js";
 import { type DecodedAddress, decodeAddress } from "./address.js";
 import { detectionKeyFor, type ViewingKey } from "./keys.js";
 
@@ -26,8 +24,7 @@ export async function parseAddress(addr: string): Promise<DecodedAddress> {
 /**
  * The γ FMD detection scalars for a viewing key.
  *
- * Releasing these releases the root detection secret permanently — see
- * `detectionKeyFor`.
+ * Releasing these permanently releases the root detection secret; see `detectionKeyFor`.
  */
 export async function detectionKey(
     vk: ViewingKey,

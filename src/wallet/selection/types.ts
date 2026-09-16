@@ -1,19 +1,15 @@
-// The vocabulary of coin selection: what a caller may ask for, what a selector
-// may answer, and the strategy interface that joins the two.
-//
-// Split out from the algorithms so a module that only names a selection — the
-// wallet API, the spend steps, the config — costs nothing but types.
+// Coin selection types: request options, results, and the strategy interface.
+// Kept separate from the algorithms so type-only importers pull in no code.
 
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
-import type { StoredNote } from "../note-store.js";
+import type { StoredNote } from "../notes/note-store.js";
 
 /**
  * Blocks a note must age before it becomes spendable.
  *
- * One block breaks the same-block change-link heuristic: a change note spent
- * in the block it was created in ties the two spends together for an observer
- * counting leaves. Higher values widen the window, at the cost of leaving a
- * just-received note briefly unspendable.
+ * One block defeats the same-block change-link heuristic: a change note spent
+ * in the block that created it links the two spends. Higher values widen the
+ * window at the cost of delaying spends of newly received notes.
  */
 export const DEFAULT_COOLDOWN_BLOCKS = 1;
 
@@ -29,39 +25,36 @@ export interface SelectOpts {
      */
     cooldownBlocks?: number | undefined;
     /**
-     * Chain tip. `prepareSpend` supplies it from `ChainAdapter.blockNumber()`;
+     * Chain tip. `runSpend` supplies it from `ChainAdapter.blockNumber()`;
      * an adapter without that method leaves the cooldown inert.
      */
     tipBlock?: number | undefined;
     /** Tiebreak shuffle width: notes within `(1 ± bucketPct) * pivot`. Default 0.05. */
     bucketPct?: number | undefined;
     /**
-     * Most notes a single spend may consume — the circuit's `nIn`. Defaults to
-     * `DEFAULT_SHAPE.nIn`; `prepareSpend` passes the configured shape's arity.
+     * Maximum notes a single spend may consume (the circuit's `nIn`). Defaults
+     * to `DEFAULT_SHAPE.nIn`; `runSpend` passes the configured shape's arity.
      */
     maxInputs?: number | undefined;
     /**
      * Restrict candidates to these note ids.
      *
-     * Consolidation is what needs it. Asking by *amount* does not name the
-     * notes: SFRT returns the smallest-*sum* cover of that amount, and any
-     * single note whose value falls between the target and the dust set's
-     * total is a cheaper cover than the dust set itself. When one exists the
-     * merge silently does nothing, and the retry fails for the same reason as
-     * the first attempt. Naming the ids removes the ambiguity.
+     * Used by consolidation. Selecting by amount does not pin the notes: SFRT
+     * returns the smallest-sum cover, and a single note valued between the
+     * target and the dust set's total is a cheaper cover than the dust set, so
+     * the merge would not consolidate anything.
      *
-     * Applied alongside the other spendability rules, not instead of them: an
-     * id named here that is spent, reserved or cooling down stays excluded.
+     * Applied in addition to the other spendability rules: a named id that is
+     * spent, reserved or cooling down stays excluded.
      */
     only?: readonly string[] | undefined;
     /**
      * Injectable randomness for tests: returns a uniform integer in `[0, n)`.
      *
-     * An integer picker rather than a float, because the tiebreak's whole job
-     * is to be uniform — scaling a float over `n` buckets makes them unequal
-     * unless `n` is a power of two, and the fingerprint this defends against is
-     * exactly a skew in which note gets picked. Defaults to `randomBelow`, from
-     * `@lelantos-org/sdk/core`.
+     * An integer picker rather than a float: scaling a float over `n` buckets
+     * is non-uniform unless `n` is a power of two, and a skew in which note is
+     * picked is the fingerprint the tiebreak defends against. Defaults to
+     * `randomBelow` from `@lelantos-org/sdk/primitives`.
      */
     pick?: ((n: number) => number) | undefined;
 }
@@ -89,9 +82,8 @@ export type SelectionResult = DirectSelection | ConsolidateFirst;
 /**
  * Value held back from a spend, by the rule that held it.
  *
- * Plain `bigint`, not `CircuitAmount`: the branded type is a subtype of
- * `bigint`, so a `CircuitAmount | bigint` union erases the brand and buys
- * nothing.
+ * Plain `bigint`: `CircuitAmount` is a subtype of `bigint`, so a union with it
+ * would erase the brand.
  */
 export interface WithheldValue {
     /** Reserved by a submit whose outcome was never confirmed. */
@@ -103,9 +95,8 @@ export interface WithheldValue {
     /**
      * Spendable, but beyond the circuit's input arity.
      *
-     * The odd one out: the other three need time, this one needs a
-     * consolidation. `partitionSpendable` cannot see it — it depends on
-     * `maxInputs` — so it stays `0n` until `Wallet.spendableMax` fills it in.
+     * Resolved by consolidation rather than time. It depends on `maxInputs`, so
+     * `partitionSpendable` leaves it `0n` and `WalletApi.spendableMax` fills it in.
      */
     slots: bigint;
 }
@@ -127,10 +118,9 @@ export interface SpendableMax {
     /**
      * Value the balance counts but this spend cannot reach, by cause.
      *
-     * `slots` is the one that surprises: even fully spendable notes are capped
-     * at the circuit's input arity, so a balance spread across more notes than
-     * `maxInputs` has a remainder no single spend can touch. It is not stuck —
-     * consolidating merges it — where the other three simply need time.
+     * `slots` covers spendable notes beyond the circuit's input arity: a balance
+     * spread across more than `maxInputs` notes has a remainder no single spend
+     * can reach. Consolidation recovers it; the other causes resolve over time.
      */
     withheld: WithheldValue;
 }

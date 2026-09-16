@@ -1,21 +1,4 @@
 // fmd-webserver HTTP client.
-//
-// The subscription methods are the only way a consumer obtains the capability
-// `token` that `WalletConfig.syncStrategy = { kind: "matches" }` requires, so
-// they are public despite having no in-SDK caller.
 
 export { FmdClient } from "./client.js";
-export {
-    type CommitmentChunkEntry,
-    type CommitmentChunkOut,
-    type CreateSubscriptionInput,
-    type FmdHead,
-    type FmdMatchesPage,
-    type FmdMatchOut,
-    type FmdNoteOut,
-    type FmdTreeState,
-    GAMMA_MAX,
-    GAMMA_MIN,
-    type NullifierChunkOut,
-    type SubscriptionOut,
-} from "./wire.js";
+export type { CommitmentChunkOut, FmdNoteOut, NullifierChunkOut } from "./wire.js";

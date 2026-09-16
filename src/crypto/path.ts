@@ -1,12 +1,10 @@
-// Merkle path recomputation — the verification counterpart to
-// `MerkleTree.proof()`.
+// Merkle path recomputation, the verification counterpart to `MerkleTree.proof()`.
 //
-// A second, independent implementation of the same quaternary node hashing as
-// `merkle.ts`: one builds, one checks. `path.test.ts` cross-validates the two,
-// since a divergence would let the wallet prove membership against a root the
-// chain never held.
+// An independent implementation of the quaternary node hashing in `merkle.ts`. `path.test.ts`
+// cross-validates the two, since a divergence would let the wallet prove membership against a
+// root the chain never held.
 
-import { InvalidArgumentError } from "../core/errors.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import type { Field, Poseidon } from "./poseidon.js";
 import { TAG_MERKLE } from "./tags.js";
 
@@ -15,11 +13,9 @@ const ARITY = 4;
 /**
  * Recompute the root a `(leaf, path)` pair attests to.
  *
- * The path is validated rather than coerced: this is public API reached with
- * relayer-supplied data. An out-of-range `pathIndices[lvl]` would skip the
- * `k === slot` branch, dropping the running hash and hashing the level from
- * siblings alone — a plausible root for a leaf that is not in the tree. A
- * short sibling array zero-pads to the same effect.
+ * The path is validated rather than coerced because it is relayer-supplied. An out-of-range
+ * `pathIndices[lvl]` would skip the `k === slot` branch and hash the level from siblings alone,
+ * yielding a plausible root for a leaf not in the tree. A short sibling array has the same effect.
  */
 export function rootFromPath(
     P: Poseidon,
@@ -31,6 +27,7 @@ export function rootFromPath(
         throw new InvalidArgumentError(
             `rootFromPath: ${pathElements.length} sibling levels for ` +
                 `${pathIndices.length} indices`,
+            { argument: "pathElements" },
         );
     }
 
@@ -40,6 +37,7 @@ export function rootFromPath(
         if (!Number.isInteger(slot) || slot < 0 || slot >= ARITY) {
             throw new InvalidArgumentError(
                 `rootFromPath: pathIndices[${lvl}] is ${slot}, expected 0..${ARITY - 1}`,
+                { argument: "pathIndices" },
             );
         }
         const sibs = pathElements[lvl]!;
@@ -47,15 +45,12 @@ export function rootFromPath(
             throw new InvalidArgumentError(
                 `rootFromPath: pathElements[${lvl}] has ${sibs.length} siblings, ` +
                     `expected ${ARITY - 1}`,
+                { argument: "pathElements" },
             );
         }
 
-        const children: Field[] = [];
-        let s = 0;
-        for (let k = 0; k < ARITY; k++) {
-            if (k === slot) children.push(cur);
-            else children.push(sibs[s++]!);
-        }
+        const children = [...sibs];
+        children.splice(slot, 0, cur);
         cur = P.hash([TAG_MERKLE, children[0]!, children[1]!, children[2]!, children[3]!]);
     }
     return cur;
@@ -70,10 +65,8 @@ export interface PathCheck {
 /**
  * Whether the pool would accept a proof against `root`.
  *
- * Named because two layers ask it — this module for a scanned path, and
- * `TreeStore` before condemning a locally built tree — and `ChainAdapter`
- * supplies it. Without one name they are the same contract declared twice,
- * with nothing telling a caller of `verifyPath` what to pass.
+ * Shared contract: this module uses it for a scanned path, `TreeStore` before discarding a locally
+ * built tree, and `ChainAdapter` supplies it.
  */
 export type IsKnownRoot = (root: Field) => Promise<boolean>;
 

@@ -1,9 +1,8 @@
 // The prover port and its data shapes.
 //
-// This module imports nothing but `core/`, so naming a prover type never
-// pulls in `snarkjs` — an optional peer dependency. Anything that needs only
-// the shapes (wasm backend, worker client, wallet config, bundle builder)
-// imports this rather than a backend.
+// Imports only `core/`, so referencing a prover type never pulls in `snarkjs`
+// (an optional peer dependency). Code that needs only the shapes imports this
+// module rather than a backend.
 
 import type { Url } from "../core/url.js";
 
@@ -15,10 +14,15 @@ export interface ProverArtifacts {
     zkey: Url;
 }
 
-/** Resolved filesystem/URL strings for the two artifacts. */
+/**
+ * {@link ProverArtifacts} resolved to absolute filesystem/URL strings, as they
+ * cross `postMessage` to a worker.
+ *
+ * @internal
+ */
 export interface ProverPaths {
-    wasmPath: string; // e.g. "circuits/build/2x2_js/2x2.wasm"
-    zkeyPath: string; // e.g. "circuits/build/2x2_final.zkey"
+    wasmPath: string; // e.g. "circuits/build/4x6.wasm"
+    zkeyPath: string; // e.g. "circuits/build/4x6_final.zkey"
 }
 
 /** @internal */
@@ -41,10 +45,10 @@ export interface Prover {
     /** Prove a witness against the configured circuit. */
     prove(input: Record<string, unknown>): Promise<ProveResult>;
     /**
-     * Release held resources — worker threads, wasm heaps.
+     * Release held resources (worker threads, wasm heaps).
      *
-     * Optional because the in-process backends hold nothing a GC will not
-     * reclaim. `WorkerProver` owns a real worker and must be told.
+     * Optional: in-process backends hold nothing the GC does not reclaim.
+     * `WorkerProver` owns a worker and requires this call.
      */
     dispose?(): Promise<void> | void;
 }

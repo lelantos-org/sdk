@@ -40,7 +40,7 @@ Every other arity the SDK uses stays on the JS backend, since each width here
 costs a round-constant table in the binary.
 
 `src/poseidon/` is vendored byte-for-byte from
-`backend/crates/common-crypto/src/poseidon/`, so `just drift` catches an edit to
+`backend/crates/crypto/src/poseidon/`, so `just drift` catches an edit to
 either side. `tests/vectors/poseidon.json`, asserted by both repos, catches
 semantic drift.
 

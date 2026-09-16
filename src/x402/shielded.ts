@@ -1,10 +1,10 @@
 // The `shielded:<chainId>` payment mechanism.
 //
-// x402's `exact` scheme is chain-agnostic — "transfers a specific amount of
-// funds from a client to a resource server" — and is extended by per-network
-// implementation documents (Solana, Stellar, TON, Sui each have one). A
-// shielded transfer is exactly `exact` semantics, so this is a new *network*
-// family under an accepted scheme rather than a new scheme.
+// x402's `exact` scheme is chain-agnostic ("transfers a specific amount of
+// funds from a client to a resource server") and is extended by per-network
+// implementation documents (Solana, Stellar, TON, Sui). A shielded transfer has
+// `exact` semantics, so this is a new *network* family under an existing
+// scheme rather than a new scheme.
 //
 // The wire format is pool-agnostic: `extra.pool` is the only
 // implementation-specific field, so any shielded pool can serve and accept
@@ -12,19 +12,18 @@
 //
 // Payment flow
 // ------------
-// `extra.paymentFlow: "upfront"` — the transfer is submitted before the
-// resource is served, and the payload is the receipt. x402's default
-// `authorization` flow (hand over an unsubmitted proof, let the server settle
-// it) is more trust-minimal but needs a facilitator that can relay a Lelantos
-// bundle; until one exists, upfront is the only available model. It exposes
-// the payer to a server that takes payment and does not answer, which is why
-// `budget` is required rather than optional.
+// `extra.paymentFlow: "upfront"`: the transfer is submitted before the resource
+// is served, and the payload is the receipt. x402's default `authorization`
+// flow (hand over an unsubmitted proof for the server to settle) requires a
+// facilitator that can relay a Lelantos bundle, so upfront is the only
+// supported model. It exposes the payer to a server that takes payment without
+// responding, which is why `budget` is required.
 
 import { memoAsync } from "../core/async.js";
 import type { AssetId, CircuitAmount, ShieldedAddress } from "../core/brand.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
-import type { OnPhase, SpendPhase } from "../wallet/options.js";
+import type { OpOptions, SpendPhase } from "../wallet/types/options.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
 import {
     requireAmount,
@@ -48,8 +47,8 @@ export const LELANTOS_POOL = "lelantos";
 
 /**
  * Lower bound on `maxTimeoutSeconds`. A shielded payment includes a Groth16
- * proof, which takes seconds — accepting a 5-second window would mean paying
- * into a requirement the server has already stopped honouring.
+ * proof that takes seconds; a shorter window could expire before the payment
+ * lands.
  */
 export const DEFAULT_MIN_TIMEOUT_SECONDS = 20;
 
@@ -59,8 +58,8 @@ export function shieldedNetwork(chainId: bigint): string {
 }
 
 export interface ShieldedExactOptions {
-    /** Forwarded to `wallet.transfer` — `"proving"` is the multi-second phase. */
-    onPhase?: OnPhase<SpendPhase> | undefined;
+    /** Forwarded to `wallet.transfer`; `"proving"` is the multi-second phase. */
+    onPhase?: OpOptions<SpendPhase>["onPhase"];
     /** Reject requirements whose window is shorter than this. Default 20. */
     minTimeoutSeconds?: number | undefined;
     /** Self-spend to make a payable note when no 2-note cover exists. Default true. */
@@ -92,12 +91,10 @@ export function shieldedExact(
 ): PayableSchemeClient {
     const minTimeoutSeconds = opts.minTimeoutSeconds ?? DEFAULT_MIN_TIMEOUT_SECONDS;
 
-    // Memoised: an offer is read once while selecting and again while paying,
-    // and a wallet's chain cannot change underneath it.
-    // Memoised with eviction on rejection: `x402()` builds this mechanism once
-    // and returns a long-lived `fetch`, so a single RPC blip on the first read
-    // would otherwise be replayed to every later payment for the process
-    // lifetime.
+    // Memoised: an offer is read during selection and again during payment,
+    // and a wallet's chain does not change. Evicted on rejection because
+    // `x402()` builds this mechanism once for a long-lived `fetch`, so a
+    // transient RPC failure must not be cached for the process lifetime.
     const chainId = memoAsync(() => wallet.chain.chainId());
     const read = async (req: PaymentRequirements): Promise<Terms> => {
         requireNetwork(SCOPE, req.network, {
@@ -118,7 +115,7 @@ export function shieldedExact(
 
         async quote(req: PaymentRequirements): Promise<PaymentQuote> {
             const terms = await read(req);
-            // Already circuit units: this network quotes in the wallet's own
+            // Already circuit units: this network quotes in the wallet's
             // denomination.
             return { amount: terms.amount, asset: await wallet.asset(terms.asset) };
         },
@@ -136,17 +133,16 @@ export function shieldedExact(
             });
 
             const result = await wallet.transfer({
-                to: payTo,
+                recipient: payTo,
                 amount,
                 asset,
                 onPhase: opts.onPhase,
                 autoConsolidate: opts.autoConsolidate ?? true,
             });
 
-            // Named by the receipt, not read off a fixed index: output slots
-            // are shuffled, so the payee's note is not at slot 0 and the other
-            // slots are the payer's change and the relayer's fee, neither of
-            // which the server can verify.
+            // Taken from the receipt, not a fixed index: output slots are
+            // shuffled, and the other slots (payer change, relayer fee) are not
+            // verifiable by the server.
             return {
                 x402Version,
                 payload: {
@@ -161,7 +157,7 @@ export function shieldedExact(
     };
 }
 
-/** Absent means "any pool" — only a mismatch is a refusal. */
+/** Absent means "any pool"; only a mismatch is refused. */
 function requirePool(req: PaymentRequirements): void {
     const pool = req.extra?.pool;
     if (pool !== undefined && pool !== LELANTOS_POOL) {

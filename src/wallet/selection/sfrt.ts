@@ -2,12 +2,11 @@
 
 import { type AssetId, branded, type CircuitAmount } from "../../core/brand.js";
 import { cmpBigint } from "../../core/compare.js";
-import { SelectionError } from "../../core/errors.js";
 import { randomBelow } from "../../core/random.js";
-import { DEFAULT_SHAPE } from "../../core/shape.js";
-import type { StoredNote } from "../note-store.js";
+import { DEFAULT_SHAPE } from "../../protocol/shape.js";
+import type { StoredNote } from "../notes/note-store.js";
 import { coverBucket, smallestCover } from "./cover-search.js";
-import { describeRejections, partitionSpendable, spendRules } from "./spendability.js";
+import { fundingError, partitionSpendable, spendRules } from "./spendability.js";
 import type { CoinSelector, SelectionResult, SelectOpts } from "./types.js";
 
 /**
@@ -20,8 +19,8 @@ import type { CoinSelector, SelectionResult, SelectOpts } from "./types.js";
  *
  * For each cover size 1..`maxInputs` the smallest qualifying sum is found, the
  * smallest of those wins, and ties break toward fewer notes. The chosen size
- * is then shuffled within its bucket, so the note picked is not a
- * deterministic function of the wallet's contents.
+ * is then shuffled within its bucket, so the selection is not a deterministic
+ * function of the wallet's contents.
  *
  * @internal
  */
@@ -36,15 +35,10 @@ export function selectNotes(
     const pick = opts.pick ?? randomBelow;
     const threshold = target + (opts.fee ?? 0n);
 
-    const { candidates, rejected } = partitionSpendable(all, asset, spendRules(opts));
+    const rules = spendRules(opts);
+    const { candidates } = partitionSpendable(all, asset, rules);
 
-    if (candidates.length === 0) {
-        throw new SelectionError(
-            `no spendable notes for asset ${asset} ` +
-                `(${all.length} in store: ${describeRejections(rejected)})`,
-            { asset },
-        );
-    }
+    if (candidates.length === 0) throw fundingError(all, asset, threshold, rules);
 
     const asc = [...candidates].sort((a, b) => cmpBigint(BigInt(a.value), BigInt(b.value)));
     const values = asc.map((n) => BigInt(n.value));
@@ -64,7 +58,7 @@ export function selectNotes(
     if (bestSum !== null) {
         const tied = coverBucket(values, threshold, bestSum, bucketPct, bestSize);
         // `coverBucket` always contains the cover that produced `bestSum`, so
-        // it is never empty and `pick` is never asked for a bound of zero.
+        // `pick` is never called with a bound of zero.
         const chosen = tied[pick(tied.length)]!;
         const notes = chosen.map((i) => asc[i]!);
         return {
@@ -89,10 +83,8 @@ export function selectNotes(
         };
     }
 
-    throw new SelectionError(
-        `insufficient unspent value for asset ${asset}: have ${total}, need ${threshold}`,
-        { asset },
-    );
+    // Below the threshold in total: either nothing more exists, or it is held back.
+    throw fundingError(all, asset, threshold, rules);
 }
 
 /** Smallest-First with Random Tiebreak. */

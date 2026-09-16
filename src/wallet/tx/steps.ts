@@ -1,235 +1,132 @@
-// Steps every spend shares.
+// Submitting a proven spend and settling its notes.
 //
-// The cover-selection preamble, the change-note split, the submit-and-finalize
-// tail, and the deposit-request randomness block, shared by transfer, withdraw
-// and swap. Output slots are not shared: each path builds its own list and
-// hands it to `finalizeSlots` (`tx/outputs.ts`), which shuffles it and derives
-// every index from that one permutation. A path that needs the payee's slot
-// back marks it rather than remembering where it put it.
+// What a failed submit means for the notes it consumed (spent, reserved or
+// untouched), the error the caller receives, and where a landed spend sits in
+// its transaction. Used by `run-spend.ts` for every spend.
 
-import type { InputSlots } from "../../bundle/common.js";
-import type { AssetId, CircuitAmount } from "../../core/brand.js";
-import { branded } from "../../core/brand.js";
-import { safePhase } from "../../core/callbacks.js";
-import { NetworkError, SelectionError, WireFormatError } from "../../core/errors.js";
-import type { DecodedAddress } from "../../keys/address.js";
-import { decodeAddress } from "../../keys/address.js";
+import { locateOperation } from "../../chain/operation.js";
+import type { ChainReader } from "../../chain/port.js";
+import type { Hex32 } from "../../core/brand.js";
+import { errMessage, WalletError } from "../../errors/base.js";
+import { NetworkError } from "../../errors/network.js";
+import {
+    RelayerRejectedError,
+    type RelayerRejectReason,
+    SpendOutcomeUnknownError,
+} from "../../errors/spend.js";
 import { getLogger } from "../../log/logger.js";
-import { freshOutput, type NoteOutputRandomness } from "../../notes/randomness.js";
-import type { OnPhase, SpendPhase } from "../api.js";
-import type { SpendContext } from "../context.js";
-import { inputsCtx } from "../context.js";
-import { ensureCover } from "../cover.js";
-import { buildInputSlots } from "../inputs.js";
-import type { DirectSelection, SelectOpts } from "../selection/index.js";
-import type { ResolvedFee } from "./fee.js";
+import {
+    isSubmitOutcomeUnknown,
+    parseRelayerRejectReason,
+} from "../../services/relayer/reject-reason.js";
+import { SPEND_RESERVATION_MS } from "../constants.js";
 
 const log = getLogger("lelantos:wallet:spend");
-
-export interface PreparedSpend {
-    /** Already narrowed: `ensureCover` resolves the consolidate case. */
-    selection: DirectSelection;
-    /**
-     * Cover for the fee asset, present only when the fee is paid in an asset
-     * the spend is not otherwise moving. A same-asset fee is folded into
-     * `target` by the caller and comes out of `selection`.
-     */
-    feeSelection?: DirectSelection;
-    /** Own decoded shielded address — the change recipient. */
-    ownAddr: DecodedAddress;
-    inputs: InputSlots;
-    merkleRoot: bigint;
-    /** Every note this spend consumes, across both assets. */
-    spentIds: string[];
-    /**
-     * What the spend asset actually had to cover — the caller's `target` plus a
-     * same-asset fee. Change is `selection.sum - covered`.
-     */
-    covered: CircuitAmount;
-}
-
-/**
- * Select cover, sync the tree, and build the input slots.
- *
- * `target` is the full amount that must be covered, fee included — the
- * caller computes it, because each flow derives it differently.
- */
-export async function prepareSpend(
-    ctx: SpendContext,
-    args: {
-        asset: AssetId;
-        target: CircuitAmount;
-        /**
-         * The relayer's fee, if it charges one.
-         *
-         * Handled here rather than by each caller because the two cases pull in
-         * opposite directions and every flow got them subtly differently: a
-         * same-asset fee raises the target the spend must cover, while a
-         * cross-asset one leaves the target alone and takes cover of its own.
-         */
-        fee?: ResolvedFee | null | undefined;
-        selectOpts?: SelectOpts | undefined;
-        autoConsolidate?: boolean | undefined;
-        onPhase?: OnPhase<SpendPhase> | undefined;
-    },
-): Promise<PreparedSpend> {
-    safePhase(args.onPhase, "preparing");
-    const nIn = ctx.cfg.shape.nIn;
-    const cover = (asset: AssetId, target: CircuitAmount, maxInputs: number) =>
-        ensureCover(
-            ctx.selector,
-            () => ctx.storedNotes(),
-            {
-                asset,
-                target,
-                // Rebuilt per attempt, not captured once. The selector's spend
-                // cooldown needs a tip — without one a note is spendable in the
-                // block it arrived in, linking a change note to the spend that
-                // produced it — and a tip captured before consolidation would
-                // exclude the note consolidation just created. See `cover.ts`.
-                selectOpts: async () => {
-                    const tipBlock = await ctx.cfg.chain.blockNumber?.();
-                    return {
-                        // The circuit's arity is the ceiling; a caller may lower
-                        // it but not raise it past what the proof can consume.
-                        maxInputs,
-                        ...(tipBlock !== undefined ? { tipBlock } : {}),
-                        ...args.selectOpts,
-                    };
-                },
-                autoConsolidate: args.autoConsolidate,
-            },
-            (a, sel) => ctx.autoConsolidate(a, sel),
-        );
-
-    // A same-asset fee comes out of the same notes as the spend, so it has to
-    // be covered alongside it.
-    const feeCover = args.fee?.cover;
-    const covered = branded<CircuitAmount>(
-        args.target + (args.fee && !args.fee.crossAsset ? args.fee.value : 0n),
-    );
-
-    // A cross-asset fee needs at least one input slot of its own, so the spend
-    // cannot be allowed to fill every slot first and leave the fee unpayable.
-    // Reserving one up front turns "no slot left for the fee" into an ordinary
-    // insufficient-cover error against the asset being moved, which is both
-    // actionable and what the caller can do something about.
-    const selection = await cover(args.asset, covered, feeCover ? nIn - 1 : nIn);
-
-    let feeSelection: DirectSelection | undefined;
-    if (feeCover) {
-        const remaining = nIn - selection.notes.length;
-        if (remaining < 1) {
-            // Typed, not bare: the message already tells the caller what to do
-            // about it, which is the definition of a boundary error here — and
-            // `SelectionError` is what every other unrecoverable cover failure
-            // in this path reports.
-            throw new SelectionError(
-                `spend needs ${selection.notes.length} of ${nIn} input slots for asset ` +
-                    `${args.asset}, leaving none for a fee in asset ${feeCover.asset}; ` +
-                    "consolidate that asset or pay the fee in the asset being moved",
-                { asset: feeCover.asset },
-            );
-        }
-        feeSelection = await cover(feeCover.asset, feeCover.value, remaining);
-    }
-
-    const notes = [...selection.notes, ...(feeSelection?.notes ?? [])];
-    const ownAddr = decodeAddress(ctx.J, ctx.address);
-    await syncTreeToVerifiedRoot(ctx);
-    const inputs = await buildInputSlots(inputsCtx(ctx), notes);
-
-    return {
-        selection,
-        ...(feeSelection ? { feeSelection } : {}),
-        ownAddr,
-        inputs,
-        merkleRoot: ctx.treeStore.root(),
-        spentIds: notes.map((n) => n.id),
-        covered,
-    };
-}
-
-/**
- * Sync the tree and confirm it is one the pool would accept a proof against.
- *
- * The wallet no longer derives leaves from primary data — it trusts the
- * server's `leafHash` — so a wrong or lagging value yields a wrong root with
- * no local symptom. Proving against it costs a full Groth16 run (seconds to a
- * minute) and then fails `isKnownRoot` as an unexplained relayer rejection.
- *
- * `TreeStore.syncVerified` owns the reconciling, the repairs, and when to put
- * the question to the chain; it is handed the adapter's `isKnownRoot` because
- * reaching the pool is a capability it does not otherwise have. What belongs
- * to the spend path is only the refusal.
- */
-async function syncTreeToVerifiedRoot(ctx: SpendContext): Promise<void> {
-    const chain = ctx.cfg.chain;
-    // Bound, because it is passed on as a value and the adapter's own reads
-    // go through `this`.
-    const check = await ctx.treeStore.syncVerified({
-        isKnownRoot: chain.isKnownRoot?.bind(chain),
-    });
-    if (check.spendable) return;
-
-    throw new WireFormatError(
-        "$.root",
-        "local Merkle root does not match the chain after resyncing and rebuilding the " +
-            "tree from leaf 0, and the pool does not recognise it either — the commitment " +
-            "feed is serving leaves that do not reconcile with the root it reports, so any " +
-            "proof built against this tree would be rejected on chain",
-        {
-            context: {
-                localRoot: check.localRoot.toString(),
-                mirrorRoot: check.mirrorRoot.toString(),
-                localLeaves: check.localLeaves,
-                mirrorLeaves: check.mirrorLeaves,
-            },
-        },
-    );
-}
-
-/**
- * The relayer's own words for a broadcast it never saw confirmed —
- * `AppError::SubmitUnknown` in `crates/relayer/src/domain/error.rs`. It shares
- * a 502 with a plain revert, which is a definite no, so the body is what tells
- * the two apart.
- */
-const SUBMIT_UNKNOWN_BODY = "outcome unknown";
 
 /**
  * Whether a failed submit leaves it unknown whether the spend was accepted.
  *
- * The distinction decides what happens to the notes. A rejection the relayer
- * articulated — a bad payload, a stale root — means nothing was spent and the
- * notes stay available. A submit that never came back with an answer may have
- * landed anyway, and offering those notes again is how a wallet ends up
- * spending into a duplicate rejection over and over.
+ * An explicit rejection (bad payload, stale root) means nothing was spent and
+ * the notes stay available. A submit without a definite answer may have
+ * landed, and reselecting its notes leads to repeated duplicate rejections.
  *
- *   - no status: a timeout or a dropped connection, so the request may have
- *     been received and acted on.
- *   - 409: the relayer holds these nullifiers as spent or in flight. Whichever
- *     it is, they are not ours to spend again right now.
+ *   - no status: a timeout or dropped connection; the request may have been
+ *     received and acted on.
+ *   - any earlier attempt without a response: the transport resends a submit
+ *     under the same `Idempotency-Key`, so a later definite answer (a 400, a
+ *     429) does not rule out that the first copy landed.
  *   - 502 naming an unknown outcome: broadcast succeeded, no receipt arrived.
+ *
+ * A 409 is a definite answer about the nullifiers, classified separately by
+ * {@link classifySubmitFailure}.
  *
  * @internal — exported for direct testing.
  */
 export function outcomeUnknown(err: unknown): boolean {
     if (!(err instanceof NetworkError)) return false;
-    if (err.status === undefined || err.status === 409) return true;
-    return err.status === 502 && (err.body?.includes(SUBMIT_UNKNOWN_BODY) ?? false);
+    if (err.status === undefined) return true;
+    if (err.attempts.some((a) => a.status === undefined)) return true;
+    return isSubmitOutcomeUnknown(err.status, err.body);
+}
+
+/**
+ * A 409 reason whose notes are withheld from selection: the nullifiers are
+ * spent, or held by another pending submission, or (stale estimate) the
+ * refusal came after admission. Only a key collision says nothing about them.
+ */
+function reservesNotes(reason: RelayerRejectReason): boolean {
+    return reason !== "idempotency-key-reused";
+}
+
+/** How {@link submitSpend} treats a failed submit. */
+type SubmitFailure =
+    | { kind: "unknown" }
+    | {
+          kind: "rejected";
+          status: number;
+          body: string;
+          reason: RelayerRejectReason;
+          /** Whether the spend's notes are withheld from selection. */
+          reserve: boolean;
+      }
+    | { kind: "other" };
+
+/**
+ * What a failed submit means, as the error the caller receives, and what to do
+ * to the spend's notes first.
+ *
+ *   - outcome unknown → `SpendOutcomeUnknownError`, notes reserved;
+ *   - 409 → `RelayerRejectedError` with the parsed reason, notes reserved
+ *     (except a reused idempotency key);
+ *   - any other 4xx, or a 502 reporting a revert → `RelayerRejectedError`,
+ *     notes untouched;
+ *   - anything else (a 500/503, which stays a retryable `NetworkError`; a
+ *     custom submitter's own error) → rethrown unchanged, notes untouched.
+ *
+ * @internal — exported for direct testing.
+ */
+export function classifySubmitFailure(err: unknown): SubmitFailure {
+    if (outcomeUnknown(err)) return { kind: "unknown" };
+    if (!(err instanceof NetworkError) || err.status === undefined) return { kind: "other" };
+    const body = err.body ?? "";
+    const reason = parseRelayerRejectReason(err.status, body);
+    if (err.status === 409) {
+        return { kind: "rejected", status: 409, body, reason, reserve: reservesNotes(reason) };
+    }
+    if ((err.status >= 400 && err.status < 500) || reason === "reverted") {
+        return { kind: "rejected", status: err.status, body, reason, reserve: false };
+    }
+    return { kind: "other" };
+}
+
+/** What {@link submitSpend} does to a spend's notes. */
+interface SpendSettlement {
+    markSpent(ids: string[]): Promise<void>;
+    /**
+     * Withhold notes from selection after a spend with unknown outcome. Weaker
+     * than `markSpent` and reversible; see `StoredNote.pendingSpendAt`.
+     */
+    markPendingSpend(ids: string[]): Promise<void>;
+    /**
+     * Sync the spent-nullifier set and reconcile local notes against it, after
+     * the relayer refuses a spend because a nullifier is already spent.
+     * Optional: without it the consumed notes stay offered until the next sync.
+     */
+    resyncSpent?(): Promise<void>;
 }
 
 /**
  * Submit a spend and record what it did to the notes it consumed.
  *
- * On success they are spent. On a failure that settles the question they are
- * untouched. Otherwise they are reserved: withheld from the selector until the
- * nullifier feed says whether they were spent, or until the reservation
- * expires. See `StoredNote.pendingSpendAt`.
+ * On success they are marked spent; on a definite failure they are untouched.
+ * Otherwise they are reserved: withheld from the selector until the nullifier
+ * feed resolves them or the reservation expires. See `StoredNote.pendingSpendAt`.
+ *
+ * A refusal because a nullifier is already spent triggers a spent-set resync
+ * first, so the next selection no longer offers the consumed notes.
  */
 export async function submitSpend<T>(
-    ctx: Pick<SpendContext, "markSpent" | "markPendingSpend">,
+    ctx: SpendSettlement,
     spent: string[],
     submit: () => Promise<T>,
 ): Promise<T> {
@@ -237,31 +134,88 @@ export async function submitSpend<T>(
     try {
         result = await submit();
     } catch (err) {
-        if (!outcomeUnknown(err)) throw err;
-        // The one branch that leaves the wallet's view of these notes
-        // unresolved, and the reason a balance can drop without a matching
-        // transaction. Logged so that is answerable after the fact.
-        log.warn("spend outcome unknown; reserving its notes", {
-            notes: spent.length,
-            error: err instanceof Error ? err.message : String(err),
-        });
-        await ctx.markPendingSpend(spent);
-        throw err;
+        throw await settleFailedSubmit(ctx, spent, err);
     }
     await ctx.markSpent(spent);
     return result;
 }
 
+/** Apply {@link classifySubmitFailure} to the notes and build the error to throw. */
+async function settleFailedSubmit(
+    ctx: SpendSettlement,
+    spent: string[],
+    err: unknown,
+): Promise<unknown> {
+    const c = classifySubmitFailure(err);
+    if (c.kind === "other") return err;
+
+    const reserve = c.kind === "unknown" || c.reserve;
+    const reservedUntil = new Date(Date.now() + SPEND_RESERVATION_MS);
+    if (reserve) {
+        // Leaves these notes unresolved, so a balance can drop without a
+        // matching transaction; logged for diagnosis.
+        log.warn("spend not confirmed; reserving its notes", {
+            notes: spent.length,
+            outcome: c.kind === "unknown" ? "unknown" : c.reason,
+        });
+        await ctx.markPendingSpend(spent);
+    }
+    const context = err instanceof WalletError ? err.context : undefined;
+
+    if (c.kind === "unknown") {
+        return new SpendOutcomeUnknownError(
+            { reservedNoteIds: [...spent], reservedUntil },
+            { cause: err, context },
+        );
+    }
+
+    if (c.reason === "nullifier-spent" && ctx.resyncSpent) {
+        // Best effort: the refusal is the answer the caller needs, and a
+        // failed resync only means the next sync picks the spend up instead.
+        await ctx.resyncSpent().catch((resyncErr: unknown) => {
+            log.warn("spent-set resync after a nullifier-spent refusal failed", {
+                error: errMessage(resyncErr),
+            });
+        });
+    }
+    return new RelayerRejectedError(
+        {
+            status: c.status,
+            reason: c.reason,
+            body: c.body,
+            ...(reserve ? { reservedNoteIds: [...spent], reservedUntil } : {}),
+        },
+        { cause: err, context },
+    );
+}
+
 /**
- * Fresh randomness for a deposit's two output slots.
+ * Attach where a landed spend sits in its transaction, when that can be read.
  *
- * A deposit mints the depositor's note and the relayer's fee note, and each
- * needs its own blinders — sharing them would let anyone who can open one leaf
- * open the other.
+ * A relayer may bundle several operations into one transaction, so the hash
+ * alone does not identify this one. The receipt is read through the chain
+ * adapter and matched locally against the spend's commitments, so the read RPC
+ * learns the hash but not which operation belongs to this wallet.
+ *
+ * Never throws. The spend has already landed, so an adapter without log access,
+ * a lagging read RPC, or an unexpected layout leaves `operation` absent.
  */
-export function freshDepositSlots(): {
-    output0: NoteOutputRandomness;
-    fee: NoteOutputRandomness;
-} {
-    return { output0: freshOutput(), fee: freshOutput() };
+export async function withOperation<R extends { txHash: Hex32; commitments: readonly Hex32[] }>(
+    chain: ChainReader,
+    result: R,
+): Promise<R> {
+    if (!chain.txReceiptLogs) return result;
+    try {
+        const [logs, pool] = await Promise.all([
+            chain.txReceiptLogs(result.txHash),
+            chain.maspAddress(),
+        ]);
+        const operation = locateOperation(logs, pool, result.commitments);
+        return operation ? { ...result, operation } : result;
+    } catch (err) {
+        log.debug("could not locate spend in its transaction", {
+            error: errMessage(err),
+        });
+        return result;
+    }
 }

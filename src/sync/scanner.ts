@@ -9,10 +9,9 @@ export interface Scanner {
      * (filtered to hits).
      *
      * There is no client-side FMD pre-filter: the note feed does not carry
-     * `clue.R`, so one is not implementable here today. For FMD filtering
-     * use `syncStrategy: { kind: "matches", token }`, which does it
-     * server-side — trading some anonymity for bandwidth. See
-     * `./worker/protocol.ts` for the full reasoning.
+     * `clue.R`. For FMD filtering use `syncStrategy: { kind: "matches", token }`,
+     * which filters server-side, trading some anonymity for bandwidth. See
+     * `./worker/protocol.ts`.
      */
     scan(ivk: Field, inputs: ScanInput[]): Promise<ScanHit[]>;
 
@@ -25,7 +24,7 @@ export class LocalScanner implements Scanner {
     /** Tallies from the most recent `scan`. */
     lastStats: ScanStats = emptyScanStats();
 
-    /** `P` reproduces each hit's commitment — see {@link scanNotes}. */
+    /** `P` reproduces each hit's commitment; see {@link scanNotes}. */
     constructor(
         private readonly J: Jubjub,
         private readonly P: Poseidon,
@@ -36,5 +35,3 @@ export class LocalScanner implements Scanner {
         return scanNotes(this.J, this.P, ivk, inputs, this.lastStats);
     }
 }
-
-export type { ScanHit, ScanInput, ScanStats } from "./scan.js";

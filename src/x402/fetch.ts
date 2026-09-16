@@ -1,25 +1,24 @@
-// `x402()` — wrap a `fetch` so 402 responses are paid and retried.
+// `x402()`: wrap a `fetch` so 402 responses are paid and retried.
 //
-// This is the whole integration surface. Because the result is an ordinary
-// `fetch`, every agent framework already accepts it:
+// This is the entire integration surface. The result is an ordinary `fetch`, so
+// agent frameworks accept it directly:
 //
 //   createOpenAI({ fetch: pay });                            // Vercel AI SDK
 //   new StreamableHTTPClientTransport(url, { fetch: pay });   // MCP
 //
-// The 402 loop is implemented here rather than delegated to `@x402/fetch` so
-// the one-liner needs no extra install. Callers who already run an
-// `x402Client` — to combine these mechanisms with Solana, or to use
-// `@x402/mcp` — should register `shieldedExact` / `unshieldedExact` on it
-// directly instead; both are structurally `SchemeNetworkClient`.
+// The 402 handling is implemented here rather than delegated to `@x402/fetch`,
+// so no extra install is needed. Callers with an existing `x402Client` (e.g. to
+// combine with Solana or use `@x402/mcp`) should register `shieldedExact` /
+// `unshieldedExact` on it directly; both are structurally `SchemeNetworkClient`.
 //
 // Exactly-once
 // ------------
-// A payment is attached to at most one retry per call. There is no loop: a
-// paid request that comes back 402 is `payment-rejected`, not a reason to pay
-// twice. This wrapper also sits outside `createHttpClient`'s retry machinery
-// for the same reason — 5xx retries must never re-run a payment.
+// A payment is attached to at most one retry per call. A paid request that
+// returns 402 is `payment-rejected` and is not paid again. For the same reason
+// this wrapper sits outside `createHttpClient`'s retry logic: 5xx retries must
+// never re-run a payment.
 
-import { X402PaymentError } from "../core/errors.js";
+import { X402PaymentError } from "../errors/x402.js";
 import { getLogger } from "../log/logger.js";
 import type { WalletApi } from "../wallet/api.js";
 import { type Budget, BudgetLedger, type BudgetReservation } from "./budget.js";
@@ -28,7 +27,6 @@ import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
 import { parseCaip2 } from "./requirements.js";
 import { SHIELDED_NAMESPACE, type ShieldedExactOptions, shieldedExact } from "./shielded.js";
 import type { PaymentPayload, PaymentRequirements, SettleResponse } from "./types.js";
-import { X402_VERSION } from "./types.js";
 import { EVM_NAMESPACE, type UnshieldedExactOptions, unshieldedExact } from "./unshielded.js";
 
 const log = getLogger("lelantos:x402");
@@ -64,8 +62,11 @@ export interface X402Options {
     shielded?: ShieldedExactOptions | undefined;
     /** Passed through to the unshielded mechanism. */
     unshielded?: UnshieldedExactOptions | undefined;
-    /** Defaults to bound `globalThis.fetch`. */
-    fetchImpl?: typeof fetch | undefined;
+    /**
+     * Transport for the wrapped requests, named as `connect`'s `http` option. `fetch` defaults to
+     * `globalThis.fetch`, looked up at call time.
+     */
+    http?: { fetch?: typeof fetch | undefined } | undefined;
 }
 
 /** A `fetch` that settles 402s. */
@@ -80,14 +81,14 @@ export interface PayingFetch {
  * retried once.
  *
  * ```ts
- * const wallet = await connect({ mnemonic, network: "anvil" });
+ * const wallet = await connect({ network: "base", rpcUrl, mnemonic, readOnly: true });
  * await wallet.sync();
  *
  * const pay = x402(wallet, { budget: { total: "5" } });
  * const data = await pay("https://api.example.com/premium").then((r) => r.json());
  * ```
  *
- * Returns synchronously — nothing is contacted until the first call.
+ * Returns synchronously; no network request is made until the first call.
  */
 export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
     if (!opts?.budget?.total) {
@@ -99,7 +100,7 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
     }
 
     const ledger = new BudgetLedger(opts.budget, opts.allowHosts);
-    const doFetch = opts.fetchImpl ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+    const doFetch = opts.http?.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
 
     const mechanisms = new Map<string, PayableSchemeClient>([
         [SHIELDED_NAMESPACE, shieldedExact(wallet, opts.shielded)],
@@ -109,10 +110,8 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
     }
 
     const paying = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-        // Normalised up front so the retry can reproduce the call. A `Request`
-        // body is consumed by the first fetch, so paying and then retrying the
-        // same object threw `Request body is unusable` — after the funds had
-        // already moved. Both documented integrations are POST-shaped.
+        // Normalised up front and cloned for the first fetch, which consumes the
+        // body; the original is kept intact for the paid retry.
         const req = new Request(input instanceof URL ? input.toString() : input, init);
         const res = await doFetch(req.clone());
         if (res.status !== 402) return res;
@@ -120,12 +119,11 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
         const url = req.url;
         ledger.assertHostAllowed(url);
 
-        const required = await readPaymentRequired(res, url);
+        const required = readPaymentRequired(res, url);
         const chosen = await select(required.accepts, mechanisms, ledger, url);
         const { requirements } = chosen;
 
-        // Host only: a full URL records the request path an agent paid for,
-        // which accumulates into a browsing history at info level.
+        // Host only: a full URL would log the paid request path at info level.
         log.info("paying for resource", {
             host: hostOf(url),
             scheme: requirements.scheme,
@@ -135,12 +133,12 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
         let result: Awaited<ReturnType<PayableSchemeClient["createPaymentPayload"]>>;
         try {
             result = await chosen.mechanism.createPaymentPayload(
-                required.x402Version || X402_VERSION,
+                required.x402Version,
                 requirements,
                 { host: hostOf(url) },
             );
         } catch (err) {
-            // Nothing was spent, so hand the headroom back.
+            // Nothing was spent; release the reservation.
             chosen.reservation.release();
             throw err;
         }
@@ -154,7 +152,7 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
         };
 
         // The payment is made. Commit before the retry so a network failure on
-        // the retry cannot under-count what was spent.
+        // the retry does not under-count spend.
         chosen.reservation.commit();
 
         const paid = await doFetch(withPaymentRequest(req, payload));
@@ -193,11 +191,10 @@ interface Choice {
  * Pick an offer to pay: shielded networks first, original order within a
  * tier, first affordable one wins.
  *
- * The two failure kinds are treated differently. An offer this wallet cannot
- * satisfy — wrong chain, unknown token, a window too short to prove in — is a
- * routing problem, so the next offer gets a turn. A budget breach stops
- * everything: falling through to a cheaper offer would hide that a caller's
- * ceiling was hit.
+ * An offer this wallet cannot satisfy (wrong chain, unknown token, a window too
+ * short to prove in) moves on to the next offer. A budget breach aborts:
+ * falling through to a cheaper offer would hide that the caller's ceiling was
+ * reached.
  */
 async function select(
     accepts: PaymentRequirements[],
@@ -215,10 +212,10 @@ async function select(
             continue;
         }
         try {
-            // The mechanism prices its own network — see `PaymentQuote`.
+            // The mechanism prices its own network; see `PaymentQuote`.
             const quote = await mechanism.quote(requirements);
-            // Reserved, not merely checked: minting the payload below takes
-            // seconds, and a concurrent payment must see this one coming.
+            // Reserved, not only checked: minting the payload takes seconds and
+            // concurrent payments must account for this one.
             const reservation = ledger.reserve(quote.amount, quote.asset, url);
             return { mechanism, requirements, namespace, quote, reservation };
         } catch (err) {
@@ -246,7 +243,7 @@ function preferShielded(accepts: readonly PaymentRequirements[]): PaymentRequire
     return [...shielded, ...rest];
 }
 
-/** Only "this offer does not suit us" lets the search continue. */
+/** Only `unsupported-requirements` lets the search continue. */
 function isRoutable(err: unknown): err is X402PaymentError {
     return err instanceof X402PaymentError && err.reason === "unsupported-requirements";
 }

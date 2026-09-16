@@ -1,45 +1,24 @@
 // The wire contract for `shielded:<chainId>`. These assertions are the
-// executable half of `docs/x402-shielded-network.md` — changing one means
-// changing the spec, and every server implementing it.
+// executable form of `docs/x402-shielded-network.md`; changing one changes the
+// spec and affects every server implementing it.
 
 import { describe, expect, it, vi } from "vitest";
-import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
+import { hex32 } from "../core/brand.js";
+import {
+    RECIPIENT_CM,
+    shieldedRequirements,
+    transferSpy,
+    WETH,
+    X402_CHAIN_ID,
+} from "../test-utils/x402.js";
 import type { WalletApi } from "../wallet/api.js";
-import { makeAssetInfo } from "../wallet/assets/index.js";
-import type { TransferResult } from "../wallet/result.js";
 import { LELANTOS_POOL, SHIELDED_NAMESPACE, shieldedExact, shieldedNetwork } from "./shielded.js";
 import type { PaymentRequirements } from "./types.js";
 
-const CHAIN_ID = 31337n;
-const RECIPIENT_CM = hex32(`0x${"11".repeat(32)}`);
-const CHANGE_CM = hex32(`0x${"22".repeat(32)}`);
-
-const WETH = makeAssetInfo({
-    id: assetId(1n),
-    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-    scale: 10n ** 15n,
-    symbol: "WETH",
-    decimals: 18,
-});
+const CHAIN_ID = X402_CHAIN_ID;
 
 function stubWallet() {
-    const transfer = vi.fn(
-        async (): Promise<TransferResult> => ({
-            kind: "transfer",
-            txHash: hex32(`0x${"fe".repeat(32)}`),
-            // Payee off slot 0, because output slots are shuffled: a fixture
-            // that put it first would pass under a `commitments[0]` read.
-            commitments: [CHANGE_CM, RECIPIENT_CM],
-            nonZeroCommitments: [CHANGE_CM, RECIPIENT_CM],
-            ownCommitments: [CHANGE_CM],
-            recipientCommitment: RECIPIENT_CM,
-            ownInflow: circuitAmount(0n),
-            spent: ["n1"],
-            inputSum: circuitAmount(10_000n),
-            sent: circuitAmount(1_500n),
-            change: circuitAmount(8_500n),
-        }),
-    );
+    const transfer = transferSpy(hex32(`0x${"fe".repeat(32)}`));
     const chainId = vi.fn(async () => CHAIN_ID);
     const asset = vi.fn(async () => WETH);
     return {
@@ -48,17 +27,6 @@ function stubWallet() {
         chainId,
     };
 }
-
-const requirements = (over: Partial<PaymentRequirements> = {}): PaymentRequirements => ({
-    scheme: "exact",
-    network: shieldedNetwork(CHAIN_ID),
-    amount: "1500",
-    asset: "1",
-    payTo: "lelantos1qqqq",
-    maxTimeoutSeconds: 120,
-    extra: { pool: LELANTOS_POOL, paymentFlow: "upfront" },
-    ...over,
-});
 
 describe("shieldedNetwork", () => {
     it("is CAIP-2 shaped, which is all @x402/core validates", () => {
@@ -76,18 +44,18 @@ describe("shieldedExact", () => {
 
     it("transfers to payTo and returns the receipt payload", async () => {
         const { wallet, transfer } = stubWallet();
-        const result = await shieldedExact(wallet).createPaymentPayload(2, requirements());
+        const result = await shieldedExact(wallet).createPaymentPayload(2, shieldedRequirements());
 
         expect(transfer).toHaveBeenCalledWith(
-            expect.objectContaining({ to: "lelantos1qqqq", amount: 1500n, asset: 1n }),
+            expect.objectContaining({ recipient: "lelantos1qqqq", amount: 1500n, asset: 1n }),
         );
         expect(result).toEqual({
             x402Version: 2,
             payload: {
                 pool: LELANTOS_POOL,
                 txHash: hex32(`0x${"fe".repeat(32)}`),
-                // The receipt's own `recipientCommitment`; quoting the sender's
-                // change instead would make the payment unverifiable.
+                // The receipt's `recipientCommitment`; the sender's change
+                // commitment would make the payment unverifiable.
                 commitment: RECIPIENT_CM,
                 asset: "1",
                 amount: "1500",
@@ -99,7 +67,7 @@ describe("shieldedExact", () => {
         const { wallet } = stubWallet();
         const result = await shieldedExact(wallet).createPaymentPayload(
             2,
-            requirements({ amount: "0000001500" }),
+            shieldedRequirements({ amount: "0000001500" }),
         );
         expect(result.payload.amount).toBe("0000001500");
     });
@@ -107,15 +75,15 @@ describe("shieldedExact", () => {
     it("memoises the chain id across quote and payment", async () => {
         const { wallet, chainId } = stubWallet();
         const mechanism = shieldedExact(wallet);
-        await mechanism.quote(requirements());
-        await mechanism.createPaymentPayload(2, requirements());
+        await mechanism.quote(shieldedRequirements());
+        await mechanism.createPaymentPayload(2, shieldedRequirements());
         expect(chainId).toHaveBeenCalledTimes(1);
     });
 
     it("treats a missing `extra.pool` as compatible", async () => {
         const { wallet } = stubWallet();
         await expect(
-            shieldedExact(wallet).quote(requirements({ extra: {} })),
+            shieldedExact(wallet).quote(shieldedRequirements({ extra: {} })),
         ).resolves.toBeTruthy();
     });
 });
@@ -123,16 +91,18 @@ describe("shieldedExact", () => {
 describe("shieldedExact.quote", () => {
     it("prices in circuit units, which this network already quotes in", async () => {
         const { wallet, transfer } = stubWallet();
-        const quote = await shieldedExact(wallet).quote(requirements());
+        const quote = await shieldedExact(wallet).quote(shieldedRequirements());
         expect(quote).toEqual({ amount: 1500n, asset: WETH });
-        // Pricing must never move value — the selector calls it on offers it
-        // may well discard.
+        // Pricing must not move value; the selector calls it on offers it may
+        // discard.
         expect(transfer).not.toHaveBeenCalled();
     });
 
     const rejects = async (over: Partial<PaymentRequirements>, pattern: RegExp) => {
         const { wallet, transfer } = stubWallet();
-        await expect(shieldedExact(wallet).quote(requirements(over))).rejects.toThrow(pattern);
+        await expect(shieldedExact(wallet).quote(shieldedRequirements(over))).rejects.toThrow(
+            pattern,
+        );
         expect(transfer).not.toHaveBeenCalled();
     };
 
@@ -159,7 +129,7 @@ describe("shieldedExact.quote", () => {
         const { wallet } = stubWallet();
         await expect(
             shieldedExact(wallet, { minTimeoutSeconds: 3 }).quote(
-                requirements({ maxTimeoutSeconds: 5 }),
+                shieldedRequirements({ maxTimeoutSeconds: 5 }),
             ),
         ).resolves.toBeTruthy();
     });

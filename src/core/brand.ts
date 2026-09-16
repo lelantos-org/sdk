@@ -1,20 +1,19 @@
 // Nominal types for the values callers most often confuse.
 //
-// The SDK's API surface is dominated by two structural types: `string` for
-// four different address and hash formats, and `bigint` for asset ids plus
-// three separate amount spaces. Structurally they are interchangeable, so
-// transposing them compiles and fails at runtime — or, worse, succeeds
+// The SDK's API uses `string` for four address and hash formats and `bigint` for
+// asset ids plus three amount spaces. Structurally interchangeable values can be
+// transposed without a compile error and then fail at runtime or succeed
 // against the wrong recipient. Branding makes each one nominal.
 //
 // Brands are erased at runtime: a `CircuitAmount` is a `bigint`, an
 // `EvmAddress` is a string, and arithmetic or interpolation works unchanged.
 // JavaScript consumers are unaffected.
 //
-// Each constructor validates and brands. Values that come back out of the SDK
-// are already branded, so a normal flow — `wallet.asset(...)` into
-// `parseAmount` into `wallet.transfer` — needs no calls here at all.
+// Each constructor validates and brands. Values returned by the SDK are already
+// branded, so a typical flow (`wallet.asset(...)` into `parseAmount` into
+// `wallet.transfer`) needs no calls here.
 
-import { InvalidArgumentError } from "./errors.js";
+import { InvalidArgumentError } from "../errors/config.js";
 
 declare const BRAND: unique symbol;
 
@@ -49,15 +48,14 @@ export type AssetId = Brand<bigint, "AssetId">;
 
 /**
  * Accepted wherever an asset id is an *input*. Branding guards internal
- * invariants; requiring callers to brand a literal buys nothing, so inputs
- * take a plain `bigint` and are branded on the way in. Outputs stay `AssetId`.
+ * invariants, so inputs take a plain `bigint` and are branded on the way in.
+ * Outputs stay `AssetId`.
  */
 export type AssetIdLike = AssetId | bigint;
 
 /**
  * Accepted wherever a shielded address is an *input*. `decodeAddress`
- * validates the string regardless, so demanding a branded value only moves
- * the failure earlier for callers who already hold a `string`.
+ * validates the string regardless of branding.
  */
 export type ShieldedAddressLike = ShieldedAddress | string;
 
@@ -65,13 +63,12 @@ export type ShieldedAddressLike = ShieldedAddress | string;
 export type EvmAddressLike = EvmAddress | `0x${string}`;
 
 /**
- * Accepted wherever a circuit-unit amount is an *input*. `parseAmount` is
- * still the way to reach circuit units from a human string; this only spares
- * callers a brand call on a literal they already have.
+ * Accepted wherever a circuit-unit amount is an *input*. Use `parseAmount` to
+ * convert a human string to circuit units.
  */
 export type CircuitAmountLike = CircuitAmount | bigint;
 
-/** Amount in circuit units — the denomination every `Wallet` method takes. */
+/** Amount in circuit units — the denomination every wallet method takes. */
 export type CircuitAmount = Brand<bigint, "CircuitAmount">;
 
 /** Amount in ERC-20 base units: `token = circuit * asset.scale`. */
@@ -125,7 +122,9 @@ export function hex32(value: string): Hex32 {
 export function shieldedAddress(value: string): ShieldedAddress {
     if (!SHIELDED.test(value)) {
         throw new InvalidArgumentError(
-            `not a bech32m shielded address (expected \`lelantos1…\`): ${JSON.stringify(value)}`,
+            // The address is kept out of the message, as in `decodeAddress`: error text reaches
+            // application logs verbatim, and an address identifies a payee.
+            "not a bech32m shielded address (expected `lelantos1…`)",
             { argument: "address" },
         );
     }
@@ -154,12 +153,7 @@ export function assetId(value: bigint | number): AssetId {
  * @throws {InvalidArgumentError} when negative.
  */
 export function circuitAmount(value: bigint): CircuitAmount {
-    if (value < 0n) {
-        throw new InvalidArgumentError(`amount must not be negative: ${value}`, {
-            argument: "amount",
-        });
-    }
-    return value as CircuitAmount;
+    return nonNegativeAmount(value) as CircuitAmount;
 }
 
 /**
@@ -169,19 +163,22 @@ export function circuitAmount(value: bigint): CircuitAmount {
  * @throws {InvalidArgumentError} when negative.
  */
 export function tokenAmount(value: bigint): TokenAmount {
+    return nonNegativeAmount(value) as TokenAmount;
+}
+
+function nonNegativeAmount(value: bigint): bigint {
     if (value < 0n) {
         throw new InvalidArgumentError(`amount must not be negative: ${value}`, {
             argument: "amount",
         });
     }
-    return value as TokenAmount;
+    return value;
 }
 
 /**
  * Apply a brand without validating. For SDK-internal use where the value's
- * provenance already guarantees the invariant: a freshly formatted hex word, a
- * wire field a decoder has just checked, the result of arithmetic on values
- * that were themselves branded.
+ * provenance guarantees the invariant: a freshly formatted hex word, a wire
+ * field a decoder has checked, or arithmetic on branded values.
  *
  * The overloads tie each brand to its base primitive, so
  * `branded<CircuitAmount>("0x…")` does not compile.

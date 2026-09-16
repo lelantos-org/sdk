@@ -3,20 +3,19 @@
 // On Ethereum and OP-stack chains (Base, Optimism) `block.number` is the
 // block's own height, so a log's `blockNumber` is the value the contract saw.
 //
-// Arbitrum breaks that assumption: inside the EVM, `block.number` returns an
-// approximation of the *L1* height, while receipts and logs report the L2
-// height. The two are unrelated magnitudes — an L2 block around 495,000,000
-// sits at an L1 height around 25,700,000.
+// On Arbitrum, `block.number` inside the EVM approximates the *L1* height,
+// while receipts and logs report the L2 height. The two are unrelated
+// magnitudes: an L2 block around 495,000,000 sits at an L1 height around
+// 25,700,000.
 //
-// This matters because MASP folds `uint32(block.number)` into the deposit
-// digest (`_depositDigest`). Replaying the L2 height reconstructs a different
-// digest, and both `flushBatch` and `cancelDeposit` revert
-// `DigestMismatch(id)` — permanently, since nothing about the deposit changes.
+// MASP folds `uint32(block.number)` into the deposit digest (`_depositDigest`).
+// Replaying the L2 height reconstructs a different digest, and both
+// `flushBatch` and `cancelDeposit` revert `DigestMismatch(id)` permanently,
+// since nothing about the deposit changes.
 //
 // Arbitrum nodes expose the value as a non-standard `l1BlockNumber` field on
-// the block. Its absence is the signal that the chain's own height is what the
-// EVM reports, which covers every other chain without needing a chain-id
-// allowlist that a future rollup would fall off.
+// the block. Its absence means the EVM reports the chain's own height; keying
+// on the field rather than a chain-id allowlist also covers future rollups.
 
 import type { PublicClient } from "viem";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NetworkError, WireFormatError } from "../../core/errors.js";
+import { NetworkError, WireFormatError } from "../../errors/network.js";
 import { isShieldedFeeRejection } from "./client.js";
 
 const netErr = (status: number, body?: string) =>

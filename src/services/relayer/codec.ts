@@ -8,14 +8,15 @@
 // `decStr` rather than a bare `Number(...)` or `.toString()`; `codec.test.ts`
 // pins both encodings with golden fixtures.
 
-import { WireFormatError } from "../../core/errors.js";
 import { bytesToHex } from "../../core/hex.js";
 import type { Point } from "../../crypto/index.js";
+import { WireFormatError } from "../../errors/network.js";
+import type { OutputAux } from "../../notes/aux.js";
+import type { DepositRequest } from "../../protocol/deposit-request.js";
 import type {
     SubmitSwapPayload,
     SubmitTransactPayload,
     SwapBlob,
-    TransactAux,
     TransactPubInputs,
 } from "../../protocol/transact.js";
 
@@ -67,32 +68,42 @@ function serializeSwapBlob(s: SwapBlob): unknown {
     return {
         adapter: s.adapter,
         route: s.route,
-        depositD: {
-            // Rust DTO declares these as u64 (serde rejects strings); JS
-            // Number is safe up to 2^53.
-            chainId: u64Num(s.depositD.chainId, "$.swap.depositD.chainId"),
-            publicAssetId: u64Num(s.depositD.publicAssetId, "$.swap.depositD.publicAssetId"),
-            publicIn: u64Num(s.depositD.publicIn, "$.swap.depositD.publicIn"),
-            payer: s.depositD.payer,
-            recipient: s.depositD.recipient,
-            outCm: s.depositD.outCm,
-            cvDep: [decStr(s.depositD.cvDep[0]), decStr(s.depositD.cvDep[1])],
-            rcv: decStr(s.depositD.rcv),
-            // The B-note deposit mints a fee leaf too, though the swap pays
-            // the relayer on its spend leg, so this one is a zero-value pad.
-            feeIn: u64Num(s.depositD.feeIn, "$.swap.depositD.feeIn"),
-            feeCm: s.depositD.feeCm,
-            feeCvDep: [decStr(s.depositD.feeCvDep[0]), decStr(s.depositD.feeCvDep[1])],
-            feeRcv: decStr(s.depositD.feeRcv),
-        },
+        depositD: serializeSwapDeposit(s.depositD, "$.swap.depositD"),
         auxD: serializeAux(s.auxD),
         feeAuxD: serializeAux(s.feeAuxD),
+        refundD: serializeSwapDeposit(s.refundD, "$.swap.refundD"),
+        refundAuxD: serializeAux(s.refundAuxD),
+        refundFeeAuxD: serializeAux(s.refundFeeAuxD),
         tokenIn: s.tokenIn,
         tokenOut: s.tokenOut,
         // Decimal strings so U256 values >2^53 round-trip safely.
         amountIn: decStr(s.amountIn),
         minOut: decStr(s.minOut),
-        deadline: s.deadline === undefined ? null : decStr(s.deadline),
+        deadline: decStr(s.deadline),
+        refundTo: s.refundTo,
+    };
+}
+
+function serializeSwapDeposit(d: DepositRequest, path: string): unknown {
+    return {
+        // Rust DTO declares these as u64 (serde rejects strings); JS
+        // Number is safe up to 2^53.
+        chainId: u64Num(d.chainId, `${path}.chainId`),
+        publicAssetId: u64Num(d.publicAssetId, `${path}.publicAssetId`),
+        publicIn: u64Num(d.publicIn, `${path}.publicIn`),
+        payer: d.payer,
+        recipient: d.recipient,
+        outCm: d.outCm,
+        cvDep: [decStr(d.cvDep[0]), decStr(d.cvDep[1])],
+        rcv: decStr(d.rcv),
+        // A swap deposit mints a fee leaf too, paying whoever flushes it. Its
+        // asset is a `u64` like `feeIn`: the escrowed asset, or 0 for a
+        // zero-value leaf.
+        feeAssetId: u64Num(d.feeAssetId, `${path}.feeAssetId`),
+        feeIn: u64Num(d.feeIn, `${path}.feeIn`),
+        feeCm: d.feeCm,
+        feeCvDep: [decStr(d.feeCvDep[0]), decStr(d.feeCvDep[1])],
+        feeRcv: decStr(d.feeRcv),
     };
 }
 
@@ -114,11 +125,12 @@ function serializePubInputs(pi: TransactPubInputs): unknown {
         chainId: u64Num(pi.chainId, "$.pubInputs.chainId"),
         payer: pi.payer,
         relayer: pi.relayer,
+        intentHash: decStr(pi.intentHash),
         outCvDep: pi.outCvDep.map(pointToObj),
     };
 }
 
-function serializeAux(a: TransactAux): unknown {
+function serializeAux(a: OutputAux): unknown {
     return {
         clueR: pointToObj(a.clueR),
         ephPub: pointToObj(a.ephPub),

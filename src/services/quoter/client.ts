@@ -1,22 +1,19 @@
 // Quote-fetch helper for the MetaQuoter backend.
 //
 // Fetches the best route for `(tokenIn, tokenOut, amountIn)`. Proof bundling
-// reuses `buildWithdraw` + `buildDeposit` from `bundle/`; caller assembles
-// `SwapWrapper.swap(SwapArgs)` calldata against their own signer/relayer.
+// reuses `buildWithdraw` + `buildDeposit` from `bundle/`; the caller assembles
+// `SwapWrapper.swap(SwapArgs)` calldata against its own signer/relayer.
 //
-// Built on `core/json-client.ts` like every other service client here, which
-// is what gives it the per-attempt timeout, the retry with backoff, and URL
-// redaction in errors and logs. It previously called `fetch` directly with a
-// hand-rolled `AbortController`, so a quote had no retry at all and a failure
-// arrived as a bare `Error` that `isWalletError` could not see.
+// Built on `services/http/json-client.ts`, which provides the per-attempt timeout, retry
+// with backoff, and URL redaction in errors and logs.
 //
-// Retrying is safe here despite the POST: a quote reads a venue and moves
-// nothing, so a repeat costs a round trip and nothing else.
+// Retrying is safe despite the POST: a quote reads a venue and moves nothing.
 
-import { bigintFrom, int, obj, str } from "../../core/decode.js";
-import { WireFormatError } from "../../core/errors.js";
-import type { HttpClientOptions } from "../../core/http.js";
-import { createJsonClient } from "../../core/json-client.js";
+import { unixNow } from "../../core/time.js";
+import { WireFormatError } from "../../errors/network.js";
+import type { HttpClientOptions } from "../http/client.js";
+import { bigintFrom, int, obj, str } from "../http/decode.js";
+import { createJsonClient } from "../http/json-client.js";
 
 /**
  * Venue tag returned by MetaQuoter.
@@ -32,7 +29,7 @@ const VENUES: ReadonlySet<string> = new Set<SwapVenue>(["univ3", "univ4"]);
  * arrive as decimal strings on the wire; this type holds the parsed
  * `bigint` values.
  */
-export interface SwapQuote {
+export interface SwapRouteQuote {
     venue: SwapVenue;
     /** Allowlisted `ISwapAdapter` address bound to the route on-chain. */
     adapter: `0x${string}`;
@@ -91,13 +88,13 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  *
  * Throws `NetworkError` (`QUOTER_TIMEOUT` / `QUOTER_FAILED`) on transport
  * failure and `WireFormatError` on a response that does not match the
- * contract above — both `WalletError`s, so `isWalletError` sees them.
+ * contract above; both are `WalletError`s, so `isWalletError` recognises them.
  */
 export async function fetchSwapQuote(
     baseUrl: string,
     req: SwapQuoteRequest,
     opts: FetchSwapQuoteOptions = {},
-): Promise<SwapQuote> {
+): Promise<SwapRouteQuote> {
     const { signal, ...http } = opts;
     const json = createJsonClient(
         baseUrl,
@@ -121,13 +118,12 @@ export async function fetchSwapQuote(
 /**
  * Validate the wire shape rather than asserting it.
  *
- * An `as WireSwapQuote` cast would surface a missing `min_out` as a
- * `TypeError` from `BigInt(undefined)` deep inside the deserializer, and an
- * `expected_out` of `"abc"` as a `SyntaxError` — neither naming the field. A
- * quote drives how much a caller is willing to receive out of a swap, so a
- * malformed one must fail loudly and name the offending value.
+ * A type cast would surface a missing `min_out` as a `TypeError` from
+ * `BigInt(undefined)` and an `expected_out` of `"abc"` as a `SyntaxError`,
+ * neither naming the field. A quote sets how much a caller accepts from a swap,
+ * so a malformed one must fail with the offending field named.
  */
-function swapQuote(raw: unknown): SwapQuote {
+function swapQuote(raw: unknown): SwapRouteQuote {
     const d = obj(raw, "$");
     const venue = str(d.venue, "$.venue");
     if (!VENUES.has(venue)) {
@@ -158,7 +154,7 @@ function hexAddress(v: unknown, path: string): `0x${string}` {
     return s as `0x${string}`;
 }
 
-/** Opaque to the SDK, but it must at least be whole bytes of hex. */
+/** Opaque to the SDK, but must be whole bytes of hex. */
 function hexBlob(v: unknown, path: string): `0x${string}` {
     const s = str(v, path);
     if (!HEX_BLOB.test(s)) {
@@ -168,9 +164,6 @@ function hexBlob(v: unknown, path: string): `0x${string}` {
 }
 
 /** Quote age in seconds. Callers choose their own staleness threshold. */
-export function quoteAgeSecs(
-    q: SwapQuote,
-    nowSecs: number = Math.floor(Date.now() / 1000),
-): number {
+export function quoteAgeSecs(q: SwapRouteQuote, nowSecs: number = unixNow()): number {
     return Math.max(0, nowSecs - q.quotedAt);
 }

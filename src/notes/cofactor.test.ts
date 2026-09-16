@@ -12,8 +12,8 @@
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
 import { blake2b } from "@noble/hashes/blake2";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { Jubjub, Point } from "../crypto/jubjub.js";
-import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
+import type { Point } from "../crypto/jubjub.js";
+import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
 import { buildSpendingKey, type SpendingKey } from "../keys/keys.js";
 import { encodeNotePayload } from "./codec.js";
@@ -51,7 +51,7 @@ describe("cofactor-cleared trial decryption", () => {
     let Q: Point;
 
     beforeAll(async () => {
-        J = await WasmJubjub.build();
+        J = await Jubjub.build();
         P = await Poseidon.build();
         me = buildSpendingKey(P, J, 4242n);
         plaintext = encodeNotePayload({ asset: 1n, value: 500n, rho: 11n, rcm: 22n, rcvDep: 33n });

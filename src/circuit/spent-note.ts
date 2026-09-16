@@ -1,5 +1,5 @@
-// Witness builders for the 2x2 MASP circuit. Shared between circuit tests
-// and Foundry fixture generators so all three views stay byte-identical.
+// Witness builders for the MASP transact circuit. Shared by the SDK, circuit tests
+// and Foundry fixture generators so all three stay byte-identical.
 
 import { randomJubjubScalar } from "../core/random.js";
 import {
@@ -45,8 +45,6 @@ export interface DummyBlinders {
     rcvDep?: Field;
 }
 
-/** @internal */
-
 // Dummy spent slot. is_dummy=1 bypasses Merkle membership + pk check.
 //
 // nf = Poseidon(TAG_NF, nk, rho, cm) with nk = Poseidon(TAG_NK, 0); fresh `rho`
@@ -58,6 +56,7 @@ export interface DummyBlinders {
 // publicly visible: a reused rho repeats the nullifier, and `cv = 0·gen +
 // rcv·H` with rcv = 0 is the identity point in every transaction, which tags
 // the slot as a dummy in the public inputs.
+/** @internal */
 export function dummyInputAt(
     P: Poseidon,
     depth: number,

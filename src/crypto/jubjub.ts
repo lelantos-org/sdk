@@ -1,6 +1,5 @@
 // Baby-Jubjub types + shared constants. Runtime implementation lives in
-// `./jubjub-wasm/` (Rust/WASM). `Jubjub` is exported as a type alias for the
-// WASM class so the rest of the codebase keeps a single nominal name.
+// `./jubjub-wasm/` (Rust/WASM).
 
 import type { Field } from "./poseidon.js";
 
@@ -18,4 +17,4 @@ export const H_BASE: Point = [
     5980429700218124965372158798884772646841287887664001482443826541541529227896n,
 ];
 
-export { WasmJubjub as Jubjub } from "./jubjub-wasm/index.js";
+export { Jubjub } from "./jubjub-wasm/index.js";

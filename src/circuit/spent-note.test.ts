@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { randomFr } from "../core/random.js";
-import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
+import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
 import { dummyInputAt } from "./spent-note.js";
 
 // `in_cv` is a public input (PI slots 8..11, `PubInputs.compress`), so anything
 // deterministic about a dummy slot's commitment is visible on chain. With
 // rcv = 0 and value = 0 the commitment is the identity point in every
-// transaction, which is a free "this slot is a dummy" oracle.
+// transaction, which identifies the slot as a dummy.
 
-const cvOf = (J: WasmJubjub, asset: bigint, value: bigint, rcv: bigint) =>
+const cvOf = (J: Jubjub, asset: bigint, value: bigint, rcv: bigint) =>
     J.valueCommit(value, J.hashToAssetGen(asset), rcv);
 
 describe("dummyInputAt", () => {
     it("blinds the value commitment so the slot is not identifiable", async () => {
         const P = await Poseidon.build();
-        const J = await WasmJubjub.build();
+        const J = await Jubjub.build();
 
         const a = dummyInputAt(P, 4, randomFr());
         const b = dummyInputAt(P, 4, randomFr());

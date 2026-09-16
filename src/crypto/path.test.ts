@@ -16,9 +16,9 @@ function treeOf(depth: number, count: number): MerkleTree {
     return t;
 }
 
-// `MerkleTree` builds paths, `rootFromPath` checks them: separate
-// implementations of the same quaternary hashing. A divergence would let the
-// wallet prove membership against a root the chain never held.
+// `MerkleTree` builds paths and `rootFromPath` checks them, as separate implementations of the
+// same quaternary hashing. A divergence would let the wallet prove membership against a root the
+// chain never held.
 describe("rootFromPath vs MerkleTree.proof", () => {
     for (const depth of [2, 3, 10]) {
         it(`agrees at depth ${depth} for every leaf`, () => {
@@ -70,8 +70,7 @@ describe("verifyPath", () => {
             pathIndices,
             async () => false,
         );
-        // Even on rejection the caller learns what the path hashed to, which
-        // is the difference between "unknown root" and "corrupt path".
+        // On rejection the computed root distinguishes "unknown root" from "corrupt path".
         expect(rejected).toEqual({ ok: false, computedRoot: tree.root() });
     });
 });

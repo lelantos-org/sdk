@@ -1,7 +1,7 @@
 // Ambient types for `circom_runtime`, which ships as untyped JavaScript.
 //
-// Scope: exactly what `prover/wasm-prover.ts` calls. As with `snarkjs.d.ts`,
-// these declarations are unverified assertions; keep the surface minimal.
+// Scope: only what `prover/wasm-prover.ts` calls. As with `snarkjs.d.ts`, these
+// declarations are not checked against the package; keep the surface minimal.
 
 declare module "circom_runtime" {
     export interface WitnessCalculator {

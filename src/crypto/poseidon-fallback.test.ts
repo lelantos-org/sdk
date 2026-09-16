@@ -1,12 +1,10 @@
 // The JS fallback path.
 //
-// Isolated in its own file because `configurePoseidonWasm` installs a
-// process-wide loader override and resets the module memo — a failing loader
-// left behind would silently degrade every other suite in the same realm.
+// Isolated in its own file because `configurePoseidonWasm` installs a process-wide loader override
+// and resets the module memo; a failing loader would degrade every other suite in the same realm.
 //
-// Worth testing rather than assuming: a wallet that quietly loses the wasm
-// backend is 2.5x slower with no other symptom, so both halves of the
-// contract — that it still hashes correctly, and that it says so — matter.
+// Losing the wasm backend makes hashing 2.5x slower with no other symptom, so the fallback must
+// both hash correctly and log a warning.
 
 import { poseidon5 } from "poseidon-lite/poseidon5";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,12 +33,11 @@ describe("wasm unavailable", () => {
 
         expect(P.backend).toBe("js");
 
-        // Correctness is not optional on the degraded path.
+        // The fallback must produce identical digests.
         const xs = [1n, 2n, 3n, 4n, 5n];
         expect(P.hash(xs)).toBe(poseidon5(xs));
 
-        // And the reason has to reach the operator, or a 2.5x regression looks
-        // like "sync is slow today".
+        // The reason must reach the operator, or the slowdown looks like an ordinary slow sync.
         const warned = records.find((r) => r.ns === "lelantos:crypto:poseidon");
         expect(warned?.level).toBe("warn");
         expect(warned?.fields?.error).toContain("no wasm here");

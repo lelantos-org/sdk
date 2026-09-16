@@ -1,8 +1,8 @@
 // Ambient types for `snarkjs`, which ships as untyped JavaScript.
 //
-// Scope: exactly the calls `prover/snarkjs.ts` makes. These declarations are
-// unverified against the real package, so an upstream signature change
-// compiles clean and fails at runtime. Keep the surface minimal.
+// Scope: only the calls `prover/snarkjs.ts` makes. These declarations are not
+// checked against the package, so an upstream signature change compiles but
+// fails at runtime. Keep the surface minimal.
 
 declare module "snarkjs" {
     export interface Groth16Proof {

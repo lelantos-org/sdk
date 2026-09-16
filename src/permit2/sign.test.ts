@@ -9,25 +9,22 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
-import { PrivateKeySigner } from "../chain/eth-signer.js";
+import { PrivateKeySigner } from "../chain/signer/private-key.js";
+import { isWalletError } from "../errors/guard.js";
+import type { EthSigner } from "../keys/signer.js";
 import { computePiHash } from "../protocol/abi-hash.js";
 import {
     type AuxOutput,
     type DepositRequest,
     PERMIT2_ADDRESS,
-    signPermit2Allowance,
-    signPermit2AllowanceBatch,
-    signPermit2Witness,
-} from "./sign.js";
+} from "../protocol/deposit-request.js";
+import { signPermit2Allowance, signPermit2AllowanceBatch } from "./allowance.js";
+import { signPermit2Witness } from "./witness.js";
 
 /**
- * The `PermitDetails` member list, as the tests state it independently of the
- * production table.
- *
- * Hoisted because it was written out four times in this file: the point of
- * restating it here rather than importing is that an unintended edit to
- * `PERMIT2_ALLOWANCE_TYPES` fails a test — four copies meant an edit could
- * match one and be missed by the others.
+ * The `PermitDetails` member list, restated independently of the production
+ * table so an unintended edit to `PERMIT2_ALLOWANCE_TYPES` fails a test.
+ * Defined once for all tests in this file.
  */
 const PERMIT_DETAILS = [
     { name: "token", type: "address" },
@@ -105,6 +102,7 @@ describe("permit2", () => {
             outCm: "0x0000000000000000000000000000000000000000000000000000000000000003",
             cvDep: [11n, 12n],
             rcv: 99n,
+            feeAssetId: 1n,
             feeIn: 7n,
             feeCm: "0x0000000000000000000000000000000000000000000000000000000000000004",
             feeCvDep: [13n, 14n],
@@ -125,23 +123,27 @@ describe("permit2", () => {
         const other = { ...deposit, publicIn: 1001n };
         expect(computePiHash(other, aux, aux)).not.toBe(h1);
 
-        // The fee note is inside the witness too, so a relayer cannot swap in
+        // The fee note is part of the witness, so a relayer cannot substitute
         // a different one and reuse the payer's signature.
         const otherFee = { ...deposit, feeIn: 8n };
         expect(computePiHash(otherFee, aux, aux)).not.toBe(h1);
+
+        // So is its asset: a submitter cannot move the charge onto another
+        // token the payer holds.
+        const otherFeeAsset = { ...deposit, feeAssetId: 2n };
+        expect(computePiHash(otherFeeAsset, aux, aux)).not.toBe(h1);
     });
 });
 
 describe("permit2 witness type string", () => {
-    // The signing tests above re-declare the same type table and recover with
-    // viem — which proves viem is self-consistent and nothing about the bytes
-    // the contract verifies. These pin those bytes, so an edit to
-    // `PERMIT2_TYPES` (a reordered field, a changed width, a renamed struct)
-    // fails here rather than on chain.
+    // The signing tests above recover with viem, which checks only viem's
+    // self-consistency. These pin the bytes the contract verifies, so an edit to
+    // `PERMIT2_TYPES` (reordered field, changed width, renamed struct) fails
+    // here rather than on chain.
     //
     // Permit2 builds the signed type string by concatenating its own stub with
-    // the caller's witness type string, so this concatenation is what has to
-    // equal `MASP._DEPOSIT_WITNESS_TYPE_STRING`.
+    // the caller's witness type string; this concatenation must equal
+    // `MASP._DEPOSIT_WITNESS_TYPE_STRING`.
     const WITNESS_TYPE_STRING =
         "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce," +
         "uint256 deadline,MASPDeposit witness)MASPDeposit(bytes32 piHash)" +
@@ -166,11 +168,10 @@ describe("permit2 witness type string", () => {
     });
 
     it("produces the digest a hand-rolled EIP-712 encoding gives", () => {
-        // The independent half: the struct hash is assembled here from the
-        // type strings above, byte for byte as Solidity would, and compared
-        // against what viem derives from the SDK's own `PERMIT2_TYPES`. They
-        // agree only if that table encodes to exactly this type string — which
-        // is the property the contract depends on and nothing else checked.
+        // The struct hash is assembled from the type strings above as Solidity
+        // would, and compared against viem's digest from `PERMIT2_TYPES`. They
+        // agree only if that table encodes to exactly this type string, which
+        // is the property the contract depends on.
         const token = "0x0000000000000000000000000000000000001234" as const;
         const spender = "0x0000000000000000000000000000000000005678" as const;
         const amount = 1_000n;
@@ -209,8 +210,8 @@ describe("permit2 witness type string", () => {
             chainId: 31337,
             verifyingContract: PERMIT2_ADDRESS as `0x${string}`,
         };
-        // Domain separator hand-rolled too. Permit2's domain omits `version`,
-        // which is exactly the kind of detail a helper would paper over.
+        // Domain separator also built manually, since Permit2's domain omits
+        // `version`.
         const domainSeparator = keccak256(
             encodeAbiParameters(
                 [
@@ -250,18 +251,257 @@ describe("permit2 witness type string", () => {
     });
 
     it("still finds the constants on the canonical MASP ABI", () => {
-        // A rename on the contract side is the other way these drift. Read
-        // from the published ABI, not the SDK's trimmed local copy.
+        // Guards against a contract-side rename. Reads the published ABI, not
+        // the SDK's trimmed local copy.
         const names = maspAbi.filter((e) => e.type === "function").map((e) => e.name);
         expect(names).toContain("DEPOSIT_WITNESS_TYPE_STRING");
         expect(names).toContain("DEPOSIT_WITNESS_TYPEHASH");
     });
 });
 
+// ─── two-token witness permit ────────────────────────────────────────────────
+//
+// A relayer note in another asset is pulled under a
+// `PermitBatchWitnessTransferFrom` over `[deposit token, fee token]`. The vector
+// is lifted from a forge trace of
+// `MASPDepositFeeAssetTest.test_signature_crossAsset_pullsBothTokens`
+// (`forge test --match-test test_signature_crossAsset_pullsBothTokens -vvvv`):
+// the request and payloads MASP received, the digest `_batchDigest` handed to
+// `vm.sign`, and the signature Permit2 then accepted.
+
+describe("signPermit2Witness batch form", () => {
+    const FORGE = {
+        chainId: 31337n,
+        spender: "0xa0Cb889707d426A7A386870A03bc70d1b0697598",
+        token: "0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f",
+        maxTotal: 10_025_000_000_000n,
+        feeToken: "0x15cF58144EF33af1e14b5208015d11F9143E27b9",
+        maxFee: 70_000n,
+        nonce: 0n,
+        deadline: (1n << 256n) - 1n,
+        /** `keccak256(abi.encode(DEPOSIT_WITNESS_TYPEHASH, piHash))`, from the Permit2 call. */
+        witness: "0x15668c4ea4cb4f9c7e1e1fa0ef692e53323c91221e541bfe23112ddb3cf67f95",
+        domainSeparator: "0xd5a17abc3865df5c1400c0299bd4ce2eefc8114aec5f9d3dded1745783e57b98",
+        /**
+         * The `verifyingContract` behind that separator. `DeployPermit2` etches
+         * prebuilt bytecode at the canonical address, and Permit2 caches its
+         * domain at construction, so forge signs under the address it was built
+         * at rather than the canonical one. Passed as `permit2Address`, the
+         * override for exactly such a non-canonical domain.
+         */
+        verifyingContract: "0xF62849F9A0B5Bf2913b396098F7c7019b51A820a",
+        digest: "0x236cc2c0229beef15f0a55475e59b525ebb96e06f65767c892e49923b525e97a",
+        /** `SIGNER_PK = 0x5161E7`. */
+        key: `0x${"5161e7".padStart(64, "0")}` as const,
+        signature:
+            "0xff43473e64cea04848d6809fb7cb96456e1de92f513f4121f7f0885f150902a9" +
+            "13b40488d3cbdda35ace0b9a4dbe76f54ae3f4929846ff5af0e521bb374817131c",
+    } as const;
+
+    /** `SpendFixture.validAux()[0]`, used for both payloads in that test. */
+    const forgeAux: AuxOutput = {
+        clueRx: 5299619240641551281634865583518297030282874472190772894086521144482721001553n,
+        clueRy: 16950150798460657717958625567821834550301663161624707787222815936182638968203n,
+        ephPubX: 5299619240641551281634865583518297030282874472190772894086521144482721001553n,
+        ephPubY: 16950150798460657717958625567821834550301663161624707787222815936182638968203n,
+        ciphertext: new Uint8Array([0x00, 0x01]),
+    };
+    const forgeRequest: DepositRequest = {
+        chainId: 31337n,
+        publicAssetId: 1n,
+        publicIn: 1000n,
+        payer: "0x5F3cAc19f89bd2e972062Db0F287c525E1913341",
+        recipient: "0x000000000000000000000000000000000000F00D",
+        outCm: `0x${"100".padStart(64, "0")}`,
+        cvDep: [192n, 193n],
+        rcv: 0n,
+        feeAssetId: 2n,
+        feeIn: 7n,
+        feeCm: `0x${"101".padStart(64, "0")}`,
+        feeCvDep: [240n, 241n],
+        feeRcv: 0n,
+    };
+    const piHash = computePiHash(forgeRequest, forgeAux, forgeAux);
+
+    /**
+     * A signer that records the typed data it is asked to sign, and signs it
+     * with `inner` when given.
+     */
+    function recordingSigner(inner?: EthSigner) {
+        const calls: Parameters<EthSigner["signTypedData"]>[] = [];
+        const signer = {
+            signTypedData: async (...args: Parameters<EthSigner["signTypedData"]>) => {
+                calls.push(args);
+                return inner ? inner.signTypedData(...args) : "0x";
+            },
+        } as unknown as EthSigner;
+        return { signer, calls };
+    }
+
+    /** The EIP-712 digest of a recorded `signTypedData` call. */
+    const digestOf = ([domain, types, primaryType, message]: Parameters<
+        EthSigner["signTypedData"]
+    >) => hashTypedData({ domain, types, primaryType, message } as never);
+
+    const batchArgs = (signer: EthSigner) => ({
+        signer,
+        chainId: FORGE.chainId,
+        spender: FORGE.spender,
+        token: FORGE.token,
+        maxTotal: FORGE.maxTotal,
+        feeToken: FORGE.feeToken,
+        maxFee: FORGE.maxFee,
+        nonce: FORGE.nonce,
+        deadline: FORGE.deadline,
+        piHash,
+        permit2Address: FORGE.verifyingContract,
+    });
+
+    it("hashes the request to the piHash the forge witness was built from", () => {
+        expect(
+            keccak256(
+                encodeAbiParameters(
+                    [{ type: "bytes32" }, { type: "bytes32" }],
+                    [keccak256(toBytes("MASPDeposit(bytes32 piHash)")), piHash],
+                ),
+            ),
+        ).toBe(FORGE.witness);
+    });
+
+    it("signs forge's `_batchDigest`, reproducing the signature Permit2 accepted", async () => {
+        const { signer, calls } = recordingSigner(
+            new PrivateKeySigner(FORGE.key, "http://localhost:0", FORGE.chainId),
+        );
+        const out = await signPermit2Witness(batchArgs(signer));
+
+        expect(calls).toHaveLength(1);
+        expect(calls[0]![2]).toBe("PermitBatchWitnessTransferFrom");
+        // The vector also pins the entry order, `[token, feeToken]`.
+        expect(digestOf(calls[0]!)).toBe(FORGE.digest);
+        expect(out).toEqual({
+            nonce: FORGE.nonce,
+            deadline: FORGE.deadline,
+            maxTotal: FORGE.maxTotal,
+            maxFee: FORGE.maxFee,
+            signature: FORGE.signature,
+        });
+    });
+
+    it("hand-rolled batch digest equals forge's, from the Permit2 type string", () => {
+        // `_batchDigest`, transliterated: Permit2's batch stub followed by the
+        // witness type string MASP passes, an array member hashed as the packed
+        // entry hashes, and Permit2's version-less domain.
+        const tpType = keccak256(toBytes("TokenPermissions(address token,uint256 amount)"));
+        const entry = (token: `0x${string}`, amount: bigint) =>
+            keccak256(
+                encodeAbiParameters(
+                    [{ type: "bytes32" }, { type: "address" }, { type: "uint256" }],
+                    [tpType, token, amount],
+                ),
+            );
+        const typeHash = keccak256(
+            toBytes(
+                "PermitBatchWitnessTransferFrom(TokenPermissions[] permitted,address spender,uint256 nonce,uint256 deadline," +
+                    "MASPDeposit witness)MASPDeposit(bytes32 piHash)TokenPermissions(address token,uint256 amount)",
+            ),
+        );
+        const structHash = keccak256(
+            encodeAbiParameters(
+                [
+                    { type: "bytes32" },
+                    { type: "bytes32" },
+                    { type: "address" },
+                    { type: "uint256" },
+                    { type: "uint256" },
+                    { type: "bytes32" },
+                ],
+                [
+                    typeHash,
+                    keccak256(
+                        concat([
+                            entry(FORGE.token, FORGE.maxTotal),
+                            entry(FORGE.feeToken, FORGE.maxFee),
+                        ]),
+                    ),
+                    FORGE.spender,
+                    FORGE.nonce,
+                    FORGE.deadline,
+                    FORGE.witness,
+                ],
+            ),
+        );
+        const domainSeparator = keccak256(
+            encodeAbiParameters(
+                [
+                    { type: "bytes32" },
+                    { type: "bytes32" },
+                    { type: "uint256" },
+                    { type: "address" },
+                ],
+                [
+                    keccak256(
+                        toBytes(
+                            "EIP712Domain(string name,uint256 chainId,address verifyingContract)",
+                        ),
+                    ),
+                    keccak256(toBytes("Permit2")),
+                    FORGE.chainId,
+                    FORGE.verifyingContract,
+                ],
+            ),
+        );
+        expect(domainSeparator).toBe(FORGE.domainSeparator);
+        expect(keccak256(concat(["0x1901", domainSeparator, structHash]))).toBe(FORGE.digest);
+    });
+
+    it("keeps the single-token form, with maxFee 0, when no fee token is given", async () => {
+        const { signer, calls } = recordingSigner();
+        const { feeToken: _t, maxFee: _f, ...single } = batchArgs(signer);
+        const out = await signPermit2Witness(single);
+
+        // Exactly the pre-existing single-token typed data, restated from the
+        // independent `PERMIT2_TYPES` above.
+        expect(digestOf(calls[0]!)).toBe(
+            hashTypedData({
+                domain: {
+                    name: "Permit2",
+                    chainId: FORGE.chainId,
+                    verifyingContract: FORGE.verifyingContract,
+                },
+                types: PERMIT2_TYPES,
+                primaryType: "PermitWitnessTransferFrom",
+                message: {
+                    permitted: { token: FORGE.token, amount: FORGE.maxTotal },
+                    spender: FORGE.spender,
+                    nonce: FORGE.nonce,
+                    deadline: FORGE.deadline,
+                    witness: { piHash },
+                },
+            }),
+        );
+        // The pool reverts `BadMaxFee` for anything else on this path.
+        expect(out.maxFee).toBe(0n);
+    });
+
+    it("refuses a fee token without its ceiling, and the reverse", async () => {
+        const { signer, calls } = recordingSigner();
+        const { maxFee: _f, ...noMax } = batchArgs(signer);
+        const { feeToken: _t, ...noToken } = batchArgs(signer);
+        for (const [args, argument] of [
+            [noMax, "maxFee"],
+            [noToken, "feeToken"],
+        ] as const) {
+            const err = await signPermit2Witness(args).catch((e: unknown) => e);
+            expect(isWalletError(err, "INVALID_ARGUMENT")).toBe(true);
+            expect((err as { argument?: string }).argument).toBe(argument);
+        }
+        expect(calls).toHaveLength(0);
+    });
+});
+
 describe("signPermit2Allowance", () => {
     // The function casts its input through `as unknown as Record<string,
-    // unknown>`, so a wrong uint48/uint160 width has no static check. These
-    // cover it.
+    // unknown>`, so uint48/uint160 widths have no static check.
     const permit = {
         details: {
             token: `0x${"11".repeat(20)}` as `0x${string}`,
@@ -300,9 +540,8 @@ describe("signPermit2Allowance", () => {
     });
 
     it("rejects a value that overflows its declared width", async () => {
-        // `uint160` and `uint48` are the widths the contract reads; viem
-        // enforces them, which is the only thing standing between a silently
-        // truncated allowance and a correct one.
+        // `uint160` and `uint48` are the widths the contract reads; viem's
+        // enforcement is the only guard against a truncated allowance.
         await expect(
             signPermit2Allowance({
                 signer: new PrivateKeySigner(ANVIL_KEY, "http://localhost:0", 31337n),
@@ -322,6 +561,55 @@ describe("signPermit2Allowance", () => {
     });
 });
 
+describe("allowance type tables on the EIP-1193 wire", () => {
+    // `Eip1193Signer` serialises the tables verbatim, so pin their JSON, key order included.
+    const captureTypes = async (sign: (signer: EthSigner) => Promise<unknown>) => {
+        let types: unknown;
+        const signer = {
+            signTypedData: async (_d: unknown, t: unknown) => {
+                types = t;
+                return "0x";
+            },
+        } as unknown as EthSigner;
+        await sign(signer);
+        return JSON.stringify(types);
+    };
+    const DETAILS =
+        '"PermitDetails":[{"name":"token","type":"address"},{"name":"amount","type":"uint160"},' +
+        '{"name":"expiration","type":"uint48"},{"name":"nonce","type":"uint48"}]';
+    const details = { token: `0x${"11".repeat(20)}`, amount: 1n, expiration: 1, nonce: 0 };
+
+    it("PermitSingle", async () => {
+        const json = await captureTypes((signer) =>
+            signPermit2Allowance({
+                signer,
+                chainId: 1n,
+                permit: { details, spender: `0x${"22".repeat(20)}`, sigDeadline: 1n },
+            }),
+        );
+        expect(json).toBe(
+            '{"PermitSingle":[{"name":"details","type":"PermitDetails"},' +
+                '{"name":"spender","type":"address"},{"name":"sigDeadline","type":"uint256"}],' +
+                `${DETAILS}}`,
+        );
+    });
+
+    it("PermitBatch", async () => {
+        const json = await captureTypes((signer) =>
+            signPermit2AllowanceBatch({
+                signer,
+                chainId: 1n,
+                permit: { details: [details], spender: `0x${"22".repeat(20)}`, sigDeadline: 1n },
+            }),
+        );
+        expect(json).toBe(
+            '{"PermitBatch":[{"name":"details","type":"PermitDetails[]"},' +
+                '{"name":"spender","type":"address"},{"name":"sigDeadline","type":"uint256"}],' +
+                `${DETAILS}}`,
+        );
+    });
+});
+
 describe("signPermit2AllowanceBatch", () => {
     const BATCH_TYPES = {
         PermitBatch: [
@@ -335,8 +623,8 @@ describe("signPermit2AllowanceBatch", () => {
     const spender = `0x${"22".repeat(20)}` as `0x${string}`;
 
     // Two entries with different nonces: Permit2 keys nonces by
-    // `(owner, token, spender)`, so a batch that reused one value across
-    // entries would verify here and revert `InvalidNonce` on chain.
+    // `(owner, token, spender)`, so reusing one value across entries would
+    // verify here but revert `InvalidNonce` on chain.
     const permit = {
         details: [
             {
@@ -377,9 +665,9 @@ describe("signPermit2AllowanceBatch", () => {
         expect(recovered.toLowerCase()).toBe(account.address.toLowerCase());
     });
 
-    // The whole point of the batch: N entries, ONE signature that is not the
-    // single-entry signature. A `PermitSingle` offered to the batch overload
-    // (or vice versa) must not verify.
+    // A batch is N entries under one signature distinct from the single-entry
+    // signature. A `PermitSingle` offered to the batch overload (or vice versa)
+    // must not verify.
     it("does not collide with the PermitSingle signature for the same entry", async () => {
         const single = await signPermit2Allowance({
             signer: signerFor(),
@@ -431,9 +719,8 @@ describe("signPermit2AllowanceBatch", () => {
     });
 });
 
-// Same role as `describe("permit2 witness type string")` above: the tests
-// there prove viem agrees with itself. These pin the bytes Permit2 actually
-// hashes, so a reordered field or a changed width in
+// Same role as `describe("permit2 witness type string")` above: pins the bytes
+// Permit2 hashes, so a reordered field or changed width in
 // `PERMIT2_ALLOWANCE_BATCH_TYPES` fails here rather than on chain as
 // `InvalidSigner`.
 describe("permit2 PermitBatch type string", () => {
@@ -446,7 +733,7 @@ describe("permit2 PermitBatch type string", () => {
     const PERMIT_DETAILS_TYPEHASH = keccak256(toBytes(PERMIT_DETAILS_TYPE_STRING));
     const PERMIT_BATCH_TYPEHASH = keccak256(toBytes(PERMIT_BATCH_TYPE_STRING));
 
-    // Literals lifted from `PermitHash._PERMIT_DETAILS_TYPEHASH` and
+    // Literals taken from `PermitHash._PERMIT_DETAILS_TYPEHASH` and
     // `_PERMIT_BATCH_TYPEHASH` in the vendored Permit2.
     it("pins the typehashes Permit2 uses", () => {
         expect(PERMIT_DETAILS_TYPEHASH).toBe(
@@ -458,9 +745,9 @@ describe("permit2 PermitBatch type string", () => {
     });
 
     // `PermitHash.hash(PermitBatch)` hashes the array member as
-    // `keccak256(abi.encodePacked(perDetailHashes))`. Hand-rolling it here and
-    // comparing against viem is what proves the `PermitDetails[]` member is
-    // encoded the way the contract reads it.
+    // `keccak256(abi.encodePacked(perDetailHashes))`. Building it manually and
+    // comparing against viem checks that the `PermitDetails[]` member is
+    // encoded as the contract reads it.
     it("hand-rolled struct hash equals viem's hashTypedData", () => {
         const details = [
             {

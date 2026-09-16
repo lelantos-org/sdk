@@ -1,6 +1,4 @@
-// The one perf-timing helper for the SDK.
-//
-// Emits `{ ms }` as a numeric field; presentation is the sink's job.
+// Performance-timing helpers. Emit `{ ms }` as a numeric field; formatting is left to the sink.
 
 import type { Logger } from "./logger.js";
 

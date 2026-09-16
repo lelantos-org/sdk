@@ -1,9 +1,8 @@
 // Relayer wire contract: request payloads.
 //
-// These types are the SDK's expectation of the protocol — every relayer
-// service speaking it MUST match these shapes. They live in `protocol/`
-// rather than beside the HTTP client so the client and the codec can both
-// depend on them without depending on each other.
+// Every relayer service speaking the protocol MUST match these shapes. They live
+// in `protocol/` rather than beside the HTTP client so the client and the codec
+// can both depend on them without depending on each other.
 
 import type { Field, Point } from "../crypto/index.js";
 import type { OutputAux } from "../notes/aux.js";
@@ -12,9 +11,8 @@ import type { DepositRequest } from "./deposit-request.js";
 /**
  * Spend op the relayer routes on-chain; maps 1:1 to the MASP entry point.
  *
- * Not `@internal` like the payload types below it: `RelayerClient.estimateSpend`
- * takes one, and `QuoteFeeArgs.kind` is an `EstimateKind` widened from it, so a
- * caller cannot type either call without naming it.
+ * Not `@internal`, unlike the payload types below: `RelayerClient.estimateSpend`
+ * takes one, and the relayer estimate kind (`EstimateKind`) is widened from it.
  */
 export type SpendKind = "transfer" | "withdraw" | "withdrawNative";
 
@@ -27,10 +25,9 @@ export interface SubmitTransactPayload {
     /**
      * Snarkjs-shaped Groth16 proof for the transact circuit.
      *
-     * The field name pins the 2×2 shape and is the relayer's contract, not
-     * this SDK's — a wider circuit needs the name changed on both sides at
-     * once, so it stays as-is until that is coordinated. The arities above
-     * are already shape-generic.
+     * The field name pins the 2×2 shape and is defined by the relayer; a wider
+     * circuit requires renaming it on both sides together. The arities are
+     * shape-generic.
      */
     proof: {
         piA: string[];
@@ -46,11 +43,11 @@ export interface SubmitTransactPayload {
      */
     pubInputs: TransactPubInputs;
     /** Off-circuit FMD + ciphertext payload, one per output slot. */
-    aux: TransactAux[];
+    aux: OutputAux[];
 }
 
 /**
- * Atomic shielded-swap payload. Carries the leg-1 transact_2x2 SNARK
+ * Atomic shielded-swap payload. Carries the leg-1 transact SNARK
  * (same shape as a `withdraw` whose recipient is the SwapWrapper) plus
  * the leg-2 escrow blob the wrapper forwards to `submitDepositAuthorized`
  * in the same tx. Relayer adds the matching tree_update_batch proof and
@@ -59,12 +56,12 @@ export interface SubmitTransactPayload {
 export interface SubmitSwapPayload {
     chainId: bigint;
     /**
-     * Identical layout to `SubmitTransactPayload` — the relayer reuses
-     * the same shape validators on the leg-1 SNARK.
+     * Same layout as `SubmitTransactPayload`; the relayer applies the same
+     * shape validators to the leg-1 SNARK.
      */
     proof: SubmitTransactPayload["proof"];
     pubInputs: TransactPubInputs;
-    aux: TransactAux[];
+    aux: OutputAux[];
     swap: SwapBlob;
 }
 
@@ -91,14 +88,25 @@ export interface SwapBlob {
      * FMD + ciphertext for the B-side output. Matches the on-chain
      * `AuxValidation.Output` struct, which the deposit path takes singly.
      */
-    auxD: TransactAux;
+    auxD: OutputAux;
     /**
      * FMD + ciphertext for the B-side deposit's fee leaf. Every deposit mints
-     * two leaves, and both need an aux payload. The swap already pays the
-     * relayer on its withdraw leg, so this one carries a zero-value note —
-     * but it is still a real leaf and still escrow digest preimage.
+     * two leaves, and both need an aux payload. The swap pays the relayer on
+     * its withdraw leg, so this one carries a zero-value note, but it is still a
+     * real leaf and part of the escrow digest preimage.
      */
-    feeAuxD: TransactAux;
+    feeAuxD: OutputAux;
+    /**
+     * Slim deposit request for the refund note: the A note, in `tokenIn`
+     * and addressed to the spender, that the wrapper escrows the unshield
+     * back into when the venue leg fails (a venue revert, output below
+     * `minOut`, a passed deadline). `payer` is the wrapper, as for `depositD`.
+     */
+    refundD: DepositRequest;
+    /** FMD + ciphertext for the refund note, as `auxD` is for the B note. */
+    refundAuxD: OutputAux;
+    /** FMD + ciphertext for the refund deposit's fee leaf, as `feeAuxD`. */
+    refundFeeAuxD: OutputAux;
     /** 0x-hex ERC20 addresses. */
     tokenIn: string;
     tokenOut: string;
@@ -110,11 +118,17 @@ export interface SwapBlob {
      */
     minOut: bigint;
     /**
-     * Hard expiry, unix seconds. Wrapper reverts `SwapExpired` once
-     * `block.timestamp > deadline`. Optional on the wire — relayer
-     * defaults if absent.
+     * Hard expiry, unix seconds. When `block.timestamp > deadline` the wrapper
+     * refunds into `refundD` instead of swapping. Always set: it is part of the
+     * intent hash the withdraw proof binds, so the relayer must submit exactly
+     * this value.
      */
-    deadline?: bigint;
+    deadline: bigint;
+    /**
+     * 0x-hex address. Where a cancelled output escrow refunds
+     * (`SwapArgs.refundTo`). Never zero and never the wrapper.
+     */
+    refundTo: string;
 }
 
 /** @internal */
@@ -134,15 +148,14 @@ export interface TransactPubInputs {
     payer: string; // 0x-hex address
     relayer: string; // 0x-hex address; must equal the relayer's own
     /**
+     * Field element. What the spend's funds are used for: `swapIntentHash`
+     * of the swap's output, floor, venue, deadline and refund owner, checked
+     * only by `SwapWrapper.swap`. Zero for every non-swap spend.
+     */
+    intentHash: Field;
+    /**
      * Per-output Pedersen value commitment that anchors (asset, value) into
      * the Merkle leaf. Forwarded into the spend's tree_update_batch tpi.
      */
     outCvDep: Point[];
 }
-
-/**
- * Wire alias for the builder-side `OutputAux` (`{clueR, ephPub, ciphertext}`).
- *
- * @internal
- */
-export type TransactAux = OutputAux;

@@ -1,13 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { BN254_FR } from "../core/field.js";
 import { fieldToBytes32 } from "../core/hex.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import { buildNoteCommitment } from "./commit.js";
 import { MerkleTree } from "./merkle.js";
 import { rootFromPath } from "./path.js";
 import { Poseidon } from "./poseidon.js";
 
 // Boundary checks on the field/point layer. Validation at the JSON boundary
-// (`core/decode`, `core/brand`) does not cover field arithmetic, where invalid
+// (`services/http/decode`, `core/brand`) does not cover field arithmetic, where invalid
 // values fail silently.
 
 describe("Poseidon canonical inputs", () => {
@@ -17,9 +18,8 @@ describe("Poseidon canonical inputs", () => {
     });
 
     it("rejects an unreduced input rather than aliasing it", () => {
-        // poseidon-lite reduces mod r internally, so `x` and `x + r` hashed
-        // identically — two distinct merkle leaves or decoded note records
-        // could be made to collide by construction.
+        // poseidon-lite reduces mod r internally, so without the check `x` and `x + r` hash
+        // identically and distinct merkle leaves or decoded note records could collide.
         expect(() => P.hash([BN254_FR])).toThrow(/canonical field element/);
         expect(() => P.hash([1n, 2n + BN254_FR])).toThrow(/canonical field element/);
     });
@@ -41,8 +41,8 @@ describe("Poseidon canonical inputs", () => {
 
 describe("fieldToBytes32", () => {
     it("refuses a negative, which would pad to a 64-char string containing a minus", () => {
-        // `(-1n).toString(16)` is "-1"; padded it passes a length check and is
-        // branded `Hex32` on the way into ABI encoding and persisted records.
+        // `(-1n).toString(16)` is "-1"; padded, it would pass a length check and be branded
+        // `Hex32` for ABI encoding and persisted records.
         expect(() => fieldToBytes32(-1n)).toThrow(/32-byte unsigned integer/);
     });
 
@@ -64,9 +64,8 @@ describe("rootFromPath validation", () => {
     const level = (): bigint[] => [7n, 8n, 9n];
 
     it("rejects an out-of-range slot instead of silently dropping the leaf", () => {
-        // With slot 4 the `k === slot` branch never fired: the leaf was
-        // discarded and the level hashed from siblings alone, returning a
-        // plausible root for a leaf that was never in the tree.
+        // With slot 4 the `k === slot` branch never fires: the leaf is discarded and the level
+        // hashed from siblings alone, yielding a plausible root for a leaf not in the tree.
         expect(() => rootFromPath(P, 1n, [level()], [4])).toThrow(/pathIndices/);
         expect(() => rootFromPath(P, 1n, [level()], [-1])).toThrow(/pathIndices/);
     });
@@ -92,16 +91,17 @@ describe("MerkleTree bounds", () => {
 
     it("rejects an imported node index that would alias into another level", () => {
         // The cache key is `level * keyStride + index`, so at depth 10 the node
-        // {level: 1, index: 262144} is exactly the key for {level: 2, index: 0}
-        // — served thereafter as an internal node covering leaves it knows
-        // nothing about, and preserved across a save/load cycle.
+        // {level: 1, index: 262144} has the key for {level: 2, index: 0}; it would be served as
+        // that internal node and persisted across a save/load cycle.
         const tree = new MerkleTree(P, 10);
         const aliased = 4 ** (10 - 1);
 
         expect(() => tree.importNodes([{ level: 1, index: aliased, value: 42n }])).toThrow(
-            RangeError,
+            InvalidArgumentError,
         );
-        expect(() => tree.importNodes([{ level: 1, index: -1, value: 42n }])).toThrow(RangeError);
+        expect(() => tree.importNodes([{ level: 1, index: -1, value: 42n }])).toThrow(
+            InvalidArgumentError,
+        );
         expect(() =>
             tree.importNodes([{ level: 1, index: aliased - 1, value: 42n }]),
         ).not.toThrow();
@@ -111,8 +111,8 @@ describe("MerkleTree bounds", () => {
         const tree = new MerkleTree(P, 4);
         tree.setLeaves([1n, 2n, 3n]);
 
-        expect(() => tree.proof(-1)).toThrow(RangeError);
-        expect(() => tree.proof(3)).toThrow(RangeError);
+        expect(() => tree.proof(-1)).toThrow(InvalidArgumentError);
+        expect(() => tree.proof(3)).toThrow(InvalidArgumentError);
         expect(() => tree.proof(2)).not.toThrow();
     });
 });

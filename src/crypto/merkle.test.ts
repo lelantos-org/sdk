@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { InvalidArgumentError } from "../errors/config.js";
 import { cacheKeyStride, MerkleTree } from "./merkle.js";
 import type { Field, Poseidon } from "./poseidon.js";
 import { TAG_MERKLE } from "./tags.js";
@@ -159,17 +160,13 @@ describe("MerkleTree", () => {
     });
 
     describe("node cache", () => {
-        // The cache key packs (level, index) into one number. A stride too
-        // small for the tree aliases one level's key onto another's and
-        // silently corrupts the root.
+        // The cache key packs (level, index) into one number. A stride too small for the tree
+        // aliases one level's key onto another's and corrupts the root.
         //
-        // Asserted on the key arithmetic rather than through a real tree:
-        // aliasing needs a level-1 index of at least the stride, which for a
-        // depth-10 stride means >4^10 leaves — more than a unit test can
-        // allocate. The assertion is the invariant, not a sample: the stride
-        // must exceed every index reachable at any level, otherwise
-        // `level * stride + index` for one level lands inside the next
-        // level's range.
+        // Asserted on the key arithmetic rather than through a real tree, since aliasing at depth
+        // 10 needs >4^10 leaves. The invariant: the stride must exceed every index reachable at any
+        // level, otherwise `level * stride + index` for one level lands inside the next level's
+        // range.
         it("stride exceeds the widest reachable index at every level", () => {
             for (const depth of [4, 10, 12, 20, 25]) {
                 const stride = cacheKeyStride(depth);
@@ -188,8 +185,8 @@ describe("MerkleTree", () => {
             expect(4 ** 9).toBe(FIXED);
             expect(cacheKeyStride(10)).toBe(FIXED);
 
-            // Depth 11: level-1 indices run to 4^10 - 1, four times that
-            // stride, so (1, 2^18) collides head-on with (2, 0).
+            // Depth 11: level-1 indices run to 4^10 - 1, four times that stride, so (1, 2^18)
+            // collides with (2, 0).
             expect(4 ** 10).toBeGreaterThan(FIXED);
             expect(1 * FIXED + FIXED).toBe(2 * FIXED + 0);
             expect(cacheKeyStride(11)).toBeGreaterThanOrEqual(4 ** 10);
@@ -214,8 +211,8 @@ describe("MerkleTree", () => {
         });
 
         it("rejects a depth whose cache key would exceed 2^53", () => {
-            expect(() => new MerkleTree(stubP, 26)).toThrow(RangeError);
-            expect(() => new MerkleTree(stubP, 0)).toThrow(RangeError);
+            expect(() => new MerkleTree(stubP, 26)).toThrow(InvalidArgumentError);
+            expect(() => new MerkleTree(stubP, 0)).toThrow(InvalidArgumentError);
         });
     });
 
@@ -243,8 +240,8 @@ describe("node cache export/import", () => {
         const nodes = source.exportNodes();
         expect(nodes.length).toBeGreaterThan(0);
 
-        // Counting Poseidon calls is what distinguishes a real restore from a
-        // rebuild: both return the correct root.
+        // Both a restore and a rebuild return the correct root; counting Poseidon calls tells them
+        // apart.
         let hashes = 0;
         const countingP: Poseidon = {
             backend: "js",
@@ -272,16 +269,15 @@ describe("node cache export/import", () => {
     });
 
     it("refuses a node from a level the tree does not have", () => {
-        // `(level, index)` is depth-independent, so nodes move between trees
-        // freely — but a level this tree cannot represent would be cached
-        // under a key it later reads back as a different level.
+        // `(level, index)` is depth-independent, but a level this tree cannot represent would be
+        // cached under a key later read back as a different level.
         const deep = makeTree(4, [1n, 2n, 3n, 4n]);
         deep.root(); // nodes are memoized lazily; nothing is cached before this
         const nodes = deep.exportNodes();
         expect(nodes.some((n) => n.level > 2)).toBe(true);
 
         const shallow = new MerkleTree(stubP, 2);
-        expect(() => shallow.importNodes(nodes)).toThrow(RangeError);
+        expect(() => shallow.importNodes(nodes)).toThrow(InvalidArgumentError);
     });
 
     it("keeps a restored tree correct across further inserts", () => {
@@ -295,8 +291,8 @@ describe("node cache export/import", () => {
         restored.insert(999n);
         source.insert(999n);
 
-        // The restored cache must be invalidated by the insert just like a
-        // natively-built one, or the new leaf is silently ignored.
+        // The restored cache must be invalidated by the insert like a natively built one, or the
+        // new leaf is ignored.
         expect(restored.root()).toBe(source.root());
         expect(restored.root()).toBe(naiveRoot(3, [...leaves, 999n]));
     });

@@ -1,23 +1,27 @@
 // What the MASP registry knows about an asset, resolved into one record.
 //
-// The pool addresses assets by a `uint64` id; this turns that id into the
-// ERC-20 address, `scale`, fee rates, yield state and ladder that every other
-// wallet module reads. Amount conversion lives next door in `./amounts.ts`.
+// The pool addresses assets by a `uint64` id; this resolves it into the ERC-20
+// address, `scale`, fee rates, yield state and ladder. Amount conversion is in
+// `./amount.ts`.
 
 import type { ChainReader } from "../../chain/port.js";
+import { isContractRevert } from "../../chain/revert.js";
 import type { TokenMeta } from "../../chain/types.js";
 import type { AssetId, EvmAddress } from "../../core/brand.js";
-import { type DenominationPolicy, type Ladder, resolveLadder } from "../../core/denominations.js";
-import { InvalidArgumentError } from "../../core/errors.js";
-import { type FeeOverride, resolveFeeRates } from "../../core/fees.js";
-import { RAY, type YieldRate } from "../../core/units.js";
+import { InvalidArgumentError } from "../../errors/config.js";
+import {
+    type DenominationPolicy,
+    type Ladder,
+    resolveLadder,
+} from "../../protocol/denominations.js";
+import { type FeeOverride, resolveFeeRates } from "../../protocol/fees.js";
+import { RAY, type YieldRate } from "../../protocol/units.js";
 
 /**
  * Everything known about a registered MASP asset.
  *
  * `scale` converts between the two integer spaces:
- * `tokenUnits = circuitUnits * scale`. Every `Wallet` amount argument is in
- * circuit units.
+ * `tokenUnits = circuitUnits * scale` (times `index / RAY` for a yield asset).
  */
 export interface AssetInfo {
     /** MASP registry id — the `asset` argument on every wallet method. */
@@ -32,16 +36,15 @@ export interface AssetInfo {
      * Protocol fee on the shield leg, in basis points, charged **on top of**
      * the principal.
      *
-     * Per-asset and per-leg — there is no pool-wide rate — so this is resolved
-     * with the asset and never looked up separately. See
-     * {@link AssetInfo.withdrawBps}, which is deducted rather than added and is
-     * routinely a different number.
+     * Per-asset and per-leg; there is no pool-wide rate. See
+     * {@link AssetInfo.withdrawBps}, which is deducted rather than added and may
+     * differ.
      */
     depositBps: bigint;
     /**
      * Protocol fee on the unshield leg, in basis points, **skimmed from** the
-     * gross leaving the pool — so a withdrawal of `publicOut` delivers less
-     * than `publicOut`. {@link withdrawNetFor} is the split.
+     * gross leaving the pool, so a withdrawal of `publicOut` delivers less than
+     * `publicOut`. See `withdrawNetFor` (`@lelantos-org/sdk/protocol`).
      */
     withdrawBps: bigint;
     /** From `chain.tokenMeta`; undefined when the adapter does not implement it. */
@@ -51,12 +54,10 @@ export interface AssetInfo {
     /**
      * Pool-managed yield index, RAY-scaled, `RAY` when the pool reports none.
      *
-     * `tokenUnits = circuitUnits * scale * index / RAY`. Note this makes the
-     * human value of a fixed circuit amount *move over time* — a note is worth
-     * more underlying than it was — while the circuit amount itself never
-     * changes. That is the whole point of the normalized-unit design, and it
-     * is why a withdrawal denomination is a circuit-unit integer rather than a
-     * human amount.
+     * `tokenUnits = circuitUnits * scale * index / RAY`. The underlying value of
+     * a fixed circuit amount grows over time while the circuit amount stays
+     * constant, which is why a withdrawal denomination is a circuit-unit integer
+     * rather than a human amount.
      */
     index: bigint;
     /** Whether the pool routes this asset to a yield venue. */
@@ -64,19 +65,18 @@ export interface AssetInfo {
     /**
      * The pool's own measure of what a unit is worth, for sizing a payment.
      *
-     * Present only for a yield asset the source has priced. `index` above is
-     * floored on chain, so converting a *charge* through it can land below what
-     * the contract takes; this pair is what the pool itself divides by. A
-     * yielding asset with no `rate` cannot be quoted — `scale` is not a safe
-     * fallback, it is wrong by whatever the venue has earned.
+     * Present only for a yield asset the source has priced. `index` is floored
+     * on chain, so converting a charge through it can fall below what the
+     * contract takes; this pair is what the pool divides by. A yielding asset
+     * without `rate` cannot be quoted: `scale` is off by whatever the venue has
+     * earned.
      */
     rate?: YieldRate;
     /**
-     * Withdrawal denominations for this asset, ascending; `[]` only when the
-     * wallet opted out via `WalletConfig.denominations`. Every asset otherwise
-     * has one, derived from its own `scale` and `decimals`.
-     *
-     * Resolved once here so no code downstream needs to know the policy.
+     * Withdrawal denominations for this asset, ascending, derived from its
+     * `scale` and `decimals`; `[]` only when the wallet opted out via
+     * `WalletConfig.denominations`. Resolved here so downstream code does not
+     * need the policy.
      */
     ladder: Ladder;
 }
@@ -128,15 +128,17 @@ export async function fetchAssetInfo(
 ): Promise<AssetInfo> {
     const entry = await chain.fetchAsset(id);
     const fees = resolveFeeRates(entry, feeBps);
-    // Read before the ladder is placed, not after: `decimals` is what clamps
-    // the window to what this asset's granularity can express, so resolving it
-    // second would place every ladder as if decimals were unknown.
+    // Read before the ladder is resolved: `decimals` clamps the ladder window to
+    // the asset's granularity.
     let meta: TokenMeta | undefined;
     if (chain.tokenMeta) {
         try {
             meta = await chain.tokenMeta(entry.token);
-        } catch {
-            // Non-standard ERC-20s omit symbol()/decimals(); amounts still work.
+        } catch (err) {
+            // Non-standard ERC-20s omit symbol()/decimals(); amounts still work. Only the token's
+            // own refusal means that: a failed read propagates, since an entry built without
+            // `decimals` resolves a different ladder and callers cache what this returns.
+            if (!isContractRevert(err)) throw err;
         }
     }
     const info: AssetInfo = {
@@ -146,17 +148,12 @@ export async function fetchAssetInfo(
         disabled: entry.disabled,
         depositBps: fees.depositBps,
         withdrawBps: fees.withdrawBps,
-        // A pool with no yield mixin reports neither, and `RAY` is the identity
-        // for every conversion — so an adapter that has never heard of an index
-        // keeps exactly its previous behaviour.
-        index: entry.index ?? RAY,
-        yieldEnabled: entry.yieldEnabled ?? false,
+        index: entry.index,
+        yieldEnabled: entry.yieldEnabled,
         ladder: resolveLadder({ scale: entry.scale, decimals: meta?.decimals }, denominations),
     };
-    // Only when the adapter priced it. Assigned rather than spread with a
-    // default: `rate` has no identity value — a yielding asset without one
-    // cannot be quoted at all, and `scale` is not a safe stand-in, it is wrong
-    // by whatever the venue has earned.
+    // Set only when the adapter priced it: `rate` has no identity value to
+    // default to.
     if (entry.rate) info.rate = entry.rate;
     if (meta) {
         info.symbol = meta.symbol;
@@ -178,8 +175,7 @@ export interface MakeAssetInfoArgs {
     disabled?: boolean | undefined;
     /**
      * Protocol fee rates in bps. A bare bigint sets both legs; the pair prices
-     * them apart. Default `0n` — free, which is what a fixture wants unless it
-     * is testing fee arithmetic.
+     * them separately. Default `0n`.
      */
     feeBps?: FeeOverride | undefined;
     /** Pool-managed yield index, RAY-scaled. Default `RAY` (no yield accrued). */
@@ -188,7 +184,7 @@ export interface MakeAssetInfoArgs {
     yieldEnabled?: boolean | undefined;
     /**
      * Whether to derive a ladder for this asset. Default `true`; `false` opts
-     * out. See `core/denominations`.
+     * out. See `protocol/denominations`.
      */
     denominations?: DenominationPolicy | undefined;
 }
@@ -197,11 +193,9 @@ export interface MakeAssetInfoArgs {
  * Build an {@link AssetInfo} with every optional field defaulted.
  *
  * For tests, mocks, and custom registries that construct assets by hand rather
- * than through `fetchAssetInfo`. Worth using rather than an object literal for
- * one specific reason: it derives `ladder` from the `scale` and `decimals` it
- * is given, so the three cannot disagree. A hand-written literal that pairs one
- * asset's scale with another's ladder type-checks, runs, and silently splits
- * change onto the wrong denominations.
+ * than through `fetchAssetInfo`. Prefer it to an object literal: it derives
+ * `ladder` from `scale` and `decimals`, so the three cannot disagree, whereas a
+ * mismatched literal type-checks and splits change onto the wrong denominations.
  *
  * ```ts
  * const usdc = makeAssetInfo({
@@ -223,8 +217,7 @@ export function makeAssetInfo(args: MakeAssetInfoArgs): AssetInfo {
         withdrawBps: fees.withdrawBps,
         index: args.index ?? RAY,
         yieldEnabled: args.yieldEnabled ?? false,
-        // `args` is structurally a `LadderInputs`; repacking it would be two
-        // more field names to keep in step.
+        // `args` is structurally a `LadderInputs`.
         ladder: resolveLadder(args, args.denominations ?? true),
     };
     if (args.symbol !== undefined) info.symbol = args.symbol;

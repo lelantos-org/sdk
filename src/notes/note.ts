@@ -1,5 +1,5 @@
-// Note plaintext + encrypted-note types. Mirrors circuits/src/test/helpers.ts
-// so SDK and circuit witnesses share a single shape.
+// Note plaintext and encrypted-note types. Mirrors circuits/src/test/helpers.ts
+// so SDK and circuit witnesses share one shape.
 
 import type { Field } from "../crypto/poseidon.js";
 

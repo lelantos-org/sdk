@@ -23,16 +23,15 @@ import { BABYJUB_SUBGROUP_ORDER, type Field, Jubjub, Poseidon } from "../src/cry
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+import { fmdFlag, fmdTest } from "../src/fmd/clue.js";
+import { encodeClue } from "../src/fmd/codec.js";
 import {
-    encodeClue,
     type FmdDetectionKey,
     fmdClueKeyFromRoot,
     fmdExpandDetectionKey,
     fmdExpandFlagKey,
-    fmdFlag,
     fmdFlagKeyFromDetection,
-    fmdTest,
-} from "../src/fmd/index.js";
+} from "../src/fmd/keys.js";
 
 function bytesHex(b: Uint8Array): string {
     return `0x${Array.from(b, (v) => v.toString(16).padStart(2, "0")).join("")}`;
@@ -153,8 +152,8 @@ async function main() {
     }
 
     const out = {
-        version: 4,
-        domain: "lelantos.fmd.v4",
+        version: 1,
+        domain: "lelantos.fmd.v1",
         curve: "babyjubjub",
         hash: "poseidon",
         scheme: "poseidon-legendre",

@@ -1,8 +1,8 @@
 // The 112-byte note plaintext codec.
 //
 // Width is load-bearing: `decodeNotePayload` rejects any other length and the
-// AEAD framing assumes this one. The round-trip is a property because the
-// failure mode is a field offset slip.
+// AEAD framing assumes this one. The round-trip is property-tested to catch
+// field offset errors.
 
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -41,6 +41,25 @@ describe("note plaintext codec", () => {
                 expect(encodeNotePayload(p)).toHaveLength(NOTE_PLAINTEXT_BYTES);
             }),
         );
+    });
+
+    it("pins the wire layout to a known answer", () => {
+        const p: NotePayload = {
+            asset: 0x0102030405060708n,
+            value: 0x1112131415161718n,
+            rho: (0x21n << 200n) | 0x22n,
+            rcm: (1n << 250n) + 0x33n,
+            rcvDep: 0x44n,
+        };
+        const hex = Buffer.from(encodeNotePayload(p)).toString("hex");
+        expect(hex).toBe(
+            "0807060504030201" +
+                "1817161514131211" +
+                `22${"00".repeat(24)}21${"00".repeat(6)}` +
+                `33${"00".repeat(30)}04` +
+                `44${"00".repeat(31)}`,
+        );
+        expect(decodeNotePayload(encodeNotePayload(p))).toEqual(p);
     });
 
     it("rejects any other length", () => {

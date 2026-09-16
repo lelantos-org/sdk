@@ -172,32 +172,20 @@ jobs:
           name: wasm-pkg
           path: wasm
 
-      - name: Sync version
-        run: node scripts/sync-version.mjs
-
       - name: Type check (src + tests)
         run: npm run typecheck
 
       - name: Build
         run: npm run build
 
-      - name: Bundle size budget
-        run: npm run check:bundle-size
-
-      - name: "Per-entry eager bundle budget"
-        run: npm run check:bundle-budget
-
-      - name: "Public API surface (diff against api-surface.json)"
-        run: npm run check:api
-
-      - name: Publish hygiene (publint + attw)
-        run: npm run check:publish
-
-      - name: Verify packed contents
-        run: npm run check:pack
+      # Size budgets (dist total and each entry's eager graph), the public API diff, publint/attw
+      # and the packed raw assets.
+      - name: Package checks
+        run: npm run check:dist
 
   # ---------------------------------------------------------------------------
-  # Unit suite. Runs from `src/`, so it needs the WASM packages but not `dist/`.
+  # Unit suite. Runs from `src/`, but `runtime/wasm/rayon/exit.test.ts` drives a child process
+  # against `dist/` and skips itself when it is absent, so build first.
   # ---------------------------------------------------------------------------
   test:
     name: "Unit tests"
@@ -215,6 +203,9 @@ jobs:
         with:
           name: wasm-pkg
           path: wasm
+
+      - name: Build (the rayon exit tests run against dist/)
+        run: npm run build
 
       - name: Test (with coverage)
         run: npm run test:coverage

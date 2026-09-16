@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWalletError } from "../../core/errors.js";
+import { isWalletError } from "../../errors/guard.js";
 import { fetchSwapQuote, quoteAgeSecs, type SwapQuoteRequest } from "./client.js";
 
 const REQ: SwapQuoteRequest = {
@@ -36,7 +36,7 @@ function respond(body: unknown, status = 200): { impl: typeof fetch; calls: Requ
 describe("fetchSwapQuote", () => {
     it("parses the snake_case wire form into bigints", async () => {
         const { impl, calls } = respond(WIRE);
-        const q = await fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl });
+        const q = await fetchSwapQuote("https://quoter.test", REQ, { fetch: impl });
 
         expect(q).toEqual({
             venue: "univ3",
@@ -51,22 +51,22 @@ describe("fetchSwapQuote", () => {
         expect(calls[0]?.method).toBe("POST");
     });
 
-    // The venue set gates deserialization, so a venue the backend can now
-    // return must be listed here or every quote from it fails to parse.
+    // The venue set gates deserialization, so every venue the backend can
+    // return must be listed or quotes from it fail to parse.
     it("accepts univ4 quotes", async () => {
         const { impl } = respond({ ...WIRE, venue: "univ4" });
-        const q = await fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl });
+        const q = await fetchSwapQuote("https://quoter.test", REQ, { fetch: impl });
         expect(q.venue).toBe("univ4");
     });
     it("trims a trailing slash off baseUrl", async () => {
         const { impl, calls } = respond(WIRE);
-        await fetchSwapQuote("https://quoter.test/", REQ, { fetchImpl: impl });
+        await fetchSwapQuote("https://quoter.test/", REQ, { fetch: impl });
         expect(calls[0]?.url).toBe("https://quoter.test/v1/quotes");
     });
 
     it("sends the request as snake_case with a numeric chain id", async () => {
         const { impl, calls } = respond(WIRE);
-        await fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl });
+        await fetchSwapQuote("https://quoter.test", REQ, { fetch: impl });
         expect(await calls[0]?.json()).toEqual({
             chain_id: 31337,
             token_in: REQ.tokenIn,
@@ -76,20 +76,19 @@ describe("fetchSwapQuote", () => {
         });
     });
 
-    // The whole point of moving this onto `json-client`: a quote failure used
-    // to be a bare `Error` subclass that `isWalletError` returned false for,
-    // so a caller could not tell it apart from a bug in its own code.
+    // A typed error lets `isWalletError` distinguish a quote failure from a bug
+    // in the caller's own code.
     it("reports an HTTP failure as a typed QUOTER_FAILED", async () => {
         const { impl } = respond("no route", 503);
         let thrown: unknown;
         try {
-            await fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl, retries: 0 });
+            await fetchSwapQuote("https://quoter.test", REQ, { fetch: impl, retries: 0 });
         } catch (err) {
             thrown = err;
         }
         expect(isWalletError(thrown, "QUOTER_FAILED")).toBe(true);
         if (!isWalletError(thrown, "QUOTER_FAILED")) throw new Error("unreachable");
-        // Narrowing that only compiles because `AnyWalletError` expands
+        // This narrowing compiles because `AnyWalletError` expands
         // `NetworkError` one code per member.
         expect(thrown.status).toBe(503);
         expect(thrown.body).toBe("no route");
@@ -109,7 +108,7 @@ describe("fetchSwapQuote", () => {
         }) as unknown as typeof fetch;
 
         const q = await fetchSwapQuote("https://quoter.test", REQ, {
-            fetchImpl: impl,
+            fetch: impl,
             backoffMs: 1,
         });
         expect(n).toBe(2);
@@ -121,13 +120,12 @@ describe("fetchSwapQuote", () => {
         ctrl.abort(new Error("caller gave up"));
         const { impl } = respond(WIRE);
         await expect(
-            fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl, signal: ctrl.signal }),
+            fetchSwapQuote("https://quoter.test", REQ, { fetch: impl, signal: ctrl.signal }),
         ).rejects.toThrow("caller gave up");
     });
 
-    // Each of these reached `BigInt(undefined)` or `Number(undefined)` under
-    // the previous `as WireSwapQuote` cast, surfacing as a TypeError from
-    // inside the deserializer with no indication of which field was wrong.
+    // Without validation, each of these would reach `BigInt(undefined)` or
+    // `Number(undefined)` and surface as a TypeError that does not name the field.
     it.each([
         ["a non-object body", [1, 2, 3], "$"],
         ["an unknown venue", { ...WIRE, venue: "sushi" }, "$.venue"],
@@ -140,7 +138,7 @@ describe("fetchSwapQuote", () => {
         const { impl } = respond(body);
         let thrown: unknown;
         try {
-            await fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl });
+            await fetchSwapQuote("https://quoter.test", REQ, { fetch: impl });
         } catch (err) {
             thrown = err;
         }
@@ -151,9 +149,9 @@ describe("fetchSwapQuote", () => {
 
     it("rejects a body that is not JSON at all", async () => {
         const { impl } = respond("<html>502</html>");
-        await expect(
-            fetchSwapQuote("https://quoter.test", REQ, { fetchImpl: impl }),
-        ).rejects.toSatisfy((e: unknown) => isWalletError(e, "WIRE_FORMAT"));
+        await expect(fetchSwapQuote("https://quoter.test", REQ, { fetch: impl })).rejects.toSatisfy(
+            (e: unknown) => isWalletError(e, "WIRE_FORMAT"),
+        );
     });
 });
 

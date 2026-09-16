@@ -1,85 +1,40 @@
-// Turning `ConnectOptions` into a `KeySource`, and detecting the runtime.
+// Turning `ConnectOptions` into a spending key.
 
 import type { ChainAdapter, ChainReader } from "../../chain/port.js";
-import { WalletConfigError } from "../../core/errors.js";
-import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
-import type { KeySource } from "../../keys/key-source.js";
+import { WalletConfigError } from "../../errors/config.js";
+import { type KeySource, resolveNsk } from "../../keys/key-source.js";
 import { deriveNskFromSigner } from "../../keys/metamask.js";
+import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
+import type { ConnectExtras, NetworkPreset } from "./options.js";
 
-/**
- * The `EthSigner` implied by the chain options, if any. A pre-built `chain`
- * adapter yields none: it owns its signer and does not expose it.
- */
-async function chainLayerSigner(
-    opts: ConnectOptionsLoose,
-    chainId: bigint,
-): Promise<EthSigner | undefined> {
-    if (opts.signer) return opts.signer;
-    if (!opts.provider || !opts.address) return undefined;
-    const { Eip1193Signer } = await import("../../chain/eth-signer.js");
-    const { evmAddress } = await import("../../core/brand.js");
-    return new Eip1193Signer(opts.provider, evmAddress(opts.address), chainId);
-}
-
-import type { ConnectExtraOptions } from "./options.js";
-
-export type ConnectOptionsLoose = ConnectExtraOptions & {
-    mnemonic?: string;
-    account?: number;
-    passphrase?: string;
-    signature?: string;
-    nsk?: bigint;
-    chain?: ChainAdapter;
-    reader?: ChainReader;
-    noSigner?: boolean;
-    signer?: EthSigner;
-    provider?: Eip1193ProviderLike;
-    address?: `0x${string}`;
-    privateKey?: `0x${string}`;
-    rpcUrl?: string;
+/** Widened view of `ConnectOptions` used internally, after the union is enforced at the call site. */
+export type ConnectOptionsLoose = ConnectExtras & {
+    network: string | NetworkPreset;
+    rpcUrl?: string | undefined;
+    mnemonic?: string | undefined;
+    account?: number | undefined;
+    passphrase?: string | undefined;
+    signature?: string | undefined;
+    nsk?: bigint | undefined;
+    chain?: ChainAdapter | undefined;
+    reader?: ChainReader | undefined;
+    readOnly?: boolean | undefined;
+    signer?: EthSigner | undefined;
+    provider?: Eip1193ProviderLike | undefined;
+    address?: string | undefined;
+    privateKey?: `0x${string}` | undefined;
 };
 
-// Re-exported rather than redeclared: `connect()` reaches for it here, and a
-// second identical body is how the two answers drift apart.
-export { detectRuntime } from "../../core/runtime.js";
+/** The explicit key sources present. */
+export function explicitKeySources(opts: ConnectOptionsLoose): string[] {
+    return (["mnemonic", "signature", "nsk"] as const).filter((k) => opts[k] !== undefined);
+}
 
 /**
- * Resolve the shielded key source.
- *
- * An explicit `mnemonic` / `signature` / `nsk` always wins. Otherwise the
- * chain layer supplies it where it can: a `privateKey` derives one through a
- * domain-separated reduction, and a `signer` or `provider` derives one from a
- * single EIP-712 signature. A pre-built `chain` adapter cannot, since it
- * exposes no signing key, so that combination still needs an explicit source —
- * as do `reader` and `noSigner`, which hold no key at all.
+ * A source that derives with no prompt (`mnemonic`, `signature`, `nsk`, `privateKey`), or
+ * `undefined` when the key comes from a signer's EIP-712 signature.
  */
-export async function buildKeySource(
-    opts: ConnectOptionsLoose,
-    chainId: bigint,
-): Promise<KeySource> {
-    const provided = [
-        opts.mnemonic !== undefined,
-        opts.signature !== undefined,
-        opts.nsk !== undefined,
-    ].filter(Boolean).length;
-    if (provided > 1) {
-        throw new WalletConfigError(
-            "pass exactly one of `mnemonic`, `signature`, or `nsk` (multiple supplied)",
-        );
-    }
-    if (provided === 0) {
-        if (opts.privateKey !== undefined) {
-            return { type: "privateKey", hex: opts.privateKey };
-        }
-        const signer = await chainLayerSigner(opts, chainId);
-        if (signer) {
-            return { type: "nsk", nsk: await deriveNskFromSigner(signer) };
-        }
-        throw new WalletConfigError(
-            "no shielded key source: pass `mnemonic`, `signature`, or `nsk`, " +
-                "or a chain layer that can derive one (`privateKey`, `signer`, `provider`)",
-        );
-    }
+function silentKeySource(opts: ConnectOptionsLoose): KeySource | undefined {
     if (opts.mnemonic !== undefined) {
         return {
             type: "mnemonic",
@@ -88,22 +43,36 @@ export async function buildKeySource(
             passphrase: opts.passphrase,
         };
     }
-    if (opts.signature !== undefined) {
-        return { type: "signature", signature: opts.signature };
-    }
-    return { type: "nsk", nsk: opts.nsk! };
+    if (opts.signature !== undefined) return { type: "signature", signature: opts.signature };
+    if (opts.nsk !== undefined) return { type: "nsk", nsk: opts.nsk };
+    if (opts.privateKey !== undefined) return { type: "privateKey", hex: opts.privateKey };
+    return undefined;
 }
 
 /**
- * Single-call wallet construction.
+ * The shielded spending key, as a thunk `connect()` calls last.
  *
- * ```ts
- * const wallet = await connect({
- *     network: "anvil",
- *     mnemonic: "...",
- *     privateKey: "0x...",
- *     rpcUrl: "http://localhost:8545",
- *     proverArtifacts: { circuit: "/path/to/2x2.wasm", zkey: "/path/to/2x2.zkey" },
- * });
- * ```
+ * An explicit `mnemonic` / `signature` / `nsk` always wins. Otherwise the chain layer supplies it: a
+ * `privateKey` through a domain-separated reduction, a `signer` or `provider` through one EIP-712
+ * signature (the only prompt `connect` issues). A pre-built `chain`, `reader` or `readOnly` holds
+ * no key; validation has already refused those without an explicit source.
  */
+export function keyThunk(opts: ConnectOptionsLoose, chainId: bigint): () => Promise<bigint> {
+    return async () => {
+        const silent = silentKeySource(opts);
+        if (silent) return resolveNsk(silent);
+        let signer = opts.signer;
+        if (!signer && opts.provider && opts.address) {
+            const { Eip1193Signer } = await import("../../chain/signer/eip1193.js");
+            const { evmAddress } = await import("../../core/brand.js");
+            signer = new Eip1193Signer(opts.provider, evmAddress(opts.address), chainId);
+        }
+        if (!signer) {
+            throw new WalletConfigError(
+                "no shielded key source: pass `mnemonic`, `signature`, or `nsk`, " +
+                    "or a chain layer that can derive one (`privateKey`, `signer`, `provider`)",
+            );
+        }
+        return deriveNskFromSigner(signer);
+    };
+}

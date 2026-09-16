@@ -1,29 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assetId, branded, type CircuitAmount, evmAddress } from "../core/brand.js";
+import { branded, type CircuitAmount } from "../core/brand.js";
+import { usdc, WETH as WETH_INFO } from "../test-utils/x402.js";
 import type { AssetInfoWithMeta } from "../wallet/assets/index.js";
-import { makeAssetInfo, requireTokenMeta } from "../wallet/assets/index.js";
+import { requireTokenMeta } from "../wallet/assets/index.js";
 import { BudgetLedger } from "./budget.js";
 
-/** scale 10^15 → one circuit unit is 0.001 of an 18-decimal token. */
-const WETH = requireTokenMeta(
-    makeAssetInfo({
-        id: assetId(1n),
-        token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-        scale: 10n ** 15n,
-        symbol: "WETH",
-        decimals: 18,
-    }),
-);
-
-const USDC = requireTokenMeta(
-    makeAssetInfo({
-        id: assetId(2n),
-        token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-        scale: 10n ** 3n,
-        symbol: "USDC",
-        decimals: 6,
-    }),
-);
+const WETH = requireTokenMeta(WETH_INFO);
+const USDC = requireTokenMeta(usdc());
 
 /** `n` whole tokens in circuit units. */
 const whole = (n: bigint, asset: AssetInfoWithMeta): CircuitAmount =>

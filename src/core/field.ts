@@ -2,9 +2,10 @@
 //
 // These values are consensus-critical: they must match
 // `circuits/src/lib/tags.circom` and the Rust indexer byte-for-byte.
-// Single-sourced here so no second copy can drift.
+// Single-sourced here to prevent drift.
 
-import { InvalidArgumentError } from "./errors.js";
+import { InvalidArgumentError } from "../errors/config.js";
+import { fromBeBytes } from "./bytes.js";
 
 /** A field element. Always a `bigint`; range depends on the field in use. */
 export type Field = bigint;
@@ -20,6 +21,9 @@ export const BN254_FR =
 export const BABYJUB_SUBGROUP_ORDER =
     2736030358979909402780800718157159386076813972158567259200215660948447373041n;
 
+/** Order of the secp256k1 group: a valid EVM private key or ECDSA `s` is in `[1, n-1]`. */
+export const SECP256K1_N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+
 /** `2^64` — the `asset_id` bound enforced by `HashToAssetGen`. */
 export const POW_2_64 = 1n << 64n;
 
@@ -32,21 +36,16 @@ export const FMD_LEGENDRE_QNR = 5n;
 
 // --- range guards ------------------------------------------------------------
 //
-// One vocabulary for "is this bigint in the range its consumer requires".
-//
-// The same `x < 0n || x >= LIMIT` test was hand-written at eight call sites,
-// with eight different message spellings and three different error types — so
-// the *same* mistake read differently depending on where it surfaced, and a
-// caller filtering on error type caught some and not others. These are named
-// for the range they enforce, so a call site says what it needs rather than
-// how to check it.
+// Shared checks that a bigint is in the range its consumer requires, so every
+// violation throws `InvalidArgumentError` with a consistent message. Named for
+// the range they enforce, so a call site states what it needs rather than how
+// to check it.
 
 /**
  * A canonical BN254 field element: `[0, r)`.
  *
- * Non-canonical values are the hazard Poseidon cannot see: `poseidon-lite`
- * reduces mod `r` internally, so `x` and `x + r` hash identically and two
- * distinct decoded records can be made to collide by construction.
+ * `poseidon-lite` reduces mod `r` internally, so `x` and `x + r` hash
+ * identically and two distinct decoded records could be made to collide.
  */
 export function assertField(value: Field, what: string): void {
     assertRange(value, 0n, BN254_FR, what, "a canonical field element in [0, BN254_FR)");
@@ -55,8 +54,8 @@ export function assertField(value: Field, what: string): void {
 /**
  * A canonical non-zero field element: `(0, r)`.
  *
- * For values whose zero case degenerates — an `nsk` of 0 gives `pk_d = O`, an
- * identity ECDH key whose every incoming note is publicly decryptable.
+ * For values whose zero case degenerates: `nsk = 0` gives `pk_d = O`, an
+ * identity ECDH key whose incoming notes are publicly decryptable.
  */
 export function assertNonZeroField(value: Field, what: string): void {
     assertRange(value, 1n, BN254_FR, what, "in (0, BN254_FR)");
@@ -87,28 +86,26 @@ export function assertRange(
 /**
  * Spare bits a wide draw must carry above its modulus before reduction.
  *
- * 64 is the usual margin (RFC 9380 §5 uses the same): reducing an `m`-bit
- * uniform draw mod an `n`-bit modulus skews residues by at most `2^-(m-n)`, so
- * 64 spare bits puts the skew below any distinguisher that matters.
+ * 64 is the standard margin (as in RFC 9380 §5): reducing an `m`-bit uniform
+ * draw mod an `n`-bit modulus skews residues by at most `2^-(m-n)`, which at 64
+ * spare bits is negligible.
  */
 export const REDUCE_SPARE_BITS = 64;
 
 /**
  * Reduce wide big-endian bytes into `[1, modulus)`.
  *
- * The deterministic counterpart to `randomFr` / `randomJubjubScalar`, which
- * reject rather than reduce. Rejection is exact but needs to redraw; a key
- * derivation has to be a pure function of its input, so it buys uniformity
- * with extra input width instead.
+ * Deterministic counterpart to `randomFr` / `randomJubjubScalar`, which use
+ * rejection sampling. A key derivation must be a pure function of its input,
+ * so it obtains uniformity from extra input width instead of redrawing.
  *
- * The width is not optional. Folding a bare 256-bit hash into BN254 Fr leaves
- * 2 spare bits and skews the low residues by roughly 6:5 — the reason this
- * function exists — so a draw with less than {@link REDUCE_SPARE_BITS} to
- * spare is a programming error and throws rather than silently biasing a key.
+ * Folding a bare 256-bit hash into BN254 Fr leaves 2 spare bits and skews the
+ * low residues by roughly 6:5, so a draw with fewer than
+ * {@link REDUCE_SPARE_BITS} spare bits is a programming error and throws.
  *
  * Zero maps to 1: it is unreachable in practice (probability ~`2^-254`) and
- * `nsk = 0` degenerates to `pk_d = O`, an identity ECDH key whose every
- * incoming note is publicly decryptable.
+ * `nsk = 0` degenerates to `pk_d = O`, an identity ECDH key whose incoming
+ * notes are publicly decryptable.
  */
 export function reduceWideToField(bytes: Uint8Array, modulus: Field, what: string): Field {
     const spare = bytes.length * 8 - modulus.toString(2).length;
@@ -120,8 +117,6 @@ export function reduceWideToField(bytes: Uint8Array, modulus: Field, what: strin
             { argument: what },
         );
     }
-    let v = 0n;
-    for (const b of bytes) v = (v << 8n) | BigInt(b);
-    const r = v % modulus;
+    const r = fromBeBytes(bytes) % modulus;
     return r === 0n ? 1n : r;
 }

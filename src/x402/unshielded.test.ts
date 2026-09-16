@@ -2,57 +2,32 @@ import { hashTypedData, verifyTypedData } from "viem";
 
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
-import { assetId, circuitAmount, evmAddress, hex32, tokenAmount } from "../core/brand.js";
+import { assetId, evmAddress } from "../core/brand.js";
+import { usdc, withdrawSpy, withNsk, X402_CHAIN_ID } from "../test-utils/x402.js";
 import type { WalletApi } from "../wallet/api.js";
-import { makeAssetInfo } from "../wallet/assets/index.js";
-import type { WithdrawResult } from "../wallet/result.js";
 import { deriveEphemeralKey } from "./ephemeral.js";
 import type { PaymentRequirements } from "./types.js";
 import { unshieldedExact } from "./unshielded.js";
 
-const CHAIN_ID = 31337n;
+const CHAIN_ID = X402_CHAIN_ID;
 const NSK = 12345678901234567890n;
 const PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
 
-/** 6-decimal token, scale 10^3 → one circuit unit is 0.001 USDC. */
-const USDC = makeAssetInfo({
-    id: assetId(1n),
-    token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-    scale: 10n ** 3n,
-    symbol: "USDC",
-    decimals: 6,
-});
+const USDC = usdc(1n);
 
 function stubWallet(opts: { balances?: bigint[] } = {}) {
     const balances = [...(opts.balances ?? [10_000_000n])];
     const tokenBalanceOf = vi.fn(async () =>
         balances.length > 1 ? balances.shift()! : balances[0],
     );
-    const withdraw = vi.fn(
-        async (): Promise<WithdrawResult> => ({
-            kind: "withdraw",
-            txHash: hex32(`0x${"ff".repeat(32)}`),
-            commitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
-            nonZeroCommitments: [],
-            ownCommitments: [],
-            ownInflow: circuitAmount(0n),
-            spent: [],
-            inputSum: circuitAmount(0n),
-            sent: circuitAmount(0n),
-            change: circuitAmount(0n),
-            // Token units, unlike the circuit-unit fields above. Zero to match
-            // the rest of this stub: nothing here asserts on the receipt's
-            // amounts, only on the calls x402 makes.
-            received: tokenAmount(0n),
-            feePaid: tokenAmount(0n),
-        }),
-    );
+    const withdraw = withdrawSpy();
     const wallet = {
-        keys: { nsk: NSK },
         chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
         asset: async () => USDC,
+        assets: async () => [USDC],
         withdraw,
     } as unknown as WalletApi;
+    withNsk(wallet, NSK);
     return { wallet, tokenBalanceOf, withdraw };
 }
 
@@ -72,8 +47,7 @@ describe("unshieldedExact", () => {
         const { wallet } = stubWallet();
         const result = await unshieldedExact(wallet).createPaymentPayload(2, requirements());
 
-        // Named rather than `Record<string, string>`: the EIP-3009
-        // authorization has a fixed field set, and the test asserts each one.
+        // The EIP-3009 authorization has a fixed field set; each is asserted.
         const payload = result.payload as {
             signature: `0x${string}`;
             authorization: {
@@ -93,8 +67,8 @@ describe("unshieldedExact", () => {
         expect(payload.authorization.validAfter).toBe("0");
         expect(payload.authorization.nonce).toMatch(/^0x[0-9a-f]{64}$/);
 
-        // A signature computed against the wrong domain separator is still
-        // well-formed, so only verification catches it.
+        // A signature over the wrong domain separator is still well-formed;
+        // only verification detects it.
         const valid = await verifyTypedData({
             address: account.address,
             domain: {
@@ -128,7 +102,7 @@ describe("unshieldedExact", () => {
     });
 
     it("matches the EIP-712 digest computed independently", async () => {
-        // Guards the types tuple and primaryType against silent edits.
+        // Guards the types tuple and primaryType against unintended edits.
         const digest = hashTypedData({
             domain: {
                 name: "USD Coin",
@@ -198,17 +172,21 @@ describe("unshieldedExact", () => {
             requirements(),
         );
         // shortfall 10_000 base units × 10, ÷ scale 10^3 = 100 circuit units.
-        expect(withdraw).toHaveBeenCalledWith(expect.objectContaining({ amount: 100n, asset: 1n }));
+        expect(withdraw).toHaveBeenCalledWith(expect.objectContaining({ gross: 100n, asset: 1n }));
     });
 
     it("gives up on a withdrawal that never lands, without signing", async () => {
         const { wallet } = stubWallet({ balances: [0n, 0n, 0n] });
-        await expect(
-            unshieldedExact(wallet, { pollMs: 1, maxPolls: 2 }).createPaymentPayload(
-                2,
-                requirements(),
-            ),
-        ).rejects.toThrow(/did not land within/);
+        // The default poll schedule (30 polls, 2 s apart), on a fake clock.
+        vi.useFakeTimers();
+        try {
+            const paying = unshieldedExact(wallet).createPaymentPayload(2, requirements());
+            const outcome = expect(paying).rejects.toThrow(/did not land within 60s/);
+            await vi.runAllTimersAsync();
+            await outcome;
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 
@@ -236,11 +214,10 @@ describe("unshieldedExact.quote", () => {
     });
 
     it("prices a non-default asset id, which the selector must not second-guess", async () => {
-        // Re-deriving the price against asset 1n in the selector would make
-        // any `assetIds` override skip every offer.
+        // If the selector re-priced against asset 1n, an `assetIds` override
+        // would skip every offer.
         const OTHER = { ...USDC, id: assetId(7n) };
         const wallet = {
-            keys: { nsk: NSK },
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 0n },
             asset: async (id: bigint) =>
                 id === 7n
@@ -248,6 +225,7 @@ describe("unshieldedExact.quote", () => {
                     : { ...USDC, token: evmAddress("0x000000000000000000000000000000000000dEaD") },
             withdraw: async () => undefined,
         } as unknown as WalletApi;
+        withNsk(wallet, NSK);
 
         const quote = await unshieldedExact(wallet, { assetIds: [assetId(7n)] }).quote(
             requirements(),
@@ -270,8 +248,44 @@ describe("unshieldedExact.quote", () => {
     it("refuses a token that is not a registered MASP asset", () =>
         rejects(
             { asset: "0x00000000000000000000000000000000000000ff" },
-            /is not among the MASP assets/,
+            /is not a registered MASP asset/,
         ));
+
+    it("resolves the token among registered assets by default, verified against the pool", async () => {
+        // The relayer's list names asset 7 for the token; the pool's entry must agree.
+        const OTHER = { ...USDC, id: assetId(7n) };
+        const listed = { ...USDC, id: assetId(7n) };
+        const asset = vi.fn(async (id: bigint) => (id === 7n ? OTHER : USDC));
+        const wallet = withNsk(
+            {
+                chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 0n },
+                assets: async () => [
+                    { ...USDC, id: assetId(3n), token: evmAddress(`0x${"0d".repeat(20)}`) },
+                    listed,
+                ],
+                asset,
+            } as unknown as WalletApi,
+            NSK,
+        );
+        const quote = await unshieldedExact(wallet).quote(requirements());
+        expect(quote.asset.id).toBe(7n);
+        // Only the matching id is verified.
+        expect(asset.mock.calls.map(([id]) => id)).toEqual([7n]);
+    });
+
+    it("keeps refusing a listed token the pool's entry does not back", async () => {
+        const wallet = withNsk(
+            {
+                chain: { chainId: async () => CHAIN_ID },
+                assets: async () => [USDC],
+                asset: async () => ({ ...USDC, token: evmAddress(`0x${"0d".repeat(20)}`) }),
+            } as unknown as WalletApi,
+            NSK,
+        );
+        await expect(unshieldedExact(wallet).quote(requirements())).rejects.toThrow(
+            /is not a registered MASP asset/,
+        );
+    });
 
     it("refuses a non-integer amount", () =>
         rejects({ amount: "1.5" }, /amount must be a decimal integer/));
@@ -279,9 +293,8 @@ describe("unshieldedExact.quote", () => {
 
 describe("unshieldedExact funding concurrency", () => {
     it("tops a payer up once for concurrent payments to the same slot", async () => {
-        // Both read the balance before either withdrew, so both saw the
-        // pre-top-up figure and both unshielded: two proofs, two withdrawals,
-        // for one shortfall.
+        // Without serialisation, each payment reads the pre-top-up balance and
+        // withdraws, producing several withdrawals for one shortfall.
         let funded = false;
         const tokenBalanceOf = vi.fn(async () => (funded ? 10_000_000n : 0n));
         const withdraw = vi.fn(async () => {
@@ -289,11 +302,12 @@ describe("unshieldedExact funding concurrency", () => {
             return {} as never;
         });
         const wallet = {
-            keys: { nsk: NSK },
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
             asset: async () => USDC,
+            assets: async () => [USDC],
             withdraw,
         } as unknown as WalletApi;
+        withNsk(wallet, NSK);
 
         const mechanism = unshieldedExact(wallet, { pollMs: 1 });
         await Promise.all([
@@ -306,41 +320,49 @@ describe("unshieldedExact funding concurrency", () => {
     });
 
     it("funds distinct payer slots in parallel", async () => {
-        // Slots are separate addresses, so the lock is per slot rather than
-        // global — two hosts must not queue behind each other.
+        // Slots are separate addresses, so the lock is per slot and two hosts
+        // do not queue behind each other.
         let inFlight = 0;
         let peak = 0;
         const balances = new Map<string, bigint>();
         const tokenBalanceOf = vi.fn(
             async (_token: unknown, payer: string) => balances.get(payer) ?? 0n,
         );
-        const withdraw = vi.fn(async (args: { to: string }) => {
+        const withdraw = vi.fn(async (args: { recipient: string }) => {
             inFlight++;
             peak = Math.max(peak, inFlight);
-            await new Promise((r) => setTimeout(r, 5));
-            balances.set(args.to, 10_000_000n);
+            await new Promise((r) => setTimeout(r, 5_000));
+            balances.set(args.recipient, 10_000_000n);
             inFlight--;
             return {} as never;
         });
         const wallet = {
-            keys: { nsk: NSK },
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
             asset: async () => USDC,
+            assets: async () => [USDC],
             withdraw,
         } as unknown as WalletApi;
+        withNsk(wallet, NSK);
 
-        const mechanism = unshieldedExact(wallet, { pollMs: 1 });
-        await Promise.all([
-            mechanism.createPaymentPayload(2, requirements(), { host: "a.example" }),
-            mechanism.createPaymentPayload(2, requirements(), { host: "b.example" }),
-        ]);
+        const mechanism = unshieldedExact(wallet);
+        vi.useFakeTimers();
+        try {
+            const paid = Promise.all([
+                mechanism.createPaymentPayload(2, requirements(), { host: "a.example" }),
+                mechanism.createPaymentPayload(2, requirements(), { host: "b.example" }),
+            ]);
+            await vi.runAllTimersAsync();
+            await paid;
+        } finally {
+            vi.useRealTimers();
+        }
 
         expect(peak).toBe(2);
     });
 
     it("reports a top-up before the value leaves the pool", async () => {
-        // `topUpMultiple` moves far more than one payment costs, and if the
-        // poll times out it has left with nothing recorded anywhere.
+        // `topUpMultiple` moves more than one payment costs, and a poll timeout
+        // leaves no other record.
         const seen: Array<{ amount: bigint }> = [];
         const { wallet } = stubWallet({ balances: [0n, 0n, 0n] });
 

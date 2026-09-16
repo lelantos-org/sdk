@@ -3,11 +3,11 @@
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
-import { InvalidArgumentError } from "../core/errors.js";
 import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER, reduceWideToField } from "../core/field.js";
 import { hexToBytes } from "../core/hex.js";
-import { keccakExpand } from "../core/keccak.js";
+import { keccakExpand } from "../crypto/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import { mnemonicToAccountKey } from "./hd.js";
 import { reduceSignatureToScalar } from "./metamask.js";
 import { prfOutputToNsk } from "./passkey.js";
@@ -22,51 +22,38 @@ export type KeySource =
     | { type: "signature"; signature: string }
     | { type: "privateKey"; hex: string }
     /**
-     * Raw WebAuthn PRF output, 32 bytes. The ceremony that produced it is the
-     * caller's; see `passkey.ts` for why PRF and not the assertion signature.
+     * Raw WebAuthn PRF output, 32 bytes, from a caller-run ceremony. See `passkey.ts` for why PRF
+     * is used rather than the assertion signature.
      */
     | { type: "passkeyPrf"; prf: Uint8Array }
     | { type: "nsk"; nsk: Field };
 
 /**
- * ASCII bytes of `"lelantos.privateKey.nsk.v2\0"`. Bumping invalidates
- * every nsk derived from this path; do not change without coordinated migration.
+ * ASCII bytes of `"lelantos.privateKey.nsk.v1\0"`. Changing it invalidates every nsk derived from
+ * this path and requires a coordinated migration.
  *
- * v2 goes with the widened reduction below — the tag moves with it so a v1 and
- * a v2 key can never be derived from the same keccak input.
+ * The version tracks the two-block reduction below, so keys from different reduction versions
+ * never share a keccak input.
  */
-const PK_DOMAIN_TAG_HEX = "6c656c616e746f732e707269766174654b65792e6e736b2e763200";
-
-/**
- * Mnemonic + account → nsk via ZIP-32-lite at m/32'/LELANTOS_COIN_TYPE'/account'.
- *
- * @internal
- */
-export function mnemonicToNsk(mnemonic: string, account = 0, passphrase = ""): Field {
-    return mnemonicToAccountKey(mnemonic, account, passphrase).nsk;
-}
+const PK_DOMAIN_TAG_HEX = "6c656c616e746f732e707269766174654b65792e6e736b2e763100";
 
 export function resolveNsk(source: KeySource): Field {
     switch (source.type) {
         case "mnemonic":
-            return mnemonicToNsk(source.mnemonic, source.account ?? 0, source.passphrase);
+            // ZIP-32-lite at m/32'/LELANTOS_COIN_TYPE'/account'.
+            return mnemonicToAccountKey(source.mnemonic, source.account, source.passphrase).nsk;
         case "signature":
-            // Length and canonical form are enforced by
-            // `reduceSignatureToScalar`, which owns the signature encoding.
+            // `reduceSignatureToScalar` enforces length and canonical form.
             return reduceSignatureToScalar(source.signature);
         case "privateKey":
             return hexPrivateKeyToNsk(source.hex);
         case "passkeyPrf":
-            // Length and domain separation are enforced by `prfOutputToNsk`,
-            // which owns the PRF encoding.
+            // `prfOutputToNsk` enforces length and domain separation.
             return prfOutputToNsk(source.prf);
         case "nsk":
-            // The only source that is not the output of a reduction, so it is
-            // the only one that can be out of range. `nsk = 0` gives
-            // `pk_d = 0 · Base8 = O`, a wallet whose ECDH key is the identity
-            // and whose every incoming note is publicly decryptable; an
-            // unreduced value silently aliases onto `nsk mod r`, i.e. a
-            // different wallet than the caller named.
+            // The only source not produced by a reduction, so the only one that can be out of
+            // range. `nsk = 0` gives `pk_d = 0 · Base8 = O`, making every incoming note publicly
+            // decryptable; an unreduced value aliases onto `nsk mod r`, a different wallet.
             assertNonZeroField(source.nsk, "nsk");
             return source.nsk;
     }
@@ -74,8 +61,8 @@ export function resolveNsk(source: KeySource): Field {
 
 /**
  * `keccakExpand(domainTag || privKey, 2) mod BABYJUB_SUBGROUP_ORDER`.
- * Domain-separated from EIP-712 sig reduction to prevent collisions
- * when a signature equals the raw key bytes.
+ * Domain-separated from the EIP-712 signature reduction so a signature equal to the raw key bytes
+ * cannot collide.
  *
  * Two keccak blocks, not one: a bare 256-bit digest folded into the 251-bit
  * subgroup order skews residues by about 30:29. See `reduceWideToField`.

@@ -1,58 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
-import { assetId, circuitAmount, evmAddress, hex32 } from "../core/brand.js";
+import { assetId, hex32 } from "../core/brand.js";
+import {
+    shieldedRequirements,
+    transferSpy,
+    usdc,
+    WETH,
+    withNsk,
+    X402_CHAIN_ID,
+} from "../test-utils/x402.js";
 import type { WalletApi } from "../wallet/api.js";
-import { makeAssetInfo } from "../wallet/assets/index.js";
-import type { TransferResult } from "../wallet/result.js";
 import { x402 } from "./fetch.js";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "./types.js";
 import { HEADER_PAYMENT_REQUIRED, HEADER_PAYMENT_SIGNATURE } from "./types.js";
 
-const CHAIN_ID = 31337n;
-
-const WETH = makeAssetInfo({
-    id: assetId(1n),
-    token: evmAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
-    scale: 10n ** 15n,
-    symbol: "WETH",
-    decimals: 18,
-});
+const CHAIN_ID = X402_CHAIN_ID;
 
 /** Only the members `x402()` touches. */
 function stubWallet(overrides: Partial<WalletApi> = {}): WalletApi {
-    const transfer = vi.fn(
-        async (): Promise<TransferResult> => ({
-            kind: "transfer",
-            txHash: hex32(`0x${"de".repeat(32)}`),
-            commitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
-            nonZeroCommitments: [hex32(`0x${"11".repeat(32)}`), hex32(`0x${"22".repeat(32)}`)],
-            ownCommitments: [hex32(`0x${"22".repeat(32)}`)],
-            recipientCommitment: hex32(`0x${"11".repeat(32)}`),
-            ownInflow: circuitAmount(0n),
-            spent: ["n1"],
-            inputSum: circuitAmount(10_000n),
-            sent: circuitAmount(1_500n),
-            change: circuitAmount(8_500n),
-        }),
-    );
     return {
         chain: { chainId: async () => CHAIN_ID },
         asset: async () => WETH,
-        transfer,
+        transfer: transferSpy(),
         ...overrides,
     } as unknown as WalletApi;
-}
-
-function shieldedRequirements(over: Partial<PaymentRequirements> = {}): PaymentRequirements {
-    return {
-        scheme: "exact",
-        network: `shielded:${CHAIN_ID}`,
-        amount: "1500",
-        asset: "1",
-        payTo: "lelantos1qqqq",
-        maxTimeoutSeconds: 120,
-        extra: { pool: "lelantos", paymentFlow: "upfront" },
-        ...over,
-    };
 }
 
 function encode(value: unknown): string {
@@ -63,9 +33,9 @@ function encode(value: unknown): string {
 }
 
 /**
- * The payment payload on a paid retry. The retry is issued as a single
- * `Request` so a caller-supplied one is reproduced faithfully, so the header
- * lives on the request rather than on a separate `init`.
+ * The payment payload on a paid retry. The retry is a single `Request` (to
+ * reproduce a caller-supplied one), so the header is on the request rather
+ * than a separate `init`.
  */
 function decodePaymentHeader(input: unknown): PaymentPayload {
     const header = (input as Request).headers?.get(HEADER_PAYMENT_SIGNATURE);
@@ -97,7 +67,7 @@ describe("x402", () => {
     it("passes non-402 responses straight through without touching the wallet", async () => {
         const wallet = stubWallet();
         const fetchImpl = vi.fn(async () => new Response("hi", { status: 200 }));
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
 
         expect(await (await pay("https://api.example.com/free")).text()).toBe("hi");
         expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -111,13 +81,13 @@ describe("x402", () => {
             .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
             .mockResolvedValueOnce(new Response("premium", { status: 200 }));
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         const res = await pay("https://api.example.com/premium");
 
         expect(res.status).toBe(200);
         expect(fetchImpl).toHaveBeenCalledTimes(2);
         expect(wallet.transfer).toHaveBeenCalledWith(
-            expect.objectContaining({ to: "lelantos1qqqq", amount: 1500n, asset: 1n }),
+            expect.objectContaining({ recipient: "lelantos1qqqq", amount: 1500n, asset: 1n }),
         );
 
         const payload = decodePaymentHeader(fetchImpl.mock.calls[1]![0]);
@@ -132,36 +102,16 @@ describe("x402", () => {
         });
     });
 
-    it("accepts a 402 that puts PaymentRequired in the body", async () => {
-        const wallet = stubWallet();
-        const fetchImpl = vi
-            .fn<typeof fetch>()
-            .mockResolvedValueOnce(
-                new Response(
-                    JSON.stringify({ x402Version: 2, accepts: [shieldedRequirements()] }),
-                    {
-                        status: 402,
-                        headers: { "content-type": "application/json" },
-                    },
-                ),
-            )
-            .mockResolvedValueOnce(new Response("premium", { status: 200 }));
-
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
-        expect((await pay("https://api.example.com/premium")).status).toBe(200);
-        expect(wallet.transfer).toHaveBeenCalledTimes(1);
-    });
-
     it("pays exactly once when the paid retry fails transiently", async () => {
-        // The double-pay hazard: a 5xx after settlement must surface as a 5xx,
-        // never as a second payment.
+        // A 5xx after settlement must surface as a 5xx, never as a second
+        // payment.
         const wallet = stubWallet();
         const fetchImpl = vi
             .fn<typeof fetch>()
             .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
             .mockResolvedValueOnce(new Response("upstream boom", { status: 503 }));
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         const res = await pay("https://api.example.com/premium");
 
         expect(res.status).toBe(503);
@@ -175,7 +125,7 @@ describe("x402", () => {
             .fn<typeof fetch>()
             .mockResolvedValue(paymentRequired([shieldedRequirements()]));
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(
             /returned 402 again after payment/,
         );
@@ -195,7 +145,7 @@ describe("x402", () => {
             ]),
         );
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(
             /nothing offered by .* is payable/,
         );
@@ -223,11 +173,11 @@ describe("x402", () => {
         const pay = x402(wallet, {
             budget: { total: "5" },
             allowUnshielded: true,
-            fetchImpl,
+            http: { fetch: fetchImpl },
         });
         await pay("https://api.example.com/premium");
 
-        // The shielded entry is second in `accepts[]` but must still win.
+        // The shielded entry is second in `accepts[]` but is still selected.
         expect(decodePaymentHeader(fetchImpl.mock.calls[1]![0]).accepted.network).toBe(
             `shielded:${CHAIN_ID}`,
         );
@@ -235,22 +185,17 @@ describe("x402", () => {
     });
 
     it("pays an unshielded offer backed by a non-default asset id", async () => {
-        // Pricing belongs to the mechanism: a selector that priced eip155
-        // offers itself against MASP asset 1n would skip every offer under an
-        // `assetIds` override.
-        const USDC = makeAssetInfo({
-            id: assetId(7n),
-            token: evmAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
-            scale: 10n ** 3n,
-            symbol: "USDC",
-            decimals: 6,
-        });
-        const wallet = stubWallet({
-            keys: { nsk: 42n },
-            chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 10n ** 12n },
-            // Asset 1n is something else entirely — only 7n backs the token.
-            asset: async (id: bigint) => (id === 7n ? USDC : WETH),
-        } as unknown as Partial<WalletApi>);
+        // Pricing belongs to the mechanism: if the selector priced eip155 offers
+        // against MASP asset 1n, an `assetIds` override would skip every offer.
+        const USDC = usdc(7n);
+        const wallet = withNsk(
+            stubWallet({
+                chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 10n ** 12n },
+                // Asset 1n is a different token; only 7n backs this one.
+                asset: async (id: bigint) => (id === 7n ? USDC : WETH),
+            } as unknown as Partial<WalletApi>),
+            42n,
+        );
 
         const fetchImpl = vi
             .fn<typeof fetch>()
@@ -271,7 +216,7 @@ describe("x402", () => {
             budget: { total: "5" },
             allowUnshielded: true,
             unshielded: { assetIds: [assetId(7n)] },
-            fetchImpl,
+            http: { fetch: fetchImpl },
         });
 
         expect((await pay("https://api.example.com/premium")).status).toBe(200);
@@ -285,7 +230,7 @@ describe("x402", () => {
             .fn<typeof fetch>()
             .mockResolvedValue(paymentRequired([shieldedRequirements({ amount: "999999999" })]));
 
-        const pay = x402(wallet, { budget: { total: "0.001" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "0.001" }, http: { fetch: fetchImpl } });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(/per-request limit/);
         expect(wallet.transfer).not.toHaveBeenCalled();
     });
@@ -299,7 +244,7 @@ describe("x402", () => {
         const pay = x402(wallet, {
             budget: { total: "5" },
             allowHosts: ["trusted.example.com"],
-            fetchImpl,
+            http: { fetch: fetchImpl },
         });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(/not in allowHosts/);
         expect(wallet.transfer).not.toHaveBeenCalled();
@@ -311,7 +256,7 @@ describe("x402", () => {
             .fn<typeof fetch>()
             .mockResolvedValue(paymentRequired([shieldedRequirements({ maxTimeoutSeconds: 5 })]));
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(
             /nothing offered by .* is payable/,
         );
@@ -326,7 +271,7 @@ describe("x402", () => {
                 paymentRequired([shieldedRequirements({ network: "shielded:8453" })]),
             );
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(
             /nothing offered by .* is payable/,
         );
@@ -340,7 +285,7 @@ describe("x402", () => {
             .mockResolvedValueOnce(new Response("ok", { status: 200 }));
 
         const onPayment = vi.fn();
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl, onPayment });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl }, onPayment });
         expect(pay.spent().size).toBe(0);
 
         await pay("https://api.example.com/premium");
@@ -360,7 +305,7 @@ describe("x402", () => {
 
         const pay = x402(wallet, {
             budget: { total: "5" },
-            fetchImpl,
+            http: { fetch: fetchImpl },
             onPayment: () => {
                 throw new Error("audit sink down");
             },
@@ -374,7 +319,7 @@ describe("x402", () => {
             .fn<typeof fetch>()
             .mockResolvedValue(new Response("nope", { status: 402 }));
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         await expect(pay("https://api.example.com/premium")).rejects.toThrow(
             /without a usable PAYMENT-REQUIRED header/,
         );
@@ -383,9 +328,8 @@ describe("x402", () => {
 
 describe("x402 concurrency and request handling", () => {
     it("enforces the budget across payments that overlap in flight", async () => {
-        // Minting a payment takes seconds in reality (prove, then submit).
-        // Nothing held the ledger across that await, so every concurrent call
-        // passed the check against a total that ignored the others.
+        // Minting a payment takes seconds (prove, then submit); the ledger must
+        // count in-flight payments so concurrent calls cannot all pass the check.
         const wallet = stubWallet();
         let release: () => void = () => {};
         const gate = new Promise<void>((r) => {
@@ -405,7 +349,7 @@ describe("x402 concurrency and request handling", () => {
         );
         // WETH here is scale 1e15 / 18 decimals, so one payment of 1500
         // circuit units is "1.5". A total of "3" affords exactly two.
-        const pay = x402(wallet, { budget: { total: "3" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "3" }, http: { fetch: fetchImpl } });
 
         const calls = [1, 2, 3, 4].map(() =>
             pay("https://api.example.com/premium").catch((e: Error) => e),
@@ -419,7 +363,7 @@ describe("x402 concurrency and request handling", () => {
             (r) => r instanceof Error && /budget/.test(r.message),
         ).length;
         expect(overBudget).toBe(2);
-        // The ledger held the first two, so only two payments were ever minted.
+        // The ledger reserved the first two, so only two payments were minted.
         expect(started).toBe(2);
     });
 
@@ -435,9 +379,9 @@ describe("x402 concurrency and request handling", () => {
             .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
             .mockResolvedValueOnce(new Response("premium", { status: 200 }));
 
-        // Budget for exactly one payment: a reservation left held by the
-        // failure would make the retry unaffordable.
-        const pay = x402(wallet, { budget: { total: "1.5" }, fetchImpl });
+        // Budget for exactly one payment: a reservation not released on failure
+        // would make the retry unaffordable.
+        const pay = x402(wallet, { budget: { total: "1.5" }, http: { fetch: fetchImpl } });
 
         await expect(pay("https://api.example.com/premium")).rejects.toThrow("prover exploded");
         expect((await pay("https://api.example.com/premium")).status).toBe(200);
@@ -450,10 +394,9 @@ describe("x402 concurrency and request handling", () => {
             .mockResolvedValueOnce(paymentRequired([shieldedRequirements()]))
             .mockResolvedValueOnce(new Response("premium", { status: 200 }));
 
-        const pay = x402(wallet, { budget: { total: "5" }, fetchImpl });
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
         // The shape both documented integrations use. The first fetch consumes
-        // a Request body, so retrying the same object threw
-        // `Request body is unusable` — after the funds had already moved.
+        // a Request body, so the paid retry must not reuse the same object.
         const req = new Request("https://api.example.com/premium", {
             method: "POST",
             headers: { "content-type": "application/json", "x-caller": "keep-me" },

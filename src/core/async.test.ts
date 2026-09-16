@@ -6,10 +6,11 @@ import {
     linkAbort,
     memoAsync,
     retry,
+    ttlCache,
     withTimeout,
 } from "./async.js";
 
-// `retry` is the backoff behind every HTTP call in the SDK, and had no tests.
+// `retry` is the backoff behind every HTTP call in the SDK.
 
 describe("retry", () => {
     const policy = { retries: 2, backoffMs: 0, jitter: 0 };
@@ -29,17 +30,17 @@ describe("retry", () => {
     });
 
     it("throws a real Error rather than undefined on a negative cap", async () => {
-        // `retries: -1` skipped the loop and threw `lastErr === undefined` — a
-        // non-Error that defeats every downstream `instanceof` and
-        // `isWalletError` check.
+        // Unclamped, `retries: -1` would skip the loop and throw
+        // `lastErr === undefined`, a non-Error that defeats downstream
+        // `instanceof` and `isWalletError` checks.
         const fn = vi.fn(async () => "ok");
         await expect(retry(fn, { ...policy, retries: -1 })).resolves.toBe("ok");
         expect(fn).toHaveBeenCalledOnce();
     });
 
     it("does not let a throwing onRetry replace the real error", async () => {
-        // Documented "must not throw", but nothing enforced it — and a hook
-        // that did swallowed the network error it was reporting on.
+        // The hook is documented "must not throw"; a hook that does must not
+        // mask the network error it reports on.
         const fn = vi.fn(async () => {
             throw new Error("network down");
         });
@@ -49,6 +50,27 @@ describe("retry", () => {
 
         await expect(retry(fn, { ...policy, onRetry })).rejects.toThrow("network down");
         expect(onRetry).toHaveBeenCalled();
+    });
+
+    it("rejects with the caller's abort reason when aborted during backoff", async () => {
+        // Not the failure being backed off from: the caller ended the call, and
+        // `fetch` rejects with the reason too.
+        const ctrl = new AbortController();
+        const reason = new Error("user cancelled");
+        const fn = vi.fn(async () => {
+            throw new Error("transient");
+        });
+
+        const pending = retry(fn, {
+            retries: 3,
+            backoffMs: 10_000,
+            jitter: 0,
+            signal: ctrl.signal,
+            onRetry: () => ctrl.abort(reason),
+        });
+
+        await expect(pending).rejects.toBe(reason);
+        expect(fn).toHaveBeenCalledOnce();
     });
 
     it("clamps jitter so the delay cannot go negative", async () => {
@@ -75,8 +97,8 @@ describe("retry", () => {
 
 describe("withTimeout", () => {
     it("rejects with an Error when the abort reason is a bare string", async () => {
-        // `AbortSignal.reason` is whatever was passed to `abort()`, commonly a
-        // string — which would defeat every `instanceof` check downstream.
+        // `AbortSignal.reason` is whatever was passed to `abort()`, often a
+        // string, which defeats downstream `instanceof` checks.
         const ctrl = new AbortController();
         const pending = withTimeout(
             new Promise<never>(() => {}),
@@ -120,7 +142,14 @@ describe("createMutex", () => {
         };
 
         // `a` is slower, so without the mutex `b` would start first.
-        await Promise.all([mutex.run(op("a", 10)), mutex.run(op("b", 0))]);
+        vi.useFakeTimers();
+        try {
+            const done = Promise.all([mutex.run(op("a", 10)), mutex.run(op("b", 0))]);
+            await vi.runAllTimersAsync();
+            await done;
+        } finally {
+            vi.useRealTimers();
+        }
 
         expect(events).toEqual(["a:start", "a:end", "b:start", "b:end"]);
     });
@@ -158,16 +187,26 @@ describe("createKeyedMutex", () => {
             inFlight--;
         };
 
-        await Promise.all([
-            mutex.run("a", op(false)),
-            mutex.run("a", op(false)),
-            mutex.run("b", op(false)),
-        ]);
-        expect(peakOverall).toBe(2); // the two keys overlap; the two "a"s do not
+        const settle = async (ops: Promise<unknown>[]) => {
+            const done = Promise.all(ops);
+            await vi.runAllTimersAsync();
+            await done;
+        };
+        vi.useFakeTimers();
+        try {
+            await settle([
+                mutex.run("a", op(false)),
+                mutex.run("a", op(false)),
+                mutex.run("b", op(false)),
+            ]);
+            expect(peakOverall).toBe(2); // the two keys overlap; the two "a"s do not
 
-        inFlight = 0;
-        await Promise.all([mutex.run("a", op(true)), mutex.run("a", op(true))]);
-        expect(peakSameKey).toBe(1);
+            inFlight = 0;
+            await settle([mutex.run("a", op(true)), mutex.run("a", op(true))]);
+            expect(peakSameKey).toBe(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 
@@ -183,8 +222,8 @@ describe("memoAsync", () => {
     });
 
     it("does not cache a rejection", async () => {
-        // The whole point: a plain `promise ??= build()` replays one transient
-        // failure to every later caller in the realm, permanently.
+        // A plain `promise ??= build()` would replay one transient failure to
+        // every later caller in the realm, permanently.
         let attempt = 0;
         const build = vi.fn(async () => {
             if (++attempt === 1) throw new Error("transient");
@@ -209,9 +248,8 @@ describe("memoAsync", () => {
     });
 
     it("exposes an in-flight build without starting one", async () => {
-        // Teardown needs this: it must not start a build in order to tear
-        // down, but must still await one already under way rather than
-        // leaking what it was building.
+        // Teardown must not start a build, but must await one already under
+        // way rather than leak it.
         let release: (v: string) => void = () => {};
         const build = vi.fn(
             () =>
@@ -260,7 +298,7 @@ describe("linkAbort", () => {
 
     it("honours a parent that already aborted", () => {
         // `addEventListener("abort", …)` never fires on an already-aborted
-        // signal — the bug this helper exists to stop people rewriting.
+        // signal.
         const child = linkAbort(AbortSignal.abort(new Error("already")));
         expect(child.signal.aborted).toBe(true);
     });
@@ -294,9 +332,8 @@ describe("linkAbort", () => {
     });
 
     it("detaches and aborts on scope exit", () => {
-        // `[Symbol.dispose]` is the stronger of the two: leaving the scope ends
-        // the work, so the speculative tail must stop as well. `dispose()` only
-        // unlinks, and is for a caller that still wants the controller live.
+        // `[Symbol.dispose]` also aborts: leaving the scope ends the work, so
+        // the speculative tail must stop. `dispose()` only unlinks.
         const parent = new AbortController();
         let child!: LinkedAbort;
         {
@@ -313,5 +350,34 @@ describe("linkAbort", () => {
         const reason: unknown = child.signal.reason;
         parent.abort(new Error("parent gone after scope"));
         expect(child.signal.reason).toBe(reason);
+    });
+});
+
+describe("ttlCache", () => {
+    it("reuses a value until it expires, including an undefined one", async () => {
+        let now = 0;
+        const build = vi.fn(async () => undefined);
+        const get = ttlCache(build, 1_000, () => now);
+
+        await get();
+        now = 999;
+        await get();
+        expect(build).toHaveBeenCalledOnce();
+
+        now = 1_000;
+        await get();
+        expect(build).toHaveBeenCalledTimes(2);
+    });
+
+    it("shares one in-flight build and does not cache a failure", async () => {
+        let calls = 0;
+        const get = ttlCache(async () => {
+            if (calls++ === 0) throw new Error("relayer down");
+            return "ok";
+        }, 1_000);
+
+        await expect(Promise.all([get(), get()])).rejects.toThrow("relayer down");
+        expect(calls).toBe(1);
+        await expect(get()).resolves.toBe("ok");
     });
 });

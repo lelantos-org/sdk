@@ -1,41 +1,36 @@
 // ZIP-32-lite hierarchical key derivation for Baby-Jubjub.
 //
 // Path: m / 32' / LELANTOS_COIN_TYPE' / account' (hardened-only).
-// PRF: blake2b keyed with parent chain code. Domain byte 0x11 is reserved
-// for hardened sk-derivation; 0x12 is reserved for future non-hardened
-// ivk-derivation.
+// PRF: blake2b keyed with the parent chain code. Domain byte 0x11 is reserved for hardened
+// sk-derivation; 0x12 is reserved for future non-hardened ivk-derivation.
 //
-// v2 changed how a PRF block is drawn. v1 took `nsk` from the first 32 bytes
-// of one 64-byte blake2b output, which is 2 bits wider than BN254 Fr, so
-// reducing it skewed the low residues by about 6:5. `nsk` now comes off 40
-// bytes — 66 spare bits, see `reduceWideToField`.
+// `nsk` is drawn from 40 bytes, leaving 66 spare bits over BN254 Fr (see `reduceWideToField`).
+// Drawing 32 bytes, 2 bits wider than Fr, would skew the low residues by about 6:5.
 //
-// That needs 72 bytes and blake2b caps output at 64, so the two halves are two
-// keyed calls under the same key, separated by a leading domain byte, rather
-// than one wider call. The chain code keeps its full 32 bytes. The
-// personalisation string carries the version, so a v1 and a v2 tree cannot be
-// confused; every v1-derived key is invalidated.
+// The 40-byte `nsk` and 32-byte chain code need 72 bytes and blake2b caps output at 64, so each
+// PRF block is two keyed calls under the same key, separated by a leading domain byte. The
+// personalisation string carries the version ("v1"), so trees from different versions cannot be
+// confused.
 
 import { blake2b } from "@noble/hashes/blake2";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
-import { InvalidArgumentError } from "../core/errors.js";
+import { toLeBytes } from "../core/bytes.js";
 import { BN254_FR, reduceWideToField } from "../core/field.js";
-import { toLeBytes } from "../crypto/bytes.js";
 import type { Field } from "../crypto/poseidon.js";
+import { InvalidArgumentError } from "../errors/config.js";
 
 const HARDENED_BIT = 0x80000000;
 /** Exclusive upper bound for user-facing index. */
 const MAX_INDEX = HARDENED_BIT;
 
-const MASTER_PERSONAL = new TextEncoder().encode("Lelantos_ZIP32_v2_Master");
+const MASTER_PERSONAL = new TextEncoder().encode("Lelantos_ZIP32_v1_Master");
 
 /**
  * PRF draw widths.
  *
- * `NSK_BYTES` is 40 rather than 32 so the reduction into BN254 Fr keeps 66
- * spare bits. Narrowing it reintroduces the v1 bias, so `reduceWideToField`
- * throws rather than letting that happen quietly.
+ * `NSK_BYTES` is 40 so the reduction into BN254 Fr keeps 66 spare bits. `reduceWideToField`
+ * throws if it is narrowed enough to introduce bias.
  */
 const NSK_BYTES = 40;
 const CHAIN_CODE_BYTES = 32;
@@ -70,8 +65,7 @@ export interface ExtendedSpendingKey {
 /**
  * One PRF block: `nsk` and the next chain code, keyed by `key` over `data`.
  *
- * Two calls rather than one wide one because blake2b maxes out at 64 bytes and
- * the two halves need 72 between them.
+ * Two calls because blake2b output is capped at 64 bytes and the two halves need 72.
  */
 function prf(key: Uint8Array, data: Uint8Array): { nsk: Field; chainCode: Uint8Array } {
     const tagged = (tag: number, dkLen: number): Uint8Array => {
@@ -84,15 +78,6 @@ function prf(key: Uint8Array, data: Uint8Array): { nsk: Field; chainCode: Uint8A
         nsk: reduceWideToField(tagged(PRF_NSK, NSK_BYTES), BN254_FR, "nsk"),
         chainCode: tagged(PRF_CHAIN_CODE, CHAIN_CODE_BYTES),
     };
-}
-
-function u32LE(n: number): Uint8Array {
-    const out = new Uint8Array(4);
-    out[0] = n & 0xff;
-    out[1] = (n >>> 8) & 0xff;
-    out[2] = (n >>> 16) & 0xff;
-    out[3] = (n >>> 24) & 0xff;
-    return out;
 }
 
 function checkIndex(i: number, label: string): void {
@@ -130,7 +115,7 @@ export function deriveChildHardened(
     const nskBytes = toLeBytes(parent.nsk);
     const data = new Uint8Array(1 + 4 + 32);
     data[0] = 0x11;
-    data.set(u32LE(wireIndex), 1);
+    data.set(toLeBytes(BigInt(wireIndex), 4), 1);
     data.set(nskBytes, 5);
     return {
         ...prf(parent.chainCode, data),
@@ -163,8 +148,7 @@ export function mnemonicToAccountKey(
     passphrase = "",
 ): ExtendedSpendingKey {
     if (!validateMnemonic(mnemonic, wordlist)) {
-        // The mnemonic itself is left out: it is the wallet's root secret, and
-        // a message reaches application logs verbatim.
+        // The mnemonic is omitted: it is the root secret, and error messages reach logs verbatim.
         throw new InvalidArgumentError("invalid BIP39 mnemonic", { argument: "mnemonic" });
     }
     return deriveAccount(mnemonicToSeedSync(mnemonic, passphrase), account);

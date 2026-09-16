@@ -1,10 +1,8 @@
 // Poseidon parity + timing: wasm vs poseidon-lite, at the Merkle arity.
 //
-// Modelled on `src/prover/prover-parity.bench.ts`. Doubles as the migration
-// safety net for the vendored wasm permutation: it is the only place a digest
-// produced by `wasm/poseidon` is compared against the JS backend at scale, and
-// it fails loudly if `Poseidon.build()` silently fell back to JS — which would
-// otherwise turn every parity test green while measuring nothing.
+// Modelled on `src/prover/prover-parity.bench.ts`. The only place `wasm/poseidon` digests are
+// compared against the JS backend at scale. Fails if `Poseidon.build()` fell back to JS, which
+// would otherwise make parity tests pass without exercising wasm.
 //
 // Wired into CI via `npm run test:bench`.
 
@@ -26,8 +24,7 @@ function timeUs(fn: (i: number) => unknown, n: number): number {
 describe("poseidon5 wasm vs js", () => {
     it("wasm backend is actually live", async () => {
         const P = await Poseidon.build();
-        // `build()` falls back to JS when wasm cannot load. That is right for
-        // production and wrong for this bench, so assert it did not happen.
+        // `build()` falls back to JS when wasm cannot load; this bench requires the wasm backend.
         expect(P.backend).toBe("wasm");
     });
 
@@ -48,7 +45,7 @@ describe("poseidon5 wasm vs js", () => {
                 `${((jsUs * FULL_TREE_NODES) / 1e6).toFixed(1)}s\n`,
         );
 
-        // A regression that silently reverts to JS would land near 1.0.
+        // A fallback to JS would give a ratio near 1.0.
         expect(jsUs / wasmUs).toBeGreaterThan(1.5);
     });
 });

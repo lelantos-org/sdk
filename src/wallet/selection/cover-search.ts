@@ -1,8 +1,8 @@
-// Bounded combinatorial search over an ASCENDING value list.
+// Bounded combinatorial search over an ascending value list.
 //
-// Both walks prune on that ordering — a branch whose best case cannot beat the
-// incumbent ends the loop rather than the iteration — and both are capped, so a
-// large wallet degrades to a non-minimal answer instead of a stalled spend.
+// Both walks prune on that ordering (a branch that cannot beat the incumbent
+// ends the loop, not just the iteration) and both are capped, so a large wallet
+// gets a non-minimal answer instead of a stalled spend.
 
 import { getLogger } from "../../log/logger.js";
 
@@ -15,11 +15,9 @@ const MAX_COMBINATIONS = 50_000;
  * Smallest sum ≥ `threshold` reachable with exactly `size` of `values`, or
  * `null` if no such combination exists.
  *
- * `values` is ascending, which is what makes the search cheap: once the
- * best case for a branch — the running sum plus `size` copies of the current
- * value, the smallest anything further along can contribute — cannot beat the
- * incumbent, no later index can either, so the loop breaks rather than
- * continues.
+ * `values` is ascending, so once a branch's best case (the running sum plus
+ * `size` copies of the current value) cannot beat the incumbent, no later index
+ * can either and the loop breaks.
  */
 export function smallestCover(
     values: readonly bigint[],
@@ -28,25 +26,19 @@ export function smallestCover(
 ): bigint | null {
     if (size > values.length) return null;
 
-    // Seeded with the sum of the `size` largest values — the most any
-    // combination of this size can reach.
-    //
-    // Two things follow. If even that sum falls short, no combination
-    // qualifies and the walk is skipped entirely. Otherwise it is itself a
-    // valid cover, giving the prune below an incumbent from the first branch.
-    // Seeding with `null` would leave the prune inert until the first success,
-    // and a wallet whose largest notes cannot reach `threshold` has none — so
-    // every C(n, size) would be enumerated before returning null. That is the
-    // dusty wallet needing `consolidate-first`, reached only after this
-    // returns.
+    // Seeded with the sum of the `size` largest values, the maximum for this
+    // size. If it falls short, no combination qualifies and the walk is
+    // skipped; otherwise it is a valid cover that gives the prune an incumbent
+    // from the first branch. Without the seed, a wallet whose largest notes
+    // cannot reach `threshold` (the `consolidate-first` case) would enumerate
+    // every C(n, size) before returning null.
     let best = 0n;
     for (let i = values.length - size; i < values.length; i++) best += values[i]!;
     if (best < threshold) return null;
 
-    // The seed makes the search cheap in practice, but branch-and-bound has no
-    // polynomial guarantee, so the documented cap is enforced here too. Bailing
-    // early returns the incumbent, which is always a real cover — a possibly
-    // non-minimal selection, never a stalled spend.
+    // Branch-and-bound has no polynomial guarantee, so the cap applies here
+    // too. Stopping early returns the incumbent, which is always a valid,
+    // possibly non-minimal, cover.
     let visited = 0;
     let truncated = false;
 

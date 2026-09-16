@@ -1,237 +1,255 @@
-// `connect()` option types.
+// `connect()` and `connectWatch()` options.
 //
-// The mutually-exclusive key and chain groups are modelled with `Only<>`, so
-// passing two at once is a compile error rather than a silent precedence rule.
+// The key and chain groups are exclusive unions built with `Only<>`: passing two members of one
+// group is a compile error, not a precedence rule. Pluggables that only an integrator swaps
+// (submitter, selector, note source, fee override) are not here: they belong to
+// `createWallet(KeySource, WalletConfig)` in `./advanced`.
 
-import type { Eip1193ProviderLike, EthSigner } from "../../chain/eth-signer.js";
-import type { NetworkName, NetworkPreset } from "../../chain/networks.js";
+import type {
+    DeployedNetworkName,
+    NetworkPreset,
+    PlaceholderNetworkPreset,
+} from "../../chain/networks.js";
 import type { ChainAdapter, ChainReader } from "../../chain/port.js";
 import type { WasmConfig } from "../../configure-wasm.js";
-import type { DenominationPolicy } from "../../core/denominations.js";
-import type { FeeOverride } from "../../core/fees.js";
-import type { CircuitShape } from "../../core/shape.js";
-import type { ProverArtifacts } from "../../prover/artifacts.js";
-import type { Prover, ProverPaths } from "../../prover/types.js";
+import type { EvmAddressLike, ViewingKeyString } from "../../core/brand.js";
+import type { FullViewingKey, ViewingKey } from "../../keys/keys.js";
+import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
+import type { DenominationPolicy } from "../../protocol/denominations.js";
+import type { CircuitShape } from "../../protocol/shape.js";
+import type { Prover, ProverArtifacts } from "../../prover/types.js";
+import type { WorkerFactory } from "../../runtime/rpc/types.js";
+import type { NullifierPersistence } from "../../sync/nullifier-store.js";
 import type { Scanner } from "../../sync/scanner.js";
-import type { SyncStrategy } from "../config.js";
-import type { NoteSource } from "../note-source.js";
-import type { NoteStore } from "../note-store.js";
-import type { NullifierPersistence, NullifierStore } from "../nullifier-store.js";
-import type { CoinSelector } from "../selection/index.js";
-import type { Submitter } from "../submitter.js";
-import type { TreePersistence, TreeStore } from "../tree-store.js";
+import type { TreePersistence } from "../../sync/tree-store.js";
+import type { NoteStore } from "../notes/note-store.js";
+import type { SyncStrategy } from "../types/config.js";
+
+export type { DeployedNetworkName, SyncStrategy };
+
+/** `0x`-prefixed hex. */
+export type Hex = `0x${string}`;
 
 /**
- * Marks every sibling key the variant does not own as `?: never`, so
- * mixing two mutually-exclusive variants is a compile error rather than a
- * `WalletConfigError` at runtime.
+ * Marks every sibling key the variant does not own as `?: never`, so mixing two variants of an
+ * exclusive group fails to compile.
  */
-
 type Only<T, Keys extends PropertyKey> = T & { [K in Exclude<Keys, keyof T>]?: never };
 
-type KeyOptionKeys = "mnemonic" | "account" | "passphrase" | "signature" | "nsk";
+// --- network -------------------------------------------------------------------------------------
+
+// `NetworkPreset` / `PlaceholderNetworkPreset` live in `chain/networks.ts` (tier 4), which
+// `NETWORKS` is typed against; re-exported so there is one definition.
+export type { NetworkPreset, PlaceholderNetworkPreset };
+
+export interface NetworkOptions {
+    /** A deployed preset name, or a full preset. A placeholder name does not compile. */
+    network: DeployedNetworkName | NetworkPreset;
+    /**
+     * Overrides `preset.rpcUrl`. Required (here or on the preset) unless the chain group is a
+     * pre-built `chain` or `reader`; missing, it fails `WALLET_CONFIG` before any signing prompt.
+     */
+    rpcUrl?: string | undefined;
+}
+
+// --- key source ----------------------------------------------------------------------------------
+
+type KeyKeys = "mnemonic" | "account" | "passphrase" | "signature" | "nsk";
 
 /**
- * How the shielded spending key is derived — pick at most one shape.
+ * Where the shielded spending key comes from. At most one.
  *
- * - `mnemonic` — BIP-39 phrase, ZIP-32 derived. The portable option.
- * - `signature` — hex of the canonical EIP-712 message, for wallet-derived
- *   keys where the user already signed (see `keys/metamask.ts`).
- * - `nsk` — pre-derived nullifier spending key; derivation is the caller's.
- *
- * Omitting all three is valid when the chain layer can derive one — see
- * `SelfKeyingChainOptions`.
+ * May be omitted when the chain group can derive one (`privateKey`, `signer`, `provider`); see
+ * {@link ConnectOptions}.
  */
-export type ConnectKeyOptions =
+export type KeyOptions =
     | Only<
           {
+              /** BIP-39 phrase, ZIP-32 derived. */
               mnemonic: string;
               /** ZIP-32 account index. Default 0. */
               account?: number | undefined;
               passphrase?: string | undefined;
           },
-          KeyOptionKeys
+          KeyKeys
       >
-    | Only<{ signature: string }, KeyOptionKeys>
-    | Only<{ nsk: bigint }, KeyOptionKeys>;
+    /** Signature over the canonical EIP-712 key-derivation message. */
+    | Only<{ signature: Hex }, KeyKeys>
+    /** A nullifier spending key the caller derived (e.g. `deriveNskFromPasskey`) or cached. */
+    | Only<{ nsk: bigint }, KeyKeys>;
 
-type ChainOptionKeys =
-    | "chain"
-    | "reader"
-    | "noSigner"
-    | "signer"
-    | "provider"
-    | "address"
-    | "privateKey";
+/** No explicit key source. */
+type NoKey = { [K in KeyKeys]?: never };
+
+// --- chain layer ---------------------------------------------------------------------------------
+
+type ChainKeys = "chain" | "reader" | "readOnly" | "signer" | "provider" | "address" | "privateKey";
 
 /**
- * How transactions reach the chain — pick exactly one shape. Everything
- * but the pre-built `chain` adapter needs an `rpcUrl` for reads.
+ * How the wallet reads the chain and, where it can, signs as an EOA. Exactly one.
+ *
+ * Only deposits (and cancel / allowance setup) need an EOA. Transfers, withdrawals and swaps are
+ * authorised by the proof and broadcast by the relayer, so a `readOnly` or `reader` wallet spends
+ * normally; `capabilities.deposit` is `false` for it.
  */
-export type ConnectChainOptions =
-    | Only<
-          {
-              /** Pre-built `ChainAdapter`; caller owns construction. */
-              chain: ChainAdapter;
-              rpcUrl?: string | undefined;
-          },
-          ChainOptionKeys
-      >
-    | Only<
-          {
-              /**
-               * Pre-built read-only layer. Everything but deposit works: a
-               * spend is authorised by the circuit and broadcast by the
-               * relayer, so it never needs a key of its own.
-               */
-              reader: ChainReader;
-              rpcUrl?: string | undefined;
-          },
-          ChainOptionKeys
-      >
-    | Only<
-          {
-              /** Let the SDK build the read-only layer from `rpcUrl` alone. */
-              noSigner: true;
-              rpcUrl: string;
-          },
-          ChainOptionKeys
-      >
-    | Only<
-          {
-              /** Pre-built `EthSigner` (wraps any wallet via the abstraction). */
-              signer: EthSigner;
-              rpcUrl: string;
-          },
-          ChainOptionKeys
-      >
-    | Only<
-          {
-              /**
-               * Browser entrypoint: raw EIP-1193 provider + the signing
-               * account. SDK builds the signer internally.
-               */
-              provider: Eip1193ProviderLike;
-              address: `0x${string}`;
-              rpcUrl: string;
-          },
-          ChainOptionKeys
-      >
-    | Only<
-          {
-              /** 0x-hex; for Node tests / scripts. */
-              privateKey: `0x${string}`;
-              rpcUrl: string;
-          },
-          ChainOptionKeys
-      >;
+export type ChainOptions =
+    /** A pre-built adapter; the caller owns its construction and signer. */
+    | Only<{ chain: ChainAdapter }, ChainKeys>
+    /** A pre-built read-only layer. */
+    | Only<{ reader: ChainReader }, ChainKeys>
+    /** Build a read-only layer from `rpcUrl`. */
+    | Only<{ readOnly: true }, ChainKeys>
+    | Only<{ signer: EthSigner }, ChainKeys>
+    /** Browser: an EIP-1193 provider and the account to sign as. */
+    | Only<{ provider: Eip1193ProviderLike; address: EvmAddressLike }, ChainKeys>
+    /** Node scripts and tests. */
+    | Only<{ privateKey: Hex }, ChainKeys>;
 
-/** Everything that is not a key source or a chain layer. */
-export interface ConnectExtraOptions {
-    /** Builtin preset name or custom `NetworkPreset`. */
-    network: NetworkName | NetworkPreset;
+/**
+ * Chain layers holding a key the shielded key can be derived from: `privateKey` by domain-separated
+ * reduction, `signer` / `provider` by one EIP-712 signature (the only prompt `connect` issues).
+ */
+type SelfKeyingChainOptions = Exclude<
+    ChainOptions,
+    { chain: ChainAdapter } | { reader: ChainReader } | { readOnly: true }
+>;
 
-    /**
-     * Prover artifacts. Omitted → `bundledProverArtifacts()` resolves:
-     * companion `@lelantos-org/circuits` on Node. Browser has NO default
-     * (companion is on GitHub Packages, not jsDelivr-proxiable); pass
-     * explicitly or set `proverArtifactsCdn`.
-     */
-    proverArtifacts?: ProverArtifacts | ProverPaths | undefined;
-    /** Self-hosted CDN base serving `<shape>.wasm` + `<shape>_final.zkey` at root. */
-    proverArtifactsCdn?: string | undefined;
-    /** Skips `proverArtifacts` resolution. */
-    prover?: Prover | undefined;
-    /**
-     * Default `true` (Node and browser). Set `false` to force the
-     * in-process snarkjs prover. On wasm load failure the SDK falls back
-     * to snarkjs automatically.
-     */
-    useWasmProver?: boolean | undefined;
-    /**
-     * `"eager"` (default) starts the zkey fetch/parse + thread-pool
-     * spin-up in the background as soon as `connect()` resolves the
-     * artifacts; `"lazy"` defers it to the first `prove()`.
-     */
-    proverWarmup?: "eager" | "lazy" | undefined;
+// --- pluggables ----------------------------------------------------------------------------------
 
-    /**
-     * Pre-resolved wasm-pack module + binary URLs. Required in browser
-     * builds where bundlers rewrite `#wasm/*` subpath imports. Applied
-     * via `configureWasm` before any `.build()`.
-     */
-    wasm?: WasmConfig | undefined;
+/**
+ * How proofs are made.
+ *
+ * - a `Prover`: used as-is and owned by the caller: neither `wallet.dispose()` nor a failed
+ *   `connect` disposes it, so one prover (e.g. a tab-wide `WorkerProver`) can serve many wallets;
+ * - a {@link ProverConfig}: the SDK builds one (default `{ warmup: "lazy" }`) and disposes it with
+ *   the wallet;
+ * - `"none"`: no prover; spends reject `PROVER_UNAVAILABLE` and `capabilities.prove` is `false`.
+ */
+export type ProverOption = Prover | ProverConfig | "none";
 
-    noteStore?: NoteStore | undefined;
-    noteSource?: NoteSource | undefined;
-    /** Pre-built tree store. Use `treePersistence` instead for the common case. */
-    treeStore?: TreeStore | undefined;
+export interface ProverConfig {
+    /** Circuit artifacts. Node default: the `@lelantos-org/circuits` companion package. */
+    artifacts?: ProverArtifacts | undefined;
+    /** Self-hosted base URL serving `<shape>.wasm` and `<shape>_final.zkey`. */
+    cdn?: string | undefined;
+    /** `"auto"` (default): wasm, falling back to snarkjs when wasm fails to load. */
+    backend?: "auto" | "wasm" | "snarkjs" | undefined;
     /**
-     * Persistence backend for the Merkle tree (e.g. IndexedDB in the browser).
-     * The SDK restores state at startup and saves after every sync.
+     * `"lazy"` (default): nothing is fetched until the first proof or `warmProver()`, so `connect`
+     * does no artifact I/O. `"eager"`: start fetching and warming in the background once connected.
      */
-    treePersistence?: TreePersistence | undefined;
-    /** Pre-built spent-nullifier store. Use `nullifierPersistence` instead for the common case. */
-    nullifierStore?: NullifierStore | undefined;
-    /** As `treePersistence`, for the locally mirrored spent-nullifier set. */
-    nullifierPersistence?: NullifierPersistence | undefined;
-    submitter?: Submitter | undefined;
-    selector?: CoinSelector | undefined;
-    /**
-     * Whether this wallet uses withdrawal ladders. Defaults to `true`;
-     * `false` opts out entirely. See `WalletConfig.denominations`.
-     */
-    denominations?: DenominationPolicy | undefined;
-    scanner?: Scanner | undefined;
-    syncStrategy?: SyncStrategy | undefined;
-    /**
-     * Input/output arity of the transact circuit. Defaults to `DEFAULT_SHAPE`
-     * (4×6), the only shape with published keys. Also selects which artifact
-     * pair `bundledProverArtifacts` resolves.
-     */
+    warmup?: "lazy" | "eager" | undefined;
+    /** Run proving in a worker built by this factory. */
+    worker?: WorkerFactory | undefined;
+    /** Prover thread count. Default: runtime concurrency. */
+    threads?: number | undefined;
+    /** Keeps a `Prover` from also matching this shape. */
+    prove?: never;
+}
+
+/**
+ * How notes are trial-decrypted: a `Scanner`, a worker pool (`size` default 2–8 by concurrency),
+ * or `"inline"` (default, main thread).
+ *
+ * A `Scanner` instance is owned by the caller: `wallet.dispose()` and a failed `connect` leave it
+ * running, so release it yourself. A pool built from `{ workers }` is the SDK's and is disposed
+ * with the wallet (or when `connect` fails).
+ */
+export type ScannerOption =
+    | Scanner
+    | { workers: WorkerFactory; size?: number | undefined; scan?: never }
+    | "inline";
+
+/** One backoff before a retry, as `HttpOptions.onRetry` sees it. */
+export interface RetryInfo {
+    /** Which client is retrying. */
+    service: "relayer" | "fmd" | "quoter";
+    /** Redacted. */
+    url: string;
+    method: string;
+    /** 1-based attempt that just failed. */
+    attempt: number;
+    delayMs: number;
+}
+
+/** Transport options forwarded to the relayer, FMD and quoter clients. */
+export interface HttpOptions {
+    fetch?: typeof fetch | undefined;
+    /** Per-attempt deadline for reads and estimates. */
+    timeoutMs?: number | undefined;
+    /** Per-attempt deadline for spend submits. Overrides `preset.submitTimeoutMs`. */
+    submitTimeoutMs?: number | undefined;
+    /** Additional attempts after the first. Submits retry only on no response, 429 and 503. */
+    retries?: number | undefined;
+    /** Must not throw; a throw is logged and swallowed. */
+    onRetry?: ((info: RetryInfo) => void) | undefined;
+    /** Added to every request, e.g. an API gateway key. */
+    headers?: Readonly<Record<string, string>> | undefined;
+}
+
+/**
+ * Persistence backends. Each defaults to in-memory. Owned by the caller: the SDK reads and writes
+ * them but never closes or deletes them, on `dispose()` or on a failed `connect`.
+ */
+export interface ConnectStorage {
+    notes?: NoteStore | undefined;
+    tree?: TreePersistence | undefined;
+    nullifiers?: NullifierPersistence | undefined;
+}
+
+/** Everything that is neither the network, a key source nor a chain layer. */
+export interface ConnectExtras {
+    /** See {@link ProverOption}; a `Prover` instance is caller-owned and never disposed. */
+    prover?: ProverOption | undefined;
+    /** See {@link ScannerOption}; a `Scanner` instance is caller-owned and never disposed. */
+    scanner?: ScannerOption | undefined;
+    http?: HttpOptions | undefined;
+    /** See {@link ConnectStorage}; never closed by the SDK. */
+    storage?: ConnectStorage | undefined;
+    /** Transact circuit arity. Default 4×6, the only shape with published keys. */
     shape?: CircuitShape | undefined;
-    /** See `WalletConfig.feeBps`. */
-    feeBps?: FeeOverride | undefined;
-
-    /** See `WalletConfig.fetchImpl`. */
-    fetchImpl?: typeof fetch | undefined;
-
-    /** Default: auto-detect. */
+    /** Withdrawal ladders. Default `true`. */
+    denominations?: DenominationPolicy | undefined;
+    /** Default `{ kind: "full" }`. */
+    syncStrategy?: SyncStrategy | undefined;
+    /** Pre-resolved wasm module URLs for bundlers that rewrite `#wasm/*`. */
+    wasm?: WasmConfig | undefined;
+    /** Default `"auto"`. */
     runtime?: "node" | "browser" | "auto" | undefined;
 }
 
-/** No explicit key source; the chain layer supplies it. */
-type NoKeyOptions = { [K in KeyOptionKeys]?: never };
-
 /**
- * Chain layers that carry a signing key, and can therefore derive the
- * shielded key on their own: `privateKey` by domain-separated reduction,
- * `signer` / `provider` by one EIP-712 signature.
+ * Everything `connect()` accepts.
  *
- * A pre-built `chain` adapter is absent by design — it owns its signer and
- * exposes nothing to derive from, so it still needs an explicit key source.
- * `reader` and `noSigner` are absent for the stronger reason that there is no
- * key there at all: those layers must be paired with an explicit `mnemonic`,
- * `signature` or `nsk`. A passkey wallet takes the last of these — derive the
- * key with `deriveNskFromPasskey` and pass the result, which is also what lets
- * an application cache it for the session.
+ * A key source may be omitted only when the chain layer derives one, so
+ * `connect({ network: "base", rpcUrl, privateKey })` is complete and `connect({ network, readOnly: true })`
+ * does not compile.
  */
-type SelfKeyingChainOptions = Exclude<
-    ConnectChainOptions,
-    { chain: ChainAdapter } | { reader: ChainReader } | { noSigner: true }
->;
+export type ConnectOptions = NetworkOptions &
+    ConnectExtras &
+    ((KeyOptions & ChainOptions) | (NoKey & SelfKeyingChainOptions));
 
-/**
- * Everything `connect()` accepts: a chain layer, optionally an explicit key
- * source, plus the shared options. Both groups are exclusive unions, so an
- * invalid combination (`mnemonic` *and* `nsk`, `signer` *and* `privateKey`)
- * fails to compile instead of throwing at runtime.
- *
- * The key source may be omitted when the chain layer can derive one, which is
- * what makes `connect({ privateKey, network, rpcUrl })` a complete call.
- */
-export type ConnectOptions =
-    | (ConnectExtraOptions & ConnectKeyOptions & ConnectChainOptions)
-    | (ConnectExtraOptions & NoKeyOptions & SelfKeyingChainOptions);
+// --- watch ---------------------------------------------------------------------------------------
 
-/** Widened view used internally, after the union has done its job. */
+/** Everything `connectWatch()` accepts. Returns a `ReadOnlyWalletApi`. */
+export interface ConnectWatchOptions extends NetworkOptions {
+    /** Either viewing-key tier, or its bech32m encoding. */
+    viewingKey: ViewingKey | FullViewingKey | ViewingKeyString | string;
+    /**
+     * Asset metadata source. Else built from `rpcUrl` when one is known; with neither, `asset()`
+     * and `assets()` reject `WALLET_CONFIG` and no RPC is contacted.
+     */
+    reader?: ChainReader | undefined;
+    scanner?: ScannerOption | undefined;
+    http?: HttpOptions | undefined;
+    storage?: Omit<ConnectStorage, "tree"> | undefined;
+    denominations?: DenominationPolicy | undefined;
+    syncStrategy?: SyncStrategy | undefined;
+    /**
+     * Required for `syncStrategy: { kind: "matches" }`, which releases the account's FMD detection
+     * secret to the server permanently.
+     */
+    allowDetectionKeyRelease?: boolean | undefined;
+    wasm?: WasmConfig | undefined;
+    runtime?: "node" | "browser" | "auto" | undefined;
+}

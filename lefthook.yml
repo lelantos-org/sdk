@@ -4,10 +4,13 @@ pre-commit:
     - name: biome
       glob: "*.{ts,js,mjs,json}"
       run: npx biome check --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+    - name: check-throws
+      glob: "src/**/*.ts"
+      run: node scripts/check-throws.mjs
 
 pre-push:
   jobs:
     - name: typecheck
-      run: npx tsc -p tsconfig.json --noEmit
+      run: npx tsc -p tsconfig.json --noEmit && npx tsc -p tsconfig.test.json --noEmit
     - name: tests
       run: npx vitest run --changed

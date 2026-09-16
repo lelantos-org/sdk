@@ -5,10 +5,10 @@
 // them; none of those should depend on the Permit2 signer.
 //
 // The ABI component lists and the functions mapping a struct onto them are
-// colocated. Their two consumers — the `computePiHash` witness and the
-// calldata in `chain/viem/deposits.ts` — must agree field-for-field, since the
-// hash is a Permit2 witness over the struct the calldata carries. A mismatch
-// produces a signature the contract rejects, with no local symptom.
+// colocated. Their two consumers, the `computePiHash` witness and the calldata
+// in `chain/viem/deposits.ts`, must agree field-for-field, since the hash is a
+// Permit2 witness over the struct the calldata carries. A mismatch produces a
+// signature the contract rejects, with no local symptom.
 
 import { bytesToHex } from "../core/hex.js";
 
@@ -20,18 +20,13 @@ import { bytesToHex } from "../core/hex.js";
 export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 
 /**
- * `PubInputs.DepositRequest` mirror — wire-side bigints/hex.
+ * `PubInputs.DepositRequest` mirror, with wire-side bigints/hex.
  *
- * One output: the contract collapses the deposit to a single leaf rather than
- * padding it to the two-leaf shape of a spend. There is correspondingly no
- * `rcvTotal` or `rcvDepPad`, which would only have pinned a pad leaf's value
- * to zero.
+ * The depositor's output is not padded to a spend's output shape, so there is
+ * no pad-leaf blinder.
  */
 export interface DepositRequest {
-    /**
-     * Full-width, matching `Transact.chainId`. Encodes to the same ABI word as
-     * the `uint64` it replaced, so the Permit2 witness preimage is unchanged.
-     */
+    /** Full-width `uint256`, matching `Transact.chainId`. */
     chainId: bigint;
     publicAssetId: bigint;
     publicIn: bigint;
@@ -53,11 +48,21 @@ export interface DepositRequest {
      */
     rcv: bigint;
     /**
-     * The relayer's fee note, in the deposit's own asset.
+     * Registry id of the asset the relayer's fee note is paid in.
+     *
+     * `0` exactly when `feeIn` is zero: a zero-value leaf's asset is
+     * canonically 0 in the circuit, and the pool reverts `FeeAssetMustBeZero`
+     * otherwise. A valued note names either `publicAssetId` (one pull of the
+     * deposit token) or another plain, enabled asset (a second pull, of that
+     * token); see `isSameFeeAsset`.
+     */
+    feeAssetId: bigint;
+    /**
+     * The relayer's fee note value, in circuit units of `feeAssetId`.
      *
      * A deposit mints two leaves: the depositor's note and this one. `feeIn`
-     * may be zero — a chain that subsidises deposits still mints the leaf, so
-     * there is one code path rather than two.
+     * may be zero; a chain that subsidises deposits still mints the leaf, so
+     * the shape is fixed.
      */
     feeIn: bigint;
     feeCm: string;
@@ -99,10 +104,22 @@ export interface Permit2Sig {
     nonce: bigint;
     deadline: bigint;
     /**
-     * Caller's ceiling on `inAmt + fee`. Bound into the Permit2 sig as
-     * `permitted.amount`; the contract requests at most this amount.
+     * Caller's ceiling on the deposit token's pull, bound into the Permit2 sig
+     * as the deposit token's `permitted.amount`; the contract requests at most
+     * this amount.
+     *
+     * Covers `inAmt + fee`, plus the relayer note when it is paid in the
+     * deposit's own asset.
      */
     maxTotal: bigint;
+    /**
+     * Caller's ceiling on the fee token's pull: the relayer note's value when
+     * it is paid in another asset, signed as the second entry of a
+     * `PermitBatchWitnessTransferFrom`.
+     *
+     * `0n` on the single-token path; the pool reverts `BadMaxFee` otherwise.
+     */
+    maxFee: bigint;
     /** 65-byte (r||s||v) hex string. */
     signature: string;
 }
@@ -142,13 +159,12 @@ export interface PermitSingle {
 }
 
 /**
- * Mirror of `IAllowanceTransfer.PermitBatch` — one signature covering N
- * token allowances.
+ * Mirror of `IAllowanceTransfer.PermitBatch`: one signature covering N token
+ * allowances.
  *
- * `spender` is shared across every entry, which is fine: it is always the MASP
- * address. `details[i].nonce` is NOT shared — Permit2 keys nonces by
- * `(owner, token, spender)`, so each entry carries its own, read from
- * `IAllowanceTransfer.allowance(owner, token, spender)`.
+ * `spender` is shared across entries because it is always the MASP address.
+ * `details[i].nonce` is per entry: Permit2 keys nonces by
+ * `(owner, token, spender)`, read from `IAllowanceTransfer.allowance(owner, token, spender)`.
  *
  * @internal
  */
@@ -172,21 +188,28 @@ export interface PermitBatch {
  * @internal
  */
 export function depositTuple(deposit: DepositRequest) {
+    // Lowercased: viem rejects a mixed-case address whose checksum does not
+    // match, and the encoded bytes are the same either way.
     return {
         chainId: deposit.chainId,
         publicAssetId: deposit.publicAssetId,
         publicIn: deposit.publicIn,
-        payer: deposit.payer as `0x${string}`,
-        recipient: deposit.recipient as `0x${string}`,
+        payer: abiAddress(deposit.payer),
+        recipient: abiAddress(deposit.recipient),
         outCm: deposit.outCm as `0x${string}`,
         cvDep: deposit.cvDep,
         rcv: deposit.rcv,
+        feeAssetId: deposit.feeAssetId,
         feeIn: deposit.feeIn,
         feeCm: deposit.feeCm as `0x${string}`,
         feeCvDep: deposit.feeCvDep,
         feeRcv: deposit.feeRcv,
     };
 }
+
+/** `0x`-hex address with no checksum casing, which viem accepts unconditionally. @internal */
+export const abiAddress = (address: string): `0x${string}` =>
+    address.toLowerCase() as `0x${string}`;
 
 /**
  * `AuxOutput` as the tuple `AUX_OUTPUT_COMPONENTS` describes.

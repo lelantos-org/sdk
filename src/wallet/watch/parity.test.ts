@@ -21,13 +21,15 @@ import {
 import { encodeFullViewingKey, encodeViewingKey } from "../../keys/viewing-key.js";
 import { clueBitsToPrefix, encodeNotePayload, type NotePayload } from "../../notes/codec.js";
 import { encryptNote } from "../../notes/encrypt.js";
+import type { NotePage, NoteSource } from "../../sync/note-source.js";
+import type { NullifierStore } from "../../sync/nullifier-store.js";
 import type { ScanInput } from "../../sync/scan.js";
-import type { NotePage, NoteSource } from "../note-source.js";
-import { InMemoryNoteStore } from "../note-store.js";
-import type { NullifierStore } from "../nullifier-store.js";
-import type { WalletNote } from "../result.js";
-import { testWallet } from "../wallet-test-utils.js";
-import { WatchWallet } from "./watch-wallet.js";
+import { testWallet } from "../../test-utils/wallet.js";
+import type { ReadOnlyWalletApi } from "../api.js";
+import { InMemoryNoteStore } from "../notes/note-store.js";
+import type { WalletNote } from "../types/results.js";
+import { connectWatch } from "./connect.js";
+import { createWatchWallet } from "./watch-wallet.js";
 
 const NSK = 4242n;
 
@@ -107,8 +109,8 @@ describe("watch wallet parity", () => {
         return wallet;
     }
 
-    async function watchWallet(key: string): Promise<WatchWallet> {
-        return WatchWallet.create(key, {
+    async function watchWallet(key: string): Promise<ReadOnlyWalletApi> {
+        return createWatchWallet(key, {
             chainId: 31337n,
             fmdUrl: "http://fmd.invalid",
             noteStore: new InMemoryNoteStore(),
@@ -119,40 +121,67 @@ describe("watch wallet parity", () => {
 
     // Keyed on `cm`, not `id`: ids are minted per store, so two wallets scanning
     // the same feed agree on every note and on none of the ids.
-    const shape = (w: { notes: () => WalletNote[] }) =>
-        w
-            .notes()
+    const shape = async (w: { notes: () => Promise<WalletNote[]> }) =>
+        (await w.notes())
             .map((n) => ({ cm: n.cm, asset: n.asset, value: n.value, spent: n.spent }))
             .sort((a, b) => a.cm.localeCompare(b.cm));
+    const balance = (w: ReadOnlyWalletApi, asset: bigint) =>
+        w.state().balances.get(asset as never) ?? 0n;
 
     it("an FVK watch wallet matches the spending wallet exactly", async () => {
         const spend = await spendingWallet();
         const watch = await watchWallet(encodeFullViewingKey(fullViewingKeyFromSpending(sk)));
 
-        await spend.syncNotes();
-        await watch.sync();
+        await spend.sync({ scope: "notes" });
+        const report = await watch.sync();
 
         expect(watch.address).toBe(spend.address);
         expect(watch.spentKnown).toBe(true);
-        expect(shape(watch)).toEqual(shape(spend));
-        expect(watch.balance(1n)).toBe(spend.balance(1n));
-        expect(watch.balance(2n)).toBe(spend.balance(2n));
+        expect(watch.keys).toMatchObject({
+            tier: "full",
+            viewingKey: spend.keys.viewingKey,
+            fullViewingKey: spend.keys.fullViewingKey,
+        });
+        expect(await shape(watch)).toEqual(await shape(spend));
+        expect(balance(watch, 1n)).toBe(balance(spend, 1n));
+        expect(balance(watch, 2n)).toBe(balance(spend, 2n));
         // The spent note is actually settled, not merely absent.
-        expect(watch.notes({ spent: true })).toHaveLength(1);
+        expect(await watch.notes({ spent: true })).toHaveLength(1);
+        // A watch wallet keeps no tree, and a full key mirrors the spent set.
+        expect(report.tree).toBeUndefined();
     });
 
     it("an IVK watch wallet sees the same notes but cannot settle spends", async () => {
         const spend = await spendingWallet();
         const watch = await watchWallet(encodeViewingKey(viewingKeyFromSpending(sk)));
 
-        await spend.syncNotes();
-        await watch.sync();
+        await spend.sync({ scope: "notes" });
+        const report = await watch.sync({ scope: "full" });
 
         expect(watch.address).toBe(spend.address);
         expect(watch.spentKnown).toBe(false);
-        expect(watch.notes()).toHaveLength(spend.notes().length);
-        expect(watch.notes({ spent: true })).toHaveLength(0);
+        expect(watch.keys).toMatchObject({
+            tier: "incoming",
+            viewingKey: spend.keys.viewingKey,
+            fullViewingKey: undefined,
+        });
+        expect(await watch.notes()).toHaveLength((await spend.notes()).length);
+        expect(await watch.notes({ spent: true })).toHaveLength(0);
         // Its balance is therefore everything received, the spent note included.
-        expect(watch.balance(1n)).toBe(spend.balance(1n) + 500n);
+        expect(balance(watch, 1n)).toBe(balance(spend, 1n) + 500n);
+        // An incoming key cannot use the spent set, so it is not fetched; "full" is "notes" here.
+        expect(report.nullifiers).toBeUndefined();
+        expect(report.tree).toBeUndefined();
+    });
+
+    it("connectWatch builds a reader from the preset's rpcUrl without contacting it", async () => {
+        const watch = await connectWatch({
+            network: "anvil",
+            viewingKey: encodeFullViewingKey(fullViewingKeyFromSpending(sk)),
+            storage: { notes: new InMemoryNoteStore() },
+        });
+        expect(watch.keys.tier).toBe("full");
+        expect(Object.isFrozen(watch)).toBe(true);
+        await watch.dispose();
     });
 });

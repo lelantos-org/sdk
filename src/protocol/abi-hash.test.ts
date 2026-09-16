@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 import { flatten } from "../circuit/index.js";
 import { BN254_FR } from "../core/field.js";
 import { bytesToHex } from "../core/hex.js";
-import { auxDigest, computePiHash, DEPOSIT_REQUEST_COMPONENTS } from "./abi-hash.js";
+import {
+    auxDigest,
+    computePiHash,
+    DEPOSIT_REQUEST_COMPONENTS,
+    swapIntentHash,
+} from "./abi-hash.js";
 import { AUX_OUTPUT_COMPONENTS, type AuxOutput } from "./deposit-request.js";
 
 type AbiParam = { name?: string; type: string; components?: readonly AbiParam[] };
@@ -61,15 +66,22 @@ describe("auxDigest", () => {
         expect(auxDigest([a, b])).not.toBe(auxDigest([b, a]));
     });
 
+    it("pins its bytes to a known answer", () => {
+        const empty = aux({ ephPubX: 34n, ciphertext: new Uint8Array([]) });
+        expect(auxDigest([aux(), empty])).toBe(
+            0x113f30d8b0ce6d4e83ea0aa1b6be67d092bd983d3be15022cbfa7b725492168cn,
+        );
+    });
+
     it("distinguishes array length (encoded as a dynamic tuple[])", () => {
         expect(auxDigest([aux()])).not.toBe(auxDigest([aux(), aux()]));
     });
 });
 
 describe("flatten", () => {
-    // The aux digest occupies the last slot, leaving indices 0..29 fixed, so a
+    // The aux digest occupies the last slot, leaving indices 0..30 fixed, so a
     // PubInputs.sol layout only has to append.
-    it("puts out_aux_digest in the final slot, index 30", () => {
+    it("puts out_aux_digest in the final slot, index 31", () => {
         const input = {
             merkle_root: 1n,
             nullifier: [2n, 3n],
@@ -89,6 +101,7 @@ describe("flatten", () => {
             chain_id: 18n,
             payer_address: 19n,
             relayer_address: 20n,
+            intent_hash: 777n,
             out_cv_dep: [
                 [21n, 22n],
                 [23n, 24n],
@@ -99,10 +112,15 @@ describe("flatten", () => {
             out_aux_digest: 999n,
         };
         const coeffs = flatten(input);
-        expect(coeffs).toHaveLength(31);
-        expect(coeffs[30]).toBe(999n);
+        expect(coeffs).toHaveLength(32);
+        expect(coeffs[31]).toBe(999n);
         expect(coeffs[0]).toBe(1n);
-        expect(coeffs[29]).toBe(30n);
+        expect(coeffs[30]).toBe(30n);
+        // `intentHash` directly follows `relayer`, ahead of the clue slots — the
+        // `PubInputs.Transact` member order.
+        expect(coeffs[23]).toBe(20n);
+        expect(coeffs[24]).toBe(777n);
+        expect(coeffs[25]).toBe(25n);
     });
 });
 
@@ -111,8 +129,8 @@ describe("flatten", () => {
 // `piHash` is the Permit2 witness: the contract recomputes
 // `keccak256(abi.encode(d, aux, feeAux))` and rejects the signature if it disagrees, so
 // a wrong field order or width breaks every deposit with no local symptom.
-// These derive the encoding from the canonical Foundry ABI rather than trusting
-// the hand-written component list.
+// These tests derive the encoding from the canonical Foundry ABI and compare it
+// with the hand-written component list.
 
 describe("computePiHash vs the canonical ABI", () => {
     // `depositAuthorized` is the shortest signature carrying both structs:
@@ -132,8 +150,8 @@ describe("computePiHash vs the canonical ABI", () => {
     });
 
     it("declares AuxValidation.Output exactly as the contract does", () => {
-        // Two structs, not an array: one per leaf a deposit mints — the
-        // depositor's note and the note paying whoever flushes it.
+        // Two structs, not an array: one per leaf a deposit mints (the
+        // depositor's note and the note paying the flusher).
         expect(auxParam?.type).toBe("tuple");
         expect(layout(auxParam?.components)).toEqual(layout(AUX_OUTPUT_COMPONENTS));
         expect(feeAuxParam?.type).toBe("tuple");
@@ -150,6 +168,8 @@ describe("computePiHash vs the canonical ABI", () => {
             outCm: `0x${"33".repeat(32)}`,
             cvDep: [7n, 8n] as [bigint, bigint],
             rcv: 99n,
+            // Not the deposit's asset, so a dropped or misplaced field shows.
+            feeAssetId: 2n,
             feeIn: 5n,
             feeCm: `0x${"44".repeat(32)}`,
             feeCvDep: [9n, 10n] as [bigint, bigint],
@@ -166,5 +186,72 @@ describe("computePiHash vs the canonical ABI", () => {
         );
 
         expect(computePiHash(request, a, a)).toBe(fromCanonical);
+    });
+});
+
+// ─── swap intent hash ────────────────────────────────────────────────────────
+//
+// `SwapWrapper.swap` reverts `IntentMismatch` unless the withdraw proof's
+// `intentHash` equals `SwapWrapper._intentHash(args)`. The vector below is
+// pinned identically in the Solidity and relayer test suites, so an encoding
+// mismatch on any side fails that side's tests before reaching the chain.
+
+describe("swapIntentHash", () => {
+    const addr = (tail: string) => `0x${tail.padStart(40, "0")}`;
+    const intent = {
+        refundTo: addr("4EF0"),
+        tokenOut: addr("B0B0"),
+        minOut: 9_900_000_000_000n,
+        adapter: addr("ADA7"),
+        deadline: 1_900_000_000n,
+        depositD: {
+            chainId: 31337n,
+            publicAssetId: 2n,
+            publicIn: 990n,
+            payer: addr("5A5A"),
+            recipient: addr("BEEF"),
+            outCm: `0x${"1".padStart(64, "0")}`,
+            cvDep: [2n, 3n] as [bigint, bigint],
+            rcv: 4n,
+            feeAssetId: 2n,
+            feeIn: 5n,
+            feeCm: `0x${"6".padStart(64, "0")}`,
+            feeCvDep: [7n, 8n] as [bigint, bigint],
+            feeRcv: 9n,
+        },
+        auxD: { clueR: [10n, 11n], ephPub: [12n, 13n], ciphertext: new Uint8Array([1, 2]) },
+        feeAuxD: {
+            clueR: [14n, 15n],
+            ephPub: [16n, 17n],
+            ciphertext: new Uint8Array([3, 4, 5]),
+        },
+        refundD: {
+            chainId: 31337n,
+            publicAssetId: 1n,
+            publicIn: 995n,
+            payer: addr("5A5A"),
+            recipient: addr("BEEF"),
+            outCm: `0x${"12".padStart(64, "0")}`,
+            cvDep: [19n, 20n] as [bigint, bigint],
+            rcv: 21n,
+            feeAssetId: 1n,
+            feeIn: 22n,
+            feeCm: `0x${"17".padStart(64, "0")}`,
+            feeCvDep: [24n, 25n] as [bigint, bigint],
+            feeRcv: 26n,
+        },
+        refundAuxD: { clueR: [27n, 28n], ephPub: [29n, 30n], ciphertext: new Uint8Array([6]) },
+        refundFeeAuxD: {
+            clueR: [31n, 32n],
+            ephPub: [33n, 34n],
+            ciphertext: new Uint8Array([7, 8]),
+        },
+    } satisfies Parameters<typeof swapIntentHash>[0];
+
+    it("matches the cross-language vector", () => {
+        expect(swapIntentHash(intent)).toBe(
+            // `SwapWrapperBindingTest.INTENT_VECTOR`.
+            17537988237215357429810858075676193989150518723851377084809783452071645726238n,
+        );
     });
 });

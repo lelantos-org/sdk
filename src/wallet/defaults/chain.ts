@@ -1,83 +1,85 @@
-// Chain-adapter construction from `connect()` inputs.
+// Chain-layer construction from `connect()` inputs.
 
-import type { DeployedNetworkPreset } from "../../chain/networks.js";
+import type { NetworkPreset } from "../../chain/networks.js";
 import type { ChainReader } from "../../chain/port.js";
 import { evmAddress } from "../../core/brand.js";
-import { WalletConfigError } from "../../core/errors.js";
-import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
+import { WalletConfigError } from "../../errors/config.js";
+import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
 
-export interface ChainAdapterInputs {
+interface ChainAdapterInputs {
+    /** Pre-built adapter; the caller owns its construction and signer. */
     chain?: ChainReader | undefined;
-    /** Pre-built read-only layer; caller owns construction. No deposits. */
+    /** Pre-built read-only layer. No deposits. */
     reader?: ChainReader | undefined;
     /**
-     * Build a read-only `ViemChainReader` from `rpcUrl` alone.
-     *
-     * For a wallet that holds no EVM key — a passkey, say. Spending out of the
-     * pool needs no signer, so this is a complete chain layer for transfer,
-     * withdraw and swap; only deposit is out of reach, and it refuses at the
-     * call rather than here.
+     * Build a read-only `ViemChainReader` from `rpcUrl` alone, for a wallet without an EVM key
+     * (e.g. a passkey). Spending needs no signer; deposits are refused at the call.
      */
-    noSigner?: boolean | undefined;
-    /** Pre-built signer (EIP-1193 wrapper, private key signer, etc.). */
+    readOnly?: boolean | undefined;
     signer?: EthSigner | undefined;
-    /**
-     * Browser-style entry: raw EIP-1193 provider + the signing account +
-     * chainId. SDK builds an `Eip1193Signer` internally.
-     */
+    /** Browser: a raw EIP-1193 provider and the signing account. */
     provider?: Eip1193ProviderLike | undefined;
-    address?: `0x${string}` | undefined;
-    /** 0x-hex private key for Node tests / CLI builds. */
+    address?: string | undefined;
+    /** 0x-hex private key for Node tests and scripts. */
     privateKey?: `0x${string}` | undefined;
+    /** Already resolved: the option, else the preset's. */
     rpcUrl?: string | undefined;
+    /** RPC `fetch` (`HttpOptions.fetch`). */
+    fetch?: typeof fetch | undefined;
+}
+
+/** What a viem reader or adapter for `preset` is built from. */
+export function viemChainOptions(
+    preset: NetworkPreset,
+    rpcUrl: string,
+    fetchImpl: typeof fetch | undefined,
+) {
+    return {
+        rpcUrl,
+        maspAddress: preset.maspAddress,
+        chainId: preset.chainId,
+        permit2Address: preset.permit2Address,
+        nativeAdapterAddress: preset.nativeAdapterAddress,
+        ...(fetchImpl ? { fetch: fetchImpl } : {}),
+    };
 }
 
 /**
- * Build the default `ViemChainAdapter`. Used by `connect()` when the caller
- * passes `signer` / `provider` / `privateKey` rather than a pre-built adapter.
+ * Build the chain layer `connect()` was asked for.
  *
- * viem and the signers load dynamically: a caller who supplies their own
- * `chain` never pays for the viem client stack (~230 KB), and one who does not
- * pays for it off `connect()`'s critical path rather than at module load.
- * Validation stays ahead of the import so a misconfigured call still fails
- * without fetching anything.
+ * viem and the signers load dynamically, so a caller supplying `chain` never loads the viem client
+ * stack (~230 KB) and others load it on demand. Validation runs before the import so a
+ * misconfigured call fails without fetching anything.
  */
 export async function defaultChainAdapter(
     inputs: ChainAdapterInputs,
-    preset: DeployedNetworkPreset,
+    preset: NetworkPreset,
 ): Promise<ChainReader> {
     if (inputs.chain) return inputs.chain;
     if (inputs.reader) return inputs.reader;
 
-    if (inputs.noSigner) {
-        if (!inputs.rpcUrl) {
-            throw new WalletConfigError([
-                "`rpcUrl` required when building a read-only chain layer",
-            ]);
-        }
-        const { ViemChainReader } = await import("../../chain/viem/index.js");
-        return new ViemChainReader({
-            rpcUrl: inputs.rpcUrl,
-            maspAddress: preset.maspAddress,
-            chainId: preset.chainId,
-            permit2Address: preset.permit2Address,
-            nativeAdapterAddress: preset.nativeAdapterAddress,
-        });
-    }
-
-    const errs: string[] = [];
-    if (!inputs.rpcUrl) {
-        errs.push("`rpcUrl` required when building chain adapter (or pass a pre-built `chain`)");
-    }
-    if (!inputs.signer && !(inputs.provider && inputs.address) && !inputs.privateKey) {
-        errs.push(
-            "pass one of `chain`, `reader`, `noSigner`, `signer`, `{provider,address}`, or `privateKey`",
+    const rpcUrl = inputs.rpcUrl;
+    if (!rpcUrl) {
+        throw new WalletConfigError(
+            "`rpcUrl` (on the preset or in the options) — required to build a chain layer; " +
+                "or pass a pre-built `chain` or `reader`",
         );
     }
-    if (errs.length) throw new WalletConfigError(errs);
+    const common = viemChainOptions(preset, rpcUrl, inputs.fetch);
 
-    const [{ Eip1193Signer, PrivateKeySigner }, { ViemChainAdapter }] = await Promise.all([
-        import("../../chain/eth-signer.js"),
+    if (inputs.readOnly) {
+        const { ViemChainReader } = await import("../../chain/viem/index.js");
+        return new ViemChainReader(common);
+    }
+    if (!inputs.signer && !(inputs.provider && inputs.address) && !inputs.privateKey) {
+        throw new WalletConfigError(
+            "pass one of `chain`, `reader`, `readOnly`, `signer`, `{ provider, address }` or `privateKey`",
+        );
+    }
+
+    const [{ Eip1193Signer }, { PrivateKeySigner }, { ViemChainAdapter }] = await Promise.all([
+        import("../../chain/signer/eip1193.js"),
+        import("../../chain/signer/private-key.js"),
         import("../../chain/viem/index.js"),
     ]);
 
@@ -85,20 +87,7 @@ export async function defaultChainAdapter(
         inputs.signer ??
         (inputs.provider && inputs.address
             ? new Eip1193Signer(inputs.provider, evmAddress(inputs.address), preset.chainId)
-            : new PrivateKeySigner(
-                  inputs.privateKey as `0x${string}`,
-                  inputs.rpcUrl as string,
-                  preset.chainId,
-              ));
+            : new PrivateKeySigner(inputs.privateKey as `0x${string}`, rpcUrl, preset.chainId));
 
-    return new ViemChainAdapter({
-        rpcUrl: inputs.rpcUrl as string,
-        signer,
-        maspAddress: preset.maspAddress,
-        chainId: preset.chainId,
-        permit2Address: preset.permit2Address,
-        nativeAdapterAddress: preset.nativeAdapterAddress,
-    });
+    return new ViemChainAdapter({ ...common, signer });
 }
-
-/** Inputs `connect()` collects to wire a default browser/node prover. */

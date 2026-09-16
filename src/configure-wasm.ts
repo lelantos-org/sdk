@@ -7,14 +7,13 @@
 // Per-crate alternatives: `configureJubjubWasm`, `configurePoseidonWasm`,
 // `configureProverWasm`.
 //
-// None of this is required on a bundler that follows the `#wasm/*` subpath
-// imports — the defaults resolve on their own. It exists for the ones that
-// rewrite the wasm-pack glue's `new URL(..., import.meta.url)` to a path that
-// does not exist at runtime.
+// Not required with bundlers that follow the `#wasm/*` subpath imports. Intended for bundlers that
+// rewrite the wasm-pack glue's `new URL(..., import.meta.url)` to a path that does not exist at
+// runtime.
 
 import { configureJubjubWasm, type JubjubWasmLoader } from "./crypto/jubjub-wasm/loader.js";
 import { configurePoseidonWasm, type PoseidonWasmLoader } from "./crypto/poseidon-wasm/loader.js";
-import { configureProverWasm, type ProverWasmLoader } from "./prover/wasm-loader.js";
+import { configureProverWasm, type ProverWasmLoader } from "./runtime/wasm/prover-loader.js";
 
 export interface WasmConfig {
     jubjub?: JubjubWasmLoader;

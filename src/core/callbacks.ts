@@ -1,7 +1,7 @@
 // Guarded invocation of caller-supplied callbacks.
 //
 // A throwing listener must never break an in-flight transaction, so throws are
-// swallowed — and logged, so they stay diagnosable.
+// swallowed and logged.
 
 import { getLogger } from "../log/logger.js";
 
@@ -18,9 +18,4 @@ export function safeCall<A>(name: string, cb: ((arg: A) => void) | undefined, ar
     } catch (err) {
         log.warn("callback threw; ignored", { callback: name, err });
     }
-}
-
-/** Phase-progress callback. Swallows listener errors — see {@link safeCall}. */
-export function safePhase<P>(cb: ((p: P) => void) | undefined, phase: P): void {
-    safeCall("onPhase", cb, phase);
 }

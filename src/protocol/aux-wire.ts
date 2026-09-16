@@ -1,7 +1,6 @@
 // `OutputAux` <-> `AuxOutput`: the builder-side shape (points) and the wire
 // shape (split x/y, mirroring the on-chain `AuxValidation.Output` struct).
-//
-// Both directions live here so a field added to one cannot miss the other.
+// Both directions live in one file so a field added to one is added to the other.
 
 import type { OutputAux } from "../notes/aux.js";
 import type { AuxOutput } from "./deposit-request.js";
@@ -23,8 +22,8 @@ export function auxOutputToWire(a: OutputAux): AuxOutput {
 }
 
 /**
- * Inverse of `auxOutputToWire`: flat-scalar wire `AuxOutput` (piHash shape)
- * → point-tuple `OutputAux` (builder/relayer shape) for swap.
+ * Inverse of `auxOutputToWire`: converts the flat-scalar wire `AuxOutput` (piHash shape)
+ * to the point-tuple `OutputAux` (builder/relayer shape). Used by swap.
  */
 export function auxOutputFromWire(a: AuxOutput): OutputAux {
     return {

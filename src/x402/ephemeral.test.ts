@@ -11,11 +11,14 @@ describe("deriveEphemeralKey", () => {
     });
 
     it("golden vector — a change here strands funds at old addresses", () => {
-        // Pinned so the derivation path cannot drift silently. If this fails,
-        // the domain tag or byte layout changed and every previously funded
-        // ephemeral address became unreachable.
+        // Pins the derivation (domain tag and byte layout). Any change makes
+        // existing funded ephemeral addresses unreachable.
         expect(deriveEphemeralKey(1n, 0)).toBe(
             "0x2095110998e29c5ea5116f6d44471639e36d8c3576cb5760b71bccba57af675b",
+        );
+        // A multi-byte index pins the little-endian `u32` suffix.
+        expect(deriveEphemeralKey(0x1234567n, 0x01020304)).toBe(
+            "0x64ca20a81d38cda5b09cbb8d3dc181e7a78eadb47085a30efb9665bc2db7ae91",
         );
     });
 
@@ -50,9 +53,8 @@ describe("deriveEphemeralKey", () => {
 
 describe("hostPayerIndex", () => {
     it("gives each host its own payer address", () => {
-        // A single shared slot gives every server the same `from`, and each
-        // such address is publicly funded by a Lelantos withdrawal, so two
-        // servers can establish that they share a wallet by comparing it.
+        // A shared slot gives every server the same publicly funded `from`
+        // address, letting servers link payments to one wallet.
         const addr = (host: string) =>
             privateKeyToAccount(deriveEphemeralKey(NSK, hostPayerIndex(host))).address;
 

@@ -22,7 +22,6 @@ import { keccak256, toBytes } from "viem";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bitAt } from "../core/bits.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "../core/field.js";
-import { challengeWordCount, coeffCount, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
@@ -48,8 +47,10 @@ import {
     TAG_PK,
     TAG_RHO,
 } from "../crypto/index.js";
-import { loadWasmJubjub, wasmDescribe } from "../crypto/wasm-test-utils.js";
-import { fmdFlag, fmdFlagKeyFromDetection } from "../fmd/index.js";
+import { fmdFlag } from "../fmd/clue.js";
+import { fmdFlagKeyFromDetection } from "../fmd/keys.js";
+import { challengeWordCount, coeffCount, shapeId, TRANSACT_SHAPES } from "../protocol/shape.js";
+import { loadJubjub, wasmDescribe } from "../test-utils/wasm.js";
 import { coeffs, fiatShamirZ, flatten, hornerEval } from "./compression.js";
 import { toCircomInput } from "./input.js";
 
@@ -74,8 +75,8 @@ interface CircuitMeta {
     coeffCount: number;
     /**
      * Words hashed into `z`. A superset of `coeffCount` for transact, equal to
-     * it for the batch circuit, whose coefficients are all pinned. Published
-     * from circuits v0.14.0, which this suite requires.
+     * it for the batch circuit, whose coefficients are all pinned. Requires
+     * circuits >= v0.14.0.
      */
     challengeWords: number;
     layout: string[];
@@ -105,6 +106,7 @@ interface TransactWitness {
     chain_id: string;
     payer_address: string;
     relayer_address: string;
+    intent_hash: string;
     out_cv_dep: string[][];
     in_asset: string[];
     in_value: string[];
@@ -242,9 +244,9 @@ function loadJson<T>(name: string): T {
 const index = loadJson<VectorIndex>("index.json");
 
 // The batch vector is named for the circuit's `MAX_L`, which is not part of
-// `CircuitShape` — it tracks the batch circuit, not the transact arity. Read the
-// name out of the index rather than hardcoding it, so a widened batch is a
-// failing assertion here rather than an ENOENT at import time.
+// `CircuitShape`; it tracks the batch circuit, not the transact arity. The name
+// is read from the index so a widened batch fails an assertion here instead of
+// raising ENOENT at import time.
 const BATCH_FILE = Object.keys(index.files).find((name) =>
     /^tree-update-batch-\d+\.json$/.test(name),
 );
@@ -262,17 +264,16 @@ interface TransactSet {
     readonly file: VectorFile<TransactVector>;
 }
 
-// Driven off `TRANSACT_SHAPES` rather than a hand-written list, so a shape the
-// SDK knows about but the package does not publish a vector file for fails
-// loudly at load time instead of going quietly uncovered.
+// Driven by `TRANSACT_SHAPES`, so a shape the SDK supports but the package has
+// no vector file for fails at load time instead of going uncovered.
 const TRANSACT: readonly TransactSet[] = TRANSACT_SHAPES.map((shape) => {
     const id = shapeId(shape);
     return { id, file: loadJson<VectorFile<TransactVector>>(`transact-${id}.json`) };
 });
 
-// The constants block is byte-identical across every file — `every vector file
-// agrees on the constants` below is what proves it — so one file stands in for
-// all of them wherever a test needs a constant rather than a witness.
+// The constants block is identical across every file (asserted by `every vector
+// file agrees on the constants` below), so one file stands in for all of them
+// wherever a test needs a constant rather than a witness.
 const BASELINE = TRANSACT[0]?.file;
 if (!BASELINE) throw new Error("vectors.test: TRANSACT_SHAPES is empty");
 
@@ -335,9 +336,9 @@ describe("installed circuit vectors", () => {
 // reproducing the digest here proves the two orderings agree name-for-name,
 // not merely in length.
 /**
- * The POLYNOMIAL's slots, which is what `circuit.layout` names — not the
- * challenge preimage. The four address words, the clue triples and the aux
- * digest are hashed into `z` and never evaluated, so they are absent here.
+ * The polynomial's slots, as named by `circuit.layout`, not the challenge
+ * preimage. The four address words, the clue triples and the aux digest are
+ * hashed into `z` and never evaluated, so they are absent here.
  */
 function slotLabels(nIn: number, nOut: number): string[] {
     const labels = ["merkleRoot"];
@@ -362,15 +363,15 @@ describe.each(TRANSACT)("transact $id public-input layout", ({ file }) => {
         expect(digest).toBe(file.circuit.layoutDigest);
     });
 
-    it("evaluates 4 + 3·N_IN + 5·N_OUT coefficients and hashes 9 + 3·N_IN + 8·N_OUT", () => {
-        // `coeffCount` and `challengeWordCount` in core/shape.ts must reproduce
+    it("evaluates 4 + 3·N_IN + 5·N_OUT coefficients and hashes 10 + 3·N_IN + 8·N_OUT", () => {
+        // `coeffCount` and `challengeWordCount` in protocol/shape.ts must reproduce
         // what the package publishes.
         //
-        // The two differ by 23 at 4x6 — the address words, the clue triples and
-        // the aux digest — and that is a soundness requirement. `PolyEval` is
+        // The two differ by 24 at 4x6 (the address words, the clue triples and
+        // the aux digest), which is a soundness requirement. `PolyEval` is
         // affine in each coefficient and the prover reads `z` before choosing a
         // witness, so a coefficient the circuit does not constrain is one linear
-        // equation in one unknown. Those 23 carry no constraint, so they are
+        // equation in one unknown. Those 24 carry no constraint, so they are
         // hashed into `z` and never evaluated.
         expect(file.circuit.coeffCount).toBe(coeffCount({ nIn, nOut }));
         expect(file.circuit.challengeWords).toBe(challengeWordCount({ nIn, nOut }));
@@ -415,8 +416,8 @@ describe("consensus constants", () => {
         }
     });
 
-    // The circuit tabulates this ladder as literals (constant-folding Poseidon
-    // is not something circom does); the SDK recomputes it in MerkleTree's
+    // The circuit tabulates this ladder as literals (circom does not
+    // constant-fold Poseidon); the SDK recomputes it in MerkleTree's
     // constructor. An empty tree of depth d must land on entry d.
     it("shares the empty-subtree hash ladder", async () => {
         const P = await Poseidon.build();
@@ -436,7 +437,7 @@ wasmDescribe("transact vectors", () => {
 
     beforeAll(async () => {
         P = await Poseidon.build();
-        J = await loadWasmJubjub();
+        J = await loadJubjub();
     });
 
     it("shares the Baby-Jubjub base point", () => {
@@ -628,6 +629,7 @@ wasmDescribe("transact vectors", () => {
                             chainId: f(w.chain_id),
                             payerAddress: f(w.payer_address),
                             relayerAddress: f(w.relayer_address),
+                            intentHash: f(w.intent_hash),
                             z: f(w.z),
                             outputAuxDigest: f(w.out_aux_digest),
                         });
@@ -642,9 +644,9 @@ wasmDescribe("transact vectors", () => {
 
 // ── tree_update_batch vectors ────────────────────────────────────────────
 //
-// The SDK does not prove this circuit — the relayer owns its 249 MB zkey — but
-// it does build the leaves that go into it and mirrors the tree the circuit
-// updates, so those two halves must agree.
+// The SDK does not prove this circuit (the relayer owns its 249 MB zkey), but it
+// builds the leaves that go into it and mirrors the tree the circuit updates,
+// so both must agree.
 
 wasmDescribe("tree_update_batch vectors", () => {
     let P: Poseidon;
@@ -652,7 +654,7 @@ wasmDescribe("tree_update_batch vectors", () => {
 
     beforeAll(async () => {
         P = await Poseidon.build();
-        J = await loadWasmJubjub();
+        J = await loadJubjub();
     });
 
     for (const v of treeUpdate.vectors) {

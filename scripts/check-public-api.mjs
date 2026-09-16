@@ -1,80 +1,83 @@
 // Diffs the built public API against a checked-in snapshot.
 //
-// The root barrel plus 30 subpaths is more surface than anyone reliably
-// holds in their head — which is how eight `export *` barrels came to
-// publish every @internal symbol they touched, while types that appeared in
-// exported signatures (TreeStore, HttpClientOptions, OnPhase) were not
-// exported at all.
-//
-// This makes every change to the surface a visible diff in one file.
-// Run `npm run check:api -- --update` after an intentional change.
+// Two checks:
+//   1. Every change to the surface is a visible diff in one file. Run
+//      `npm run check:api -- --update` after an intentional change.
+//   2. One home per name: a name published from two subpaths fails, whether it is one symbol
+//      re-exported twice or two symbols sharing a name. Consumers should never have to choose
+//      between two import paths for the same thing.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { join } from "node:path";
+import { ROOT, readPackage, ts } from "./lib/package.mjs";
 
-const require = createRequire(import.meta.url);
-const SNAPSHOT = new URL("../api-surface.json", import.meta.url).pathname;
-const PKG = new URL("../package.json", import.meta.url).pathname;
+const SNAPSHOT = join(ROOT, "api-surface.json");
 const update = process.argv.includes("--update");
 
-const pkg = JSON.parse(readFileSync(PKG, "utf8"));
+const entries = Object.entries(readPackage().exports)
+    .filter(([, v]) => typeof v === "object" && v.types?.startsWith("./dist/"))
+    .map(([subpath, v]) => [subpath, join(ROOT, v.types)]);
 
-/** Exported names of a `.d.ts`, via the TypeScript compiler API. */
-function surfaceOf(dtsPath) {
-    const ts = require("typescript");
-    const program = ts.createProgram([dtsPath], {
+const missing = entries.filter(([, types]) => !existsSync(types));
+if (missing.length > 0) {
+    console.error("check-public-api: build output missing. Run `npm run build` first.\n");
+    for (const [subpath, types] of missing) console.error(`  ${subpath} -> ${types}`);
+    process.exit(1);
+}
+
+// One program over every entry: the declaration graphs overlap almost entirely.
+const program = ts.createProgram(
+    entries.map(([, types]) => types),
+    {
         target: ts.ScriptTarget.ES2023,
         module: ts.ModuleKind.NodeNext,
         moduleResolution: ts.ModuleResolutionKind.NodeNext,
         noEmit: true,
         skipLibCheck: true,
-    });
-    const checker = program.getTypeChecker();
-    const source = program.getSourceFile(dtsPath);
-    if (!source) return null;
-    const sym = checker.getSymbolAtLocation(source);
-    if (!sym) return [];
-    return checker
-        .getExportsOfModule(sym)
-        .map((s) => s.getName())
-        .sort();
+    },
+);
+const checker = program.getTypeChecker();
+
+/** Exported names of a `.d.ts`. */
+function surfaceOf(types) {
+    const sym = checker.getSymbolAtLocation(program.getSourceFile(types));
+    return sym
+        ? checker
+              .getExportsOfModule(sym)
+              .map((s) => s.getName())
+              .sort()
+        : [];
 }
 
-const entries = Object.entries(pkg.exports)
-    .filter(([, v]) => typeof v === "object" && v.types?.startsWith("./dist/"))
-    .map(([name, v]) => [name, v.types.replace(/^\.\//, "")]);
+const current = Object.fromEntries(entries.map(([subpath, types]) => [subpath, surfaceOf(types)]));
 
-const current = {};
-const missing = [];
-for (const [name, types] of entries) {
-    if (!existsSync(types)) {
-        missing.push(`${name} -> ${types}`);
-        continue;
-    }
-    current[name] = surfaceOf(types) ?? [];
+const homes = new Map();
+for (const [subpath, names] of Object.entries(current)) {
+    for (const n of names) homes.set(n, [...(homes.get(n) ?? []), subpath]);
 }
-
-if (missing.length > 0) {
-    console.error("check-public-api: build output missing. Run `npm run build` first.\n");
-    for (const m of missing) console.error(`  ${m}`);
+const duplicated = [...homes].filter(([, subpaths]) => subpaths.length > 1);
+if (duplicated.length > 0) {
+    console.error("check-public-api: a name is published from more than one subpath\n");
+    for (const [n, subpaths] of duplicated) console.error(`  ${n}: ${subpaths.join(", ")}`);
+    console.error("\nPick one home in the entries under src/entry/.");
     process.exit(1);
 }
 
 if (update || !existsSync(SNAPSHOT)) {
     writeFileSync(SNAPSHOT, `${JSON.stringify(current, null, 2)}\n`);
     console.log(
-        `check-public-api: snapshot ${update ? "updated" : "created"} (${Object.keys(current).length} subpaths)`,
+        `check-public-api: snapshot ${update ? "updated" : "created"} (${entries.length} subpaths)`,
     );
     process.exit(0);
 }
 
 const previous = JSON.parse(readFileSync(SNAPSHOT, "utf8"));
 const diffs = [];
-for (const name of new Set([...Object.keys(previous), ...Object.keys(current)])) {
-    const before = new Set(previous[name] ?? []);
-    const after = new Set(current[name] ?? []);
-    for (const n of before) if (!after.has(n)) diffs.push(`  - ${name}: removed \`${n}\``);
-    for (const n of after) if (!before.has(n)) diffs.push(`  + ${name}: added \`${n}\``);
+for (const subpath of new Set([...Object.keys(previous), ...Object.keys(current)])) {
+    const before = new Set(previous[subpath] ?? []);
+    const after = new Set(current[subpath] ?? []);
+    for (const n of before) if (!after.has(n)) diffs.push(`  - ${subpath}: removed \`${n}\``);
+    for (const n of after) if (!before.has(n)) diffs.push(`  + ${subpath}: added \`${n}\``);
 }
 
 if (diffs.length > 0) {
@@ -86,4 +89,4 @@ if (diffs.length > 0) {
     );
     process.exit(1);
 }
-console.log(`check-public-api: OK — ${Object.keys(current).length} subpaths unchanged`);
+console.log(`check-public-api: OK — ${entries.length} subpaths unchanged`);

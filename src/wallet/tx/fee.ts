@@ -1,31 +1,36 @@
 // Resolving the relayer's shielded fee for a spend.
 //
 // The relayer is paid with an output note addressed to its own shielded
-// address, riding in the spend it pays for (see `bundle/fee.ts` for why it is
-// not an on-chain transfer). This module is the wallet-side half: ask what the
-// relay costs, decide which asset pays it, and hand back the slot.
+// address, inside the spend it pays for (see `bundle/fee.ts` for why it is not
+// an on-chain transfer). This module is the wallet side: fetch the quote, pick
+// the paying asset, and return the slot.
 //
 // # Paying in an asset other than the one being moved
 //
 // The circuit conserves value per asset, not in aggregate
 // (`PerAssetValueBalance` in `circuits/src/lib/balance.circom`), so one proof
-// may carry the asset being moved alongside a second asset that pays the fee.
-// Nothing in the relayer requires the two to match either: it prices every
-// asset it accepts and refuses only a fee *split* across assets.
+// may carry the moved asset alongside a second asset that pays the fee. The
+// relayer prices every asset it accepts and refuses only a fee split across
+// assets.
 //
-// What it costs is slots. A cross-asset fee needs an input note of the fee
-// asset and an output slot for its change, on top of the fee note itself — two
-// slots more than paying in the asset already being moved. At the 4x4 shape a
-// transfer fits exactly: `[recipient, change, fee, fee-change]`.
+// A cross-asset fee needs an input note of the fee asset and an output slot for
+// its change, on top of the fee note: two slots more than a same-asset fee. At
+// the 4x4 shape a transfer fits exactly: `[recipient, change, fee, fee-change]`.
 
 import type { FeeOutput } from "../../bundle/fee.js";
 import { feeOutputFromEstimate } from "../../bundle/fee.js";
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { assetId, branded } from "../../core/brand.js";
-import type { Jubjub } from "../../crypto/index.js";
+import { InvalidArgumentError } from "../../errors/config.js";
 import type { DecodedAddress } from "../../keys/address.js";
-import type { SpendContext } from "../context.js";
-import type { EstimateKind } from "../submitter.js";
+import type { EstimateKind } from "../../services/relayer/submitter.js";
+import { chargedMoney, shieldedMoney } from "../assets/amount.js";
+import type { AssetRef } from "../assets/asset-ref.js";
+import type { AssetInfo } from "../assets/info.js";
+import type { WalletContext } from "../context.js";
+import { relayerEstimate } from "../relayer-info.js";
+import type { FeeKind } from "../types/quotes.js";
+import type { Money } from "../types/results.js";
 import { changeSlots, type OutputSlotSpec } from "./outputs.js";
 
 /** The fee slot for one spend, plus what it costs and in which asset. */
@@ -36,12 +41,8 @@ export interface ResolvedFee {
     /** True when the fee is paid in an asset the spend is not otherwise moving. */
     crossAsset: boolean;
     /**
-     * Cover this fee needs in its own right, or `undefined` when it comes out
-     * of the notes the spend already selects.
-     *
-     * A same-asset fee is part of the spend's target; a cross-asset one has to
-     * be selected for separately, because no amount of the asset being moved
-     * pays it.
+     * Cover this fee needs separately, or `undefined` for a same-asset fee,
+     * which is part of the spend's target.
      */
     cover?: { asset: AssetId; value: CircuitAmount } | undefined;
     /**
@@ -51,7 +52,7 @@ export interface ResolvedFee {
     slots: number;
 }
 
-export interface ResolveFeeArgs {
+interface ResolveFeeArgs {
     kind: EstimateKind;
     /** The asset the spend is moving. */
     spendAsset: AssetId;
@@ -62,24 +63,23 @@ export interface ResolveFeeArgs {
 /**
  * What this relay costs, as an output slot ready to splice into the spend.
  *
- * `null` means no fee slot is needed — either the submitter cannot quote (a
- * custom one predating shielded fees) or the relayer is subsidising gas on this
- * chain. Both are the behaviour that predates fees, and both are correct to
- * build a spend without a fee note.
+ * `null` means no fee slot is needed: the submitter cannot quote (a custom
+ * submitter without shielded-fee support) or the relayer subsidises gas on this
+ * chain.
  *
- * Throws when the relayer charges but will not take the requested asset. That
- * is a spend it would refuse with a 402 after a full Groth16 run, so it is
- * worth failing here, before any artifact is fetched.
+ * Throws when the relayer charges but does not accept the requested asset. The
+ * relayer would reject such a spend with a 402 after a full Groth16 run, so it
+ * fails here before any artifact is fetched.
  */
 export async function resolveFee(
-    ctx: Pick<SpendContext, "J" | "cfg" | "submitter">,
+    ctx: Pick<WalletContext, "J" | "cfg">,
     args: ResolveFeeArgs,
 ): Promise<ResolvedFee | null> {
-    if (!ctx.submitter.estimate) return null;
+    const estimate = await relayerEstimate(ctx, args.kind);
+    if (!estimate) return null;
 
-    const estimate = await ctx.submitter.estimate(ctx.cfg.chainId, args.kind);
     const asset = args.feeAsset ?? args.spendAsset;
-    const output = feeOutputFromEstimate({ J: ctx.J as Jubjub, estimate, asset });
+    const output = feeOutputFromEstimate({ J: ctx.J, estimate, asset, kind: args.kind });
     if (!output) return null;
 
     const crossAsset = asset !== args.spendAsset;
@@ -95,16 +95,36 @@ export async function resolveFee(
 }
 
 /**
+ * The fee asset a spend names (default: the spend's own) and the relayer's fee in it.
+ *
+ * The fee asset is verified, so a symbol or address the relayer maps to another id is refused
+ * rather than paid in.
+ */
+export async function resolveSpendFee(
+    ctx: Pick<WalletContext, "J" | "cfg" | "assets">,
+    kind: EstimateKind,
+    asset: AssetInfo,
+    feeRef: AssetRef | undefined,
+): Promise<{ feeAsset: AssetInfo; fee: ResolvedFee | null }> {
+    const feeAsset = feeRef === undefined ? asset : await ctx.assets.resolveVerified(feeRef);
+    const fee = await resolveFee(ctx, { kind, spendAsset: asset.id, feeAsset: feeAsset.id });
+    return { feeAsset, fee };
+}
+
+/** A resolved fee as the `Money` results report; `null` when none is charged. */
+export function relayerMoney(feeAsset: AssetInfo, fee: ResolvedFee | null): Money | null {
+    return fee ? chargedMoney(shieldedMoney(feeAsset, fee.value)) : null;
+}
+
+/**
  * The output slots a resolved fee occupies: the relayer's note, then the change
  * from the notes that funded it.
  *
- * `feeSelection` is the cover `prepareSpend` took for a cross-asset fee, and is
- * absent for a same-asset one — whose change is part of the spend's own.
+ * `feeSelection` is the cover `runSpend` took for a cross-asset fee, and is
+ * absent for a same-asset one, whose change is part of the spend's own.
  *
- * The fee note carries the randomness `feeOutput` drew for it. Nothing depends
- * on that being the same draw — the aux is built from it here, not earlier — so
- * fresh randomness would do just as well; it travels with the note only so the
- * slot arrives whole rather than half-assembled.
+ * The fee note reuses the randomness `feeOutput` drew for it so the slot is
+ * self-contained; nothing depends on it being that particular draw.
  */
 export function feeSlots(
     fee: ResolvedFee | null,
@@ -122,8 +142,7 @@ export function feeSlots(
     if (!feeSelection) return [relayerSlot];
     return [
         relayerSlot,
-        // The fee asset's own change. No ladder: this is the relayer's asset,
-        // not the one being withdrawn, so there is no `publicOut` for it to
+        // The fee asset's change. No ladder: this asset has no `publicOut` to
         // conform to.
         ...changeSlots({
             pk,
@@ -133,4 +152,15 @@ export function feeSlots(
             slots: 1,
         }),
     ];
+}
+
+/** The relayer estimate for `kind`: a native withdrawal is priced on its own. */
+export function estimateKindOf(kind: unknown, op: string, native?: boolean): EstimateKind {
+    if (kind !== "transfer" && kind !== "withdraw" && kind !== "swap" && kind !== "deposit") {
+        throw new InvalidArgumentError(
+            `${op}: kind must be "transfer", "withdraw", "swap" or "deposit"`,
+            { argument: "kind" },
+        );
+    }
+    return kind === "withdraw" && native ? "withdrawNative" : (kind satisfies FeeKind);
 }

@@ -7,10 +7,9 @@ import {
     supportsSigning,
 } from "./port.js";
 
-// The guards are what a caller asks before it commits to a flow, so their
-// answers are load-bearing: a false positive reaches `payerAddress` on a layer
-// that has none, and a false negative hides the deposit tab from a wallet that
-// could have used it.
+// Callers consult the guards before committing to a flow: a false positive
+// reaches `payerAddress` on a layer that has none, and a false negative hides
+// the deposit tab from a wallet that supports it.
 
 const reader = (extra: Partial<ChainAdapter> = {}): ChainReader =>
     ({
@@ -42,7 +41,7 @@ describe("supportsSigning", () => {
     });
 
     it("rejects a layer with only half the signing surface", () => {
-        // Either alone is useless: a deposit needs the payer named *and* the
+        // Neither alone suffices: a deposit needs the payer named *and* the
         // Permit2 witness signed, and a partial adapter would fail mid-flow
         // with value already committed to a strategy.
         expect(supportsSigning(reader({ payerAddress }))).toBe(false);
@@ -53,8 +52,7 @@ describe("supportsSigning", () => {
 describe("the deposit-path guards imply signing", () => {
     it("rejects a reader that happens to carry the deposit members", () => {
         // Without the `supportsSigning` conjunct these would pass on a layer
-        // with no `payerAddress`, and every one of them narrows to a type that
-        // promises it.
+        // with no `payerAddress`, yet each narrows to a type that promises it.
         const { payerAddress: _p, signPermit2: _s, ...unsigned } = ALLOWANCE;
         const half = reader(unsigned);
         expect(supportsAllowanceTransfer(half)).toBe(false);
@@ -81,9 +79,8 @@ describe("the deposit-path guards imply signing", () => {
     });
 
     it("requires the native adapter address, not just the call", () => {
-        // The address is what the deposit builder names as `payer`, so an
-        // adapter that can encode the call but not name the contract is not
-        // usable.
+        // The deposit builder names this address as `payer`, so an adapter
+        // that can encode the call but not name the contract is unusable.
         const noAddr = reader({
             ...SIGNING,
             submitDepositNative: (async () => ({})) as never,

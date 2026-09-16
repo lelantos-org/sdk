@@ -3,18 +3,18 @@
 // `PrivateKeySigner` hands the structured `{domain, types, primaryType,
 // message}` to viem, which hashes it. `Eip1193Signer` cannot: a raw provider
 // wants JSON for `eth_signTypedData_v4`, with an explicit `EIP712Domain` entry
-// and every integer as a hex string. The helpers here do that conversion by
-// hand, so nothing viem does covers them.
+// and every integer as a hex string. The helpers in `typed-data.ts` do that
+// conversion by hand, outside viem's coverage.
 //
-// A divergence is silent and expensive. The same wallet would derive a
-// different `nsk` depending on which signer built the payload, and a Permit2
-// witness signed through a browser wallet would recover to the wrong address
-// on chain — the deposit reverts, having already cost a proof.
+// A divergence is silent. The same wallet would derive a different `nsk`
+// depending on which signer built the payload, and a Permit2 witness signed
+// through a browser wallet would recover to the wrong address on chain, so the
+// deposit reverts after a proof has been generated.
 //
 // These tests hash both ways and require the same digest. The wire payload is
-// round-tripped through `JSON.parse(JSON.stringify(...))` first, because that
-// is what actually reaches the provider, and read back the way a wallet reads
-// it: hex strings widen to integers for integer-typed fields.
+// round-tripped through `JSON.parse(JSON.stringify(...))` first, as that is
+// what reaches the provider, and read back the way a wallet reads it: hex
+// strings widen to integers for integer-typed fields.
 
 import { hashTypedData, type TypedDataDomain, type TypedDataParameter } from "viem";
 import { describe, expect, it } from "vitest";
@@ -82,9 +82,9 @@ function parseAsWallet(value: any, typeName: string, types: Types): unknown {
  * viem's.
  *
  * The domain separator is built from the *declared* `EIP712Domain` entries,
- * not from whatever keys the domain object happens to carry — that is what a
- * provider does, and it is the difference that makes a declaration drifting
- * out of step with the values a hash mismatch rather than a silent no-op.
+ * not from the keys the domain object carries. Providers do the same, so a
+ * declaration out of step with the values produces a hash mismatch rather than
+ * a silent no-op.
  */
 function hashWire(payload: any, primaryType: string): string {
     const { EIP712Domain: declared, ...types } = payload.types;
@@ -171,6 +171,28 @@ describe("eth_signTypedData_v4 serialisation", () => {
         const payload = wirePayload(PERMIT2_DOMAIN, PERMIT2_TYPES, "PermitWitnessTransferFrom", {});
         expect(Object.keys(payload.domain)).toEqual(["name", "chainId", "verifyingContract"]);
         expect(payload.types.EIP712Domain).not.toContainEqual({ name: "salt", type: "bytes32" });
+    });
+
+    it("pins the EIP712Domain declaration and values for a full domain, in EIP-712 order", () => {
+        const domain: TypedDataDomain = {
+            salt: `0x${"cd".repeat(32)}`,
+            verifyingContract: "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+            chainId: 1,
+            version: "1",
+            name: "Lelantos",
+        };
+        expect(JSON.stringify(domainTypes(domain))).toBe(
+            '[{"name":"name","type":"string"},{"name":"version","type":"string"},' +
+                '{"name":"chainId","type":"uint256"},{"name":"verifyingContract","type":"address"},' +
+                '{"name":"salt","type":"bytes32"}]',
+        );
+        expect(JSON.stringify(serialisableDomain(domain))).toBe(
+            '{"name":"Lelantos","version":"1","chainId":"0x01",' +
+                '"verifyingContract":"0x000000000022D473030F116dDEE9F6B43aC78BA3",' +
+                `"salt":"0x${"cd".repeat(32)}"}`,
+        );
+        expect(domainTypes({})).toEqual([]);
+        expect(serialisableDomain({})).toEqual({});
     });
 
     it("encodes every integer as hex, at any nesting depth", () => {

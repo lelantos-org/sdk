@@ -10,19 +10,16 @@
 
 // Leaf imports, not the barrel: keeps the worker bundle minimal.
 import { bitAt } from "../core/bits.js";
-import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
+import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../core/bytes.js";
 import type { Field } from "../crypto/poseidon.js";
+import { InvalidArgumentError } from "../errors/config.js";
+import { WireFormatError } from "../errors/network.js";
 
-/** @internal */
-export const NOTE_ASSET_BYTES = 8;
-/** @internal */
-export const NOTE_VALUE_BYTES = 8;
-/** @internal */
-export const NOTE_RHO_BYTES = FIELD_BYTES;
-/** @internal */
-export const NOTE_RCM_BYTES = FIELD_BYTES;
-/** @internal */
-export const NOTE_RCV_DEP_BYTES = FIELD_BYTES;
+const NOTE_ASSET_BYTES = 8;
+const NOTE_VALUE_BYTES = 8;
+const NOTE_RHO_BYTES = FIELD_BYTES;
+const NOTE_RCM_BYTES = FIELD_BYTES;
+const NOTE_RCV_DEP_BYTES = FIELD_BYTES;
 /** @internal */
 export const NOTE_PLAINTEXT_BYTES =
     NOTE_ASSET_BYTES + NOTE_VALUE_BYTES + NOTE_RHO_BYTES + NOTE_RCM_BYTES + NOTE_RCV_DEP_BYTES; // 112
@@ -36,37 +33,40 @@ export interface NotePayload {
     rcvDep: Field;
 }
 
+/** The plaintext's fields in wire order, with their widths. */
+const NOTE_LAYOUT = [
+    ["asset", NOTE_ASSET_BYTES],
+    ["value", NOTE_VALUE_BYTES],
+    ["rho", NOTE_RHO_BYTES],
+    ["rcm", NOTE_RCM_BYTES],
+    ["rcvDep", NOTE_RCV_DEP_BYTES],
+] as const satisfies readonly (readonly [keyof NotePayload, number])[];
+
 export function encodeNotePayload(p: NotePayload): Uint8Array {
     const out = new Uint8Array(NOTE_PLAINTEXT_BYTES);
     let off = 0;
-    out.set(toLeBytes(p.asset, NOTE_ASSET_BYTES), off);
-    off += NOTE_ASSET_BYTES;
-    out.set(toLeBytes(p.value, NOTE_VALUE_BYTES), off);
-    off += NOTE_VALUE_BYTES;
-    out.set(toLeBytes(p.rho, NOTE_RHO_BYTES), off);
-    off += NOTE_RHO_BYTES;
-    out.set(toLeBytes(p.rcm, NOTE_RCM_BYTES), off);
-    off += NOTE_RCM_BYTES;
-    out.set(toLeBytes(p.rcvDep, NOTE_RCV_DEP_BYTES), off);
+    for (const [field, width] of NOTE_LAYOUT) {
+        out.set(toLeBytes(p[field], width), off);
+        off += width;
+    }
     return out;
 }
 
 /** @internal */
 export function decodeNotePayload(buf: Uint8Array): NotePayload {
     if (buf.length !== NOTE_PLAINTEXT_BYTES) {
-        throw new Error(`note plaintext: expected ${NOTE_PLAINTEXT_BYTES}B, got ${buf.length}`);
+        throw new WireFormatError(
+            "$.plaintext",
+            `note plaintext: expected ${NOTE_PLAINTEXT_BYTES}B, got ${buf.length}`,
+        );
     }
-    const a = NOTE_ASSET_BYTES;
-    const v = a + NOTE_VALUE_BYTES;
-    const r = v + NOTE_RHO_BYTES;
-    const c = r + NOTE_RCM_BYTES;
-    return {
-        asset: fromLeBytes(buf.slice(0, a)),
-        value: fromLeBytes(buf.slice(a, v)),
-        rho: fromLeBytes(buf.slice(v, r)),
-        rcm: fromLeBytes(buf.slice(r, c)),
-        rcvDep: fromLeBytes(buf.slice(c, c + NOTE_RCV_DEP_BYTES)),
-    };
+    const out = {} as NotePayload;
+    let off = 0;
+    for (const [field, width] of NOTE_LAYOUT) {
+        out[field] = fromLeBytes(buf.subarray(off, off + width));
+        off += width;
+    }
+    return out;
 }
 
 /**
@@ -78,7 +78,9 @@ export const CLUE_BITS_PREFIX_BYTES = 2;
 
 export function withClueBitsPrefix(prefix: Uint8Array, body: Uint8Array): Uint8Array {
     if (prefix.length !== CLUE_BITS_PREFIX_BYTES) {
-        throw new Error(`clue prefix must be ${CLUE_BITS_PREFIX_BYTES}B`);
+        throw new InvalidArgumentError(`clue prefix must be ${CLUE_BITS_PREFIX_BYTES}B`, {
+            argument: "prefix",
+        });
     }
     const out = new Uint8Array(prefix.length + body.length);
     out.set(prefix, 0);
@@ -89,7 +91,7 @@ export function withClueBitsPrefix(prefix: Uint8Array, body: Uint8Array): Uint8A
 /** @internal */
 export function stripClueBitsPrefix(wire: Uint8Array): { prefix: Uint8Array; body: Uint8Array } {
     if (wire.length < CLUE_BITS_PREFIX_BYTES) {
-        throw new Error("ciphertext shorter than clue prefix");
+        throw new WireFormatError("$.ciphertext", "ciphertext shorter than clue prefix");
     }
     return {
         prefix: wire.slice(0, CLUE_BITS_PREFIX_BYTES),
@@ -100,24 +102,21 @@ export function stripClueBitsPrefix(wire: Uint8Array): { prefix: Uint8Array; bod
 /**
  * Pack the FMD `clue.bits` (LSB-first byte array, ⌈γ/8⌉B) into one integer.
  *
- * The single source of truth for this packing. It is consumed twice — as the
- * 16-bit wire prefix the indexer reads, and as the `out_clue_bits` witness
- * slot the proof commits to — and the contract recomputes the second from the
- * first, so the two must agree bit for bit. They were two independent loops in
- * two numeric types; a drift in either would have made every proof fail
- * verification with no local symptom.
+ * Single source of truth for this packing. It feeds both the 16-bit wire prefix
+ * the indexer reads and the `out_clue_bits` witness slot the proof commits to.
+ * The contract recomputes the second from the first, so they must agree bit for
+ * bit; a mismatch fails verification with no local symptom.
  *
- * `bigint` because the witness slot is a field element. The wire prefix is two
- * bytes, so γ > 16 cannot be represented there — asserted rather than
- * silently truncated, which is what the `number` version did (and it wrapped
- * negative at γ ≥ 31 besides).
+ * Returns `bigint` because the witness slot is a field element. The wire prefix
+ * is two bytes, so γ > 16 throws instead of truncating.
  *
  * @internal
  */
 export function packClueBits(bits: Uint8Array, gamma: number): bigint {
     if (gamma > CLUE_BITS_PREFIX_BYTES * 8) {
-        throw new Error(
+        throw new InvalidArgumentError(
             `clue gamma ${gamma} exceeds the ${CLUE_BITS_PREFIX_BYTES * 8}-bit wire prefix`,
+            { argument: "gamma" },
         );
     }
     let acc = 0n;

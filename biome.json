@@ -6,15 +6,7 @@
         "useIgnoreFile": true
     },
     "files": {
-        "includes": [
-            "src/**/*.ts",
-            "scripts/**/*.ts",
-            "tests/**/*.ts",
-            "!**/dist",
-            "!**/node_modules",
-            "!**/wasm/*/pkg",
-            "!**/*.d.ts"
-        ]
+        "includes": ["src/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs", "!**/*.d.ts"]
     },
     "formatter": {
         "enabled": true,

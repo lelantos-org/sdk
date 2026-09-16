@@ -24,6 +24,7 @@ import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 // Leaf imports, not the barrel: keeps the worker bundle minimal.
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import type { EncryptedNote } from "./note.js";
 
 const KDF_DOMAIN = new TextEncoder().encode("lelantos.note.kdf.v1");
@@ -46,11 +47,17 @@ export interface DecryptArgs {
 
 export function encryptNote({ J, recipientPkD, esk, plaintext }: EncryptArgs): EncryptedNote {
     const eskMod = esk % BABYJUB_SUBGROUP_ORDER;
-    if (eskMod === 0n) throw new Error("esk must be non-zero mod q");
+    if (eskMod === 0n) {
+        throw new InvalidArgumentError("esk must be non-zero mod q", { argument: "esk" });
+    }
 
     const epk = J.mulPointEscalar(J.base8, eskMod);
     const shared = J.mulPointEscalar(recipientPkD, eskMod);
-    if (!J.inSubgroup(shared)) throw new Error("shared not in subgroup");
+    if (!J.inSubgroup(shared)) {
+        throw new InvalidArgumentError("recipient key is not in the prime-order subgroup", {
+            argument: "recipientPkD",
+        });
+    }
 
     const epkPacked = J.packPoint(epk);
     const key = noteKey(epkPacked, J.packPoint(shared));

@@ -1,9 +1,9 @@
-// Browser-wallet signer: everything goes through `provider.request`, so
-// prompts land in the wallet the user connected with.
+// Browser-wallet signer backed by an EIP-1193 provider.
 
 import type { TypedDataDomain, TypedDataParameter } from "viem";
 import { branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
-import type { Eip1193ProviderLike, EthSigner } from "../../core/signer.js";
+import { asUserRejection } from "../../errors/chain.js";
+import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
 import { domainTypes, serialisableDomain, stringifyBigInts } from "./typed-data.js";
 
 /**
@@ -36,11 +36,16 @@ export class Eip1193Signer implements EthSigner {
             domain: serialisableDomain(domain),
             message: stringifyBigInts(message),
         };
-        const sig = (await this.provider.request({
-            method: "eth_signTypedData_v4",
-            params: [this.address, JSON.stringify(payload)],
-        })) as string;
-        return sig;
+        try {
+            return (await this.provider.request({
+                method: "eth_signTypedData_v4",
+                params: [this.address, JSON.stringify(payload)],
+            })) as string;
+        } catch (err) {
+            // `sign-permit` is the signer's default reading; key derivation
+            // re-labels it `derive-key`.
+            throw asUserRejection(err, "sign-permit");
+        }
     }
 
     async sendTransaction(args: {
@@ -56,10 +61,14 @@ export class Eip1193Signer implements EthSigner {
                 ...(args.value !== undefined ? { value: `0x${args.value.toString(16)}` } : {}),
             },
         ];
-        const hash = (await this.provider.request({
-            method: "eth_sendTransaction",
-            params,
-        })) as string;
-        return branded<Hex32>(hash);
+        try {
+            const hash = (await this.provider.request({
+                method: "eth_sendTransaction",
+                params,
+            })) as string;
+            return branded<Hex32>(hash);
+        } catch (err) {
+            throw asUserRejection(err, "send-tx");
+        }
     }
 }

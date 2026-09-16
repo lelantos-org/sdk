@@ -6,7 +6,7 @@
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../../core/bytes.js";
 import type { Point } from "../jubjub.js";
 
-export const POINT_BYTES = 64;
+const POINT_BYTES = 64;
 
 export function pointToBytes(p: Point): Uint8Array {
     const out = new Uint8Array(POINT_BYTES);

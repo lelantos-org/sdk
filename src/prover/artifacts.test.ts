@@ -1,20 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cacheApiArtifactCache, clearArtifactCache } from "./artifact-cache.js";
 import {
     __resetArtifactCacheForTest,
     configureArtifactCache,
     loadArtifactBytes,
     releaseArtifactBytes,
-    resolveArtifacts,
-} from "./artifacts.js";
+} from "./artifact-bytes.js";
+import { cacheApiArtifactCache, clearArtifactCache } from "./artifact-cache.js";
+import { resolveArtifacts } from "./artifact-paths.js";
 
-// The zkey is tens of MB at the 4x6 shape and was re-downloaded on every
-// page load *and* every worker spawn before persistence existed. These pin the
-// two properties that make it worth having: a hit never touches the network,
-// and no storage failure can turn into a failed proof.
-//
-// They are also the first coverage of `loadArtifactBytes` at all, so the retry
-// and status-classification paths are asserted here too.
+// The zkey is tens of MB at the 4x6 shape. These tests pin the persistence
+// properties (a hit never touches the network; no storage failure fails a
+// proof) and cover `loadArtifactBytes` retry and status classification.
 
 const ZKEY = "https://cdn.test/3x3_final.zkey";
 const BYTES = new Uint8Array([1, 2, 3, 4]);
@@ -22,10 +18,9 @@ const BYTES = new Uint8Array([1, 2, 3, 4]);
 /**
  * Minimal in-memory stand-in for the Cache API, keyed by request URL.
  *
- * Entries are `ArrayBuffer` rather than `Uint8Array` because `BodyInit`
- * rejects SharedArrayBuffer-backed views and plain `Uint8Array` is generic
- * over both — storing buffers sidesteps the variance entirely. Only one cache
- * name is ever in play, so there is no outer namespace.
+ * Entries are `ArrayBuffer` because `BodyInit` rejects SharedArrayBuffer-backed
+ * views and `Uint8Array` is generic over both. Only one cache name is used, so
+ * there is no outer namespace.
  */
 function fakeCaches(): { entries: Map<string, ArrayBuffer>; open: ReturnType<typeof vi.fn> } {
     const entries = new Map<string, ArrayBuffer>();
@@ -61,9 +56,9 @@ function respondWith(body: BodyInit): ReturnType<typeof vi.fn> {
 }
 
 /**
- * Stub `fetch` with a chunked streaming body. Trailing object argument sets
- * response headers — `content-length` is what decides whether
- * `readWithProgress` can preallocate.
+ * Stub `fetch` with a chunked streaming body. A trailing object argument sets
+ * response headers; `content-length` determines whether `readWithProgress`
+ * preallocates.
  */
 function streamOf(...chunks: (number[] | Record<string, string>)[]): void {
     const last = chunks.at(-1);
@@ -110,8 +105,8 @@ describe("loadArtifactBytes persistence", () => {
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
         expect(fetchMock).toHaveBeenCalledTimes(1);
 
-        // A worker is a separate JS realm: same origin-scoped Cache API, but a
-        // fresh in-memory map. Dropping the memo is what simulates that.
+        // A worker is a separate JS realm: same origin-scoped Cache API, fresh
+        // in-memory map. Dropping the memo simulates that.
         __resetArtifactCacheForTest();
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -125,7 +120,7 @@ describe("loadArtifactBytes persistence", () => {
 
         await loadArtifactBytes(ZKEY, { onProgress: (p) => seen.push(p) });
 
-        // Without this a progress bar sits at 0% forever on a cache hit.
+        // A cache hit must still complete a progress consumer.
         expect(seen).toEqual([{ loaded: 4, total: 4, url: ZKEY }]);
     });
 
@@ -193,8 +188,8 @@ describe("releaseArtifactBytes", () => {
         const fetchMock = respondWith(BYTES);
 
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
-        // The wasm prover parses the ~29 MB zkey into linear memory and never
-        // reads the Uint8Array again; without this the realm holds it twice.
+        // The wasm prover copies the zkey into linear memory and releases the
+        // memoised Uint8Array.
         releaseArtifactBytes(ZKEY);
         expect(await loadArtifactBytes(ZKEY)).toEqual(BYTES);
 
@@ -202,15 +197,13 @@ describe("releaseArtifactBytes", () => {
     });
 
     it("releases a page-relative path, which memoises under its absolute URL", async () => {
-        // `WasmProver.build` is documented as taking caller-supplied paths
-        // without passing them through `resolveArtifacts`, so a browser app
-        // passing "/artifacts/3x3_final.zkey" is the ordinary case — and the
-        // one where deleting the raw string matched no entry at all, pinning
-        // ~29 MB for the lifetime of the realm. Every other test here uses an
-        // already-absolute URL, where the mismatch cannot show.
+        // `WasmProver.build` accepts caller-supplied paths that bypass
+        // `resolveArtifacts`, so a relative path must release the entry memoised
+        // under its absolute URL. Other tests use absolute URLs and cannot
+        // exercise this.
         //
-        // With persistence off, the memo is the only thing that can serve a
-        // second load, so the fetch count reports whether the release landed.
+        // With persistence off only the memo can serve a second load, so the
+        // fetch count shows whether the release took effect.
         configureArtifactCache(false);
         vi.stubGlobal("location", { href: "https://app.test/wallet/" });
         const relative = "/artifacts/3x3_final.zkey";
@@ -223,7 +216,7 @@ describe("releaseArtifactBytes", () => {
         releaseArtifactBytes(relative);
 
         expect(await loadArtifactBytes(relative)).toEqual(BYTES);
-        expect(fetchMock).toHaveBeenCalledTimes(2); // memo actually dropped
+        expect(fetchMock).toHaveBeenCalledTimes(2); // memo dropped
     });
 });
 
@@ -236,8 +229,8 @@ describe("loadArtifactBytes cancellation", () => {
             loadArtifactBytes(ZKEY, { signal: AbortSignal.abort(new Error("user left")) }),
         ).rejects.toThrow(/aborted by caller/);
 
-        // `fetchArtifact` runs once per retry, so an abort that was ignored
-        // meant every remaining attempt pulled the full artifact.
+        // `fetchArtifact` runs once per retry; an ignored abort would download
+        // the full artifact on every remaining attempt.
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -285,27 +278,28 @@ describe("resolveArtifacts", () => {
 
     it("leaves filesystem paths alone when there is no document", () => {
         // Node: a bare string is a path, and `new URL()` would corrupt it.
-        expect(resolveArtifacts({ wasmPath: "/tmp/3x3.wasm", zkeyPath: "/tmp/3x3.zkey" })).toEqual({
+        expect(resolveArtifacts({ circuit: "/tmp/3x3.wasm", zkey: "/tmp/3x3.zkey" })).toEqual({
             wasmPath: "/tmp/3x3.wasm",
             zkeyPath: "/tmp/3x3.zkey",
         });
     });
 
     it("absolutises page-relative references in a browser", () => {
-        // A self-hosted app passing `proverArtifactsCdn: "/artifacts"` fetches
-        // fine but fails `isHttpUrl`, silently losing artifact persistence.
-        // Absolutising also means two spellings cannot become two cache keys,
-        // hence two downloads and two prover sessions.
+        // A relative `prover.cdn` such as "/artifacts" fetches but fails
+        // `isHttpUrl`, losing persistence. Absolutising also keeps two spellings
+        // from becoming two cache keys (two downloads, two prover sessions).
         vi.stubGlobal("location", { href: "https://app.test/wallet/" });
         const absolute = {
             wasmPath: "https://app.test/artifacts/3x3.wasm",
             zkeyPath: "https://app.test/wallet/3x3.zkey",
         };
 
-        expect(resolveArtifacts({ wasmPath: "/artifacts/3x3.wasm", zkeyPath: "3x3.zkey" })).toEqual(
+        expect(resolveArtifacts({ circuit: "/artifacts/3x3.wasm", zkey: "3x3.zkey" })).toEqual(
             absolute,
         );
-        expect(resolveArtifacts(absolute)).toEqual(absolute);
+        expect(resolveArtifacts({ circuit: absolute.wasmPath, zkey: absolute.zkeyPath })).toEqual(
+            absolute,
+        );
     });
 });
 
@@ -317,7 +311,7 @@ describe("cacheApiArtifactCache", () => {
     });
 
     it("refuses non-http keys", async () => {
-        // `cache.put` throws on a non-http Request; skipping beats throwing.
+        // `cache.put` throws on a non-http Request, so such keys are skipped.
         const { open } = fakeCaches();
         const cache = cacheApiArtifactCache();
         expect(cache).not.toBeNull();
@@ -403,7 +397,7 @@ describe("loadArtifactBytes network handling", () => {
     });
 
     it("assembles a streamed body that declares no length", async () => {
-        // Nothing to preallocate from, so this exercises growth from zero.
+        // No length to preallocate from; exercises growth from zero.
         streamOf([1, 2], [3, 4]);
         const seen: Array<number | undefined> = [];
 
@@ -416,9 +410,9 @@ describe("loadArtifactBytes network handling", () => {
     });
 
     it("recovers when the body outruns its declared content-length", async () => {
-        // The second chunk does not fit the 3 bytes the server promised, so the
-        // buffer has to grow mid-stream. `onProgress` is required: without it
-        // `fetchArtifact` takes `res.arrayBuffer()` and never streams at all.
+        // The second chunk exceeds the declared 3 bytes, so the buffer grows
+        // mid-stream. `onProgress` is required: without it `fetchArtifact` uses
+        // `res.arrayBuffer()` and does not stream.
         streamOf([1, 2], [3, 4], { "content-length": "3" });
 
         await expect(loadArtifactBytes(`${ZKEY}?short`, { onProgress: () => {} })).resolves.toEqual(
@@ -427,8 +421,8 @@ describe("loadArtifactBytes network handling", () => {
     });
 
     it("trims a body shorter than its declared content-length", async () => {
-        // Over-declared: the result must be the 2 bytes received, and must not
-        // retain the oversized buffer behind a view.
+        // Over-declared: the result is the 2 bytes received and does not retain
+        // the oversized buffer behind a view.
         streamOf([1, 2], { "content-length": "64" });
 
         const out = await loadArtifactBytes(`${ZKEY}?long`, { onProgress: () => {} });

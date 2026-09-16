@@ -1,9 +1,9 @@
-// Byte-equality regression tests for encoding primitives. Every pin comes
-// from an implementation other than the one under test, so agreement means
-// something: `lelantosTypedDataHash`, `computePiHash` and `fiatShamirZ` were
-// generated with ethers@6 (`TypedDataEncoder.hash`,
-// `AbiCoder.defaultAbiCoder().encode`, `keccak256`); `auxDigest` is re-derived
-// here from the ABI spec and hashed with `@noble/hashes`.
+// Byte-equality tests for encoding primitives. Every pin comes from an implementation other than
+// the one under test: `lelantosTypedDataHash` and `fiatShamirZ` were generated with ethers@6
+// (`TypedDataEncoder.hash`, `AbiCoder.defaultAbiCoder().encode`, `keccak256`); `computePiHash` is
+// the Solidity golden `PI_HASH_GOLDEN` from `MASPPermit2WitnessTest.test_piHash_isStableForFixedFixture`
+// (contracts, `keccak256(abi.encode(d, aux, feeAux))` over the same fixture); `auxDigest` is
+// re-derived here from the ABI spec and hashed with `@noble/hashes`.
 //
 // A shifted hash breaks wire compatibility:
 //
@@ -18,12 +18,10 @@
 // Update these constants only with a contract/relayer upgrade that bumps
 // the corresponding domain version.
 //
-// The `computePiHash` vector covers the two-output `DepositRequest` the
-// contract takes today — the depositor's note and the relayer's fee note —
-// and is cross-checked below against a hand-rolled ABI
-// encoder built from the spec rather than copied from `encodeAbiParameters`
-// output. `abi-hash.test.ts` additionally derives the component list from the
-// canonical Foundry ABI, so the layout rests on the contract itself.
+// The `computePiHash` vector covers the two-output `DepositRequest` (the depositor's note and the
+// relayer's fee note, with its `feeAssetId`) and is cross-checked below against an ABI encoder written from the spec
+// rather than copied from `encodeAbiParameters` output. `abi-hash.test.ts` also derives the
+// component list from the canonical Foundry ABI, so the layout rests on the contract itself.
 
 import { keccak_256 } from "@noble/hashes/sha3";
 import { describe, expect, it } from "vitest";
@@ -35,13 +33,13 @@ import { auxDigest, computePiHash } from "./protocol/abi-hash.js";
 import type { AuxOutput, DepositRequest } from "./protocol/deposit-request.js";
 
 const PINNED = {
-    lelantosTypedDataHash: "0x9e1eeace1f9571e06d932dec45d3b1365134bf23b02828818cd703c1b7461662",
-    computePiHash: "0x4c168014e99a21cfa1eb087694c074f5dd0b2a5ad09cf165793720d321d88aa7",
+    lelantosTypedDataHash: "0xaf9b4003f47701e282c9f5934e4ea6e5fe0f794e18c0e12c60bb6ba68ee3a93f",
+    computePiHash: "0xf79a840cb98e948cf7937366de41257723ae0467b054ff6cf02272d5e713e972",
     auxDigest: "0x0c1c91777a86f5850add27faced1cdd04125ab20d353f852f5ee880ecc76b9de",
     fiatShamirZ: "0x09749a91edf59dfc22cb354dc68e01ed58df7cd957ee08c5e8623f0f9374d29b",
 } as const;
 
-/** The two aux outputs shared by the `computePiHash` and `auxDigest` vectors. */
+/** The two aux outputs of the `auxDigest` vector. */
 const AUX: [AuxOutput, AuxOutput] = [
     {
         clueRx: 1n,
@@ -53,39 +51,58 @@ const AUX: [AuxOutput, AuxOutput] = [
     { clueRx: 5n, clueRy: 6n, ephPubX: 7n, ephPubY: 8n, ciphertext: new Uint8Array([0x12, 0x34]) },
 ];
 
+/** `MASPPermit2WitnessTest._fixtureDeposit`, field for field. */
 const INTENT: DepositRequest = {
     chainId: 31337n,
     publicAssetId: 1n,
-    publicIn: 1000n,
-    payer: "0x0000000000000000000000000000000000000001",
-    recipient: "0x0000000000000000000000000000000000000002",
-    outCm: "0x0000000000000000000000000000000000000000000000000000000000000003",
-    cvDep: [11n, 12n],
-    rcv: 99n,
+    publicIn: 100n,
+    payer: "0x000000000000000000000000000000000000face",
+    recipient: "0x0000000000000000000000000000000000000b0b",
+    outCm: `0x${"1111".padStart(64, "0")}`,
+    cvDep: [0xaaaan, 0xbbbbn],
+    rcv: 0xeeeen,
+    feeAssetId: 1n,
     feeIn: 7n,
-    feeCm: "0x0000000000000000000000000000000000000000000000000000000000000004",
-    feeCvDep: [13n, 14n],
-    feeRcv: 98n,
+    feeCm: `0x${"2222".padStart(64, "0")}`,
+    feeCvDep: [0xccccn, 0xddddn],
+    feeRcv: 0xffffn,
 };
+
+/** `_fixtureAux` and `_fixtureFeeAux`: distinct in every field, so a swapped payload shows. */
+const PI_AUX: [AuxOutput, AuxOutput] = [
+    {
+        clueRx: 0x111n,
+        clueRy: 0x112n,
+        ephPubX: 0x113n,
+        ephPubY: 0x114n,
+        ciphertext: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+    },
+    {
+        clueRx: 0x221n,
+        clueRy: 0x222n,
+        ephPubX: 0x223n,
+        ephPubY: 0x224n,
+        ciphertext: new Uint8Array([0xfe, 0xed, 0xfa, 0xce]),
+    },
+];
 
 describe("encoding parity (independent implementation → viem)", () => {
     it("lelantosTypedDataHash matches the pinned ethers output", () => {
         expect(lelantosTypedDataHash()).toBe(PINNED.lelantosTypedDataHash);
     });
 
-    it("computePiHash matches the pinned output for the canonical fixture", () => {
-        expect(computePiHash(INTENT, AUX[0], AUX[1])).toBe(PINNED.computePiHash);
+    it("computePiHash matches the Solidity golden for the canonical fixture", () => {
+        expect(computePiHash(INTENT, PI_AUX[0], PI_AUX[1])).toBe(PINNED.computePiHash);
     });
 
     it("computePiHash agrees with the layout spelled out from the ABI spec", () => {
-        // Same argument as the `auxDigest` cross-check below: the pin alone
-        // would survive a change applied to both sides at once. `DepositRequest`
-        // is fully static (14 words — `cvDep` and `feeCvDep` take two each), so
-        // the preimage is those words, then one offset per dynamic aux tuple,
-        // each of whose `ciphertext` needs a further nested offset.
-        const encoded = encodePiHashFromSpec(INTENT, AUX[0], AUX[1]);
-        // 14 deposit + 2 offsets + 7 per aux (4 static + offset + len + data)
-        expect(encoded.length / 32).toBe(30);
+        // As with `auxDigest` below, the pin alone would not detect a change applied to both
+        // sides. `DepositRequest` is fully static (15 words; `cvDep` and `feeCvDep` take two
+        // each), so the preimage is those words, then one offset per dynamic aux tuple, each of
+        // whose `ciphertext` needs a further nested offset.
+        const encoded = encodePiHashFromSpec(INTENT, PI_AUX[0], PI_AUX[1]);
+        // 15 deposit + 2 offsets + 7 per aux (4 static + offset + len + data)
+        expect(encoded.length / 32).toBe(31);
         expect(bytesToHexWord(keccak_256(encoded))).toBe(PINNED.computePiHash);
     });
 
@@ -94,16 +111,13 @@ describe("encoding parity (independent implementation → viem)", () => {
     });
 
     it("auxDigest agrees with the layout spelled out from the ABI spec", () => {
-        // The pinned constant alone would survive a change applied to both
-        // sides at once. This re-derives the preimage from the encoding rules
-        // — and hashes it with `@noble/hashes` rather than viem — so the
-        // vector rests on the spec, not on `encodeAbiParameters` agreeing
-        // with itself.
+        // The pinned constant alone would not detect a change applied to both sides. The preimage
+        // is re-derived from the encoding rules and hashed with `@noble/hashes` rather than viem,
+        // so the vector rests on the spec rather than on `encodeAbiParameters`.
         //
-        // `auxDigest` is the hardest layout in the file: a dynamic `tuple[]`
-        // whose element type is itself dynamic (`ciphertext bytes`), so the
-        // preimage carries a length word, an offset per element, and a nested
-        // offset inside each element.
+        // `auxDigest` is a dynamic `tuple[]` whose element type is itself dynamic
+        // (`ciphertext bytes`), so the preimage carries a length word, an offset per element, and
+        // a nested offset inside each element.
         const encoded = encodeAuxArrayFromSpec(AUX);
         expect(encoded.length / 32).toBe(18); // 1 offset + 1 length + 2 heads + 7 + 7
         expect(BigInt(bytesToHexWord(keccak_256(encoded))) % BN254_FR).toBe(auxDigest(AUX));
@@ -172,7 +186,7 @@ function encodeAuxArrayFromSpec(aux: readonly AuxOutput[]): Uint8Array {
 }
 
 /**
- * `abi.encode(DepositRequest, AuxValidation.Output)`, written out from the
+ * `abi.encode(DepositRequest, AuxValidation.Output, AuxValidation.Output)`, written out from the
  * encoding rules rather than produced by `encodeAbiParameters`.
  */
 function encodePiHashFromSpec(d: DepositRequest, a: AuxOutput, fee: AuxOutput): Uint8Array {
@@ -186,6 +200,7 @@ function encodePiHashFromSpec(d: DepositRequest, a: AuxOutput, fee: AuxOutput): 
         word(d.cvDep[0]),
         word(d.cvDep[1]),
         word(d.rcv),
+        word(d.feeAssetId),
         word(d.feeIn),
         d.feeCm.slice(2),
         word(d.feeCvDep[0]),
@@ -211,9 +226,9 @@ function encodePiHashFromSpec(d: DepositRequest, a: AuxOutput, fee: AuxOutput): 
     };
     const tail0 = auxTail(a);
     const tail1 = auxTail(fee);
-    // The request is static and occupies 14 words; two offsets follow it, so
-    // the tail begins at 16 * 32. The second offset skips the first tuple.
-    const AUX_OFFSET = 512n;
+    // The request is static and occupies 15 words; two offsets follow it, so
+    // the tail begins at 17 * 32. The second offset skips the first tuple.
+    const AUX_OFFSET = 544n;
     const FEE_AUX_OFFSET = AUX_OFFSET + BigInt(tail0.join("").length / 2);
     return hexToBytes(
         `0x${[...depositWords, word(AUX_OFFSET), word(FEE_AUX_OFFSET), ...tail0, ...tail1].join("")}`,

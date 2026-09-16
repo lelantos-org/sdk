@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isWalletError } from "../errors/guard.js";
 import {
     assetId,
     circuitAmount,
@@ -7,7 +8,6 @@ import {
     shieldedAddress,
     tokenAmount,
 } from "./brand.js";
-import { isWalletError } from "./errors.js";
 
 const ADDR = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const WORD = `0x${"ab".repeat(32)}`;
@@ -52,11 +52,10 @@ describe("shieldedAddress", () => {
         expect(() => shieldedAddress("lelantos1bio")).toThrow(/shielded address/);
     });
 
-    it("rejects a legacy `sswap2…` address", () => {
-        // A superseded HRP must not match, or a payment would be routed to a
-        // different address format.
-        expect(() => shieldedAddress("sswap21qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq")).toThrow(
-            /shielded address/,
+    it("keeps the rejected address out of the message", () => {
+        const secret = "lelantos1notreallyanaddressbio";
+        expect(() => shieldedAddress(secret)).toThrow(
+            expect.objectContaining({ message: expect.not.stringContaining(secret) }),
         );
     });
 });

@@ -14,9 +14,8 @@ describe("base64 JSON", () => {
     });
 
     it("survives non-ASCII text", () => {
-        // `btoa` is Latin-1 only and throws on these directly, so the UTF-8
-        // step is load-bearing — a server description in any non-Latin script
-        // would otherwise break every payment to it.
+        // `btoa` is Latin-1 only and throws on these directly; the UTF-8 step
+        // is required for descriptions in non-Latin scripts.
         const value = { description: "プレミアムデータ — 高速 · émoji 🚀" };
         expect(decodeBase64Json(encodeBase64Json(value), "u", "h")).toEqual(value);
     });
@@ -40,7 +39,7 @@ describe("readPaymentRequired", () => {
             status: 402,
             headers: { [HEADER_PAYMENT_REQUIRED]: encodeBase64Json(offer) },
         });
-        expect(await readPaymentRequired(res, "https://x/y")).toEqual(offer);
+        expect(readPaymentRequired(res, "https://x/y")).toEqual(offer);
     });
 
     it("finds the header whatever its casing on the wire", async () => {
@@ -48,37 +47,30 @@ describe("readPaymentRequired", () => {
             status: 402,
             headers: { "payment-required": encodeBase64Json(offer) },
         });
-        expect(await readPaymentRequired(res, "https://x/y")).toEqual(offer);
+        expect(readPaymentRequired(res, "https://x/y")).toEqual(offer);
     });
 
-    it("falls back to a body-carried document", async () => {
+    it("ignores a body-carried document", async () => {
         const res = new Response(JSON.stringify(offer), {
             status: 402,
             headers: { "content-type": "application/json" },
         });
-        expect(await readPaymentRequired(res, "https://x/y")).toEqual(offer);
+        expect(() => readPaymentRequired(res, "https://x/y")).toThrow(
+            /without a usable PAYMENT-REQUIRED header/,
+        );
     });
 
-    it("falls back to the body when the header decodes but has no accepts[]", async () => {
-        const res = new Response(JSON.stringify(offer), {
+    it("rejects another protocol version", async () => {
+        const res = new Response("", {
             status: 402,
-            headers: {
-                [HEADER_PAYMENT_REQUIRED]: encodeBase64Json({ x402Version: 2 }),
-                "content-type": "application/json",
-            },
+            headers: { [HEADER_PAYMENT_REQUIRED]: encodeBase64Json({ ...offer, x402Version: 1 }) },
         });
-        expect(await readPaymentRequired(res, "https://x/y")).toEqual(offer);
-    });
-
-    it("leaves the caller's response body readable", async () => {
-        const res = new Response(JSON.stringify(offer), { status: 402 });
-        await readPaymentRequired(res, "https://x/y");
-        expect(res.bodyUsed).toBe(false);
+        expect(() => readPaymentRequired(res, "https://x/y")).toThrow(/protocol version 1/);
     });
 
     it("rejects a 402 carrying nothing usable", async () => {
         const res = new Response("go away", { status: 402 });
-        await expect(readPaymentRequired(res, "https://x/y")).rejects.toThrow(
+        expect(() => readPaymentRequired(res, "https://x/y")).toThrow(
             /without a usable PAYMENT-REQUIRED header/,
         );
     });

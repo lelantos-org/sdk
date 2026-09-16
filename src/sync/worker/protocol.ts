@@ -1,22 +1,22 @@
-// Scanner worker wire types. Transport is `src/worker/` — this module owns
+// Scanner worker wire types. Transport is in `src/runtime/rpc/`; this module defines
 // only the payload shapes and their codecs.
 //
 // No client-side FMD pre-filter
 // -----------------------------
 // The protocol carries no detection key or per-input clue: `/v1/notes` does
 // not return `clue.R`, so the worker cannot FMD-reject before trial-decrypt.
-// Adding one would need a wire change on fmd-webserver, and the local saving
-// is marginal — γ=5 with early exit costs ~2 Baby-Jubjub scalar muls plus two
+// Adding one would need a wire change on fmd-webserver, and the local saving is
+// marginal: γ=5 with early exit costs ~2 Baby-Jubjub scalar muls plus two
 // Poseidon-6 hashes per non-matching note, against one wasm call for
-// trial-decrypt. FMD's payoff is server-side bandwidth, which
-// `FmdMatchesNoteSource` (`syncStrategy: { kind: "matches" }`) delivers.
+// trial-decrypt. FMD's benefit is server-side bandwidth, provided by
+// `FmdMatchesNoteSource` (`syncStrategy: { kind: "matches" }`).
 
 import type { ScanHit, ScanInput } from "../scan.js";
 
 /**
  * Wasm loader overrides forwarded on `init`. Required for bundlers that
- * rewrite `new URL(..., import.meta.url)` inside worker chunks — without it
- * the wasm load in the worker hangs silently.
+ * rewrite `new URL(..., import.meta.url)` inside worker chunks; without it the
+ * worker's wasm load hangs silently.
  */
 export interface WireWasmConfig {
     jubjubModuleUrl: string;
@@ -102,10 +102,10 @@ export function decodeHit(w: WireScanHit): ScanHit {
 /**
  * Buffers to transfer rather than copy.
  *
- * These are the caller's arrays, straight from `NoteSource.listNotes`.
- * Transferring detaches them, so a scan request consumes its inputs and can
- * never be re-sent. The pool must recycle a failed worker rather than retry
- * the request: a resend would scan zero-length ciphertexts and report no hits.
+ * These are the caller's arrays from `NoteSource.listNotes`. Transferring
+ * detaches them, so a scan request cannot be re-sent. The pool must recycle a
+ * failed worker rather than retry: a resend would scan zero-length ciphertexts
+ * and report no hits.
  */
 export function transferablesOf(inputs: WireScanInput[]): Transferable[] {
     const xs: Transferable[] = [];

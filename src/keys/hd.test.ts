@@ -1,7 +1,7 @@
 import { mnemonicToSeedSync } from "@scure/bip39";
 import { describe, expect, it } from "vitest";
-import { isWalletError } from "../core/errors.js";
 import { BN254_FR } from "../crypto/index.js";
+import { isWalletError } from "../errors/guard.js";
 import { ADDRESS_HRP } from "./address.js";
 import {
     accountPath,
@@ -12,7 +12,7 @@ import {
     mnemonicToAccountKey,
     ZIP32_PURPOSE,
 } from "./hd.js";
-import { mnemonicToNsk } from "./key-source.js";
+import { resolveNsk } from "./key-source.js";
 import { deriveKeysFromMnemonic } from "./keys.js";
 
 const TEST_MNEMONIC = "test test test test test test test test test test test junk";
@@ -22,6 +22,16 @@ function seedFor(mnemonic = TEST_MNEMONIC): Uint8Array {
 }
 
 describe("hd / ZIP-32-lite", () => {
+    it("golden vector: pins the child derivation's byte layout", () => {
+        // A multi-byte index pins the little-endian `u32` encoding; a change strands funds.
+        const acct = deriveAccount(seedFor(), 0x01020304);
+        expect(acct.nsk).toBe(0x238a6fadcc9ea77e7165b147aa3f4b68ebcf95a1bc3f09ba345201e2388a7682n);
+        expect(Buffer.from(acct.chainCode).toString("hex")).toBe(
+            "723709cafd2bc83ac6b363f73fae5287db101d3130e6f2d91ad0c473f3ab4f8f",
+        );
+        expect(acct.childIndex).toBe(0x81020304);
+    });
+
     it("masterFromSeed is deterministic", () => {
         const a = masterFromSeed(seedFor());
         const b = masterFromSeed(seedFor());
@@ -94,8 +104,10 @@ describe("hd / ZIP-32-lite", () => {
         expect(a.nsk).toBe(b.nsk);
     });
 
-    it("mnemonicToNsk default account is 0", () => {
-        expect(mnemonicToNsk(TEST_MNEMONIC)).toBe(mnemonicToNsk(TEST_MNEMONIC, 0));
+    it("a mnemonic key source defaults to account 0", () => {
+        expect(resolveNsk({ type: "mnemonic", mnemonic: TEST_MNEMONIC })).toBe(
+            resolveNsk({ type: "mnemonic", mnemonic: TEST_MNEMONIC, account: 0 }),
+        );
     });
 
     it("accountPath renders canonical string", () => {
@@ -104,8 +116,7 @@ describe("hd / ZIP-32-lite", () => {
         expect(() => accountPath(-1)).toThrow();
     });
 
-    // Mnemonic and account index are both caller input, so both failures have
-    // to carry a code. Each threw a bare `Error` before.
+    // Mnemonic and account index are caller input, so both failures carry an error code.
     it("reports bad caller input as INVALID_ARGUMENT", () => {
         for (const call of [
             () => mnemonicToAccountKey("not a mnemonic"),

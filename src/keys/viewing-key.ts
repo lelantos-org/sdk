@@ -13,11 +13,12 @@
 
 import { bech32m } from "bech32";
 import { branded, type ViewingKeyString } from "../core/brand.js";
-import { InvalidArgumentError } from "../core/errors.js";
+import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../core/bytes.js";
 import { assertNonZeroField } from "../core/field.js";
-import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../crypto/bytes.js";
 import type { Jubjub } from "../crypto/jubjub.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
+import { InvalidArgumentError } from "../errors/config.js";
+import { BECH32_LIMIT, rethrowBech32 } from "./address.js";
 import {
     buildFullViewingKey,
     buildViewingKey,
@@ -33,7 +34,6 @@ const VERSION = 1;
 
 const IVK_PAYLOAD_LEN = 1 + FIELD_BYTES;
 const FVK_PAYLOAD_LEN = 1 + 2 * FIELD_BYTES;
-const BECH32_LIMIT = 256;
 
 /** Whether a decoded viewing key carries `nk`, and so can see spends. */
 export function isFullViewingKey(vk: ViewingKey | FullViewingKey): vk is FullViewingKey {
@@ -68,15 +68,7 @@ function encode(hrp: string, scalars: readonly Field[]): ViewingKeyString {
  * secret, and error text reaches application logs verbatim.
  */
 export function decodeViewingKey(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKey {
-    try {
-        return decode(P, J, key);
-    } catch (err) {
-        if (err instanceof InvalidArgumentError) throw err;
-        throw new InvalidArgumentError("invalid viewing key: not valid bech32m", {
-            argument: "viewingKey",
-            cause: err,
-        });
-    }
+    return rethrowBech32(() => decode(P, J, key), "invalid viewing key", "viewingKey");
 }
 
 function decode(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKey {

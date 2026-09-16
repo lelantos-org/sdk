@@ -1,9 +1,8 @@
 // Shared vocabulary for reading a server's `PaymentRequirements`.
 //
-// Every check answers "can this wallet pay this offer?", and every failure is
+// Each check answers "can this wallet pay this offer?". Every failure is
 // `unsupported-requirements`, which the selector treats as "skip to the next
-// `accepts[]` entry". They live together because a refusal thrown with any
-// other reason aborts the whole request.
+// `accepts[]` entry"; a refusal with any other reason aborts the request.
 
 import {
     type AssetId,
@@ -15,14 +14,15 @@ import {
     type ShieldedAddress,
     shieldedAddress,
 } from "../core/brand.js";
-import { InvalidArgumentError, X402PaymentError } from "../core/errors.js";
+import { InvalidArgumentError } from "../errors/config.js";
+import { X402PaymentError } from "../errors/x402.js";
 
 /**
- * "This wallet cannot pay this offer" — recoverable, the caller should try
- * the next one. `scope` names the mechanism for the message prefix.
+ * "This wallet cannot pay this offer": recoverable; the caller tries the next
+ * offer. `scope` names the mechanism for the message prefix.
  *
- * Returns the error rather than throwing so call sites read as
- * `throw unsupported(...)`, which keeps them visibly terminal.
+ * Returns the error rather than throwing, so call sites read as
+ * `throw unsupported(...)`.
  */
 export function unsupported(
     scope: string,
@@ -40,7 +40,7 @@ export interface Caip2 {
 
 /**
  * Split a CAIP-2 network id. `@x402/core` validates only that the string is
- * ≥3 chars and contains a colon; everything beyond that is checked here.
+ * ≥3 chars and contains a colon; further checks happen here.
  */
 export function parseCaip2(network: string): Caip2 {
     const i = network.indexOf(":");
@@ -51,9 +51,9 @@ export function parseCaip2(network: string): Caip2 {
 /**
  * Require an offer to be on `namespace:<this wallet's chain>`.
  *
- * Both halves are worth distinguishing in the message: a wrong namespace
- * means the offer was meant for a different kind of mechanism, while a wrong
- * reference means the right mechanism on a chain with no bridge.
+ * The message distinguishes the two halves: a wrong namespace means the offer
+ * targets a different mechanism; a wrong reference means the right mechanism
+ * on another chain (no bridging).
  */
 export function requireNetwork(
     scope: string,
@@ -75,8 +75,8 @@ export function requireNetwork(
 
 /**
  * Parse an amount- or asset-shaped field. x402 quotes these as decimal
- * integer strings; anything else (a float, hex, scientific notation) means
- * the offer was written against a different network's conventions.
+ * integer strings; anything else (float, hex, scientific notation) indicates
+ * a different network's conventions.
  */
 export function requirePositiveInteger(scope: string, value: string, field: string): bigint {
     if (!/^\d+$/.test(value)) {
@@ -97,9 +97,8 @@ export function requireAmount(scope: string, value: string, field: string): Circ
 /**
  * A server-quoted MASP asset id.
  *
- * Range failures are `unsupported-requirements` like every other malformed
- * field, so a bad offer falls through to the next `accepts[]` entry instead of
- * aborting the request.
+ * Range failures are `unsupported-requirements`, so a bad offer falls through
+ * to the next `accepts[]` entry instead of aborting the request.
  */
 export function requireAssetId(scope: string, value: string, field: string): AssetId {
     const raw = requirePositiveInteger(scope, value, field);

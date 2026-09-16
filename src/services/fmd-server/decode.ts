@@ -1,18 +1,17 @@
 // Raw JSON → domain values, one decoder per response.
 //
-// Wire encoding stops here. Every response is validated through `core/decode`
+// Wire encoding stops here. Every response is validated through `services/http/decode`
 // and returned as `Field`/`Uint8Array`, so a malformed response raises a
 // `WireFormatError` naming the offending JSON path instead of a `TypeError`
 // surfacing later inside a store.
 //
-// That validation is not cosmetic. The backend is inconsistent about the `0x`
-// prefix — tree state, nullifiers and chunk leaf hashes carry it; note/match
-// commitments, ciphertexts and packed points do not. Every one of them is hex,
-// so every one goes through `hexInt`/`hexBytes` and none through `bigintFrom`:
-// that decoder also accepts decimal, and a bare-hex value whose digits happen
-// to all be decimal would decode as the wrong number, silently.
+// The backend is inconsistent about the `0x` prefix: tree state, nullifiers and
+// chunk leaf hashes carry it; note/match commitments, ciphertexts and packed
+// points do not. All are hex, so all go through `hexInt`/`hexBytes` and none
+// through `bigintFrom`, which also accepts decimal: a bare-hex value with only
+// decimal digits would silently decode as the wrong number.
 
-import { bool, hexBytes, hexBytesN, hexInt, int, mapArr, obj } from "../../core/decode.js";
+import { bool, hexBytes, hexBytesN, hexInt, int, mapArr, obj } from "../http/decode.js";
 import type {
     CommitmentChunkOut,
     FmdHead,
@@ -36,9 +35,9 @@ export function note(raw: unknown, idField: "id" | "noteId", path: string): FmdN
         leafIndex: int(d.leafIndex, `${path}.leafIndex`),
         cm: hexInt(d.commitmentHex, `${path}.commitmentHex`),
         ciphertext: hexBytes(d.ciphertextHex, `${path}.ciphertextHex`),
-        // Width-checked here because `epk` reaches `decryptNote` untouched: a
-        // short or over-long value would otherwise surface as a decryption
-        // failure with nothing pointing back at the response that caused it.
+        // Width-checked because `epk` reaches `decryptNote` untouched: a wrong
+        // length would otherwise surface as a decryption failure with no link
+        // back to the response.
         epk: hexBytesN(d.ephPubPackedHex, `${path}.ephPubPackedHex`, PACKED_POINT_BYTES),
     };
 }
@@ -100,21 +99,8 @@ export function notesPage(raw: unknown): FmdNoteOut[] {
     return mapArr(raw, "$", (row, p) => note(row, "id", p));
 }
 
-/**
- * `/v1/matches` — rows plus the backfill watermark.
- *
- * A server predating the watermark answers with a bare array. Treat its
- * watermark as 0 — "nothing is known to be backfilled" — which pins the
- * caller's persisted cursor at 0 and degrades to re-scanning from the start
- * rather than silently skipping notes.
- */
+/** `/v1/matches` — rows plus the backfill watermark. */
 export function matchesPage(raw: unknown): FmdMatchesPage {
-    if (Array.isArray(raw)) {
-        return {
-            matches: mapArr(raw, "$", (row, p) => note(row, "noteId", p)),
-            backfilledThroughNoteId: 0,
-        };
-    }
     const d = obj(raw, "$");
     return {
         matches: mapArr(d.matches, "$.matches", (row, p) => note(row, "noteId", p)),

@@ -5,6 +5,7 @@
 // is BE, and writes into a caller-owned buffer because that path runs ~350K
 // times in a full tree build and must not allocate per call.
 
+import { InvalidArgumentError } from "../errors/config.js";
 import type { Field } from "./field.js";
 
 /** Width of a serialised field element, in bytes. */
@@ -17,7 +18,9 @@ export function toLeBytes(x: Field, len = FIELD_BYTES): Uint8Array {
         out[i] = Number(v & 0xffn);
         v >>= 8n;
     }
-    if (v !== 0n) throw new Error(`field exceeds ${len} bytes`);
+    if (v !== 0n) {
+        throw new InvalidArgumentError(`field exceeds ${len} bytes`, { argument: "value" });
+    }
     return out;
 }
 

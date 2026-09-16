@@ -2,10 +2,11 @@
 //   node = Poseidon(TAG_MERKLE, c0, c1, c2, c3)
 // Mirrors `circuits/src/lib/merkle.circom`.
 //
-// Internal nodes are memoized in `nodeCache`. On insert, only the O(depth)
-// dirty path from leaf to root is evicted. bulkInsert evicts the minimal
-// range instead of per-leaf paths, saving ~7.5× cache operations per chunk.
+// Internal nodes are memoized in `nodeCache`. On insert, only the O(depth) dirty path from leaf to
+// root is evicted. `bulkInsert` evicts the minimal range instead of per-leaf paths, using ~7.5×
+// fewer cache operations per chunk.
 
+import { InvalidArgumentError } from "../errors/config.js";
 import type { Field, Poseidon } from "./poseidon.js";
 import { TAG_MERKLE } from "./tags.js";
 
@@ -15,16 +16,12 @@ const ARITY = 4;
 const MAX_DEPTH = 25;
 
 /**
- * Stride that makes `level * stride + index` injective over every
- * (level, index) the tree can reach.
+ * Stride that makes `level * stride + index` injective over every (level, index) the tree can
+ * reach.
  *
- * At level L a cached index is < 4^(depth-L), so the widest level is L=1
- * with indices < 4^(depth-1) = 2^(2·depth-2). Anything smaller aliases one
- * level into the next.
- *
- * The stride must therefore track `depth`: a fixed value sized for one depth
- * lets a level-1 index of a deeper tree run past it and collide with a
- * level-2 key.
+ * At level L a cached index is < 4^(depth-L), so the widest level is L=1 with indices
+ * < 4^(depth-1) = 2^(2·depth-2). Anything smaller aliases one level into the next, so the stride
+ * must track `depth`.
  *
  * @internal exported for the injectivity test; not part of the public API.
  */
@@ -33,13 +30,11 @@ export function cacheKeyStride(depth: number): number {
 }
 
 /**
- * A memoized internal node, addressed the way the tree thinks about it.
+ * A memoized internal node, addressed by `(level, index)`.
  *
- * Deliberately not the packed `nodeCache` key: that encoding depends on
- * `cacheKeyStride(depth)`, and anything persisting nodes would have to
- * reimplement it to unpack them. `(level, index)` also means the same subtree
- * in any tree containing those leaves, so a snapshot stays meaningful even if
- * the configured depth changes.
+ * Not the packed `nodeCache` key, whose encoding depends on `cacheKeyStride(depth)`.
+ * `(level, index)` denotes the same subtree in any tree containing those leaves, so a snapshot
+ * stays meaningful if the configured depth changes.
  *
  * @internal
  */
@@ -59,12 +54,10 @@ export interface MerkleProof {
 /** @internal */
 export class MerkleTree {
     /**
-     * Private backing store with a read-only view below.
+     * Private backing store, exposed read-only via `leaves`.
      *
-     * Every mutation path here evicts the dirty range from the node cache, so
-     * a public mutable array let `tree.leaves.push(x)` from outside change the
-     * tree without invalidating anything — leaving `root()` returning the
-     * pre-mutation root.
+     * Every mutation path evicts the dirty range from the node cache; external mutation would
+     * bypass that and leave `root()` stale.
      */
     private _leaves: Field[] = [];
 
@@ -84,7 +77,12 @@ export class MerkleTree {
         // keyStride · depth must stay within Number.MAX_SAFE_INTEGER:
         // 2·25−2 = 48 bits of index + 5 of level = 53.
         if (depth < 1 || depth > MAX_DEPTH) {
-            throw new RangeError(`MerkleTree: depth must be 1..${MAX_DEPTH}, got ${depth}`);
+            throw new InvalidArgumentError(
+                `MerkleTree: depth must be 1..${MAX_DEPTH}, got ${depth}`,
+                {
+                    argument: "depth",
+                },
+            );
         }
         this.keyStride = cacheKeyStride(depth);
         let z: Field = 0n;
@@ -125,10 +123,9 @@ export class MerkleTree {
     /**
      * Memoized internal nodes, for persistence.
      *
-     * Restoring these is what lets a reloaded tree skip rebuilding: without
-     * them the first `root()` or `getPath()` recomputes every internal node
-     * from the leaves — ~350K Poseidon-5 hashes on a full tree, on every
-     * single app open rather than only the first.
+     * Restoring these lets a reloaded tree skip rebuilding; otherwise the first `root()` or
+     * `getPath()` recomputes every internal node from the leaves (~350K Poseidon-5 hashes on a
+     * full tree) on every app open.
      */
     exportNodes(): MerkleNode[] {
         const out: MerkleNode[] = [];
@@ -140,35 +137,31 @@ export class MerkleTree {
     }
 
     /**
-     * Reload previously exported nodes. Call *after* `setLeaves`, which
-     * clears the cache.
+     * Reload previously exported nodes. Call *after* `setLeaves`, which clears the cache.
      *
-     * A level outside `1..depth` cannot have come from a tree this one can
-     * represent, and caching it under a key this tree would later read as a
-     * different level is exactly how a wrong root gets produced silently, so
-     * it is rejected rather than skipped.
+     * A level outside `1..depth` cannot come from a tree this one can represent, and caching it
+     * under a key read as a different level would produce a wrong root, so it is rejected rather
+     * than skipped.
      */
     importNodes(nodes: Iterable<MerkleNode>): void {
         for (const { level, index, value } of nodes) {
             if (level < 1 || level > this.depth) {
-                throw new RangeError(
+                throw new InvalidArgumentError(
                     `MerkleTree.importNodes: level ${level} outside 1..${this.depth}`,
+                    { argument: "nodes" },
                 );
             }
-            // `index` needs the same rejection as `level`, for the same reason.
-            // The cache key is `level * keyStride + index`, so an index at or
-            // past `keyStride` aliases into the next level: at the deployed
-            // depth 10, `{level: 1, index: 262144}` is exactly the key for
-            // `{level: 2, index: 0}`. The node is then served as an internal
-            // node covering leaves it knows nothing about, `root()` and every
-            // `proof()` describe a tree the chain never held, and
-            // `exportNodes()` reads it back at the aliased position — so the
-            // corruption survives a save/load cycle.
+            // `index` is rejected for the same reason. The cache key is
+            // `level * keyStride + index`, so an index at or past `keyStride` aliases into the next
+            // level: at the deployed depth 10, `{level: 1, index: 262144}` is the key for
+            // `{level: 2, index: 0}`. `root()` and `proof()` would then describe a tree the chain
+            // never held, and `exportNodes()` would persist the corruption.
             const width = ARITY ** (this.depth - level);
             if (!Number.isInteger(index) || index < 0 || index >= width) {
-                throw new RangeError(
+                throw new InvalidArgumentError(
                     `MerkleTree.importNodes: index ${index} outside 0..${width - 1} ` +
                         `at level ${level}`,
+                    { argument: "nodes" },
                 );
             }
             this.nodeCache.set(this.cacheKey(level, index), value);
@@ -194,27 +187,23 @@ export class MerkleTree {
             const stride = this.strides[lvl]!;
             const slot = Math.floor(N / stride) % ARITY;
             const parentIdx = Math.floor(N / (stride * ARITY));
-            const slots: Field[] = [];
-            for (let k = 0; k < 3; k++) {
-                if (k < slot) {
-                    slots.push(this.nodeAt(lvl, parentIdx * ARITY + k));
-                } else {
-                    slots.push(0n);
-                }
-            }
-            out.push(slots);
+            out.push(
+                Array.from({ length: ARITY - 1 }, (_, k) =>
+                    k < slot ? this.nodeAt(lvl, parentIdx * ARITY + k) : 0n,
+                ),
+            );
         }
         return out;
     }
 
     proof(leafIndex: number): MerkleProof {
-        // Bounded: `proof(-1)` walks negative indices, falls through every
-        // `?? 0n` / zeros lookup and returns a well-formed proof for a leaf
-        // that does not exist.
+        // Without this bound, an out-of-range index falls through every `?? 0n` / zeros lookup
+        // and yields a well-formed proof for a leaf that does not exist.
         if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= this._leaves.length) {
-            throw new RangeError(
+            throw new InvalidArgumentError(
                 `MerkleTree.proof: leafIndex ${leafIndex} outside ` +
                     `0..${this._leaves.length - 1}`,
+                { argument: "leafIndex" },
             );
         }
         const pathElements: Field[][] = [];

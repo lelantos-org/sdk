@@ -1,13 +1,11 @@
 // Cross-implementation Poseidon parity, SDK side.
 //
 // The same `tests/vectors/poseidon.json` is asserted by the Rust backend in
-// `backend/crates/common-crypto/tests/poseidon_vectors.rs`. Both files must stay
+// `backend/crates/crypto/tests/poseidon_vectors.rs`. Both files must stay
 // byte-identical; `scripts/gen-poseidon-vectors.ts` writes both copies.
 //
-// `anchors` are the digests circomlibjs publishes, so this ties the SDK to
-// circomlib itself rather than to whichever implementation happens to be
-// wired in — which is the property that has to survive swapping the JS
-// backend for the vendored wasm one.
+// `anchors` are the digests circomlibjs publishes, tying the SDK to circomlib itself rather than
+// to whichever backend (JS or vendored wasm) is in use.
 
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -34,7 +32,7 @@ const parsed = JSON.parse(readFileSync(vectorFile, "utf8")) as {
  * Highest arity the SDK's table serves. See `poseidon.ts`.
  *
  * The shared vector file covers the Rust crate's wider range, so rows above
- * this width are skipped here and asserted by `backend/crates/common-crypto`.
+ * this width are skipped here and asserted by `backend/crates/crypto`.
  */
 const MAX_ARITY = 6;
 const served = (v: Vector) => v.inputs.length <= MAX_ARITY;
@@ -55,8 +53,7 @@ describe("poseidon vectors", () => {
     });
 
     it("skips only widths the table does not serve", () => {
-        // Guards the filter: a change to `MAX_ARITY` or to the file's contents
-        // must be deliberate rather than silently reduce coverage.
+        // Guards the filter so a change to `MAX_ARITY` or the file cannot silently reduce coverage.
         expect(skipped).toBe(2);
         for (const v of [...anchors, ...vectors]) {
             expect(v.inputs.length).toBeLessThanOrEqual(MAX_ARITY);

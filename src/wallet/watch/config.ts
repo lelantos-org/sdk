@@ -5,22 +5,19 @@
 // `../defaults/resolveConfig` builds a prover and a submitter, and a watch
 // wallet uses neither.
 
-import type { ChainAdapter } from "../../chain/port.js";
-import { WalletConfigError } from "../../core/errors.js";
+import type { ChainReader } from "../../chain/port.js";
 import type { Jubjub, Poseidon } from "../../crypto/index.js";
+import { WalletConfigError } from "../../errors/config.js";
+import type { NoteSource } from "../../sync/note-source.js";
+import type { NullifierStore } from "../../sync/nullifier-store.js";
 import type { Scanner } from "../../sync/scanner.js";
 import { LocalScanner } from "../../sync/scanner.js";
-import type { WalletConfig } from "../config.js";
-// Leaf import, not the `../defaults/index.js` barrel: that barrel re-exports
-// `defaultChainAdapter`, which reaches the viem adapter and drags it into a
-// graph that never builds a chain adapter.
 import { defaultNoteSource, defaultNullifierStore, lazyFmdClient } from "../defaults/pluggables.js";
-import type { NoteSource } from "../note-source.js";
-import { InMemoryNoteStore, type NoteStore } from "../note-store.js";
-import type { NullifierStore } from "../nullifier-store.js";
+import { InMemoryNoteStore, type NoteStore } from "../notes/note-store.js";
+import type { WalletConfig } from "../types/config.js";
 
 /**
- * Configuration for {@link WatchWallet}, picked from `WalletConfig`.
+ * Configuration for `createWatchWallet`, picked from `WalletConfig`.
  *
  * A `Pick`, so a new `WalletConfig` field must be opted into here. Fields
  * serving a proof, a submission or the Merkle tree are excluded.
@@ -36,17 +33,17 @@ export interface WatchWalletConfig
         | "nullifierPersistence"
         | "scanner"
         | "syncStrategy"
-        | "fetchImpl"
+        | "http"
         | "denominations"
         | "feeBps"
     > {
     /**
-     * Chain adapter, for asset metadata only.
+     * Chain reads, for asset metadata and the chain tip only.
      *
-     * Optional: notes and balances come from the note cache. When omitted,
-     * `asset()` and `assets()` throw and no RPC is contacted.
+     * Optional: notes come from the note cache. When omitted, `asset()`, `assets()`
+     * and `balance()` reject `WALLET_CONFIG` and no RPC is contacted.
      */
-    chain?: ChainAdapter | undefined;
+    reader?: ChainReader | undefined;
 
     /**
      * Permit `syncStrategy: { kind: "matches" }`. Off by default.

@@ -2,22 +2,28 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
     test: {
-        include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
-        // `*.bench.ts` files are heavyweight WASM/prover suites — run them
-        // explicitly via `npm run test:bench`. Keeps default `npm test` fast.
-        exclude: ["node_modules", "dist", "wasm/**/pkg/**", "src/**/*.bench.ts"],
+        // `tests/` holds JSON vectors only; every suite is colocated under `src/`.
+        include: ["src/**/*.test.ts"],
         pool: "forks",
         testTimeout: 30_000,
         hookTimeout: 30_000,
+        // `*.test-d.ts` files assert types only: `@ts-expect-error` directives and `expectTypeOf`.
+        // Vitest checks them with the test tsconfig, in the same run.
+        typecheck: {
+            enabled: true,
+            include: ["src/**/*.test-d.ts"],
+            tsconfig: "./tsconfig.test.json",
+        },
         coverage: {
             provider: "v8",
             reporter: ["text", "html", "lcov"],
             include: ["src/**/*.ts"],
             exclude: [
                 "src/**/*.test.ts",
+                "src/**/*.test-d.ts",
                 "src/**/*.bench.ts",
-                "src/**/*test-utils*",
-                "src/wasm/**",
+                "src/test-utils/**",
+                "src/runtime/wasm/**",
                 "src/types-ambient/**",
             ],
         },

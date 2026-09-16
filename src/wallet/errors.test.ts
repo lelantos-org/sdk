@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
-import {
-    InsufficientCoverError,
-    isWalletError,
-    NetworkError,
-    WALLET_ERROR_CODES,
-    WalletConfigError,
-    type WalletErrorCode,
-    type WalletErrorOf,
-    WorkerRpcError,
-} from "../core/errors.js";
+import { assetId, circuitAmount } from "../core/brand.js";
+import { NoEvmAccountError } from "../errors/chain.js";
+import { WALLET_ERROR_CODES, type WalletErrorCode } from "../errors/codes.js";
+import { WalletConfigError } from "../errors/config.js";
+import { InsufficientCoverError } from "../errors/funds.js";
+import { isWalletError, type WalletErrorOf } from "../errors/guard.js";
+import { NetworkError } from "../errors/network.js";
+import { WorkerRpcError } from "../errors/worker.js";
+import { testWallet } from "../test-utils/wallet.js";
 
 const cover = new InsufficientCoverError({
-    target: 10n,
-    asset: 1n,
+    target: circuitAmount(10n),
+    asset: assetId(1n),
     consolidate: [],
-    consolidateSum: 4n,
+    consolidateSum: circuitAmount(4n),
 });
 
 describe("isWalletError", () => {
@@ -63,22 +62,18 @@ describe("error codes", () => {
     });
 });
 
-// `WalletErrorOf` is an `Extract` over `AnyWalletError`, which matches a member
-// only when its `code` is assignable to the literal asked for. A class covering
-// several codes — `NetworkError`, `WorkerRpcError` — declares a union-typed
-// `code`, which never is, so listing it once in `AnyWalletError` silently
-// resolved every one of its codes to `never`: the guard kept returning `true`
-// while narrowing away `url`, `status`, `body` and `method`. `AnyWalletError`
-// expands those two classes one code per member to stop it. The gate below is
-// what keeps a code from regressing to `never` when the next multi-code class
-// is added.
+// `WalletErrorOf` is an `Extract` over `AnyWalletError`, which matches a member only when its
+// `code` is assignable to the requested literal. A class covering several codes (`NetworkError`,
+// `WorkerRpcError`) declares a union-typed `code`, which is not assignable to a single literal;
+// listed once in `AnyWalletError`, each of its codes would resolve to `never` and narrowing would
+// drop `url`, `status`, `body` and `method`. `AnyWalletError` therefore lists those classes once
+// per code. The check below ensures every code narrows to a non-`never` type.
 type UnnarrowableCode = {
     [K in WalletErrorCode]: [WalletErrorOf<K>] extends [never] ? K : never;
 }[WalletErrorCode];
 
-// Fails to compile naming the offending codes if any is `never`. Asserted this
-// way round because `never` is assignable to every type, so a plain assignment
-// would pass in exactly the broken case.
+// Fails to compile, naming the offending codes, if any is `never`. Asserted in this direction
+// because `never` is assignable to every type, so a plain assignment would pass when broken.
 type Assert<T extends true> = T;
 type _EveryCodeNarrows = Assert<[UnnarrowableCode] extends [never] ? true : false>;
 
@@ -89,8 +84,8 @@ describe("WalletErrorOf", () => {
             body: "gateway timeout",
         });
         if (!isWalletError(net, "RELAYER_TIMEOUT")) throw new Error("guard failed");
-        // Type-level assertion: these only compile if the code did not narrow
-        // to `never`. They were all `Property … does not exist on type 'never'`.
+        // Type-level assertion: these compile only if the code does not narrow
+        // to `never`.
         expect(net.url).toBe("http://r");
         expect(net.status).toBe(504);
         expect(net.body).toBe("gateway timeout");
@@ -105,5 +100,26 @@ describe("WalletErrorOf", () => {
         expect(isWalletError(net, "FMD_FAILED")).toBe(true);
         expect(isWalletError(net, "FMD_TIMEOUT")).toBe(false);
         expect(isWalletError(net, "RELAYER_FAILED")).toBe(false);
+    });
+});
+
+describe("NoEvmAccountError", () => {
+    it("explains that cancelling, not depositing, needs a signing account", async () => {
+        const { wallet } = await testWallet();
+
+        const err = await wallet.cancelDeposit({ depositId: 1n }).catch((e: unknown) => e);
+
+        expect(err).toBeInstanceOf(NoEvmAccountError);
+        expect(err).toMatchObject({ code: "NO_EVM_ACCOUNT", operation: "cancelDeposit" });
+        // Neutral: names the operation, never "add funds", which misdirects a user getting funds back.
+        expect((err as Error).message).toMatch(/cancelDeposit/);
+        expect((err as Error).message).not.toMatch(/add funds/);
+    });
+
+    it("names the deposit for a deposit", () => {
+        const err = new NoEvmAccountError();
+        expect(err.operation).toBe("deposit");
+        expect(err.message).toMatch(/^deposit needs an EVM account/);
+        expect(err.retryable).toBe(false);
     });
 });

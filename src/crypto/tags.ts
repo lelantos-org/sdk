@@ -1,7 +1,6 @@
 // Domain-separation tags. Must match circuits/src/lib/tags.circom byte-for-byte.
 //
-// The whole table lives here — no tag may be redeclared elsewhere, so a
-// consensus constant cannot drift between modules.
+// No tag may be redeclared elsewhere, so a consensus constant cannot drift between modules.
 //
 // | Tag         | Value | Use
 // | TAG_CM      | 1     | reserved

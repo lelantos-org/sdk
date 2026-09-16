@@ -37,9 +37,9 @@ describe("note encryption", () => {
 
 describe("clue-bit packing", () => {
     // The wire prefix the indexer reads and the `out_clue_bits` witness slot
-    // the proof commits to were two independent loops in two numeric types.
-    // The contract recomputes the second from the first, so a drift in either
-    // would make every proof fail verification with no local symptom.
+    // the proof commits to must share one packing. The contract recomputes the
+    // second from the first, so any mismatch fails verification with no local
+    // symptom.
     it("derives the wire prefix from the same packing as the witness slot", () => {
         const bits = new Uint8Array([0b10101]);
         const gamma = 5;
@@ -52,8 +52,6 @@ describe("clue-bit packing", () => {
     });
 
     it("refuses a gamma the 16-bit prefix cannot hold", () => {
-        // The `number` version truncated silently past 16 and wrapped negative
-        // at 31.
         expect(() => packClueBits(new Uint8Array(8), 17)).toThrow(/wire prefix/);
     });
 

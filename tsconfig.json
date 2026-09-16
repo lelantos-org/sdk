@@ -2,9 +2,8 @@
   "compilerOptions": {
     "target": "ES2023",
     "module": "nodenext",
-    "moduleResolution": "nodenext",
     // `ESNext.Disposable` is types-only: it declares `Symbol.dispose` /
-    // `Symbol.asyncDispose` so the aliases on `Wallet`, `WorkerRpc` and friends
+    // `Symbol.asyncDispose` so the dispose aliases on `WorkerRpc` and friends
     // typecheck. It emits nothing. It also declares `DisposableStack`, which is
     // a much newer runtime global — do not reach for that one here.
     "lib": ["ES2023", "DOM", "ESNext.Disposable"],
@@ -18,17 +17,16 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "skipLibCheck": true
   },
   "include": ["src/**/*"],
+  // What the build emits: everything else here is test material.
   "exclude": [
     "node_modules",
     "dist",
     "src/**/*.test.ts",
+    "src/**/*.test-d.ts",
     "src/**/*.bench.ts",
-    "src/**/*test-utils*"
+    "src/test-utils"
   ]
 }

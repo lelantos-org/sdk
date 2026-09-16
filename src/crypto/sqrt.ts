@@ -1,9 +1,10 @@
 // Modular square root + Legendre symbol over the BN254 scalar field.
-// Consumed by FMD bit derivation (sdk/src/fmd.ts:sharedBit) and by the (bit, y) witness for
+// Consumed by FMD bit derivation (`sharedBit` in `fmd/clue.ts`) and by the (bit, y) witness for
 // the `HashToBit` gadget in circuits/src/lib/hash_to_bit.circom.
 // BN254 has 2-adicity 28 (r-1 = 2^28 · q): full Tonelli–Shanks required, no shortcut formula.
 
 import { BN254_FR, FMD_LEGENDRE_QNR } from "../core/field.js";
+import { assertInvariant } from "../errors/base.js";
 
 function mod(a: bigint, p: bigint): bigint {
     const r = a % p;
@@ -49,10 +50,9 @@ export function modSqrt(n: bigint, p: bigint): bigint | null {
         s++;
     }
 
-    // Find any QNR z. Pinned for BN254's Fr, which is the only modulus the
-    // SDK actually calls this with — the trial search costs three extra
-    // 254-bit `modPow`s on every `fmdLegendreWitness`, for a constant
-    // `core/field.ts` already exports and `hash_to_bit.circom` already pins.
+    // Find any QNR z. For BN254 Fr, the only modulus the SDK uses, z is the constant exported by
+    // `core/field.ts` and pinned in `hash_to_bit.circom`, avoiding three 254-bit `modPow`s per
+    // `fmdLegendreWitness`.
     let z: bigint;
     if (p === BN254_FR) {
         z = FMD_LEGENDRE_QNR;
@@ -85,17 +85,17 @@ export function modSqrt(n: bigint, p: bigint): bigint | null {
 
 /** @internal */
 // Witness pair for HashToBit. bit=1 ⇒ hash is QR and y² = hash; bit=0 ⇒ hash is QNR and
-// y² · Z = hash. Throws on hash=0 (probability 1/r — indicates a bug).
+// y² · Z = hash. Throws on hash=0 (probability 1/r; treated as an internal error).
 export function fmdLegendreWitness(h: bigint): { bit: 0 | 1; y: bigint } {
     const sym = legendreSymbol(h, BN254_FR);
-    if (sym === 0) throw new Error("FMD legendre witness: hash collided to zero");
+    assertInvariant(sym !== 0, "FMD legendre witness: hash collided to zero");
     if (sym === 1) {
         const y = modSqrt(h, BN254_FR);
-        if (y === null) throw new Error("FMD legendre witness: sqrt failed for QR");
+        assertInvariant(y !== null, "FMD legendre witness: sqrt failed for QR");
         return { bit: 1, y };
     }
     const zInv = modInverse(FMD_LEGENDRE_QNR, BN254_FR);
     const y = modSqrt(mod(h * zInv, BN254_FR), BN254_FR);
-    if (y === null) throw new Error("FMD legendre witness: sqrt failed for QNR/Z");
+    assertInvariant(y !== null, "FMD legendre witness: sqrt failed for QNR/Z");
     return { bit: 0, y };
 }

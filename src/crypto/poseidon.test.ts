@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Poseidon } from "./poseidon.js";
 
-// Vectors generated from circomlibjs `buildPoseidon` (BN254, iden3 default
-// constants). Locks the in-tree Poseidon impl (`poseidon-lite`) to the
-// circuit-side reference.
+// Vectors generated from circomlibjs `buildPoseidon` (BN254, iden3 default constants). Pins the
+// SDK Poseidon implementation to the circuit-side reference.
 const VECTORS: ReadonlyArray<{ inputs: bigint[]; expected: bigint }> = [
     {
         inputs: [20n, 27n],

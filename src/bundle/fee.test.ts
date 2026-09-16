@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { Jubjub, Poseidon } from "../crypto/index.js";
+import { FeeAssetNotQuotedError } from "../errors/funds.js";
 import { encodeAddress } from "../keys/address.js";
 import { buildSpendingKey } from "../keys/keys.js";
-import type { EstimateResponse, FeeQuote } from "../protocol/responses.js";
+import type { EstimateResponse, RelayerFeeQuote } from "../protocol/responses.js";
 import { feeOutput, feeOutputFromEstimate } from "./fee.js";
 
 describe("feeOutput", () => {
@@ -18,8 +19,8 @@ describe("feeOutput", () => {
         address = encodeAddress(J, relayer.pk_d, relayer.pk, relayer.ck);
     });
 
-    // The whole point: the relayer rebuilds `cm` over its own `pk`, so a note
-    // built for any other `pk` is not a payment to it.
+    // The relayer rebuilds `cm` over its own `pk`, so a note built for any
+    // other `pk` is not a payment to it.
     it("binds the note to the pk the relayer will rebuild the commitment over", () => {
         const out = feeOutput({ J, relayerAddress: address, asset: 1n, circuitAmount: 250n });
         expect(out.note.pk).toBe(relayer.pk);
@@ -35,8 +36,8 @@ describe("feeOutput", () => {
         expect(a.randomness.esk).not.toBe(b.randomness.esk);
     });
 
-    // A zero-value output is a pad: every scanner drops it, so it would look
-    // paid and deliver nothing.
+    // A zero-value output is a pad that every scanner drops, so it would appear
+    // paid but deliver nothing.
     it("refuses a zero or negative value", () => {
         const args = { J, relayerAddress: address, asset: 1n };
         expect(() => feeOutput({ ...args, circuitAmount: 0n })).toThrow(/must be positive/);
@@ -50,7 +51,7 @@ describe("feeOutput", () => {
     });
 
     describe("feeOutputFromEstimate", () => {
-        const quote = (over: Partial<FeeQuote> = {}): FeeQuote => ({
+        const quote = (over: Partial<RelayerFeeQuote> = {}): RelayerFeeQuote => ({
             tokenSymbol: "USDC",
             tokenAddress: "0xdead",
             decimals: 6,
@@ -84,22 +85,31 @@ describe("feeOutput", () => {
             expect(feeOutputFromEstimate({ J, estimate: est, asset: 1n })?.note.value).toBe(42n);
         });
 
-        // No fee to build is a normal outcome, not an error: it is what every
-        // relayer that charges nothing returns.
+        // A relayer that charges nothing omits the fee address; this is not an
+        // error.
         it("returns null when the relayer charges nothing", () => {
             const { shieldedFeeAddress: _omitted, ...noFee } = estimate();
             expect(feeOutputFromEstimate({ J, estimate: noFee, asset: 1n })).toBeNull();
         });
 
-        // Omitting the fee here would just move the failure to the submit
-        // call, where it costs a proof.
-        // The useful part of the failure is what to pay with instead: this
-        // spend *is* relayable, just not in the asset that was asked for.
+        // Failing here avoids spending a proof on a submit that would be
+        // rejected. The error lists the assets the relayer accepts instead.
         it("names the assets it will take when this one is refused", () => {
             const est = estimate({ fees: [quote({ assetId: 9 })] });
-            expect(() => feeOutputFromEstimate({ J, estimate: est, asset: 1n })).toThrow(
-                /no payable amount for asset 1\..*It will take:.*id 9/s,
-            );
+            let err: unknown;
+            try {
+                feeOutputFromEstimate({ J, estimate: est, asset: 1n, kind: "transfer" });
+            } catch (e) {
+                err = e;
+            }
+            expect(err).toBeInstanceOf(FeeAssetNotQuotedError);
+            expect(err).toMatchObject({
+                code: "FEE_ASSET_NOT_QUOTED",
+                asset: 1n,
+                kind: "transfer",
+                accepted: [9n],
+                retryable: false,
+            });
         });
 
         it("says the spend cannot be relayed when nothing at all is payable", () => {
@@ -111,8 +121,7 @@ describe("feeOutput", () => {
         });
 
         // The relayer sends `amount` without `assetId`/`scale`/`circuitAmount`
-        // when the indexer has not registered the token yet: priced, but not
-        // yet payable.
+        // when the indexer has not registered the token: priced, but not payable.
         it("throws when the asset is quoted but has no payable amount yet", () => {
             const { assetId: _a, scale: _s, circuitAmount: _c, ...unregistered } = quote();
             expect(() =>
@@ -121,7 +130,7 @@ describe("feeOutput", () => {
                     estimate: estimate({ fees: [unregistered] }),
                     asset: 1n,
                 }),
-            ).toThrow(/unregistered/);
+            ).toThrow(expect.objectContaining({ code: "FEE_ASSET_NOT_QUOTED", accepted: [] }));
         });
     });
 });

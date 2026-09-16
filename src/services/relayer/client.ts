@@ -5,7 +5,7 @@
 // tree_update_batch SNARK — it owns the multi-hundred-MB zkey and tree state —
 // and batches escrowed deposits under it, up to `MAX_L_BATCH = 4` leaves.
 //
-// Deposits do not go through here. `Wallet.deposit` broadcasts `MASP.deposit`,
+// Deposits do not go through here. `wallet.deposit` broadcasts `MASP.deposit`,
 // `depositAuthorized` or `NativeAdapter.depositNative` itself; the relayer
 // picks the escrow up from its `DepositEscrowed` event and settlement arrives
 // on the SSE feed in `deposit-stream.ts`.
@@ -25,9 +25,7 @@
 // is not an x402 payment challenge, but a caller that installs
 // `onPaymentRequired` on this client will see those rejections there.
 
-import { NetworkError } from "../../core/errors.js";
-import type { HttpClientOptions } from "../../core/http.js";
-import { createJsonClient, type JsonClient } from "../../core/json-client.js";
+import { NetworkError } from "../../errors/network.js";
 import type {
     ChainsResponse,
     EstimateResponse,
@@ -38,11 +36,20 @@ import type {
     SubmitSwapPayload,
     SubmitTransactPayload,
 } from "../../protocol/transact.js";
+import type { HttpClientOptions } from "../http/client.js";
+import { createJsonClient, type JsonClient } from "../http/json-client.js";
 import { serializeSubmitSwap, serializeSubmitTransact } from "./codec.js";
 
 /**
- * HTTP client for the relayer wire protocol. The wire format here is the
- * SDK's expectation — every relayer service speaking it MUST match these shapes.
+ * The estimate endpoints are POSTs that read: repeating one changes nothing, so
+ * they retry on 5xx like a GET. Only the submit POSTs are held to the
+ * non-idempotent policy.
+ */
+const READ_ONLY_POST = { idempotent: true } as const;
+
+/**
+ * HTTP client for the relayer wire protocol. Every relayer service implementing
+ * the protocol MUST match these shapes.
  */
 export class RelayerClient {
     private readonly json: JsonClient;
@@ -59,8 +66,7 @@ export class RelayerClient {
      * The chain registry a client boots from: ids, contract addresses, the
      * asset table, and the shielded fee terms where a relayer charges one.
      *
-     * Cacheable and identical for every caller — it carries nothing per-user,
-     * which is why it is a GET with no parameters.
+     * Cacheable and identical for every caller: it carries no per-user data.
      */
     async getChains(): Promise<ChainsResponse> {
         return this.json.get("/chains");
@@ -70,31 +76,34 @@ export class RelayerClient {
      * What this relayer will charge to relay a spend of `kind`.
      *
      * A function of `(chainId, kind)` alone, so it takes neither a payload nor
-     * a proof — an estimate fired for an amount the user may never send would
-     * otherwise name nullifiers that never reach the chain.
+     * a proof; otherwise an estimate for an amount the user may never send would
+     * reveal nullifiers that never reach the chain.
      *
      * The quote is advisory: it is not signed, and the relayer re-derives the
-     * requirement when the spend arrives. Pay at least
-     * `FeeQuote.circuitAmount`; the relayer's `graceBps` is what absorbs
-     * the drift in between.
+     * requirement when the spend arrives. Pay at least `RelayerFeeQuote.circuitAmount`;
+     * the relayer's `graceBps` absorbs drift in between.
      */
     async estimateSpend(chainId: bigint | number, kind: SpendKind): Promise<EstimateResponse> {
-        return this.json.post("/v1/spend/estimate", { chainId: Number(chainId), kind });
+        return this.json.post(
+            "/v1/spend/estimate",
+            { chainId: Number(chainId), kind },
+            READ_ONLY_POST,
+        );
     }
 
     async estimateSwap(chainId: bigint | number): Promise<EstimateResponse> {
-        return this.json.post("/v1/swap/estimate", { chainId: Number(chainId) });
+        return this.json.post("/v1/swap/estimate", { chainId: Number(chainId) }, READ_ONLY_POST);
     }
 
     /**
      * What the relayer charges to flush a deposit.
      *
      * Priced against `flushBatch` rather than a spend: a deposit is not relayed
-     * at submit time, and the cost the relayer is recovering is the batch it
-     * will later prove and broadcast.
+     * at submit time, and the relayer recovers the cost of the batch it later
+     * proves and broadcasts.
      */
     async estimateDeposit(chainId: bigint | number): Promise<EstimateResponse> {
-        return this.json.post("/v1/deposit/estimate", { chainId: Number(chainId) });
+        return this.json.post("/v1/deposit/estimate", { chainId: Number(chainId) }, READ_ONLY_POST);
     }
 
     async submitTransact(payload: SubmitTransactPayload): Promise<RelayerSubmitResponse> {
@@ -110,19 +119,17 @@ export class RelayerClient {
  * Whether a thrown error is a relayer refusing a submission over its shielded
  * fee.
  *
- * The relayer answers **402** for this and for nothing else, so the status
- * alone is decisive — but only for errors from *this* client. 402 is also the
- * x402 payment-challenge status, which `core/http.ts` handles separately via
- * `onPaymentRequired`; the point of a named predicate is that a call site says
- * which of the two it means.
+ * The relayer answers **402** for this and nothing else, so the status alone is
+ * decisive, but only for errors from *this* client. 402 is also the x402
+ * payment-challenge status, which `services/http/client.ts` handles separately via
+ * `onPaymentRequired`; a named predicate makes the call site state which it means.
  *
- * The reason is in `err.body`, verbatim from the relayer: which asset, what it
- * paid, what was required, and the grace band. It is prose, not JSON — enough
- * to show a user or put in a log, not something to parse for a number.
+ * The reason is in `err.body`, verbatim from the relayer: the asset, the amount
+ * paid, the amount required, and the grace band. It is prose, not JSON: suitable
+ * for display or logging, not for parsing.
  *
- * The useful reaction is almost always to re-estimate and rebuild rather than
- * to resubmit: the quote a fee was sized against has gone stale, and the same
- * payload will be refused again.
+ * The usual remedy is to re-estimate and rebuild rather than resubmit: the quote
+ * the fee was sized against is stale, and the same payload will be refused again.
  */
 export function isShieldedFeeRejection(err: unknown): err is NetworkError {
     return err instanceof NetworkError && err.status === PAYMENT_REQUIRED;

@@ -1,30 +1,27 @@
 // Prover parity + timing bench: SnarkjsProver vs WasmProver, per shape.
 //
-// Doubles as the migration safety net for the Rust prover: it is the only
-// place a proof produced by `wasm/prover` is verified against the companion's
-// verification key. Anything that changes the arkworks stack has to keep this
-// green for every shape. Wired into CI via `npm run test:bench`.
+// This is the only place a proof produced by `wasm/prover` is verified against
+// the companion's verification key; changes to the arkworks stack must keep it
+// passing for every shape. Runs in CI via `npm run test:bench`.
 //
-// Artifacts and witnesses come from the `@lelantos-org/circuits` devDependency,
-// so this runs anywhere `npm ci` has run. The sibling bench harness's
-// hand-made `input.<id>.json` wins when present, keeping device runs
-// comparable with the numbers already in `bench/results.json`.
+// Artifacts and witnesses come from the `@lelantos-org/circuits` devDependency.
+// A hand-made `bench/public/input.<id>.json` takes precedence when present, so
+// device runs stay comparable with `bench/results.json`.
 //
-// The debug sink below is load-bearing: `WasmProver.prove` splits its work
-// into `witness` and `groth16` records, and this is the only place that split
-// is observable. Without it the suite reports one opaque total. A
-// `just prover-build-trace` build additionally prints `[prover-trace]` lines
-// splitting `groth16` into the QAP witness map and the MSM block.
+// The debug sink below exposes the `witness` and `groth16` timing records
+// emitted by `WasmProver.prove`. A `just prover-build-trace` build additionally
+// prints `[prover-trace]` lines splitting `groth16` into the QAP witness map and
+// the MSM block.
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { circuitSignals, type TransactWitnessBundle } from "../circuit/index.js";
-import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../core/shape.js";
 import { configureLogging } from "../log/logger.js";
-import { bundledProverArtifacts, resolveArtifacts } from "./artifacts.js";
+import { type CircuitShape, shapeId, TRANSACT_SHAPES } from "../protocol/shape.js";
+import { bundledProverArtifacts, resolveArtifacts } from "./artifact-paths.js";
 import { SnarkjsProver, verify } from "./snarkjs.js";
-import type { ProveResult, ProverPaths } from "./types.js";
+import type { ProveResult, ProverArtifacts } from "./types.js";
 import { WasmProver } from "./wasm-prover.js";
 
 const WARM_ITERS = 3;
@@ -39,13 +36,14 @@ function packaged<T>(spec: string): T | null {
     }
 }
 
-async function pathsFor(shape: CircuitShape): Promise<ProverPaths | null> {
+async function pathsFor(shape: CircuitShape): Promise<ProverArtifacts | null> {
     try {
-        const paths = resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape }));
+        const artifacts = await bundledProverArtifacts({ runtime: "node", shape });
+        const paths = resolveArtifacts(artifacts);
         // `resolveArtifacts` yields `file://` hrefs for the companion package,
-        // which `existsSync` does not understand — convert before probing.
+        // which `existsSync` does not accept.
         const onDisk = (p: string) => existsSync(p.startsWith("file:") ? fileURLToPath(p) : p);
-        return onDisk(paths.wasmPath) && onDisk(paths.zkeyPath) ? paths : null;
+        return onDisk(paths.wasmPath) && onDisk(paths.zkeyPath) ? artifacts : null;
     } catch {
         return null;
     }
@@ -54,16 +52,13 @@ async function pathsFor(shape: CircuitShape): Promise<ProverPaths | null> {
 /**
  * Project a witness onto the circuit's declared signals.
  *
- * The packaged vectors carry the challenge-only fields too — the addresses,
- * the clue slots and the aux digest — because those are logical public inputs
- * that hash into `z`. They are not circuit signals, and the witness calculator
- * rejects a key the circuit does not declare (`Signal recipient_address not
- * found`). `circuitSignals` is the same projection the SDK's own prove path
- * applies in `bundle/common.ts`.
+ * Packaged vectors also carry challenge-only fields (addresses, clue slots, aux
+ * digest): logical public inputs hashed into `z` but not circuit signals. The
+ * witness calculator rejects undeclared keys (`Signal recipient_address not
+ * found`). `circuitSignals` is the same projection used in `bundle/common.ts`.
  *
- * A hand-made `bench/public/input.<id>.json` is already signal-only, so it is
- * passed through untouched rather than picked at and left with `undefined`
- * holes.
+ * A hand-made `bench/public/input.<id>.json` is already signal-only and is
+ * passed through unchanged.
  */
 function toSignals(raw: Record<string, unknown>): Record<string, unknown> {
     if (!("recipient_address" in raw)) return raw;
@@ -76,10 +71,9 @@ function inputFor(shape: CircuitShape): Record<string, unknown> | null {
         new URL(`../../../bench/public/input.${id}.json`, import.meta.url),
     );
     if (existsSync(override)) {
-        // Named, because an override built against an older circuit fails as a
-        // bare `Assert Failed ... in template Transact` with nothing pointing
-        // at the file that caused it. CI has no override and proves the
-        // packaged vector.
+        // Logged because an override built for a different circuit fails with
+        // a bare `Assert Failed ... in template Transact` that does not name
+        // the file. CI has no override and proves the packaged vector.
         process.stdout.write(`[bench] ${id}: using override input ${override}\n`);
         return toSignals(JSON.parse(readFileSync(override, "utf8")) as Record<string, unknown>);
     }
@@ -103,9 +97,8 @@ const CASES = await Promise.all(
 );
 
 if (CASES.some((c) => c.paths && c.input)) {
-    // Straight to stdout rather than `consoleSink()`: vitest intercepts
-    // `console.*` and the debug records do not survive it, which is what hid
-    // this split until now.
+    // Written to stdout rather than `consoleSink()`: vitest intercepts
+    // `console.*` and drops the debug records.
     configureLogging({
         level: "debug",
         namespaces: "lelantos:prover:*",
@@ -113,13 +106,10 @@ if (CASES.some((c) => c.paths && c.input)) {
     });
 }
 
-// Load-bearing for measurement, not just hygiene. The rayon workers spin-wait
-// while idle, so a pool that outlives its run burns every core and silently
-// inflates whatever is timed next — early numbers in this file's history were
-// wrong for exactly that reason. `shutdown()` terminates all of them (verified
-// 16 -> 0). Note the pool can still be orphaned if a run is *killed* rather
-// than allowed to finish: prefer letting the bench complete, and check for
-// stray `node` processes before trusting a suspicious result.
+// Required for accurate measurement: idle rayon workers spin-wait, so a pool
+// that outlives its run occupies every core and inflates later timings.
+// `shutdown()` terminates all workers. A killed run can still orphan the pool;
+// check for stray `node` processes before trusting an unexpected result.
 afterAll(async () => {
     await WasmProver.shutdown();
 });
@@ -140,7 +130,7 @@ for (const { id, paths, input, vkey } of CASES) {
 
     describe.skipIf(!ready)(`prover parity + timing (${id})`, () => {
         // The `ready` guard above makes both non-null inside this suite.
-        const p = paths as ProverPaths;
+        const p = paths as ProverArtifacts;
         const witness = input as Record<string, unknown>;
 
         async function proveAndCheck(

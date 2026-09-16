@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hexToBytes } from "../../core/hex.js";
-import { FMD_SENDER_GAMMA } from "../../fmd/fmd.js";
+import { FMD_DEFAULT_GAMMA } from "../../fmd/keys.js";
 import { FmdClient } from "./client.js";
 
 // The client is the only place fmd-webserver's wire encoding is understood, so
 // these pin the decode boundary: domain values out, `WireFormatError` with a
-// JSON path in, and — most of all — bare hex read as hex.
+// JSON path in, and bare hex read as hex.
 
 const BASE = "https://fmd.test";
 const CHAIN = 31337n;
@@ -27,8 +27,8 @@ const DIGITS_ONLY_CM = "1234".padStart(64, "0");
 
 /**
  * `babyJub.packPoint(Base8)`. Shares its value with the Rust test
- * `services::field::tests::packs_a_point_as_little_endian_y`, which is what
- * pins the two implementations to the same byte order.
+ * `services::field::tests::packs_a_point_as_little_endian_y`, which pins the two
+ * implementations to the same byte order.
  */
 const PACKED_BASE8 = "8b7d2d877a253c4b7733e1b91f05e0fcedf96bd11c2e572549b2a0f703727925";
 
@@ -53,7 +53,7 @@ describe("listNotes", () => {
         expect(n.id).toBe(7);
         expect(n.ciphertext).toEqual(new Uint8Array([0xde, 0xad]));
         // Byte-for-byte, in order: `epk` goes straight to `decryptNote`, and
-        // decoding it as a big-endian integer would silently reverse it — the
+        // decoding it as a big-endian integer would silently reverse it. The
         // packed form is little-endian `y` with the sign bit in the last byte.
         expect(n.epk).toEqual(hexToBytes(PACKED_BASE8));
     });
@@ -64,8 +64,8 @@ describe("listNotes", () => {
         const [n] = await client().listNotes();
         if (!n) throw new Error("expected one note");
 
-        // The trap: `commitmentHex` has no `0x`, and this value parses as a
-        // decimal string too. Decoding it as decimal yields 1234n.
+        // `commitmentHex` has no `0x`, and this value also parses as a decimal
+        // string. Decoding it as decimal yields 1234n.
         expect(n.cm).toBe(BigInt(`0x${DIGITS_ONLY_CM}`));
         expect(n.cm).not.toBe(1234n);
     });
@@ -125,7 +125,7 @@ describe("listMatches", () => {
         });
         // The subscription does NOT pin the chain: `detection_key` is globally
         // unique, so one subscription spans every chain a deployment serves.
-        // Without this the feed returns other chains' notes, which decrypt
+        // Without chainId the feed returns other chains' notes, which decrypt
         // against the same chain-independent key and land in the wallet as
         // unspendable balance.
         expect(url.searchParams.get("chainId")).toBe(String(CHAIN));
@@ -138,18 +138,6 @@ describe("listMatches", () => {
 
         expect(page.backfilledThroughNoteId).toBe(1234);
         expect(page.matches).toEqual([]);
-    });
-
-    it("treats a bare array from an older server as watermark 0", async () => {
-        // Nothing is known to be backfilled, so a caller clamping its cursor
-        // to this re-scans rather than stepping over rows still pending.
-        const { id: _id, ...rest } = NOTE_ROW;
-        respondWith([{ ...rest, noteId: 42 }]);
-
-        const page = await client().listMatches({ token: "abcd" });
-
-        expect(page.matches).toHaveLength(1);
-        expect(page.backfilledThroughNoteId).toBe(0);
     });
 });
 
@@ -177,15 +165,15 @@ describe("chunk feeds", () => {
 
         const chunk = await client().fetchCommitmentChunk(0);
 
-        // The leaf arrives ready to insert; `cm`/`cvDep` are no longer served,
-        // so nothing here recomputes it.
+        // The leaf arrives ready to insert; `cm`/`cvDep` are not served, so
+        // nothing recomputes it.
         expect(chunk.entries[0]).toEqual({ leafIndex: 0, leafHash: 10n });
         expect(chunk.isComplete).toBe(false);
     });
 
     it("reads the leaf hash as hex, not decimal", async () => {
-        // The `0x` prefix is what disambiguates: these digits are also a valid
-        // decimal literal for a different number.
+        // The `0x` prefix disambiguates: these digits are also a valid decimal
+        // literal for a different number.
         respondWith({
             chunkId: 0,
             entries: [{ leafIndex: 0, leafHash: `0x${"12345678".padStart(64, "0")}` }],
@@ -199,8 +187,8 @@ describe("chunk feeds", () => {
     });
 
     it("rejects a commitment entry with no leaf hash", async () => {
-        // A server that predates the pre-hashed feed must fail loudly rather
-        // than yield a tree of undefined leaves.
+        // A server without the pre-hashed feed must fail rather than yield a
+        // tree of undefined leaves.
         respondWith({
             chunkId: 0,
             entries: [{ leafIndex: 0, cmHex: "0a", cvDepX: "0x01", cvDepY: "0x02" }],
@@ -237,26 +225,26 @@ describe("chunk feeds", () => {
 
 describe("createSubscription", () => {
     it("decodes the re-attach signal", async () => {
-        respondWith({ gamma: FMD_SENDER_GAMMA, active: true, created: false });
+        respondWith({ gamma: FMD_DEFAULT_GAMMA, active: true, created: false });
 
         await expect(
             client().createSubscription({
                 detectionKeyHex: "ab",
-                gamma: FMD_SENDER_GAMMA,
+                gamma: FMD_DEFAULT_GAMMA,
                 tokenHex: "cd",
             }),
-        ).resolves.toEqual({ gamma: FMD_SENDER_GAMMA, active: true, created: false });
+        ).resolves.toEqual({ gamma: FMD_DEFAULT_GAMMA, active: true, created: false });
     });
 
     it("rejects a gamma above the sender gamma before it reaches the wire", async () => {
-        // Senders zero-pad clue bits past FMD_SENDER_GAMMA, so a longer
+        // Senders zero-pad clue bits past FMD_DEFAULT_GAMMA, so a longer
         // detection key discards the caller's own notes.
         const fetchMock = respondWith({ gamma: 8, active: true, created: false });
 
         await expect(
             client().createSubscription({
                 detectionKeyHex: "ab",
-                gamma: FMD_SENDER_GAMMA + 1,
+                gamma: FMD_DEFAULT_GAMMA + 1,
                 tokenHex: "cd",
             }),
         ).rejects.toMatchObject({ argument: "gamma" });

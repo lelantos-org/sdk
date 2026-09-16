@@ -3,15 +3,16 @@
 //
 // `requireWebCrypto` is the single availability guard for the whole SDK.
 
-import { fromLeBytes } from "./bytes.js";
-import { EnvironmentError } from "./errors.js";
+import { EnvironmentError, InvalidArgumentError } from "../errors/config.js";
+import { fromBeBytes, fromLeBytes } from "./bytes.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR, type Field } from "./field.js";
+import { bytesToBareHex } from "./hex.js";
 
 /**
  * The platform CSPRNG.
  *
  * @throws {EnvironmentError} when `globalThis.crypto.getRandomValues` is
- * absent (old Node without the global, or a stripped browser sandbox).
+ * absent (a stripped browser sandbox or embedded runtime).
  */
 export function requireWebCrypto(): Crypto {
     const c = globalThis.crypto;
@@ -53,32 +54,29 @@ export function randomJubjubScalar(): Field {
 
 /** Uniform 256-bit unsigned integer (Permit2 nonces). */
 export function randomU256(): bigint {
-    let n = 0n;
-    for (const b of randomBytes(32)) n = (n << 8n) | BigInt(b);
-    return n;
+    return fromBeBytes(randomBytes(32));
 }
 
 /**
  * Uniform integer in `[0, n)`.
  *
- * Rejection-sampled rather than folding a random draw with `%` or scaling a
- * float: either spreads a fixed number of outcomes over `n` buckets, which are
- * equal in size only when `n` divides that number. The bias is tiny at small
- * `n` but it is a bias in a slot permutation, which is exactly the thing the
- * permutation exists to remove.
+ * Rejection-sampled rather than folding with `%` or scaling a float: both
+ * spread a fixed number of outcomes over `n` buckets, which are equal only when
+ * `n` divides that number. The resulting bias is small but would skew slot
+ * permutations, whose purpose is to remove ordering bias.
  *
  * `bytes` is injectable so a test can force a permutation; it must behave like
  * {@link randomBytes}.
  */
 export function randomBelow(n: number, bytes: (k: number) => Uint8Array = randomBytes): number {
     if (!Number.isInteger(n) || n < 1) {
-        throw new RangeError(`randomBelow: n must be a positive integer, got ${n}`);
+        throw new InvalidArgumentError(`randomBelow: n must be a positive integer, got ${n}`, {
+            argument: "n",
+        });
     }
     // Largest multiple of `n` inside a 32-bit draw. Values at or above it fall
-    // in the short final bucket, which has fewer than `n` members, so they are
-    // redrawn rather than folded. Four bytes for every `n` rather than the
-    // narrowest that fits: the spare entropy is free at these call rates, and
-    // the rejection rate is then at most n/2^32.
+    // in the short final bucket and are redrawn. Always four bytes, so the
+    // rejection rate is at most n/2^32.
     const limit = SPAN32 - (SPAN32 % n);
     for (;;) {
         let v = 0;
@@ -92,12 +90,11 @@ const SPAN32 = 2 ** 32;
 /**
  * A uniformly random permutation of `items`, as a new array.
  *
- * Fisher–Yates, downwards, so every one of the `n!` orderings is equally
- * likely — given an unbiased `pick`, which is why the default is
- * {@link randomBelow} and not a scaled float.
+ * Downward Fisher–Yates: every one of the `n!` orderings is equally likely,
+ * provided `pick` is unbiased (hence the {@link randomBelow} default).
  *
- * `pick(k)` must return a uniform integer in `[0, k)`; injecting one is how a
- * test pins a specific permutation.
+ * `pick(k)` must return a uniform integer in `[0, k)`; tests inject one to pin
+ * a specific permutation.
  */
 export function shuffled<T>(items: readonly T[], pick: (n: number) => number = randomBelow): T[] {
     const out = [...items];
@@ -111,18 +108,22 @@ export function shuffled<T>(items: readonly T[], pick: (n: number) => number = r
 /**
  * A local note id: 32 hex chars, 128 bits of randomness.
  *
- * Wide because the id is an identity, not a display label. It keys the
- * nullifier memo, the spent-set passed to `markSpent`, and the `only` filter
- * in selection — so two notes sharing one means an unrelated note is retired
- * as spent and withheld from the selector until the next rescan.
- *
- * The previous 4 bytes made that a birthday problem over a wallet's note
- * count: ~1% at 10k notes and ~69% at 100k, which denomination decomposition
- * and per-spend change notes reach. At 16 bytes it is not a consideration.
- * Nothing outside the wallet ever sees this value.
+ * The id keys the nullifier memo, the spent-set passed to `markSpent`, and the
+ * `only` filter in selection, so a collision retires an unrelated note as spent
+ * until the next rescan. 16 bytes makes collisions negligible; 4 bytes would
+ * collide with ~1% probability at 10k notes and ~69% at 100k, counts that
+ * denomination decomposition and change notes reach. Never leaves the wallet.
  */
 export function noteId(): string {
-    let h = "";
-    for (const x of randomBytes(16)) h += x.toString(16).padStart(2, "0");
-    return h;
+    return randomHex(16);
+}
+
+/**
+ * `n` random bytes as bare lowercase hex (`2n` characters, no `0x`).
+ *
+ * The one way the SDK mints random identifiers: note ids, idempotency keys and
+ * EIP-3009 nonces (prefixed by the caller).
+ */
+export function randomHex(n: number): string {
+    return bytesToBareHex(randomBytes(n));
 }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { BN254_FR } from "../core/field.js";
 import { randomFr, randomJubjubScalar } from "../core/random.js";
-import type { Jubjub } from "../crypto/jubjub.js";
-import { WasmJubjub } from "../crypto/jubjub-wasm/index.js";
+import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
-import { fmdClueKeyFromRoot } from "../fmd/fmd.js";
+import { InvalidArgumentError } from "../errors/config.js";
+import { fmdClueKeyFromRoot } from "../fmd/keys.js";
 import type { Note } from "../notes/note.js";
 import type { SpendKind } from "../protocol/transact.js";
 import type { Prover } from "../prover/types.js";
@@ -49,7 +50,7 @@ function note(_J: Jubjub, value: bigint, pk: bigint): Note {
 describe("buildSpend", () => {
     it("tags the payload with the kind it was given", async () => {
         const P = await Poseidon.build();
-        const J = await WasmJubjub.build();
+        const J = await Jubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
         const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
@@ -97,12 +98,28 @@ describe("buildSpend", () => {
             expect(built.payload.pubInputs.publicIn).toBe(0n);
             expect(built.cm).toHaveLength(2);
             expect(built.payload.aux).toHaveLength(2);
+            // Only `SwapWrapper.swap` reads `intentHash`; every other spend
+            // binds and sends zero.
+            expect(built.payload.pubInputs.intentHash).toBe(0n);
         }
+
+        // A swap's leg 1 is a `withdraw` binding the swap intent's hash — a
+        // full field word, well past 160 bits, carried through unmasked.
+        const intentHash = BN254_FR - 1n;
+        const outs: [Note, Note] = [note(J, 60n, pk), note(J, 0n, pk)];
+        const swapLeg = await buildSpend({ ...base("withdraw", 40n, outs), intentHash });
+        expect(swapLeg.payload.pubInputs.intentHash).toBe(intentHash);
+
+        // Not a field element: the circuit would reduce it and bind a
+        // different word than the contract compares.
+        await expect(
+            buildSpend({ ...base("withdraw", 40n, outs), intentHash: BN254_FR }),
+        ).rejects.toBeInstanceOf(InvalidArgumentError);
     });
 
     it("rejects an unbalanced spend, naming the kind", async () => {
         const P = await Poseidon.build();
-        const J = await WasmJubjub.build();
+        const J = await Jubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
         const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
@@ -141,7 +158,7 @@ describe("buildSpend", () => {
 
     it("requires at least one real input", async () => {
         const P = await Poseidon.build();
-        const J = await WasmJubjub.build();
+        const J = await Jubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
         const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
@@ -173,13 +190,13 @@ describe("buildSpend", () => {
 
 describe("buildSpend pre-flight", () => {
     // Each of these builds a witness the prover accepts the shape of and then
-    // fails on — five to sixty seconds later, as an opaque circom assertion,
-    // or as a valid-looking proof the chain rejects. All are cheap to catch
-    // before an artifact is even fetched.
+    // fails on seconds to a minute later, as an opaque circom assertion or as a
+    // valid-looking proof the chain rejects. All are caught before any artifact
+    // is fetched.
 
     async function fixture() {
         const P = await Poseidon.build();
-        const J = await WasmJubjub.build();
+        const J = await Jubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
         const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
@@ -221,10 +238,10 @@ describe("buildSpend pre-flight", () => {
         await expect(buildSpend(args())).resolves.toBeDefined();
     });
 
-    // Mixing assets is legal — see the "buildSpend, multi-asset" block below.
-    // What is not legal is an asset that fails to conserve, and these two are
-    // the shapes a mis-built selection actually takes: an input nothing spends,
-    // and an output nothing funds.
+    // Mixing assets is legal (see the "buildSpend, multi-asset" block below);
+    // an asset that fails to conserve is not. These are the two shapes a
+    // mis-built selection takes: an input nothing spends, and an output nothing
+    // funds.
 
     it("rejects an input whose asset no output accounts for", async () => {
         const { J, pk, slot, args } = await fixture();
@@ -233,7 +250,7 @@ describe("buildSpend pre-flight", () => {
 
         // Asset 7 enters and never leaves; asset 1 leaves without entering.
         await expect(buildSpend(args({ inputs: [foreign, null] }))).rejects.toThrow(
-            /balance for asset 7: in=100 out=0/,
+            /balance for asset 7: inputs exceed outputs/,
         );
     });
 
@@ -242,14 +259,14 @@ describe("buildSpend pre-flight", () => {
         const outs = [{ ...note(J, 100n, pk), asset: 9n }, note(J, 0n, pk)];
 
         await expect(buildSpend(args({ outputs: outs }))).rejects.toThrow(
-            /balance for asset 1: in=100 out=0/,
+            /balance for asset 1: inputs exceed outputs/,
         );
     });
 
     it("rejects slot counts that do not match the named shape", async () => {
         const { args } = await fixture();
         // Two outputs against a 3x3 key builds a 34-coefficient witness and a
-        // completely different Fiat-Shamir `z`.
+        // different Fiat-Shamir `z`.
         await expect(buildSpend(args({ shape: { nIn: 3, nOut: 3 } }))).rejects.toThrow(
             /input slots for a 3x3 circuit/,
         );
@@ -261,7 +278,7 @@ describe("buildSpend pre-flight", () => {
     });
 
     it("rejects a binary-shaped path from a mis-implemented relayer", async () => {
-        // One sibling per level and indices 0/1: builds a witness fine and
+        // One sibling per level and indices 0/1: still builds a witness, but
         // proves against a root that is not the tree's.
         const { slot, args } = await fixture();
         const binary = slot();
@@ -315,7 +332,7 @@ describe("buildSpend, multi-asset", () => {
 
     async function fixture() {
         const P = await Poseidon.build();
-        const J = await WasmJubjub.build();
+        const J = await Jubjub.build();
         const pk = randomFr();
         const pkD = J.mulPointEscalar(J.base8, randomJubjubScalar());
         const recipient = { pk_d: pkD, pk, ck: fmdClueKeyFromRoot(J, randomFr()) };
@@ -358,7 +375,7 @@ describe("buildSpend, multi-asset", () => {
         return { slot, out, args };
     }
 
-    /// The feature this exists for: move asset 1, pay the relayer in asset 2.
+    /// Move asset 1 and pay the relayer in asset 2.
     it("accepts a spend whose fee is paid in a second asset", async () => {
         const { slot, out, args } = await fixture();
         const built = await buildSpend(
@@ -372,9 +389,8 @@ describe("buildSpend, multi-asset", () => {
     });
 
     /// Per-asset, not in aggregate. Asset 1 burns 5 and asset 2 mints 5, so the
-    /// totals match exactly — this is the cross-asset forgery
-    /// `PerAssetValueBalance` exists to reject, and the single global sum this
-    /// check replaced would have waved it through to the prover.
+    /// totals match: this is the cross-asset forgery `PerAssetValueBalance`
+    /// exists to reject, which a single global sum would accept.
     it("rejects an imbalance that a global sum would miss", async () => {
         const { slot, out, args } = await fixture();
         const inputs = [slot(1n, 100n, 0), slot(2n, 30n, 1)];
@@ -390,8 +406,8 @@ describe("buildSpend, multi-asset", () => {
 
     /// `publicOut` leaves the pool in the transparent bucket, which the circuit
     /// hard-wires to a single `public_asset_id`. It must count against that
-    /// asset only — charged to the fee asset instead, a withdraw would appear
-    /// to balance while stealing from the fee.
+    /// asset only; charged to the fee asset, a withdraw would appear to balance
+    /// while taking value from the fee.
     it("attributes publicOut to the transparent bucket's asset alone", async () => {
         const { slot, out, args } = await fixture();
         const ok = args(

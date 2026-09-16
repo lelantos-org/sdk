@@ -1,11 +1,11 @@
-// Shared bundle types + builder helpers used by deposit/transfer/withdraw.
+// Shared bundle types and builder helpers for deposit, transfer and withdraw.
 //
-// The transact spend builders (`buildTransfer`, `buildWithdraw`, `buildWithdrawNative`)
-// prove the transact_2x2 SNARK and return a `SubmitTransactPayload` for
-// `/v1/spend`. `buildDeposit` does NOT prove — deposits go through
-// `MASP.deposit` (Permit2 witness); returns a `BuiltDeposit` the wallet signs
-// and broadcasts itself. The relayer serves no deposit route: it picks the
-// escrow up from the `DepositEscrowed` event.
+// `buildSpend` proves the transact SNARK for transfer, withdraw and
+// withdrawNative, and returns a `SubmitTransactPayload` for `/v1/spend`.
+// `buildDeposit` does not prove; deposits go through `MASP.deposit` (Permit2
+// witness) and it returns a `BuiltDeposit` the wallet signs and broadcasts. The
+// relayer serves no deposit route: it picks the escrow up from the
+// `DepositEscrowed` event.
 
 import {
     circuitSignals,
@@ -17,17 +17,19 @@ import {
     toCircomInput,
     toSpentNoteFromPath,
 } from "../circuit/index.js";
-import { InternalError, WalletConfigError } from "../core/errors.js";
+import { assertField } from "../core/field.js";
 import { randomFr } from "../core/random.js";
-import type { CircuitShape } from "../core/shape.js";
 import { buildRho, type Field, type Jubjub, type Point, type Poseidon } from "../crypto/index.js";
-import { FMD_DEFAULT_GAMMA, fmdExpandFlagKey } from "../fmd/fmd.js";
+import { InternalError } from "../errors/base.js";
+import { WalletConfigError } from "../errors/config.js";
+import { FMD_DEFAULT_GAMMA, fmdExpandFlagKey } from "../fmd/keys.js";
 import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
 import { auxDigest } from "../protocol/abi-hash.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
+import type { CircuitShape } from "../protocol/shape.js";
 import type { SpendKind, SubmitTransactPayload, TransactPubInputs } from "../protocol/transact.js";
-import type { Groth16Proof, Prover, ProverPaths } from "../prover/types.js";
+import type { Groth16Proof, Prover, ProverArtifacts } from "../prover/types.js";
 
 export interface OutputRecipient {
     pk_d: Point;
@@ -60,25 +62,37 @@ export interface BundleCommon {
     chainId: bigint;
     asset: bigint;
     payerAddress: string; // 0x ETH (deposit ERC20 source; pass `0x0` for transfer/withdraw)
-    relayerAddress: string; // 0x ETH; must equal relayer's signing key
+    /**
+     * 0x ETH. The address the relayer publishes as its submitter (`/chains`
+     * `relayerAddress`), which is the pool's `msg.sender` for its spends and so
+     * must equal `pi.relayer`. For a relayer submitting through its `Bundler`
+     * contract this is the Bundler's address, not the EOA signing the outer
+     * transaction.
+     */
+    relayerAddress: string;
     recipientAddress: string; // 0x ETH (on-chain recipient for withdraw, sender for deposit/transfer)
     /**
+     * `PubInputs.Transact.intentHash`, a field element. A swap's withdraw leg
+     * must set it to `swapIntentHash` of the swap it funds; every other spend
+     * leaves it at the zero default.
+     */
+    intentHash?: bigint;
+    /**
      * Pluggable prover. Pass either:
-     *   - `proverPaths: ProverPaths` — the SDK builds a `SnarkjsProver`
+     *   - `artifacts: ProverArtifacts` — the SDK proves with snarkjs
      *   - `prover: Prover` — a custom backend (remote / worker / mock)
      * Exactly one is required.
      */
-    proverPaths?: ProverPaths;
+    artifacts?: ProverArtifacts;
     prover?: Prover;
     treeDepth: number;
     /**
      * Circuit arity, when the caller knows it.
      *
-     * Optional because `toCircomInput` reads the shape off the array lengths
-     * and does not need telling. Supplying it buys a pre-flight check that the
-     * slot counts match the zkey about to be loaded — otherwise a 2-output
-     * spend against a 3x3 key builds a perfectly valid witness with the wrong
-     * number of public inputs and fails inside the prover.
+     * Optional because `toCircomInput` infers the shape from the array lengths.
+     * Supplying it enables a pre-flight check that the slot counts match the
+     * zkey; without it a spend with the wrong output count for the key builds a valid
+     * witness with the wrong number of public inputs and fails inside the prover.
      */
     shape?: CircuitShape;
 }
@@ -112,15 +126,15 @@ export interface InputSlot {
  */
 export type InputSlots = readonly (InputSlot | null)[];
 
+type SpentNoteInput = ReturnType<typeof toSpentNoteFromPath>;
+
 /**
- * Fill both input slots, substituting a dummy for `null`. Every dummy gets a
+ * Fill every input slot, substituting a dummy for `null`. Every dummy gets a
  * fresh `rho` and fresh blinders: both reach the public inputs, `rho` through
  * the nullifier and `rcv` through `in_cv`.
  *
  * @internal
  */
-type SpentNoteInput = ReturnType<typeof toSpentNoteFromPath>;
-
 export function buildInputs(P: Poseidon, slots: InputSlots, treeDepth: number): SpentNoteInput[] {
     return slots.map((s) =>
         s
@@ -155,13 +169,7 @@ export function buildAuxForReal(
         P,
         recipientFlagKey: fmdExpandFlagKey(J, P, recipient.ck, gamma),
         recipientPkD: recipient.pk_d,
-        note: {
-            asset: note.asset,
-            value: note.value,
-            rho: note.rho,
-            rcm: note.rcm,
-            rcvDep: note.rcvDep,
-        },
+        note,
         esk: rng.esk,
         fmdR: rng.fmdR,
     });
@@ -178,11 +186,12 @@ export async function finalize(
     publicOut: bigint,
     auxAndWitness: readonly OutputAuxWithWitness[],
 ): Promise<BuiltBundle> {
-    if (!common.prover && !common.proverPaths) {
-        // `WalletConfigError` matches `runProver`'s check on the identical
-        // condition, so `isWalletError` catches both.
-        throw new WalletConfigError("BundleCommon: either `prover` or `proverPaths` is required");
-    }
+    // Resolved before the witness is built, so a missing backend fails fast.
+    const prove = proverFor(common);
+    const intentHash = common.intentHash ?? 0n;
+    // The contract compares the full uint256 word; an unreduced value would
+    // make the proof bind a different word than the wrapper recomputes.
+    assertField(intentHash, "intentHash");
     const aux: OutputAux[] = auxAndWitness.map((a) => a.aux);
 
     const { J, asset } = common;
@@ -196,72 +205,57 @@ export async function finalize(
         outputClues: auxAndWitness.map((a) => a.witness),
         outputAuxDigest: auxDigest(aux.map(auxOutputToWire)),
         merkleRoot,
-        recipientAddress: addrToField(common.recipientAddress),
+        recipientAddress: BigInt(common.recipientAddress),
         chainId: common.chainId,
-        payerAddress: addrToField(common.payerAddress),
-        relayerAddress: addrToField(common.relayerAddress),
+        payerAddress: BigInt(common.payerAddress),
+        relayerAddress: BigInt(common.relayerAddress),
+        intentHash,
         z: 0n,
     });
 
-    const z = computeFiatShamirZ(baseInput);
+    const z = fiatShamirZ(flatten(baseInput));
     // `circuitSignals` drops the challenge-only fields. They are logical public
-    // inputs — hashed into `z` just above — but not circuit signals, and the
+    // inputs (hashed into `z` above) but not circuit signals, and the
     // witness calculator rejects a key the circuit does not declare.
-    const proof = await runProver(common, {
-        ...circuitSignals({ ...baseInput, z: z.toString() }),
-    });
+    const proof = await prove({ ...circuitSignals({ ...baseInput, z: z.toString() }) });
 
     return {
         payload: {
             chainId: common.chainId,
             kind,
             proof: groth16ToWire(proof),
-            pubInputs: extractPubInputs(common, baseInput, asset, publicIn, publicOut),
+            pubInputs: extractPubInputs(common, baseInput, publicIn, publicOut),
             aux: [...aux],
         },
-        // Read back from the witness rather than recomputed. `toCircomInput`
-        // already hashed each output commitment; hashing them a second time
-        // was both wasted Poseidon work and a second source of truth for a
-        // value the proof commits to.
+        // Read back from the witness, where `toCircomInput` already hashed each
+        // output commitment, so the value the proof commits to has one source.
         cm: baseInput.out_cm.map((c) => BigInt(c)),
         producedNotes: [...outputs],
     };
 }
 
 /**
- * Field element → 0x-hex 32 B (matches MASP `bytes32` slot encoding).
+ * The configured proving backend, as a function from circuit input to proof.
  *
- * @internal
+ * The single check that one of `prover` or `artifacts` is set.
  */
-export function fieldToBytes32(f: Field): string {
-    return `0x${f.toString(16).padStart(64, "0")}`;
-}
-
-/** @internal */
-function computeFiatShamirZ(baseInput: TransactWitnessBundle): bigint {
-    return fiatShamirZ(flatten(baseInput));
-}
-
-/** Module-local: `finalize` above is the only caller. */
-async function runProver(
+function proverFor(
     common: BundleCommon,
-    input: Record<string, unknown>,
-): Promise<Groth16Proof> {
-    if (common.prover) return (await common.prover.prove(input)).proof;
-    if (!common.proverPaths) {
-        // `finalize` rejects this combination up front; reaching here means
-        // a caller built a bundle by hand and skipped that check.
-        throw new WalletConfigError("bundle: one of `prover` or `proverPaths` is required");
+): (input: Record<string, unknown>) => Promise<Groth16Proof> {
+    const { prover, artifacts } = common;
+    if (prover) return async (input) => (await prover.prove(input)).proof;
+    if (!artifacts) {
+        throw new WalletConfigError("BundleCommon: either `prover` or `artifacts` is required");
     }
-    // Loaded here, not statically at module scope. `prover/index.ts` states
-    // the invariant: only `./snarkjs.js` may reach the optional `snarkjs`
-    // peer, and only lazily — an eager import anywhere on the default path
-    // makes the optional dependency mandatory again. `bundle/common.ts` is
-    // squarely on the default path (`buildSpend` → `finalize` → here), so a
-    // static import would make every `./bundle` consumer carry the backend and
-    // put the invariant out of reach of a reader of `prover/`.
-    const { prove } = await import("../prover/snarkjs.js");
-    return (await prove(input, common.proverPaths)).proof;
+    return async (input) => {
+        // Loaded lazily. Only `prover/snarkjs.ts` may reach the optional `snarkjs` peer,
+        // and only lazily; an eager import on the default path makes the optional
+        // dependency mandatory. This module is on the default path (`buildSpend` →
+        // `finalize` → here), so a static import would make every `./protocol`
+        // consumer carry the backend.
+        const { SnarkjsProver } = await import("../prover/snarkjs.js");
+        return (await new SnarkjsProver(artifacts).prove(input)).proof;
+    };
 }
 
 /**
@@ -273,7 +267,6 @@ async function runProver(
 function extractPubInputs(
     common: BundleCommon,
     base: TransactWitnessBundle,
-    asset: bigint,
     publicIn: bigint,
     publicOut: bigint,
 ): TransactPubInputs {
@@ -296,7 +289,7 @@ function extractPubInputs(
         merkleRoot: BigInt(base.merkle_root),
         nullifier: scalars(base.nullifier),
         outCm: scalars(base.out_cm),
-        publicAssetId: asset,
+        publicAssetId: common.asset,
         publicIn,
         publicOut,
         inCv: base.in_cv.map(point),
@@ -305,12 +298,10 @@ function extractPubInputs(
         chainId: common.chainId,
         payer: common.payerAddress,
         relayer: common.relayerAddress,
+        intentHash: BigInt(base.intent_hash),
         outCvDep: base.out_cv_dep.map(point),
     };
 }
-
-/** @internal */
-const addrToField = (hex: string): Field => BigInt(hex);
 
 /** @internal */
 const groth16ToWire = (p: Groth16Proof): SubmitTransactPayload["proof"] => ({

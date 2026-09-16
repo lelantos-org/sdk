@@ -2,21 +2,17 @@ import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bytesToHex, hexToBytes } from "../core/hex.js";
 import { BABYJUB_SUBGROUP_ORDER, Jubjub, Poseidon } from "../crypto/index.js";
+import { FMD_DOMAIN, fmdFlag, fmdTest } from "./clue.js";
+import { decodeClue, encodeClue } from "./codec.js";
 import {
     assertDetectionGamma,
-    decodeClue,
-    encodeClue,
     FMD_DEFAULT_GAMMA,
-    FMD_DOMAIN,
-    FMD_SENDER_GAMMA,
     fmdClueKeyFromRoot,
     fmdExpandDetectionKey,
     fmdExpandFlagKey,
-    fmdFlag,
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,
-    fmdTest,
-} from "./fmd.js";
+} from "./keys.js";
 
 describe("detection gamma ceiling", () => {
     let J: Jubjub;
@@ -27,14 +23,14 @@ describe("detection gamma ceiling", () => {
     });
 
     it("a key longer than the sender gamma loses the recipient's own notes", () => {
-        // Senders pack FMD_SENDER_GAMMA bits and zero-pad the rest, while
+        // Senders pack FMD_DEFAULT_GAMMA bits and zero-pad the rest, while
         // detection tests every bit of the key, so each padding bit rejects a
         // genuine note with probability 1/2.
         const root = 0x1234_5678n;
         const ck = fmdClueKeyFromRoot(J, root);
-        const flag = fmdExpandFlagKey(J, P, ck, FMD_SENDER_GAMMA);
+        const flag = fmdExpandFlagKey(J, P, ck, FMD_DEFAULT_GAMMA);
 
-        const overlong = fmdExpandDetectionKey(J, P, root, FMD_SENDER_GAMMA + 3);
+        const overlong = fmdExpandDetectionKey(J, P, root, FMD_DEFAULT_GAMMA + 3);
         const matched = Array.from({ length: 64 }, (_, i) => {
             const clue = fmdFlag(J, P, flag, BigInt(i) + 1n);
             // The wire prefix is 16 bits wide with the unused bits zero; a
@@ -46,16 +42,16 @@ describe("detection gamma ceiling", () => {
         // 64 at a matching gamma; ~1/8 of that at three extra bits.
         expect(matched).toBeLessThan(30);
 
-        const exact = fmdExpandDetectionKey(J, P, root, FMD_SENDER_GAMMA);
+        const exact = fmdExpandDetectionKey(J, P, root, FMD_DEFAULT_GAMMA);
         for (let i = 0; i < 64; i++) {
             expect(fmdTest(J, P, exact, fmdFlag(J, P, flag, BigInt(i) + 1n))).toBe(true);
         }
     });
 
     it("rejects a gamma above the sender gamma", () => {
-        expect(() => assertDetectionGamma(FMD_SENDER_GAMMA + 1)).toThrow(/exceeds the sender/);
+        expect(() => assertDetectionGamma(FMD_DEFAULT_GAMMA + 1)).toThrow(/exceeds the sender/);
         expect(() => assertDetectionGamma(0)).toThrow(/positive integer/);
-        expect(() => assertDetectionGamma(FMD_SENDER_GAMMA)).not.toThrow();
+        expect(() => assertDetectionGamma(FMD_DEFAULT_GAMMA)).not.toThrow();
     });
 });
 
@@ -98,7 +94,7 @@ describe("FMD (Niwl)", () => {
             const clue = fmdFlag(J, P, fkA, ra());
             if (fmdTest(J, P, dkB, clue)) hits++;
         }
-        // E[hits] = N · 2^-γ = 256/32 = 8. Tolerate up to 4× expectation.
+        // E[hits] = N · 2^-γ = 256/32 = 8; the N/2 bound is deliberately loose.
         expect(hits).toBeLessThan(N / 2);
     });
 
@@ -141,7 +137,7 @@ describe("FMD clue-key expansion", () => {
 
     it("a sender holding only ck can flag, and the recipient detects it", () => {
         const ck = fmdClueKeyFromRoot(J, DK_ROOT);
-        // Everything a sender has: no dk_root is in scope for this call.
+        // Sender-side inputs only; dk_root is not used.
         const flag = fmdExpandFlagKey(J, P, ck);
         const clue = fmdFlag(J, P, flag, 0xf1a6n);
 
@@ -228,7 +224,7 @@ describe("cross-language vectors (tests/vectors/fmd.json)", () => {
     };
 
     it("matches the scheme version the fixture was generated for", () => {
-        expect(vectors.version).toBe(4);
+        expect(vectors.version).toBe(1);
         expect(vectors.domain).toBe(FMD_DOMAIN);
     });
 
@@ -310,9 +306,9 @@ describe("clue wire format", () => {
     });
 
     it("rejects trailing bytes rather than accepting a second spelling", () => {
-        // A tolerant length made the encoding non-canonical: two distinct byte
-        // strings decoded to one clue, so anything deduping or hashing clue
-        // bytes disagreed with anything comparing decoded clues.
+        // A tolerant length would make the encoding non-canonical: distinct
+        // byte strings would decode to one clue, so byte-level dedup or hashing
+        // would disagree with decoded comparison.
         const padded = new Uint8Array([...encodeClue(clue(5)), 0, 0]);
         expect(() => decodeClue(padded)).toThrow(/exactly/);
     });
@@ -324,7 +320,7 @@ describe("clue wire format", () => {
     });
 
     it("refuses to encode a gamma that does not fit its byte", () => {
-        // 256 truncated to 0 on the wire.
+        // 256 would truncate to 0 on the wire.
         expect(() => encodeClue(clue(256))).toThrow(/1\.\.255/);
     });
 

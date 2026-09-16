@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { InvalidArgumentError } from "../errors/config.js";
 import { BABYJUB_SUBGROUP_ORDER, BN254_FR } from "./field.js";
 import { noteId, randomBelow, randomFr, randomJubjubScalar, shuffled } from "./random.js";
 
@@ -15,9 +16,9 @@ function bytesFrom(queue: number[][]): (k: number) => Uint8Array {
 
 describe("randomBelow", () => {
     it("rejects a non-positive or non-integer bound", () => {
-        expect(() => randomBelow(0)).toThrow(RangeError);
-        expect(() => randomBelow(-1)).toThrow(RangeError);
-        expect(() => randomBelow(2.5)).toThrow(RangeError);
+        expect(() => randomBelow(0)).toThrow(InvalidArgumentError);
+        expect(() => randomBelow(-1)).toThrow(InvalidArgumentError);
+        expect(() => randomBelow(2.5)).toThrow(InvalidArgumentError);
     });
 
     it("returns 0 for a bound of 1", () => {
@@ -67,8 +68,8 @@ describe("shuffled", () => {
     });
 
     it("reaches every ordering of three elements", () => {
-        // Also the cover for the classic off-by-one — looping `i > 0` while
-        // picking from `[0, i)` leaves only two of the six orderings reachable.
+        // Also covers the off-by-one of looping `i > 0` while picking from
+        // `[0, i)`, which leaves only two of the six orderings reachable.
         const seen = new Set<string>();
         for (let i = 0; i < 500; i++) seen.add(shuffled(["a", "b", "c"]).join(""));
         expect(seen.size).toBe(6);
@@ -77,8 +78,8 @@ describe("shuffled", () => {
 
 // The masks in `randomFr` / `randomJubjubScalar` only set the acceptance rate;
 // correctness rests on the `v < modulus` rejection, so these pin the contract
-// rather than the mask. A reduce-instead-of-reject rewrite passes a range check
-// but reintroduces bias, so the moduli are asserted at their exact bit widths.
+// rather than the mask. Reducing instead of rejecting would pass a range check
+// but introduce bias, so the moduli are asserted at their exact bit widths.
 describe("field draws", () => {
     const DRAWS = 400;
 
@@ -108,8 +109,8 @@ describe("field draws", () => {
     });
 
     // Both draws mask the top byte before rejecting. A mask that cleared too
-    // much would still pass the range checks above while quietly capping the
-    // draw well below the modulus, so pin that the high end is reachable.
+    // much would pass the range checks above while capping the draw well below
+    // the modulus, so pin that the high end is reachable.
     it("reaches the top of each range", () => {
         const frTop = BN254_FR >> 2n;
         const jjTop = BABYJUB_SUBGROUP_ORDER >> 2n;
@@ -121,9 +122,9 @@ describe("field draws", () => {
 });
 
 describe("noteId", () => {
-    // 16 bytes, not 4. The id keys the nullifier memo, `markSpent` and
-    // selection's `only` filter, so a collision retires an unrelated note —
-    // which at 4 bytes was a ~1% event by 10k notes.
+    // The id keys the nullifier memo, `markSpent` and selection's `only`
+    // filter, so a collision retires an unrelated note; 4 bytes would collide
+    // with ~1% probability by 10k notes.
     it("is 128 bits of hex", () => {
         expect(noteId()).toMatch(/^[0-9a-f]{32}$/);
     });

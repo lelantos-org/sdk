@@ -1,5 +1,4 @@
-// Coin selection. The algorithms live one file down; this is the entry point
-// every caller outside `wallet/selection/` imports.
+// Coin selection entry point for callers outside `wallet/selection/`.
 
 export { DenominationCoinSelector } from "./denomination.js";
 export { SfrtCoinSelector, selectNotes } from "./sfrt.js";

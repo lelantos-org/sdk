@@ -1,22 +1,21 @@
-// Namespaced, levelled logging. Off by default and free when off.
+// Namespaced, levelled logging. Off by default, with negligible cost when off.
 //
 // COST MODEL
 // ----------
-// With no sink installed, `currentLevel` is 0 and every method returns after
-// a single integer compare. Two call-site rules keep that guarantee real:
+// With the default level, `currentRank` is 0 and every method returns after a single integer
+// compare. Two call-site rules preserve that:
 //
 //   1. Never interpolate into the message — pass a `fields` object instead.
 //      `log.debug("scan chunk", { from, to })`, not `log.debug(\`scan ${from}\`)`.
 //   2. In per-item loops, guard with `log.enabled("debug")` so even the
 //      fields object is not allocated.
 //
-// The console sink lives in a separate module so its formatting code is
-// tree-shaken out unless a consumer imports it. This module contains only
-// declarations and two module-level bindings, so `sideEffects: false` in
-// package.json stays truthful.
+// The console sink lives in a separate module so its formatting code is tree-shaken out unless
+// imported. This module contains only declarations and module-level bindings, consistent with
+// `sideEffects: false` in package.json.
 //
-// State is module-local. Two copies of the SDK in one bundle each need
-// configuring — the same caveat `isWalletError` documents.
+// State is module-local: two copies of the SDK in one bundle must each be configured (the same
+// caveat `isWalletError` documents).
 
 export type LogLevel = "silent" | "error" | "warn" | "info" | "debug" | "trace";
 
@@ -68,10 +67,9 @@ export interface LoggingConfig {
 
 let currentRank = 0;
 let currentSink: LogSink | null = null;
-// `globs` is the filter of record and `matchers` is derived from it. Keeping
-// the originals is what lets `loggingConfig` round-trip: a compiled matcher's
-// `.source` is a regex, and feeding that back through `configureLogging` would
-// escape it as a literal glob and match nothing.
+// `globs` is the source of truth and `matchers` is derived from it. The original globs let
+// `loggingConfig` round-trip: a compiled matcher's `.source` is a regex, which `configureLogging`
+// would escape as a literal glob.
 let globs: string[] | null = null;
 let matchers: RegExp[] | null = null;
 
@@ -86,9 +84,8 @@ export function configureLogging(config: LoggingConfig): void {
 }
 
 /**
- * Snapshot of the active level and namespace filter, in the form
- * `configureLogging` accepts — so it can be replayed into another realm.
- * Used by the worker RPC client to configure the worker side.
+ * Snapshot of the active level and namespace filter, in the form `configureLogging` accepts, for
+ * replay into another realm (e.g. by the worker RPC client).
  */
 export function loggingConfig(): { level: LogLevel; namespaces: string[] | null } {
     const level =
@@ -96,7 +93,7 @@ export function loggingConfig(): { level: LogLevel; namespaces: string[] | null 
     return { level, namespaces: globs };
 }
 
-/** The one parser for the `string | string[] | null` filter input. */
+/** Parses the `string | string[] | null` filter input. */
 function toGlobs(ns: string | string[] | null): string[] | null {
     if (ns === null) return null;
     const list = typeof ns === "string" ? ns.split(/[\s,]+/).filter(Boolean) : [...ns];
@@ -110,10 +107,9 @@ function toMatcher(glob: string): RegExp {
 /**
  * Push an already-formed record into the active sink.
  *
- * For records that crossed a realm boundary — a worker forwarding its own
- * output — where the originating realm already applied the level and
- * namespace filters. Re-checking them here would drop records whenever the
- * two configurations have drifted.
+ * For records that crossed a realm boundary (e.g. forwarded by a worker), where the originating
+ * realm already applied the level and namespace filters. Filters are not re-applied, so records
+ * are not dropped when the two configurations differ.
  *
  * @internal
  */
@@ -172,8 +168,8 @@ class NsLogger implements Logger {
 }
 
 /**
- * Logger for a namespace. Cheap to call at module scope — construction
- * allocates one object and touches no global state.
+ * Logger for a namespace. Safe to call at module scope: construction allocates one object and
+ * touches no global state.
  */
 export function getLogger(ns: string): Logger {
     return new NsLogger(ns);

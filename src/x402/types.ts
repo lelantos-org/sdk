@@ -1,10 +1,8 @@
 // x402 v2 wire types, declared structurally.
 //
-// These mirror `@x402/core`'s Zod-inferred types field for field, but are
-// declared here rather than imported so the SDK type-checks, builds, and
-// ships with no `@x402/*` package installed. Anything this module returns is
-// assignable to the matching `@x402/core` interface, so
-// `x402Client.register(network, shieldedExact(wallet))` works:
+// These mirror `@x402/core`'s Zod-inferred types field for field, declared
+// locally so the SDK builds and ships without any `@x402/*` package. Values
+// returned here are assignable to the matching `@x402/core` interfaces:
 //
 //   import { x402Client } from "@x402/core";
 //   client.register(`shielded:${chainId}`, shieldedExact(wallet));
@@ -23,12 +21,12 @@ export interface ResourceInfo {
 
 /**
  * One payment option offered by the server. `scheme` and `network` together
- * pick the mechanism; `@x402/core` validates `network` only for CAIP-2 shape
- * (`min(3)` and contains `":"`), which is why `shielded:<chainId>` is legal.
+ * select the mechanism; `@x402/core` validates `network` only for CAIP-2 shape
+ * (`min(3)` and contains `":"`), so `shielded:<chainId>` is valid.
  *
- * `amount` and `asset` are denominated by the network, not by x402 — for
- * `shielded:*` that means circuit units and a MASP asset id, and for
- * `eip155:*` it means ERC-20 base units and a token address.
+ * `amount` and `asset` are denominated by the network: circuit units and a
+ * MASP asset id for `shielded:*`; ERC-20 base units and a token address for
+ * `eip155:*`.
  */
 export interface PaymentRequirements {
     scheme: string;

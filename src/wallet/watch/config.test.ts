@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { WalletConfigError } from "../../core/errors.js";
+import { WalletConfigError } from "../../errors/config.js";
 import { validateWatchConfig, type WatchWalletConfig } from "./config.js";
 
 const base: WatchWalletConfig = { chainId: 31337n, fmdUrl: "http://fmd.invalid" };

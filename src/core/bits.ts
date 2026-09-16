@@ -1,8 +1,8 @@
-// LSB-first bit packing. Sole implementation for the whole SDK.
+// LSB-first bit packing, shared by the whole SDK.
 //
-// Convention: bit `i` lives in byte `i >> 3` at position `i & 7`, counting
-// from the least-significant bit. Matches the FMD clue wire format and the
-// circuit's `Num2Bits` decomposition.
+// Bit `i` lives in byte `i >> 3` at position `i & 7`, counting from the
+// least-significant bit. Matches the FMD clue wire format and the circuit's
+// `Num2Bits` decomposition.
 
 /** Read bit `i` (LSB-first) from a packed byte array. Returns 0 or 1. */
 export function bitAt(packed: Uint8Array, i: number): number {

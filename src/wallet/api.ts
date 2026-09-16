@@ -1,273 +1,220 @@
-// Public Wallet API interface. Options live in `./options.ts`, results in
-// `./result.ts`. `Wallet` in `./wallet.ts` is the default impl.
+// The wallet interfaces `connect()` and `connectWatch()` return.
+//
+// The implementation is a frozen object of closures over a `WalletContext`: methods are
+// bound, so `const { sync } = wallet` and `useSyncExternalStore(wallet.subscribe, wallet.state)`
+// work. Plumbing (note store, source, scanner, submitter, prover, selector, `markSpent`) is
+// reachable only through `walletInternals(wallet)` in `./internal`.
+//
+// Errors: every method rejects with a `WalletError` (branch on `isWalletError(err, code)` and
+// `err.retryable`), except that an `AbortSignal` the caller passed rejects with its own `reason`.
 
 import type { ChainReader } from "../chain/port.js";
-import type { CancelDepositInputs } from "../chain/types.js";
-import type { AssetId, AssetIdLike, CircuitAmount, Hex32, ShieldedAddress } from "../core/brand.js";
-import type { FullViewingKey, SpendingKey, ViewingKey } from "../keys/keys.js";
-import type { Prover } from "../prover/types.js";
-import type { Scanner } from "../sync/scanner.js";
-import type { AmountLike } from "./amount.js";
-import type { AssetRef } from "./asset-ref.js";
-import type { AssetInfo } from "./assets/index.js";
-import type { FeeQuoteResult, QuoteFeeArgs } from "./fee-quote.js";
-import type { AwaitCommitmentsOpts, AwaitCommitmentsResult } from "./note-cache.js";
-import type { NoteSource } from "./note-source.js";
-import type { NoteStore } from "./note-store.js";
+import type { Hex32, ShieldedAddress, ViewingKeyString } from "../core/brand.js";
+import type { CircuitShape } from "../protocol/shape.js";
+import type { AssetRef, OutAmount } from "./assets/amount.js";
+import type { AssetInfo } from "./assets/info.js";
+import type { AwaitCommitmentsResult } from "./notes/note-cache.js";
+import type { DenominationChoice, WithdrawPreview } from "./ops/withdraw-preview.js";
+import type { SpendableMax } from "./selection/index.js";
 import type {
-    DepositOptions,
-    NotesFilter,
-    SwapOptions,
-    TransferOptions,
-    WithdrawEthOptions,
-    WithdrawOptions,
-} from "./options.js";
-import type {
-    DepositResult,
-    SwapResult,
-    TransferResult,
-    WalletNote,
-    WithdrawResult,
-} from "./result.js";
-import type {
-    CoinSelector,
-    SelectionResult,
-    SelectOpts,
-    SpendableMax,
-    WithheldValue,
-} from "./selection/index.js";
-import type { Submitter } from "./submitter.js";
-import type { SyncOpts, SyncResult } from "./sync.js";
-import type { DenominationChoice, WithdrawPreview } from "./withdraw-preview.js";
-
-/**
- * What a wallet can answer from the notes it has scanned.
- *
- * Satisfied by `Wallet`, which adds the spend surface, and by `WatchWallet` in
- * `./watch/`, built from a viewing key. Depend on it for code that reports on
- * an account without spending from it.
- *
- * **Amounts are always in circuit units** — `tokenBaseUnits = amount *
- * asset.scale`. Use `wallet.asset(id)` plus `parseAmount` / `formatAmount`
- * from `./assets.js` to move between circuit units and what a user types.
- *
- * ```ts
- * const wallet = await connectWatch({ network: "anvil", viewingKey });
- * await wallet.sync();
- * wallet.balance(assetId(1n));
- * wallet.spentKnown;   // false ⇒ balance is gross received, not remaining
- * ```
- */
-export interface ReadOnlyWalletApi {
-    /** The shielded `lelantos1…` address this wallet watches (bech32m). */
-    readonly address: ShieldedAddress;
-    /**
-     * The viewing capability this wallet holds. A {@link SpendingKey} satisfies
-     * it; {@link WalletApi} narrows it to one.
-     */
-    readonly keys: ViewingKey | FullViewingKey;
-    readonly noteStore: NoteStore;
-    readonly noteSource: NoteSource;
-    readonly scanner: Scanner;
-
-    /**
-     * Whether this wallet can distinguish a spent note from an unspent one.
-     *
-     * `false` for an incoming-viewing-key holder, which has no `nk` and cannot
-     * recompute nullifiers. Every note then reads unspent, and `balance` is the
-     * gross amount received.
-     */
-    readonly spentKnown: boolean;
-
-    // --- sync ----------------------------------------------------------------
-
-    /** Pull encrypted notes only. Sufficient for balance display; does not sync the Merkle tree. */
-    syncNotes(opts?: SyncOpts): Promise<SyncResult>;
-    /**
-     * Pull notes and the spent set in parallel, plus the commitment feed on a
-     * wallet that keeps a Merkle tree, then reconcile which local notes are
-     * now spent.
-     */
-    sync(opts?: SyncOpts): Promise<SyncResult>;
-    /**
-     * Fetch new spent-nullifier chunks into the local set. Idempotent —
-     * resumes from its own cursor. A stale mirror only ever under-reports
-     * spends; it never marks a live note spent.
-     */
-    syncNullifiers(): Promise<void>;
-    refresh(): Promise<void>;
-    /**
-     * Poll until every commitment in `cms` is in the local store.
-     *
-     * Resolves with a status rather than void, so "the indexer is behind" is
-     * distinguishable from "all present".
-     */
-    awaitCommitments(cms: Hex32[], opts?: AwaitCommitmentsOpts): Promise<AwaitCommitmentsResult>;
-    // --- read ----------------------------------------------------------------
-
-    /** Omit a field to stop filtering on it; `notes()` returns everything. */
-    notes(filter?: NotesFilter): WalletNote[];
-    /** Unspent total for one asset, in circuit units. */
-    balance(asset: AssetIdLike): CircuitAmount;
-    /** Unspent totals keyed by asset id — one pass for a multi-asset view. */
-    balances(): Map<AssetId, CircuitAmount>;
-    /**
-     * Registry entry for `id` plus ERC-20 symbol/decimals when the adapter
-     * exposes them. Cached per wallet; pass `{ refresh: true }` to re-read.
-     */
-    asset(ref: AssetRef, opts?: { refresh?: boolean }): Promise<AssetInfo>;
-    /** Every asset registered on this chain, lowest id first. */
-    assets(): Promise<AssetInfo[]>;
-
-    // --- maintenance ---------------------------------------------------------
-
-    /**
-     * Drop notes flagged `spent: true` from the underlying store. Returns
-     * the number of notes pruned. Balance is unaffected; this only shrinks
-     * the on-disk file. Live notes and reconcile state are preserved.
-     */
-    compact(): Promise<{ removed: number }>;
-    /**
-     * Release scanner workers and any prover worker this wallet built.
-     *
-     * A `WorkerPoolScanner` holds 2–8 workers, each with its own wasm heap, so
-     * an app that rebuilds its wallet on an account or network switch must
-     * call this or leak a pool per switch. Idempotent; the wallet must not be
-     * used afterwards.
-     */
-    dispose(): Promise<void>;
-    /**
-     * Alias for {@link ReadOnlyWalletApi.dispose}, so a caller on a runtime
-     * with `Symbol.asyncDispose` can write `await using wallet = await
-     * connect(...)` and let scope exit release the workers.
-     */
-    [Symbol.asyncDispose](): Promise<void>;
-}
-
-/**
- * The high-level wallet surface. `Wallet` in `./wallet.ts` is the shipped
- * implementation; depend on this interface to keep tests mockable.
- *
- * Everything it adds over {@link ReadOnlyWalletApi} either builds a proof or
- * supplies the key material to authorise one.
- *
- * Typical lifecycle:
- *
- * ```ts
- * const wallet = await connect({ network: "anvil", privateKey, rpcUrl });
- * await wallet.sync();                              // notes + Merkle tree
- * const weth = requireTokenMeta(await wallet.asset(assetId(1n)));
- * await wallet.deposit({ asset: weth.id, amount: parseAmount("0.25", weth) });
- * await wallet.sync();
- * wallet.balance(weth.id);
- * ```
- */
-export interface WalletApi extends ReadOnlyWalletApi {
-    /** Spend authority. Narrows {@link ReadOnlyWalletApi.keys}. */
-    readonly keys: SpendingKey;
-    /** Cast to a concrete adapter type for adapter-specific accessors. */
-    readonly chain: ChainReader;
-    readonly submitter: Submitter;
-    readonly prover: Prover;
-    readonly selector: CoinSelector;
-
-    /** Fetch new Merkle commitment chunks and rebuild the local tree. Required before spending. */
-    syncTree(): Promise<void>;
-
-    /**
-     * What relaying `kind` costs and which assets can pay for it, checked
-     * against this wallet's balances. Empty when the relayer charges nothing.
-     */
-    quoteFee(args: QuoteFeeArgs): Promise<FeeQuoteResult>;
-    /**
-     * The largest amount of `asset` a single spend can cover, and what is
-     * holding the rest back.
-     *
-     * Not the balance. The selector withholds notes that are reserved by an
-     * unconfirmed spend, still in their spend cooldown, or below the dust
-     * threshold, and a spend can consume only `maxInputs` of what remains — so
-     * a "max" built on the balance produces `InsufficientCoverError` against a
-     * figure the caller itself supplied. `withheld` breaks the difference down
-     * by cause so a UI can say which it is.
-     *
-     * Takes the same {@link SelectOpts} a spend does, so the prediction and the
-     * spend cannot be computed under different rules. `maxInputs` defaults to
-     * the circuit's `nIn`; pass `nIn - 1` when a cross-asset fee will need an
-     * input slot of its own, and `fee` for one paid in this same asset.
-     */
-    spendableMax(asset: AssetId, opts?: SelectOpts): Promise<SpendableMax>;
-    selectNotes(asset: AssetId, target: CircuitAmount, opts?: SelectOpts): SelectionResult;
-    /**
-     * What a withdrawal of `amount` would actually deliver, before running it.
-     *
-     * ```ts
-     * const p = await wallet.previewWithdraw({ asset: "USDC", amount: "1000" });
-     * p.netFormatted; // "998" — what actually arrives
-     * p.onLadder;     // true
-     * ```
-     */
-    previewWithdraw(args: {
-        amount: AmountLike;
-        asset?: AssetRef | undefined;
-    }): Promise<WithdrawPreview>;
-    /**
-     * The asset's withdrawal denominations, labelled for a picker. Empty for
-     * an asset with no ladder, where any amount is as good as any other.
-     */
-    withdrawDenominations(ref?: AssetRef): Promise<DenominationChoice[]>;
-
-    // --- spend ---------------------------------------------------------------
-
-    /** Shield ERC-20 (or native ETH via `asEth`) into the MASP. */
-    deposit(args: DepositOptions): Promise<DepositResult>;
-    /** Shielded transfer to another `lelantos1…` address. */
-    transfer(args: TransferOptions): Promise<TransferResult>;
-    /** Unshield to an ERC-20 recipient. */
-    withdraw(args: WithdrawOptions): Promise<WithdrawResult>;
-    /** Unshield to raw ETH via the WETH bridge. */
-    withdrawEth(args: WithdrawEthOptions): Promise<WithdrawResult>;
-    /** Atomic shielded swap; legs bundled via `submitter.submitSwap`. */
-    swap(args: SwapOptions): Promise<SwapResult>;
-    /**
-     * Reclaim an escrowed deposit that the relayer never flushed.
-     * Permissionless once `chain.cancelDelay()` blocks have passed. Supply
-     * the `DepositEscrowed` event payload — the contract re-derives the
-     * digest from it.
-     */
-    cancelDeposit(id: bigint, inputs: CancelDepositInputs): Promise<{ txHash: Hex32 }>;
-    markSpent(noteIds: string[]): Promise<void>;
-    /**
-     * Re-split notes that sit off the asset's denomination ladder, so future
-     * spends can be covered by on-ladder notes. Returns the number of rounds
-     * run; zero means the asset has no ladder, or nothing was off it.
-     *
-     * Best-effort: a round that cannot find cover stops the loop rather than
-     * throwing, because a partially-tidied note set is a strictly better
-     * position than the one it started from.
-     */
-    redenominate(ref: AssetRef, opts?: { maxRounds?: number }): Promise<number>;
-}
-
-export type { AssetInfo, AssetInfoWithMeta } from "./assets/index.js";
-// Re-exported for backwards compatibility with `./api.js` imports.
-export type {
+    AllowanceSetupOptions,
+    CancelDepositTarget,
     DepositOptions,
     DepositPhase,
     NotesFilter,
-    OnPhase,
+    OpOptions,
+    QuoteSwapOptions,
+    SelectionOptions,
     SpendPhase,
     SwapOptions,
     TransferOptions,
-    WithdrawEthOptions,
     WithdrawOptions,
-} from "./options.js";
-export type {
+} from "./types/options.js";
+import type { DepositQuote, FeeKind, FeeQuote, SwapQuote } from "./types/quotes.js";
+import type {
+    CancelDepositResult,
+    DepositEscrow,
     DepositResult,
     SwapResult,
-    TransactionResult,
     TransferResult,
     WalletNote,
-    WalletNotePayload,
     WithdrawResult,
-} from "./result.js";
-export type { CoinSelector, SelectionResult, SelectOpts, SpendableMax, WithheldValue };
+} from "./types/results.js";
+import type {
+    AwaitCommitmentsOptions,
+    Balance,
+    StateListener,
+    SyncOptions,
+    SyncReport,
+    WalletState,
+} from "./types/sync.js";
+
+export type { DenominationChoice, NotesFilter, SpendableMax, WalletNote, WithdrawPreview };
+
+/**
+ * The key material a wallet can hand out, bech32m-encoded.
+ *
+ * Raw key objects (including `nsk`) are not on the public surface; `walletInternals(w).keys` has
+ * them for custom proofs.
+ */
+export interface WalletKeys {
+    /**
+     * `"incoming"`: detects incoming notes only. `"full"`: also recomputes nullifiers, so sees
+     * spends. `"spending"`: full, plus spend authority (held internally, never exposed).
+     */
+    readonly tier: "incoming" | "full" | "spending";
+    /** `lelantosivk1…`: lets a holder see incoming notes. */
+    readonly viewingKey: ViewingKeyString;
+    /** `lelantosfvk1…`: also reveals which notes are spent. `undefined` on an incoming-tier wallet. */
+    readonly fullViewingKey: ViewingKeyString | undefined;
+}
+
+/** {@link WalletKeys} of a wallet holding spend authority. */
+export interface SpendingWalletKeys extends WalletKeys {
+    readonly tier: "spending";
+    readonly fullViewingKey: ViewingKeyString;
+}
+
+/**
+ * What this wallet can do, fixed at `connect()` from its configuration. A `false` flag's methods
+ * stay on the interface and reject with the code noted.
+ */
+export interface WalletCapabilities {
+    /** A prover is configured (`prover` ≠ `"none"`). Else spends reject `PROVER_UNAVAILABLE`. */
+    readonly prove: boolean;
+    /** The chain layer signs as an EOA. Else deposit / cancel / setup reject `NO_EVM_ACCOUNT`. */
+    readonly deposit: boolean;
+    /** The adapter supports Permit2 batch AllowanceTransfer (`setupDepositAllowance`). */
+    readonly depositAllowance: boolean;
+    /** `deposit({ native: true })`. Else `UNSUPPORTED_OPERATION`. */
+    readonly nativeDeposit: boolean;
+    /** `withdraw({ native: true })`: a `NativeAdapter` is known. Needs no EOA. */
+    readonly nativeWithdraw: boolean;
+    /**
+     * `prove`, a submitter that relays swaps, and a quoter URL. A relayer advertising no wrapper
+     * still rejects `quoteSwap` with `UNSUPPORTED_OPERATION`.
+     */
+    readonly swap: boolean;
+}
+
+/** `spendableMax` options. */
+export interface SpendableMaxOptions {
+    /**
+     * Reserve the relayer fee for this kind: taken from the maximum when paid in `asset`, or one
+     * input slot when paid in another. Omitted: nothing is reserved.
+     */
+    kind?: FeeKind | undefined;
+    /** With `kind`: the fee asset the spend will name. Default `asset`. */
+    feeAsset?: AssetRef | undefined;
+    /** With `kind: "withdraw"`: price the native-unwrap estimate. */
+    native?: boolean | undefined;
+    selection?: SelectionOptions | undefined;
+}
+
+/**
+ * The read surface: what a viewing key can do. `connectWatch()` returns it; {@link WalletApi}
+ * extends it.
+ *
+ * Amounts are branded circuit units; format with `formatAmount(x, await wallet.asset(ref))`.
+ */
+export interface ReadOnlyWalletApi {
+    readonly address: ShieldedAddress;
+    readonly keys: WalletKeys;
+    /** `false` for an incoming-tier key: every note reads unspent and balances are gross received. */
+    readonly spentKnown: boolean;
+    readonly shape: CircuitShape;
+
+    // --- sync --------------------------------------------------------------------------------
+    /** Queued behind a sync in progress. */
+    sync(opts?: SyncOptions): Promise<SyncReport>;
+    /** Sync until every commitment is stored. Resolves a status; see `throwOnTimeout`. */
+    awaitCommitments(
+        cms: readonly (Hex32 | string)[],
+        opts?: AwaitCommitmentsOptions,
+    ): Promise<AwaitCommitmentsResult>;
+
+    // --- observe -----------------------------------------------------------------------------
+    /** The current snapshot. Same object until the next change. */
+    state(): WalletState;
+    /**
+     * Called with each new snapshot after a change commits (sync start/end, notes added, spent,
+     * pending or compacted, an op starting, changing phase or settling, dispose), coalesced to one
+     * call per microtask. Not called on subscribe. Returns an idempotent unsubscribe. A throwing
+     * listener is logged and swallowed.
+     */
+    subscribe(listener: StateListener): () => void;
+
+    // --- read --------------------------------------------------------------------------------
+    balance(asset: AssetRef): Promise<Balance>;
+    notes(filter?: NotesFilter): Promise<WalletNote[]>;
+    /** Chain-verified registry entry; cached briefly, `refresh` re-reads. */
+    asset(ref: AssetRef, opts?: { refresh?: boolean | undefined }): Promise<AssetInfo>;
+    /** Every registered asset, for display: the relayer's list, not verified against the chain. */
+    assets(): Promise<AssetInfo[]>;
+    /** What a withdrawal would publish, charge and deliver. Pure over the asset. */
+    previewWithdraw(args: { asset: AssetRef } & OutAmount): Promise<WithdrawPreview>;
+    /** The asset's denominations, labelled for a picker; `[]` without a ladder. */
+    withdrawDenominations(asset: AssetRef): Promise<DenominationChoice[]>;
+
+    // --- lifecycle ---------------------------------------------------------------------------
+    /** Drop spent notes from the store. */
+    compact(): Promise<{ removed: number }>;
+    /**
+     * Release what the SDK built for this wallet: the scanner workers and prover it created from
+     * a `ScannerOption` / `ProverConfig`. A `Scanner` or `Prover` instance passed to `connect` /
+     * `createWallet` is not disposed (its lifetime stays with the caller, so it can be shared
+     * across wallets), and stores and persistence backends are never closed. Idempotent; every
+     * method but `state` / `subscribe` / `dispose` then rejects `UNSUPPORTED_OPERATION`.
+     */
+    dispose(): Promise<void>;
+    [Symbol.asyncDispose](): Promise<void>;
+}
+
+/** A wallet holding spend authority. `connect()` returns it, whatever the chain layer. */
+export interface WalletApi extends ReadOnlyWalletApi {
+    readonly keys: SpendingWalletKeys;
+    /** Narrow with `supportsSigning` / `supportsAllowanceTransfer` for adapter-specific reads. */
+    readonly chain: ChainReader;
+    readonly capabilities: WalletCapabilities;
+
+    /** Fetch and warm the prover now rather than at the first spend. */
+    warmProver(opts?: { signal?: AbortSignal | undefined }): Promise<void>;
+
+    // --- quotes ------------------------------------------------------------------------------
+    /** Relayer fee for `kind` and the assets it accepts. `native` prices the native-path estimate. */
+    quoteFee(
+        kind: FeeKind,
+        opts?: { native?: boolean | undefined; signal?: AbortSignal | undefined },
+    ): Promise<FeeQuote>;
+    /**
+     * The largest `amount` (transfer) or `gross` (withdraw, swap) one spend can cover, by the same
+     * rules the spend applies.
+     */
+    spendableMax(asset: AssetRef, opts?: SpendableMaxOptions): Promise<SpendableMax>;
+    quoteDeposit(args: DepositOptions): Promise<DepositQuote>;
+    quoteSwap(args: QuoteSwapOptions): Promise<SwapQuote>;
+
+    // --- deposit -----------------------------------------------------------------------------
+    deposit(args: DepositOptions): Promise<DepositResult>;
+    /** Await the relayer's flush: `awaitCommitments([escrow.commitment])`. */
+    awaitDeposit(
+        escrow: DepositEscrow,
+        opts?: AwaitCommitmentsOptions,
+    ): Promise<AwaitCommitmentsResult>;
+    /** Reclaim an unflushed escrow once cancellable; routes native escrows through the adapter. */
+    cancelDeposit(
+        target: CancelDepositTarget,
+        opts?: OpOptions<DepositPhase>,
+    ): Promise<CancelDepositResult>;
+    setupDepositAllowance(args: AllowanceSetupOptions): Promise<void>;
+
+    // --- spend -------------------------------------------------------------------------------
+    transfer(args: TransferOptions): Promise<TransferResult>;
+    withdraw(args: WithdrawOptions): Promise<WithdrawResult>;
+    swap(args: SwapOptions): Promise<SwapResult>;
+    /** Re-split off-ladder notes onto the ladder; returns rounds run. Best-effort. */
+    redenominate(
+        asset: AssetRef,
+        opts?: OpOptions<SpendPhase> & { maxRounds?: number | undefined },
+    ): Promise<number>;
+}

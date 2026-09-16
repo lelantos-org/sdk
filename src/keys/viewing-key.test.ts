@@ -1,8 +1,8 @@
 import fc from "fast-check";
 import { beforeAll, describe, expect, it } from "vitest";
-import { InvalidArgumentError } from "../core/errors.js";
 import { BN254_FR } from "../core/field.js";
 import { Jubjub, Poseidon } from "../crypto/index.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import {
     addressFromSpendingKey,
     addressFromViewingKey,
@@ -96,8 +96,8 @@ describe("viewing key codec", () => {
     });
 
     it("rejects strings that are not viewing keys", () => {
-        // Built in the body, not an `it.each` table: a table is evaluated at
-        // collection time, before `beforeAll` builds `P` and `J`.
+        // Not an `it.each` table: tables are evaluated at collection time, before `beforeAll`
+        // builds `P` and `J`.
         for (const s of ["definitely-not-a-key", "", addressFromSpendingKey(J, sk)]) {
             expect(() => decodeViewingKey(P, J, s)).toThrow(InvalidArgumentError);
         }

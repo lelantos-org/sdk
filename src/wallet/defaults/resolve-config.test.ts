@@ -1,13 +1,13 @@
 // `fmdUrl` is optional when the pluggables it would build are supplied.
 //
-// `validateConfig` accepts `noteSource` in place of `fmdUrl`, so the client
-// must be built only when a default actually needs one.
+// `validateConfig` accepts `noteSource` in place of `fmdUrl`, so the client is
+// built only when a default needs one.
 
 import { describe, expect, it } from "vitest";
 import type { ChainAdapter } from "../../chain/port.js";
-import { WalletConfigError } from "../../core/errors.js";
 import { Jubjub, Poseidon } from "../../crypto/index.js";
-import type { WalletConfig } from "../config.js";
+import { WalletConfigError } from "../../errors/config.js";
+import type { WalletConfig } from "../types/config.js";
 import { resolveConfig } from "./index.js";
 
 const base = async () => ({ P: await Poseidon.build(), J: await Jubjub.build() });

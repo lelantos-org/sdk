@@ -1,5 +1,5 @@
-// Console sink. Separate module so the formatting code below is tree-shaken
-// out of bundles that never install it.
+// Console sink. A separate module so its formatting code is tree-shaken out of bundles that do
+// not install it.
 
 import type { LogRecord, LogSink } from "./logger.js";
 

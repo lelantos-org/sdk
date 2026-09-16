@@ -1,11 +1,11 @@
 // WASM module loading for Baby-Jubjub.
 //
 // Isolates bundler handling from the curve arithmetic. The boilerplate is
-// `wasm/module-loader.ts`, shared with `../poseidon-wasm/loader.ts`; the
-// Node/browser/injected branch under it is `wasm/loader.ts`.
+// `runtime/wasm/module-loader.ts`, shared with `../poseidon-wasm/loader.ts`; the
+// Node/browser/injected branch under it is `runtime/wasm/loader.ts`.
 
-import type { WasmLoaderOverride, WasmModuleBase } from "../../wasm/loader.js";
-import { createModuleLoader } from "../../wasm/module-loader.js";
+import type { WasmLoaderOverride, WasmModuleBase } from "../../runtime/wasm/loader.js";
+import { createModuleLoader } from "../../runtime/wasm/module-loader.js";
 
 export interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
@@ -25,22 +25,22 @@ export interface JubWasmMod extends WasmModuleBase {
 
 /**
  * Override for bundlers that rewrite `new URL(..., import.meta.url)` to a
- * runtime-invalid location. Call before `WasmJubjub.build()`.
+ * runtime-invalid location. Call before `Jubjub.build()`.
  *
  * @internal
  */
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
 // The import thunk and both URLs stay here, not in the shared factory: they
-// resolve against *this* file. See the bundler contract in `wasm/module-loader.ts`.
+// resolve against *this* file. See the bundler contract in `runtime/wasm/module-loader.ts`.
 const loader = createModuleLoader<JubWasmMod>({
-    owner: "WasmJubjub",
+    owner: "Jubjub",
     importModule: () => import("#wasm/jubjub"),
     pkgJsUrl: new URL("../../../wasm/jubjub/pkg/jubjub_wasm.js", import.meta.url),
     pkgWasmUrl: new URL("../../../wasm/jubjub/pkg/jubjub_wasm_bg.wasm", import.meta.url),
 });
 
-/** Call once at app boot, before `WasmJubjub.build()`. */
+/** Call once at app boot, before `Jubjub.build()`. */
 export function configureJubjubWasm(override: JubjubWasmLoader): void {
     loader.configure(override);
 }
@@ -49,7 +49,7 @@ export function ensureInit(): Promise<void> {
     return loader.ensureInit();
 }
 
-/** The loaded module. Throws if `WasmJubjub.build()` has not run. */
+/** The loaded module. Throws if `Jubjub.build()` has not run. */
 export function w(): JubWasmMod {
     return loader.w();
 }

@@ -1,70 +1,88 @@
-// The narrow surface a transaction executor needs.
+// The one object every wallet operation runs on.
 //
-// `executeDeposit`, `executeTransfer`, `executeWithdraw` and `executeSwap`
-// depend on this rather than on `Wallet`, so none of them needs a real wallet
-// (wasm, chain adapter, prover, note store) to run. `Wallet` implements it in
-// a few lines; a test satisfies it with an object literal.
+// Operations (`./ops/`) and the spend pipeline (`./tx/`) take a `WalletContext` rather than the
+// wallet object, so a test can run them over stubs (see `src/test-utils/context.ts`).
 
-import type { Field, Jubjub, Poseidon } from "../crypto/index.js";
+import { createMutex, type Mutex } from "../core/async.js";
+import type { AssetId, ShieldedAddress } from "../core/brand.js";
+import type { Jubjub, Poseidon } from "../crypto/index.js";
 import type { SpendingKey } from "../keys/keys.js";
-import type { Prover } from "../prover/types.js";
-import type { AssetRef } from "./asset-ref.js";
-import type { AssetInfo } from "./assets/index.js";
-import type { ResolvedWalletConfig } from "./config.js";
-import type { StoredNote } from "./note-store.js";
-import type { CoinSelector, SelectionResult } from "./selection/index.js";
-import type { Submitter } from "./submitter.js";
-import type { TreeStore } from "./tree-store.js";
+import { getLogger, type Logger } from "../log/logger.js";
+import { type AssetsFacade, lazyAssets } from "./assets/facade.js";
+import { NoteLeases } from "./notes/leases.js";
+import type { NoteCache } from "./notes/note-cache.js";
+import { NullifierMemo } from "./notes/sync-ops.js";
+import { type RelayerInfo, relayerInfo } from "./relayer-info.js";
+import type { ConsolidateFirst } from "./selection/index.js";
+import type { ResolvedWalletConfig } from "./types/config.js";
 
-export interface SpendContext {
+interface WalletLocks {
+    /**
+     * Serialises syncs and the spent-set resync after a refused spend; see `SyncContext.locks`.
+     *
+     * The other two locks a spend relies on live with the state they guard: the tree lock inside
+     * `TreeStore` (`syncVerifiedSnapshot` reads root and paths under it) and the selection lock
+     * inside {@link NoteLeases} (select and lease atomically).
+     */
+    readonly sync: Mutex;
+}
+
+export interface WalletContext {
     readonly P: Poseidon;
     readonly J: Jubjub;
     readonly keys: SpendingKey;
     /** Own bech32m shielded address. */
-    readonly address: string;
+    readonly address: ShieldedAddress;
+    /** Every pluggable, resolved: chain, submitter, prover, selector, stores, scanner. */
     readonly cfg: ResolvedWalletConfig;
-
-    readonly prover: Prover;
-    readonly submitter: Submitter;
-    readonly selector: CoinSelector;
-    readonly treeStore: TreeStore;
-
+    /** The in-memory note set and its persistence. */
+    readonly notes: NoteCache;
+    /** Asset lookup by id, token address or symbol. */
+    readonly assets: AssetsFacade;
+    readonly locks: WalletLocks;
+    /** Notes held by in-flight spends, so concurrent spends select disjoint notes. */
+    readonly leases: NoteLeases;
+    /** The relayer's `/chains` metadata, TTL-cached. */
+    readonly relayerInfo: RelayerInfo;
+    /** Note id → nullifier, for reconciling the spent set. */
+    readonly nullifiers: NullifierMemo;
+    readonly log: Logger;
     /**
-     * The raw stored-note list.
+     * Self-spend the notes a `consolidate-first` selection named into one, and wait until the
+     * merged note is spendable.
      *
-     * Named apart from `Wallet.notes(filter)`, which is the public,
-     * filtered, decoded query — these are two different views.
+     * Bound by the wallet shell, because a merge is a transfer and an operation may not import
+     * another (`scripts/check-layers.mjs` rule 7). `parent` is the spend that needs the merge: the
+     * nested self-spend runs under its `opId`, and its errors carry `op: "<parent op>:consolidate"`.
      */
-    storedNotes(): readonly StoredNote[];
-    markSpent(ids: string[]): Promise<void>;
-    /**
-     * Withhold notes from selection after a spend whose outcome was never
-     * learned. Weaker than `markSpent`, and reversible — see
-     * `StoredNote.pendingSpendAt`.
-     */
-    markPendingSpend(ids: string[]): Promise<void>;
-    /** Self-spend two notes into one so a 2-note cover becomes available. */
-    autoConsolidate(asset: bigint, selection: SelectionResult): Promise<void>;
-    /**
-     * Resolve an asset named by id, token address or symbol.
-     *
-     * On the context rather than reached through the registry directly so an
-     * executor test can satisfy it with a literal, like everything else here.
-     */
-    resolveAsset(ref: AssetRef): Promise<AssetInfo>;
+    autoConsolidate(
+        asset: AssetId,
+        selection: ConsolidateFirst,
+        parent: { readonly opId: string; readonly op: string },
+    ): Promise<void>;
 }
 
-/** Inputs `buildInputSlots` needs. Derived, so callers cannot get it wrong. */
-export function inputsCtx(ctx: SpendContext): {
-    pk: Field;
-    nsk: Field;
-    treeStore: TreeStore;
-    nIn: number;
-} {
+/** What {@link createWalletContext} derives the rest from. */
+interface WalletContextInit {
+    P: Poseidon;
+    J: Jubjub;
+    keys: SpendingKey;
+    address: ShieldedAddress;
+    cfg: ResolvedWalletConfig;
+    notes: NoteCache;
+    autoConsolidate: WalletContext["autoConsolidate"];
+}
+
+export function createWalletContext(init: WalletContextInit): WalletContext {
+    const { cfg } = init;
+    const relayer = relayerInfo(cfg.submitter, cfg.chainId);
     return {
-        pk: ctx.keys.pk,
-        nsk: ctx.keys.nsk,
-        treeStore: ctx.treeStore,
-        nIn: ctx.cfg.shape.nIn,
+        ...init,
+        assets: lazyAssets(() => cfg.chain, cfg, relayer.tokens),
+        locks: { sync: createMutex() },
+        leases: new NoteLeases(),
+        relayerInfo: relayer,
+        nullifiers: new NullifierMemo(init.P, init.keys.nk),
+        log: getLogger("lelantos:wallet"),
     };
 }

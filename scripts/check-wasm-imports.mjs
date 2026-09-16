@@ -12,27 +12,15 @@
 // Each subpath declared in package.json `imports` must appear at least once
 // under src/ as a literal `import("#wasm/<name>")`.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { ROOT, readPackage, SRC, walk } from "./lib/package.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..");
-const SRC = join(ROOT, "src");
-
-const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+const pkg = readPackage();
 const subpaths = Object.keys(pkg.imports ?? {}).filter((s) => s.startsWith("#wasm/"));
 
 /** @type {Map<string, string>} `#wasm/<name>` → `file:line` of its literal import. */
 const found = new Map();
-
-function walk(dir) {
-    for (const entry of readdirSync(dir)) {
-        const full = join(dir, entry);
-        if (statSync(full).isDirectory()) walk(full);
-        else if (entry.endsWith(".ts")) scan(full);
-    }
-}
 
 function scan(file) {
     const lines = readFileSync(file, "utf8").split("\n");
@@ -49,14 +37,14 @@ function scan(file) {
     }
 }
 
-walk(SRC);
+for (const file of walk(SRC)) if (file.endsWith(".ts")) scan(file);
 
 const missing = subpaths.filter((s) => !found.has(s));
 if (missing.length > 0) {
     console.error(`check-wasm-imports: ${missing.length} subpath(s) never imported literally:`);
     for (const s of missing) console.error(`  ${s}`);
     console.error(
-        "\nEach must reach `import()` as a literal, e.g. `() => import(\"#wasm/poseidon\")`.\n" +
+        '\nEach must reach `import()` as a literal, e.g. `() => import("#wasm/poseidon")`.\n' +
             "Passing the specifier through a variable leaves it unresolvable in browser bundles.",
     );
     process.exit(1);

@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { universalLadder } from "../../core/denominations.js";
 import type { DecodedAddress } from "../../keys/address.js";
+import { universalLadder } from "../../protocol/denominations.js";
 import { changeSlots, finalizeSlots, payTo, splitChange } from "./outputs.js";
 
-// Change goes out as real notes, so the split is part of what an observer
-// sees. These pin the two properties that matter: the notes sum to the
-// remainder exactly, and the two-slot case is unchanged from when the split
-// was hardcoded to a pair.
+// Change notes sum to the remainder exactly, and a two-slot split yields
+// `[floor(r/2), ceil(r/2)]`.
 
 const PK = 7n;
 const ASSET = 1n;
@@ -50,8 +48,7 @@ describe("splitChange", () => {
     });
 });
 
-// Ownership rides on the slot rather than being recomputed as indices against
-// an order defined elsewhere — which is what the fee slot kept getting wrong.
+// Ownership is carried on the slot rather than recomputed as indices.
 
 const OWN = { pk: PK } as unknown as DecodedAddress;
 
@@ -65,9 +62,8 @@ describe("changeSlots", () => {
     });
 });
 
-// `finalizeSlots` shuffles, so the interesting property is that the arrays,
-// `ownIndices` and `payeeIndex` all describe the *same* permutation. `pick` is
-// the seam that lets a test name the permutation it is asserting about.
+// `finalizeSlots` shuffles, so the arrays, `ownIndices` and `payeeIndex` must
+// all describe the same permutation. `pick` lets a test pin the permutation.
 
 const THEIRS = { pk: 99n } as unknown as DecodedAddress;
 
@@ -100,9 +96,8 @@ describe("finalizeSlots", () => {
     });
 
     it("keeps the three arrays aligned per slot under any permutation", () => {
-        // The failure this file exists to prevent: a fee note carrying another
-        // slot's randomness balances, proves, and is undecryptable by the only
-        // party that needed to read it.
+        // A fee note carrying another slot's randomness balances and proves but
+        // cannot be decrypted by the relayer.
         const { args } = finalizeSlots(changeAndFee());
         for (const [j, note] of args.outputs.entries()) {
             const own = note.pk === PK;
@@ -142,8 +137,8 @@ describe("splitChange with a ladder", () => {
         );
 
     it("decomposes onto the ladder instead of splitting evenly", () => {
-        // Evenly this would be four notes of 1_225_000_000, none of them a
-        // denomination, none of them withdrawable without re-splitting first.
+        // An even split would give four off-ladder notes of 1_225_000_000, none
+        // withdrawable without re-splitting.
         expect(values(4_900_000_000n, 4)).toEqual([
             2_000_000_000n,
             2_000_000_000n,
@@ -177,8 +172,7 @@ describe("splitChange with a ladder", () => {
     });
 
     it("leaves the even split untouched when the asset has no ladder", () => {
-        // Every asset behaved this way before denominations existed, and an
-        // asset absent from the table must keep behaving that way.
+        // An asset absent from the denomination table splits evenly.
         expect(
             splitChange({ pk: 1n, asset: 1n, remainder: 7n, slots: 2 }).map((n) => n.value),
         ).toEqual([3n, 4n]);
@@ -192,9 +186,9 @@ describe("splitChange with a ladder", () => {
 
 describe("splitChange when the wallet opts out", () => {
     it("splits evenly again, exactly as it did before denominations", () => {
-        // `WalletConfig.denominations: false` resolves an empty ladder, and an
-        // empty ladder must not be treated as "a ladder with nothing in it" —
-        // decomposing against it would dump the whole remainder into dust.
+        // `WalletConfig.denominations: false` resolves to an empty ladder, which
+        // must split evenly; decomposing against it would put the whole
+        // remainder into dust.
         const optedOut = splitChange({
             pk: 1n,
             asset: 1n,

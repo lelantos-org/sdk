@@ -11,7 +11,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
-import type { EthSigner } from "../../core/signer.js";
+import type { EthSigner } from "../../keys/signer.js";
 
 /** Local-account signer for Node (tests, scripts, relayer). */
 export class PrivateKeySigner implements EthSigner {
@@ -40,14 +40,7 @@ export class PrivateKeySigner implements EthSigner {
         primaryType: string,
         message: Record<string, unknown>,
     ): Promise<string> {
-        // viem's signTypedData generic can't infer from the abstract EthSigner
-        // boundary types; casts are unavoidable here.
-        return this.account.signTypedData({
-            domain,
-            types: types as any,
-            primaryType,
-            message: message as any,
-        });
+        return this.account.signTypedData({ domain, types, primaryType, message });
     }
 
     async sendTransaction(args: {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { WorkerLike } from "../../worker/types.js";
+import type { WorkerLike } from "../../runtime/rpc/types.js";
 import type { ScanInput } from "../scan.js";
 import { WorkerPoolScanner } from "./pool.js";
 
@@ -57,10 +57,8 @@ const inputs = (count: number): ScanInput[] =>
 
 describe("WorkerPoolScanner dispatch", () => {
     it("keeps at most one scan in flight per worker", async () => {
-        // Posting every chunk at once lets one slot hold several scans that
-        // share a timeout while queued behind each other: a chunk that has
-        // done no work times out and `recycle` takes a healthy worker with
-        // it.
+        // Several scans queued on one slot share its timeout, so a chunk that
+        // has done no work can time out and `recycle` a healthy worker.
         let inFlight = 0;
         let peak = 0;
         const release: Array<() => void> = [];

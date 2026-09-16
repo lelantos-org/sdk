@@ -6,18 +6,7 @@
 # whenever the dependency that pulls it in is bumped.
 
 [advisories]
-ignore = [
-    # tracing-subscriber 0.2.25, pinned transitively by `ark-relations` 0.5.1
-    # (via ark-groth16 -> ark-crypto-primitives -> ark-snark). The fix is
-    # >=0.3.20, a semver-major we cannot take without arkworks moving first.
-    #
-    # Not reachable here regardless: the advisory is about ANSI escape
-    # sequences in *attacker-controlled text written to a terminal log*, and
-    # this workspace builds for `wasm32-unknown-unknown` with no subscriber
-    # installed and no terminal to poison. Drop this entry when arkworks
-    # upgrades.
-    "RUSTSEC-2025-0055",
-]
+ignore = []
 
 # `derivative` (RUSTSEC-2024-0388) and `paste` (RUSTSEC-2024-0436) are
 # unmaintained-crate warnings, also from the arkworks tree. They are reported

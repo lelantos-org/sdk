@@ -1,6 +1,6 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.37.0",
+    "version": "0.39.0",
     "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
     "license": "MIT",
     "author": "Lelantos",
@@ -8,7 +8,7 @@
     "sideEffects": [
         "./dist/prover/worker-entry.js",
         "./dist/sync/worker/entry.js",
-        "./dist/wasm/rayon/bootstrap.mjs"
+        "./dist/runtime/wasm/rayon/bootstrap.mjs"
     ],
     "packageManager": "npm@10.9.2",
     "engines": {
@@ -27,117 +27,53 @@
         "registry": "https://npm.pkg.github.com",
         "access": "restricted"
     },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
+    "main": "./dist/entry/index.js",
+    "types": "./dist/entry/index.d.ts",
     "exports": {
         ".": {
-            "types": "./dist/index.d.ts",
-            "default": "./dist/index.js"
+            "types": "./dist/entry/index.d.ts",
+            "default": "./dist/entry/index.js"
         },
         "./package.json": "./package.json",
-        "./core": {
-            "types": "./dist/core/index.d.ts",
-            "default": "./dist/core/index.js"
+        "./watch": {
+            "types": "./dist/entry/watch.d.ts",
+            "default": "./dist/entry/watch.js"
         },
-        "./internal": {
-            "types": "./dist/internal.d.ts",
-            "default": "./dist/internal.js"
+        "./x402": {
+            "types": "./dist/entry/x402.d.ts",
+            "default": "./dist/entry/x402.js"
         },
-        "./errors": {
-            "types": "./dist/core/errors.d.ts",
-            "default": "./dist/core/errors.js"
-        },
-        "./log": {
-            "types": "./dist/log/index.d.ts",
-            "default": "./dist/log/index.js"
-        },
-        "./crypto": {
-            "types": "./dist/crypto/index.d.ts",
-            "default": "./dist/crypto/index.js"
-        },
-        "./keys": {
-            "types": "./dist/keys/index.d.ts",
-            "default": "./dist/keys/index.js"
-        },
-        "./notes": {
-            "types": "./dist/notes/index.d.ts",
-            "default": "./dist/notes/index.js"
-        },
-        "./fmd": {
-            "types": "./dist/fmd/index.d.ts",
-            "default": "./dist/fmd/index.js"
-        },
-        "./protocol": {
-            "types": "./dist/protocol/index.d.ts",
-            "default": "./dist/protocol/index.js"
-        },
-        "./circuit": {
-            "types": "./dist/circuit/index.d.ts",
-            "default": "./dist/circuit/index.js"
-        },
-        "./permit2": {
-            "types": "./dist/permit2/index.d.ts",
-            "default": "./dist/permit2/index.js"
-        },
-        "./bundle": {
-            "types": "./dist/bundle/index.d.ts",
-            "default": "./dist/bundle/index.js"
-        },
-        "./chain": {
-            "types": "./dist/chain/index.d.ts",
-            "default": "./dist/chain/index.js"
-        },
-        "./networks": {
-            "types": "./dist/chain/networks.d.ts",
-            "default": "./dist/chain/networks.js"
+        "./advanced": {
+            "types": "./dist/entry/advanced.d.ts",
+            "default": "./dist/entry/advanced.js"
         },
         "./prover": {
-            "types": "./dist/prover/index.d.ts",
-            "default": "./dist/prover/index.js"
+            "types": "./dist/entry/prover.d.ts",
+            "default": "./dist/entry/prover.js"
         },
-        "./wasm-prover": {
-            "types": "./dist/prover/wasm-prover.d.ts",
-            "default": "./dist/prover/wasm-prover.js"
+        "./protocol": {
+            "types": "./dist/entry/protocol.d.ts",
+            "default": "./dist/entry/protocol.js"
         },
-        "./prover-worker": {
+        "./primitives": {
+            "types": "./dist/entry/primitives.d.ts",
+            "default": "./dist/entry/primitives.js"
+        },
+        "./services": {
+            "types": "./dist/entry/services.d.ts",
+            "default": "./dist/entry/services.js"
+        },
+        "./workers/prover": {
             "types": "./dist/prover/worker-entry.d.ts",
             "default": "./dist/prover/worker-entry.js"
         },
-        "./relayer": {
-            "types": "./dist/services/relayer/index.d.ts",
-            "default": "./dist/services/relayer/index.js"
-        },
-        "./fmd-server": {
-            "types": "./dist/services/fmd-server/index.d.ts",
-            "default": "./dist/services/fmd-server/index.js"
-        },
-        "./quoter": {
-            "types": "./dist/services/quoter/index.d.ts",
-            "default": "./dist/services/quoter/index.js"
-        },
-        "./sync": {
-            "types": "./dist/sync/index.d.ts",
-            "default": "./dist/sync/index.js"
-        },
-        "./scanner-worker": {
+        "./workers/scanner": {
             "types": "./dist/sync/worker/entry.d.ts",
             "default": "./dist/sync/worker/entry.js"
         },
-        "./wallet": {
-            "types": "./dist/wallet/index.d.ts",
-            "default": "./dist/wallet/index.js"
-        },
-        "./watch": {
-            "types": "./dist/wallet/watch/index.d.ts",
-            "default": "./dist/wallet/watch/index.js"
-        },
-        "./x402": {
-            "types": "./dist/x402/index.d.ts",
-            "default": "./dist/x402/index.js"
-        },
-        "./presets": {
-            "types": "./dist/presets/index.d.ts",
-            "default": "./dist/presets/index.js"
+        "./internal": {
+            "types": "./dist/entry/internal.d.ts",
+            "default": "./dist/entry/internal.js"
         },
         "./wasm/prover": {
             "types": "./wasm/prover/pkg/prover.d.ts",
@@ -156,43 +92,34 @@
         "./wasm/poseidon/wasm": "./wasm/poseidon/pkg/poseidon_wasm_bg.wasm"
     },
     "files": [
+        "CHANGELOG.md",
         "dist",
         "wasm/prover/pkg",
         "wasm/jubjub/pkg",
         "wasm/poseidon/pkg"
     ],
     "scripts": {
-        "prebuild": "node scripts/sync-version.mjs",
-        "build": "npm run build:js && npm run build:types && mkdir -p dist/wasm/rayon && cp src/wasm/rayon/bootstrap.mjs dist/wasm/rayon/bootstrap.mjs",
-        "build:js": "tsc -p tsconfig.json --removeComments --declaration false --declarationMap false",
-        "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
-        "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+        "build": "node scripts/sync-version.mjs && rm -rf dist && tsc -p tsconfig.json --removeComments --declaration false --declarationMap false && tsc -p tsconfig.json --emitDeclarationOnly && mkdir -p dist/runtime/wasm/rayon && cp src/runtime/wasm/rayon/bootstrap.mjs dist/runtime/wasm/rayon/bootstrap.mjs",
+        "typecheck": "node scripts/sync-version.mjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
         "test": "vitest run",
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
         "test:bench": "vitest run --config vitest.bench.config.ts",
-        "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
-        "bench:scan": "tsx scripts/bench-scan.ts",
         "format": "biome format --write .",
-        "format:check": "biome format .",
         "lint": "biome lint .",
-        "check": "biome check .",
-        "check:browser-safe": "node scripts/check-browser-safe.mjs",
-        "check:layers": "node scripts/check-layers.mjs",
-        "check:wasm-imports": "node scripts/check-wasm-imports.mjs",
-        "check:entropy": "node scripts/check-entropy.mjs",
+        "check": "biome check . && node scripts/check-throws.mjs && node scripts/check-layers.mjs && node scripts/check-browser-safe.mjs && node scripts/check-wasm-imports.mjs && node scripts/check-entropy.mjs",
+        "check:dist": "node scripts/bundle-budget.mjs && node scripts/check-public-api.mjs && npm run check:publish && node scripts/check-pack.mjs",
         "check:api": "node scripts/check-public-api.mjs",
-        "check:bundle-size": "node scripts/check-bundle-size.mjs",
-        "check:bundle-budget": "node scripts/bundle-budget.mjs",
         "check:publish": "publint && attw --pack . --profile esm-only --exclude-entrypoints ./wasm/prover/wasm ./wasm/jubjub/wasm ./wasm/poseidon/wasm",
-        "check:pack": "node scripts/check-pack.mjs",
         "check:audit": "npm audit --omit=dev --audit-level=low && npm audit --audit-level=high",
         "check:audit:wasm": "cd wasm && cargo audit",
+        "gen:vectors": "tsx scripts/gen-fmd-vectors.ts",
+        "bench:scan": "tsx scripts/bench-scan.ts",
         "prepare": "lefthook install >/dev/null 2>&1 || true",
-        "prepublishOnly": "cd wasm && just build && cd .. && npm run build && node scripts/check-bundle-size.mjs && node scripts/check-wasm-size.mjs"
+        "prepublishOnly": "cd wasm && just build && cd .. && npm run build && npm run check:dist && node scripts/check-wasm-size.mjs"
     },
     "peerDependencies": {
-        "@lelantos-org/circuits": "0.15.0",
+        "@lelantos-org/circuits": "0.16.0",
         "circom_runtime": "^0.1.28",
         "snarkjs": "^0.7.4",
         "viem": "^2.49.3"
@@ -206,9 +133,6 @@
         },
         "snarkjs": {
             "optional": true
-        },
-        "viem": {
-            "optional": true
         }
     },
     "dependencies": {
@@ -221,8 +145,8 @@
     "devDependencies": {
         "@arethetypeswrong/cli": "^0.17.0",
         "@biomejs/biome": "^2.4.13",
-        "@lelantos-org/circuits": "0.15.0",
-        "@lelantos-org/contracts": "0.8.0",
+        "@lelantos-org/circuits": "0.16.0",
+        "@lelantos-org/contracts": "0.10.0",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "^4.1.5",
         "circom_runtime": "^0.1.28",

@@ -1,0 +1,245 @@
+// Shared fixtures for the wallet test suites: a real wallet object (`createWallet`) with every
+// network-touching pluggable stubbed.
+//
+// Not shipped: excluded from coverage by the `*test-utils*` pattern in `vitest.config.ts`, and
+// imported only from `*.test.ts`.
+
+import { type Mock, vi } from "vitest";
+import type { ChainAdapter } from "../chain/port.js";
+import { hex32 } from "../core/brand.js";
+import { randomFr, randomJubjubScalar } from "../core/random.js";
+import type { RelayerSubmitResponse } from "../protocol/responses.js";
+import type { ListNotesOpts, NotePage, NoteSource } from "../sync/note-source.js";
+import type { NullifierStore } from "../sync/nullifier-store.js";
+import type { ScanHit, ScanInput } from "../sync/scan.js";
+import type { Scanner } from "../sync/scanner.js";
+import type { RootCheck } from "../sync/tree-store.js";
+import { createWallet } from "../wallet/create.js";
+import { InMemoryNoteStore, type NoteStore, type StoredNote } from "../wallet/notes/note-store.js";
+import { walletInternals } from "../wallet/surface/internals.js";
+import type { WalletConfig } from "../wallet/types/config.js";
+
+/** Spendability fields the selector reads. All optional. */
+export interface StoredNoteOpts {
+    asset?: bigint;
+    spent?: boolean;
+    /** Drives the selector's spend cooldown, against a `tipBlock`. */
+    firstSeenBlock?: number;
+    /** ISO stamp; withholds the note while an earlier spend may still land. */
+    pendingSpendAt?: string;
+}
+
+/**
+ * A stored note with deterministic id and fresh randomness. `opts` lets selection suites drive
+ * the spendability rules.
+ */
+export function storedNote(id: string, value = 100n, opts: StoredNoteOpts = {}): StoredNote {
+    return {
+        id,
+        asset: (opts.asset ?? 1n).toString(),
+        value: value.toString(),
+        rho: randomFr().toString(),
+        rcm: randomFr().toString(),
+        rcvDep: randomJubjubScalar().toString(),
+        cm: `0x${id.padStart(64, "0")}`,
+        leafIndex: Number.parseInt(id, 16) || 0,
+        spent: opts.spent ?? false,
+        discoveredAt: "1970-01-01T00:00:00Z",
+        ...(opts.firstSeenBlock !== undefined ? { firstSeenBlock: opts.firstSeenBlock } : {}),
+        ...(opts.pendingSpendAt !== undefined ? { pendingSpendAt: opts.pendingSpendAt } : {}),
+    };
+}
+
+/** A scan hit that is not any stored note. */
+export function incomingHit(over: Partial<ScanHit> = {}): ScanHit {
+    return {
+        asset: 1n,
+        value: 500n,
+        rho: randomFr(),
+        rcm: randomFr(),
+        rcvDep: randomJubjubScalar(),
+        cm: BigInt(`0x${"be".repeat(16)}`),
+        leafIndex: 7,
+        blockNumber: 42,
+        ...over,
+    };
+}
+
+/** Scanner that reports `hits` on its first call and nothing afterwards. */
+export function scannerYielding(hits: ScanHit[]): Scanner {
+    let served = false;
+    return {
+        async scan() {
+            if (served) return [];
+            served = true;
+            return hits;
+        },
+    };
+}
+
+const feedRow = (id: number): ScanInput => ({
+    ciphertext: new Uint8Array(0),
+    epk: new Uint8Array(32),
+    cm: BigInt(id),
+    leafIndex: id,
+    blockNumber: 42,
+});
+
+/**
+ * Append-only note feed of `total` rows, paging on `after` as the server does.
+ *
+ * Yields a macrotask per page so concurrent syncs interleave, which the serialisation tests rely
+ * on.
+ */
+export function fakeNoteSource(total: number): FakeNoteSource {
+    const listNotes = vi.fn(async (opts: ListNotesOpts = {}): Promise<NotePage> => {
+        await new Promise((r) => setTimeout(r, 0));
+        const after = opts.after ?? 0;
+        const limit = opts.limit ?? 1000;
+        const ids: number[] = [];
+        for (let id = after + 1; id <= total && ids.length < limit; id++) ids.push(id);
+        const hi = ids.at(-1) ?? after;
+        return { inputs: ids.map(feedRow), nextAfter: hi, resumeAfter: hi };
+    });
+    return { listNotes };
+}
+
+/** A `NoteSource` whose `listNotes` is a spy, so call counts are assertable. */
+export interface FakeNoteSource extends NoteSource {
+    listNotes: Mock<(opts?: ListNotesOpts) => Promise<NotePage>>;
+}
+
+export interface TestWalletOpts {
+    /** Notes already in the store. */
+    notes?: StoredNote[];
+    /**
+     * Root spending key. Default random. Set when the test depends on the wallet's identity, such
+     * as a viewing key that must resolve to it.
+     */
+    nsk?: bigint;
+    /**
+     * Note feed the wallet reads. Default `fakeNoteSource(feedRows)`, whose rows a stubbed scanner
+     * ignores; set to drive a real scanner over real ciphertexts. The returned `source` is always
+     * the built-in spy and is not wired to the wallet when this is set.
+     */
+    noteSource?: NoteSource;
+    /** Nullifiers the mirror reports as spent on-chain. */
+    spent?: Set<bigint>;
+    scanner?: Scanner;
+    /** A `Prover` (caller-owned) or a `ProverConfig` the wallet builds (SDK-owned). */
+    prover?: WalletConfig["prover"];
+    /** Rows the note feed serves. Default 1. */
+    feedRows?: number;
+    noteStore?: NoteStore;
+    /** Chain adapter. Default `{}`, which suites not touching the chain never call. */
+    chain?: ChainAdapter;
+    /** Replaces the default nullifier mirror stub. */
+    nullifierStore?: NullifierStore;
+}
+
+/**
+ * A wallet with every network-touching pluggable stubbed.
+ *
+ * Returns the stubs as well, so a suite can drive chain state (`spent.add(nf)`,
+ * `source.listNotes` call counts), and `internals` (`walletInternals(wallet)`) for the raw key,
+ * the notes file and the reconcile pass.
+ */
+export async function testWallet(opts: TestWalletOpts = {}) {
+    const noteStore = opts.noteStore ?? new InMemoryNoteStore();
+    await noteStore.save({ version: 1, notes: opts.notes ?? [] });
+
+    const spent = opts.spent ?? new Set<bigint>();
+    const nullifierStore =
+        opts.nullifierStore ??
+        ({
+            sync: vi.fn(async () => undefined),
+            has: (nf: bigint) => spent.has(nf),
+        } as unknown as NullifierStore);
+
+    const source = fakeNoteSource(opts.feedRows ?? 1);
+
+    // Typed as `WalletConfig` rather than cast, so config shape changes fail to compile here.
+    // `chain` and `submitter` are not exercised by suites using this fixture.
+    const config: WalletConfig = {
+        chainId: 31337n,
+        treeDepth: 10,
+        relayerAddress: `0x${"11".repeat(20)}`,
+        chain: opts.chain ?? ({} as ChainAdapter),
+        fmdUrl: "http://fmd.invalid",
+        noteStore,
+        noteSource: opts.noteSource ?? source,
+        nullifierStore,
+        submitter: {
+            submit: async (): Promise<RelayerSubmitResponse> => ({
+                txHash: hex32(`0x${"ab".repeat(32)}`),
+            }),
+        },
+        ...(opts.scanner ? { scanner: opts.scanner } : {}),
+        ...(opts.prover ? { prover: opts.prover } : {}),
+    };
+
+    const wallet = await createWallet(
+        { type: "nsk", nsk: opts.nsk ?? randomJubjubScalar() },
+        config,
+    );
+
+    return {
+        wallet,
+        internals: walletInternals(wallet),
+        noteStore,
+        nullifierStore,
+        source,
+        spent,
+    };
+}
+
+/** A `RootCheck` for a tree the pool would accept a proof against. */
+export function reconciled(leaves = 4): RootCheck {
+    return {
+        spendable: true,
+        localRoot: 0n,
+        mirrorRoot: 0n,
+        localLeaves: leaves,
+        mirrorLeaves: leaves,
+    };
+}
+
+/**
+ * A `RootCheck` the spend path must refuse: the mirror disagrees and the chain does not accept
+ * the local root.
+ *
+ * `spendable` is set explicitly because it is not derivable from differing roots.
+ */
+export function unreconciled(localLeaves = 4, mirrorLeaves = 4): RootCheck {
+    return {
+        spendable: false,
+        localRoot: 0n,
+        mirrorRoot: 1n,
+        localLeaves,
+        mirrorLeaves,
+    };
+}
+
+/**
+ * The `TreeStore` surface a spend uses: reconcile, then read paths from a depth-4 tree. Shared by
+ * both spend suites.
+ */
+export function stubTreeStore(depth = 4) {
+    const syncVerified = vi.fn(async (_opts?: unknown): Promise<RootCheck> => reconciled());
+    return {
+        syncVerified,
+        // Delegates to `syncVerified`, so a test that overrides its result drives this too.
+        syncVerifiedSnapshot: vi.fn(
+            async <T>(opts: unknown, read: (check: RootCheck) => T | Promise<T>) => {
+                const check = await syncVerified(opts);
+                return { check, value: check.spendable ? await read(check) : undefined };
+            },
+        ),
+        root: () => 0n,
+        getPath: () => ({
+            pathElements: Array.from({ length: depth }, () => [0n, 0n, 0n]),
+            pathIndices: Array.from({ length: depth }, () => 0),
+            root: 0n,
+        }),
+    };
+}

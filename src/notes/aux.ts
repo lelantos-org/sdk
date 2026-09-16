@@ -4,7 +4,9 @@
 
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
-import { type FmdFlagKey, fmdFlag } from "../fmd/fmd.js";
+import { assertInvariant } from "../errors/base.js";
+import { fmdFlag } from "../fmd/clue.js";
+import type { FmdFlagKey } from "../fmd/keys.js";
 import {
     clueBitsToPrefix,
     encodeNotePayload,
@@ -37,10 +39,9 @@ export interface OutputAuxWithWitness {
 }
 
 /**
- * Twisted-Edwards identity. Use as a placeholder for fields where on-curve
- * is required but the value is unused (e.g. pad-output `aux.ephPub` when
- * no plaintext exists). Note: SNARK-bound `clueR` cannot use this — the
- * circuit forces `R = r·G_8` for any witnessed `r ≠ 0`.
+ * Twisted-Edwards identity. Placeholder for fields that must be on-curve but
+ * are unused (e.g. pad-output `aux.ephPub` when no plaintext exists). Not valid
+ * for SNARK-bound `clueR`: the circuit forces `R = r·G_8` for any witnessed `r ≠ 0`.
  *
  * @internal
  */
@@ -65,7 +66,7 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
 
     const clue = fmdFlag(J, P, recipientFlagKey, fmdR);
     const clueRPoint = J.unpackPoint(clue.R);
-    if (!clueRPoint) throw new Error("aux: clue.R failed to unpack");
+    assertInvariant(clueRPoint, "aux: clue.R failed to unpack");
 
     const enc = encryptNote({
         J,
@@ -75,14 +76,13 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
     });
 
     const ephPub = J.unpackPoint(enc.epk);
-    if (!ephPub) throw new Error("aux: epk failed to unpack");
+    assertInvariant(ephPub, "aux: epk failed to unpack");
 
     const prefix = clueBitsToPrefix(clue.bits, clue.gamma);
     const ciphertext = withClueBitsPrefix(prefix, enc.ciphertext);
 
-    // The same packing the wire prefix above is derived from — one loop, not
-    // two. The contract recomputes this slot from that prefix, so a drift
-    // between them would make every proof fail verification.
+    // Same packing the wire prefix above is derived from. The contract
+    // recomputes this slot from that prefix, so a mismatch fails verification.
     const clueBitsField = packClueBits(clue.bits, clue.gamma);
 
     return {

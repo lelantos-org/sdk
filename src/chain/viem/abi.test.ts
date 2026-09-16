@@ -1,17 +1,16 @@
 import { maspAbi, nativeAdapterAbi } from "@lelantos-org/contracts";
-import { toEventSignature, toFunctionSignature } from "viem";
+import { toEventSignature, toFunctionSelector, toFunctionSignature } from "viem";
 import { describe, expect, it } from "vitest";
 import { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
 
-// `abi.ts` is hand-maintained, so it can drift from the deployed contracts
-// silently — a wrong tuple shape encodes a call that reverts, or worse, one
-// that succeeds against the wrong slot. `@lelantos-org/contracts` ships the
-// Foundry-generated ABI, so the two can be compared.
+// `abi.ts` is hand-maintained and can drift from the deployed contracts
+// silently: a wrong tuple shape encodes a call that reverts, or one that
+// succeeds against the wrong slot. `@lelantos-org/contracts` ships the
+// Foundry-generated ABI to compare against.
 //
-// A devDependency, not a runtime one: importing `maspAbi` into the bundle
+// It is a devDependency, not a runtime one: importing `maspAbi` into the bundle
 // would cost ~27 KB minified for a 30 KB constant that cannot be shaken
-// per-entry, against a ~6 KB hand-maintained subset. The canonical ABI is
-// worth having at build time and not at runtime.
+// per entry, against a ~6 KB hand-maintained subset.
 
 type AbiParam = { type: string; components?: readonly AbiParam[] };
 type AbiItem = { type: string; name?: string; outputs?: readonly AbiParam[] };
@@ -24,11 +23,11 @@ const sigOf = (i: AbiItem): string =>
 /**
  * Return types, rendered like an input signature.
  *
- * `toFunctionSignature` covers inputs only — it is the selector, and outputs
- * are not part of it. That is not enough here: `asset` and `escrowed` agree on
- * their selector while disagreeing on what they return, and a wrong return
- * shape decodes to the wrong fields rather than reverting. Names are dropped;
- * only the type structure is binding.
+ * `toFunctionSignature` covers inputs only, since outputs are not part of the
+ * selector. An entry such as `asset` or `escrowed` can match its canonical
+ * selector while disagreeing on the return type, and a wrong return shape
+ * decodes to the wrong fields rather than reverting. Names are dropped; only
+ * the type structure is binding.
  */
 const outputsOf = (i: AbiItem): string => {
     const render = (p: AbiParam): string =>
@@ -45,7 +44,7 @@ const indexBy = (abi: readonly AbiItem[]) =>
             .map((i) => [`${i.type}:${i.name}`, i]),
     );
 
-/** Inputs and outputs together — the whole calling contract for one entry. */
+/** Inputs and outputs together: the full calling contract for one entry. */
 const fingerprint = (i: AbiItem): string => `${sigOf(i)} -> ${outputsOf(i)}`;
 
 /**
@@ -53,19 +52,18 @@ const fingerprint = (i: AbiItem): string => `${sigOf(i)} -> ${outputsOf(i)}`;
  * skipped wholesale. Anything here is a live incompatibility, not a style
  * difference.
  *
- * Empty, and kept rather than deleted: the SDK regularly lands a read before
- * `@lelantos-org/contracts` publishes the mixin behind it, and the entry has to
- * be checkable-in-principle meanwhile. The yield mixin was the last one, exempt
- * until 0.6.1 shipped it. The second test below is what forces an exemption out
- * again once the package catches up.
+ * May be empty. The SDK can add a read before `@lelantos-org/contracts`
+ * publishes the contract change behind it; such an entry is listed here until
+ * then. The second test below fails once an exempted entry matches, forcing its
+ * removal.
  */
 const PENDING_MIGRATION = new Set<string>();
 
 /**
  * The pool and the native bridge are separate deployments, so each
  * hand-written subset is checked against its own canonical ABI. A native
- * entry compared against `maspAbi` would report as merely absent, which
- * reads like a rename rather than the address change it is.
+ * entry compared against `maspAbi` would report as absent, which reads like a
+ * rename rather than a different contract address.
  */
 const SUBSETS = [
     { name: "MASP_ABI", items: MASP_ABI as readonly AbiItem[], canonical: maspAbi },
@@ -89,9 +87,8 @@ describe.each(SUBSETS)("$name vs the canonical contracts ABI", ({ items, canonic
     });
 
     it("covers every entry that is not explicitly pending migration", () => {
-        // Guards the guard: a new hand-written entry must be compared, not
-        // silently uncovered, and a stale exemption must be removed once the
-        // entry agrees again.
+        // A new hand-written entry must be compared, not silently uncovered,
+        // and a stale exemption must be removed once the entry matches.
         const exempted = items.filter((i) => PENDING_MIGRATION.has(`${i.type}:${i.name}`));
         expect(checked.length + exempted.length).toBe(items.length);
 
@@ -105,5 +102,26 @@ describe.each(SUBSETS)("$name vs the canonical contracts ABI", ({ items, canonic
                 ).not.toBe(fingerprint(found));
             }
         }
+    });
+});
+
+// The relayer pins the same selectors (`backend` relayer `adapters/abi.rs`), and
+// HANDOFF-listed values from the Foundry build. A deposit struct that gains a
+// field (here `feeAssetId`, `Permit2Sig.maxFee`, `FeeNote.feeAssetId`) moves
+// all three, so a stale copy on either side fails here rather than on chain.
+describe("deposit selectors", () => {
+    const selectorOf = (name: string) => {
+        const item = (MASP_ABI as readonly AbiItem[]).find(
+            (i) => i.type === "function" && i.name === name,
+        );
+        return toFunctionSelector(item as Parameters<typeof toFunctionSelector>[0]);
+    };
+
+    it.each([
+        ["deposit", "0xfee3714c"],
+        ["depositAuthorized", "0xdf1daf3b"],
+        ["cancelDeposit", "0x5a0083a7"],
+    ])("%s is %s", (name, selector) => {
+        expect(selectorOf(name)).toBe(selector);
     });
 });

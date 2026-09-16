@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWalletError } from "../../core/errors.js";
+import { isWalletError } from "../../errors/guard.js";
 import { DepositStream, type EventSourceLike } from "./deposit-stream.js";
 
 const CONNECTING = 0;
@@ -287,8 +287,8 @@ describe("DepositStream teardown", () => {
     });
 
     it("ignores a subscriber registered after close", async () => {
-        // `markClosed` clears the listener set, so a later `subscribe` added to
-        // a set nothing drains — unreachable, and never cleaned up.
+        // `markClosed` clears the listener set, so a later `subscribe` would
+        // add to a set nothing drains, unreachable and never cleaned up.
         const stream = new DepositStream("http://relayer.test", 1n, {
             eventSourceFactory: (url) => new FakeSource(url),
         });
