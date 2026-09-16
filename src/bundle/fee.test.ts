@@ -120,6 +120,30 @@ describe("feeOutput", () => {
             );
         });
 
+        // A charging relayer that rounds a sub-unit cost down quotes "0". A
+        // zero-value fee note pays nothing, so it is refused like no quote at
+        // all, and the zero-quoted asset is not offered as an alternative.
+        it("refuses a quote of zero, and does not list it as accepted", () => {
+            const est = estimate({
+                fees: [quote({ circuitAmount: "0" }), quote({ assetId: 9, circuitAmount: "3" })],
+            });
+            let err: unknown;
+            try {
+                feeOutputFromEstimate({ J, estimate: est, asset: 1n, kind: "deposit" });
+            } catch (e) {
+                err = e;
+            }
+            expect(err).toBeInstanceOf(FeeAssetNotQuotedError);
+            expect(err).toMatchObject({
+                code: "FEE_ASSET_NOT_QUOTED",
+                asset: 1n,
+                kind: "deposit",
+                accepted: [9n],
+            });
+            // The other asset is still payable.
+            expect(feeOutputFromEstimate({ J, estimate: est, asset: 9n })?.note.value).toBe(3n);
+        });
+
         // The relayer sends `amount` without `assetId`/`scale`/`circuitAmount`
         // when the indexer has not registered the token: priced, but not payable.
         it("throws when the asset is quoted but has no payable amount yet", () => {

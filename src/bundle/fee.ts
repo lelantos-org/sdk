@@ -142,7 +142,7 @@ function feeAssetNotQuoted(
     kind?: FeeQuoteKind | undefined,
 ): FeeAssetNotQuotedError {
     const accepted = estimate.fees
-        .filter((f) => f.assetId !== undefined && f.circuitAmount !== undefined)
+        .filter((f) => f.assetId !== undefined && payable(f.circuitAmount))
         .map((f) => assetId(BigInt(f.assetId!)));
     return new FeeAssetNotQuotedError({ asset: assetId(asset), kind, accepted });
 }
@@ -179,6 +179,12 @@ export function feeOutputFromEstimate({
  * deposits. Throws `FeeAssetNotQuotedError` when the relayer quoted no payable
  * amount for it: a spend or deposit paying in that asset would be refused.
  *
+ * A quote of zero is not payable. Callers reach this only when the relayer
+ * charges, and a zero-value fee note is not a payment: a deposit's zero-value fee
+ * leaf carries no fee asset, so the relayer prices its flush in the deposit
+ * asset instead and never flushes it, and a spend's is refused at submit. A
+ * relayer that rounds a sub-unit cost down quotes exactly this.
+ *
  * @internal
  */
 export function quotedFeeAmount(
@@ -189,6 +195,12 @@ export function quotedFeeAmount(
     // Compared as `bigint`: an asset id is a `u64` in circuit, and `Number()`
     // rounds values past 2^53.
     const quote = estimate.fees.find((f) => f.assetId !== undefined && BigInt(f.assetId) === asset);
-    if (quote?.circuitAmount === undefined) throw feeAssetNotQuoted(estimate, asset, kind);
+    if (quote === undefined || !payable(quote.circuitAmount))
+        throw feeAssetNotQuoted(estimate, asset, kind);
     return BigInt(quote.circuitAmount);
+}
+
+/** Whether a quoted circuit amount is one a fee note can actually pay: present and above zero. */
+function payable(circuitAmount: string | undefined): circuitAmount is string {
+    return circuitAmount !== undefined && BigInt(circuitAmount) > 0n;
 }
