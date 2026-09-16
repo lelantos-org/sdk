@@ -23,7 +23,9 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { SRC, shippedSources, ts } from "./lib/package.mjs";
+import { loadTs, SRC, shippedSources } from "./lib/package.mjs";
+
+const ts = loadTs();
 
 /**
  * First path segment -> tier.

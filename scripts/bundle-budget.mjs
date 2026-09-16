@@ -17,7 +17,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { build } from "esbuild";
-import { DIST, ROOT, ts, walk } from "./lib/package.mjs";
+import { DIST, loadTs, ROOT, walk } from "./lib/package.mjs";
+
+const ts = loadTs();
 
 /** Budget for all emitted JS under `dist/`. */
 const DIST_MAX = 513_024; // 501 KiB

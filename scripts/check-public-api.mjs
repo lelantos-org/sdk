@@ -9,7 +9,9 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROOT, readPackage, ts } from "./lib/package.mjs";
+import { loadTs, ROOT, readPackage } from "./lib/package.mjs";
+
+const ts = loadTs();
 
 const SNAPSHOT = join(ROOT, "api-surface.json");
 const update = process.argv.includes("--update");

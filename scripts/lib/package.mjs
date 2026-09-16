@@ -9,7 +9,16 @@ import { fileURLToPath } from "node:url";
 export const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const SRC = join(ROOT, "src");
 export const DIST = join(ROOT, "dist");
-export const ts = createRequire(import.meta.url)("typescript");
+/**
+ * The TypeScript compiler, loaded on first use.
+ *
+ * Lazy because scripts that need no parser — `check-wasm-size`, run by the CI job that builds
+ * `wasm/` before any `npm ci` — would otherwise fail on a missing devDependency.
+ */
+export const loadTs = (() => {
+    let mod;
+    return () => (mod ??= createRequire(import.meta.url)("typescript"));
+})();
 
 export function readPackage() {
     return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));

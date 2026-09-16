@@ -14,7 +14,9 @@
 // `src/errors/base.ts`.
 
 import { readFileSync } from "node:fs";
-import { shippedSources, ts } from "./lib/package.mjs";
+import { loadTs, shippedSources } from "./lib/package.mjs";
+
+const ts = loadTs();
 
 const BARE = new Set(["Error", "RangeError", "TypeError"]);
 
