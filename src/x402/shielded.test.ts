@@ -5,8 +5,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { hex32 } from "../core/brand.js";
 import {
+    type Holding,
+    NOTHING_WITHHELD,
     RECIPIENT_CM,
     shieldedRequirements,
+    spendableMaxSpy,
     transferSpy,
     WETH,
     X402_CHAIN_ID,
@@ -17,14 +20,16 @@ import type { PaymentRequirements } from "./types.js";
 
 const CHAIN_ID = X402_CHAIN_ID;
 
-function stubWallet() {
+function stubWallet(held: Record<string, Holding> = {}) {
     const transfer = transferSpy(hex32(`0x${"fe".repeat(32)}`));
     const chainId = vi.fn(async () => CHAIN_ID);
     const asset = vi.fn(async () => WETH);
+    const spendableMax = spendableMaxSpy(held);
     return {
-        wallet: { chain: { chainId }, asset, transfer } as unknown as WalletApi,
+        wallet: { chain: { chainId }, asset, spendableMax, transfer } as unknown as WalletApi,
         transfer,
         chainId,
+        spendableMax,
     };
 }
 
@@ -124,6 +129,45 @@ describe("shieldedExact.quote", () => {
 
     it("refuses a non-integer asset id", () =>
         rejects({ asset: "0xC02aaA39" }, /asset must be a decimal integer/));
+
+    it("refuses an offer in an asset this wallet cannot cover", async () => {
+        // `unsupported-requirements`, so `select` moves to the next `accepts[]`
+        // entry rather than aborting: a server pricing one tool in several
+        // assets is paid in whichever of them the wallet actually holds.
+        const { wallet, transfer } = stubWallet({ 1: 1_499n });
+        await expect(shieldedExact(wallet).quote(shieldedRequirements())).rejects.toThrow(
+            /1499 spendable unit\(s\) of asset 1 \(WETH\) is short of the 1500/,
+        );
+        expect(transfer).not.toHaveBeenCalled();
+    });
+
+    it("counts value stranded beyond the input arity, which consolidation recovers", async () => {
+        // `slots` is withheld by note count, not by time, and `autoConsolidate`
+        // merges those notes before paying — so an offer this wallet can reach
+        // in two spends is still one it can pay.
+        const thin = { 1: { max: 1_000n, withheld: { ...NOTHING_WITHHELD, slots: 1_000n } } };
+
+        await expect(
+            shieldedExact(stubWallet(thin).wallet).quote(shieldedRequirements()),
+        ).resolves.toBeTruthy();
+        await expect(
+            shieldedExact(stubWallet(thin).wallet, { autoConsolidate: false }).quote(
+                shieldedRequirements(),
+            ),
+        ).rejects.toThrow(/1000 spendable unit\(s\)/);
+    });
+
+    it("does not count value withheld by cooldown, dust or a pending spend", async () => {
+        const { wallet } = stubWallet({
+            1: {
+                max: 500n,
+                withheld: { reserved: 3_000n, dust: 500n, cooldown: 5_000n, slots: 0n },
+            },
+        });
+        await expect(shieldedExact(wallet).quote(shieldedRequirements())).rejects.toThrow(
+            /500 spendable unit\(s\)/,
+        );
+    });
 
     it("honours a caller-supplied minimum window", async () => {
         const { wallet } = stubWallet();

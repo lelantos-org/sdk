@@ -44,6 +44,68 @@ export function resolvePayerSlot(pinned: number | undefined, host: string | unde
 }
 
 /**
+ * The payer's balance reader, or an `unsupported` refusal when the adapter has none.
+ *
+ * A property of the chain adapter rather than of any one payment, so asking it
+ * in `quote` costs nothing and answers before value could move.
+ */
+function balanceReader(
+    wallet: WalletApi,
+    asset: AssetInfo,
+    payer: EvmAddress,
+): () => Promise<TokenAmount> {
+    const { tokenBalanceOf } = wallet.chain;
+    if (!tokenBalanceOf) {
+        throw unsupported(
+            SCOPE,
+            "chain adapter has no `tokenBalanceOf`, so the payer balance cannot be " +
+                "checked — pass a fuller adapter or use the shielded mechanism",
+        );
+    }
+    return () => tokenBalanceOf.call(wallet.chain, asset.token, payer);
+}
+
+/** What the pool could still add to a payer, in circuit units. */
+async function poolCanAdd(wallet: WalletApi, asset: AssetInfo): Promise<bigint> {
+    const { max } = await wallet.spendableMax(asset.id, { kind: "withdraw" });
+    return max;
+}
+
+/**
+ * Whether this payment could be funded at all, moving nothing.
+ *
+ * A routing filter, not a promise. It refuses an offer that certainly cannot be
+ * paid — no balance reader, or neither the payer nor the pool holding the
+ * shortfall — as `unsupported`, so the selector moves to the next `accepts[]`
+ * entry while nothing has happened yet. Without it the same refusal arrives
+ * from inside `createPaymentPayload`, by which point selection has committed
+ * and the request fails outright.
+ *
+ * An offer this accepts may still fail to fund: the figures are read seconds
+ * before the payment, and a top-up pays a protocol fee out of what it withdraws.
+ */
+export async function assertFundable(
+    wallet: WalletApi,
+    payer: EvmAddress,
+    asset: AssetInfo,
+    needed: TokenAmount,
+): Promise<void> {
+    const held = await balanceReader(wallet, asset, payer)();
+    if (held >= needed) return;
+
+    const shortfall = ceilDiv(needed - held, asset.scale);
+    const available = await poolCanAdd(wallet, asset);
+    if (available < shortfall) {
+        throw unsupported(
+            SCOPE,
+            `payer ${payer} holds ${held} of the ${needed} base unit(s) this offer asks for, ` +
+                `and the pool can add only ${available} of the ${shortfall} circuit unit(s) ` +
+                "missing",
+        );
+    }
+}
+
+/**
  * Unshield into `payer` when its balance does not cover `needed`. Withdraws a
  * multiple so subsequent payments need no proof.
  */
@@ -62,15 +124,7 @@ export async function ensureFunded(
             | undefined;
     },
 ): Promise<void> {
-    const { tokenBalanceOf } = wallet.chain;
-    if (!tokenBalanceOf) {
-        throw unsupported(
-            SCOPE,
-            "chain adapter has no `tokenBalanceOf`, so the payer balance cannot be " +
-                "checked — pass a fuller adapter or use the shielded mechanism",
-        );
-    }
-    const balanceOf = () => tokenBalanceOf.call(wallet.chain, asset.token, payer);
+    const balanceOf = balanceReader(wallet, asset, payer);
 
     const held = await balanceOf();
     if (held >= needed) return;
@@ -78,8 +132,22 @@ export async function ensureFunded(
     // A withdraw's amount is gross: the protocol fee is deducted from it, so a
     // top-up of exactly `needed` arrives short. A multiple absorbs the fee and
     // amortises the proof across later payments.
-    const shortfall = needed - held;
-    const target = branded<CircuitAmount>(ceilDiv(shortfall * opts.topUpMultiple, asset.scale));
+    const shortfall = ceilDiv(needed - held, asset.scale);
+    const wanted = ceilDiv((needed - held) * opts.topUpMultiple, asset.scale);
+    // The multiple is an amortisation, not a requirement: a pool that cannot
+    // cover it can still cover this payment, and refusing would strand a payer
+    // that merely holds less than ten calls' worth. Only the shortfall itself
+    // is non-negotiable — `assertFundable` has already refused the offer when
+    // even that is out of reach, so this is the racing case.
+    const available = await poolCanAdd(wallet, asset);
+    if (available < shortfall) {
+        throw unsupported(
+            SCOPE,
+            `the pool holds ${available} circuit unit(s), short of the ${shortfall} ` +
+                `needed to bring ${payer} to ${needed} base unit(s)`,
+        );
+    }
+    const target = branded<CircuitAmount>(wanted <= available ? wanted : available);
 
     log.info("topping up ephemeral payer", {
         payer,

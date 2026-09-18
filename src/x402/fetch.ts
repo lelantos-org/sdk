@@ -191,8 +191,10 @@ interface Choice {
  * Pick an offer to pay: shielded networks first, original order within a
  * tier, first affordable one wins.
  *
- * An offer this wallet cannot satisfy (wrong chain, unknown token, a window too
- * short to prove in) moves on to the next offer. A budget breach aborts:
+ * An offer this wallet cannot satisfy (wrong chain, unknown token, too little of
+ * the asset it is priced in, a window too short to prove in) moves on to the
+ * next offer — which is what lets a server price one resource in several assets
+ * and be paid in whichever of them the payer holds. A budget breach aborts:
  * falling through to a cheaper offer would hide that the caller's ceiling was
  * reached.
  */
@@ -212,8 +214,10 @@ async function select(
             continue;
         }
         try {
-            // The mechanism prices its own network; see `PaymentQuote`.
-            const quote = await mechanism.quote(requirements);
+            // The mechanism prices its own network and judges whether this
+            // wallet can pay it; see `PaymentQuote`. The host goes with the
+            // offer, so a per-host payer is judged as it will be paid.
+            const quote = await mechanism.quote(requirements, { host: hostOf(url) });
             // Reserved, not only checked: minting the payload takes seconds and
             // concurrent payments must account for this one.
             const reservation = ledger.reserve(quote.amount, quote.asset, url);

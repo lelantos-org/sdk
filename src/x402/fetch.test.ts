@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { assetId, hex32 } from "../core/brand.js";
+import { assetId, evmAddress, hex32 } from "../core/brand.js";
 import {
     shieldedRequirements,
+    spendableMaxSpy,
     transferSpy,
     usdc,
     WETH,
@@ -20,6 +21,7 @@ function stubWallet(overrides: Partial<WalletApi> = {}): WalletApi {
     return {
         chain: { chainId: async () => CHAIN_ID },
         asset: async () => WETH,
+        spendableMax: spendableMaxSpy(),
         transfer: transferSpy(),
         ...overrides,
     } as unknown as WalletApi;
@@ -151,6 +153,75 @@ describe("x402", () => {
         );
         expect(wallet.transfer).not.toHaveBeenCalled();
         expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("pays the offer whose asset this wallet actually holds", async () => {
+        // A server may price one resource in several assets. Selection walks
+        // them in order, so an empty balance in the first must fall through
+        // rather than commit the payer to an asset it cannot spend.
+        const wallet = stubWallet({ spendableMax: spendableMaxSpy({ 1: 0n, 7: 5_000n }) });
+        const fetchImpl = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(
+                paymentRequired([
+                    shieldedRequirements({ asset: "1", amount: "1500" }),
+                    shieldedRequirements({ asset: "7", amount: "1500" }),
+                ]),
+            )
+            .mockResolvedValueOnce(new Response("premium", { status: 200 }));
+
+        const pay = x402(wallet, { budget: { total: "5" }, http: { fetch: fetchImpl } });
+        expect((await pay("https://api.example.com/premium")).status).toBe(200);
+
+        expect(decodePaymentHeader(fetchImpl.mock.calls[1]![0]).accepted.asset).toBe("7");
+        expect(wallet.transfer).toHaveBeenCalledWith(
+            expect.objectContaining({ asset: 7n, amount: 1500n }),
+        );
+    });
+
+    it("falls through to the unshielded offer it can fund", async () => {
+        // The unshielded mechanism pays from a per-host throwaway address topped
+        // up by unshielding. Until it judged that in `quote`, an unfundable
+        // first entry aborted the request instead of yielding to the next.
+        const BROKE = { ...usdc(7n), token: evmAddress(`0x${"aa".repeat(20)}`) };
+        const FUNDED = usdc(8n);
+        const wallet = withNsk(
+            stubWallet({
+                chain: {
+                    chainId: async () => CHAIN_ID,
+                    tokenBalanceOf: async (token: string) =>
+                        token.toLowerCase() === FUNDED.token.toLowerCase() ? 10n ** 12n : 0n,
+                },
+                asset: async (id: bigint) => (id === 7n ? BROKE : FUNDED),
+                // The pool is empty, so the payer with no balance cannot be
+                // topped up either.
+                spendableMax: spendableMaxSpy({ 7: 0n, 8: 0n }),
+            } as unknown as Partial<WalletApi>),
+            42n,
+        );
+
+        const evmOffer = (token: string) =>
+            shieldedRequirements({
+                network: `eip155:${CHAIN_ID}`,
+                asset: token,
+                amount: "10000",
+                payTo: "0x0000000000000000000000000000000000000001",
+                extra: { name: "USD Coin", version: "2" },
+            });
+        const fetchImpl = vi
+            .fn<typeof fetch>()
+            .mockResolvedValueOnce(paymentRequired([evmOffer(BROKE.token), evmOffer(FUNDED.token)]))
+            .mockResolvedValueOnce(new Response("premium", { status: 200 }));
+
+        const pay = x402(wallet, {
+            budget: { total: "5" },
+            allowUnshielded: true,
+            unshielded: { assetIds: [assetId(7n), assetId(8n)] },
+            http: { fetch: fetchImpl },
+        });
+
+        expect((await pay("https://api.example.com/premium")).status).toBe(200);
+        expect(decodePaymentHeader(fetchImpl.mock.calls[1]![0]).accepted.asset).toBe(FUNDED.token);
     });
 
     it("prefers the shielded offer when both are on the table", async () => {

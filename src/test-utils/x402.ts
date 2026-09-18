@@ -13,6 +13,7 @@ import {
     tokenAmount,
 } from "../core/brand.js";
 import { makeAssetInfo } from "../wallet/assets/index.js";
+import type { SpendableMax, WithheldValue } from "../wallet/selection/index.js";
 import { type ReadOnlyWalletInternals, registerInternals } from "../wallet/surface/internals.js";
 import type { TransferResult, WithdrawResult } from "../wallet/types/results.js";
 import type { PaymentRequirements } from "../x402/types.js";
@@ -36,6 +37,31 @@ export function usdc(id = 2n) {
         scale: 10n ** 3n,
         symbol: "USDC",
         decimals: 6,
+    });
+}
+
+/** More than any fixture offer asks for. */
+const PLENTY = 10n ** 9n;
+
+/** Nothing is out of reach. */
+export const NOTHING_WITHHELD: WithheldValue = { reserved: 0n, dust: 0n, cooldown: 0n, slots: 0n };
+
+/** What one asset holds: the reachable figure, or that plus why the rest is out of reach. */
+export type Holding = bigint | { max: bigint; withheld: WithheldValue };
+
+/**
+ * A `wallet.spendableMax` spy over a table of {@link Holding} keyed by asset id.
+ *
+ * An asset with no entry holds {@link PLENTY}, so a suite that is not about
+ * balances states nothing; `0n` is how a suite makes the shielded mechanism
+ * reject an offer and the selector move on to the next.
+ */
+export function spendableMaxSpy(held: Record<string, Holding> = {}) {
+    return vi.fn(async (ref: unknown): Promise<SpendableMax> => {
+        const entry = held[BigInt(ref as bigint).toString()] ?? PLENTY;
+        const { max, withheld } =
+            typeof entry === "bigint" ? { max: entry, withheld: NOTHING_WITHHELD } : entry;
+        return { max: circuitAmount(max), withheld };
     });
 }
 

@@ -35,7 +35,14 @@ import {
     timeoutSeconds,
 } from "./eip3009.js";
 import { deriveEphemeralKey } from "./ephemeral.js";
-import { ceilDiv, ensureFunded, resolveAsset, resolvePayerSlot, SCOPE } from "./funding.js";
+import {
+    assertFundable,
+    ceilDiv,
+    ensureFunded,
+    resolveAsset,
+    resolvePayerSlot,
+    SCOPE,
+} from "./funding.js";
 import type { PayableSchemeClient, PaymentQuote } from "./mechanism.js";
 import { requireEvmAddress, requireNetwork, requirePositiveInteger } from "./requirements.js";
 import type { PaymentPayloadContext, PaymentPayloadResult, PaymentRequirements } from "./types.js";
@@ -126,11 +133,31 @@ export function unshieldedExact(
         };
     };
 
+    /** The throwaway account this resource is paid from. Deterministic; see `ephemeral.ts`. */
+    const payerFor = (host: string | undefined) => {
+        const slot = resolvePayerSlot(opts.index, host);
+        if (slot.provenance === "shared") {
+            // `x402()` always supplies a host; reached only from clients that
+            // do not.
+            log.warn("no resource host — paying from the shared payer slot", {
+                index: slot.index,
+            });
+        }
+        // The spending key stays off the wallet object; the internals registry holds it.
+        const { nsk } = walletInternals(wallet).keys;
+        return { slot, account: privateKeyToAccount(deriveEphemeralKey(nsk, slot.index)) };
+    };
+
     return {
         scheme: "exact",
 
-        async quote(req: PaymentRequirements): Promise<PaymentQuote> {
+        async quote(req: PaymentRequirements, ctx?: PaymentPayloadContext): Promise<PaymentQuote> {
             const { value, asset } = await read(req);
+            // Asked here, where a refusal is still routable: funding happens in
+            // `createPaymentPayload`, and a refusal from there aborts the
+            // request instead of falling through to the next offer.
+            const { account } = payerFor(ctx?.host);
+            await assertFundable(wallet, branded<EvmAddress>(account.address), asset, value);
             // Base units → circuit units, rounded up, so a budget never
             // under-counts what a payment draws from the pool.
             return { amount: branded<CircuitAmount>(ceilDiv(value, asset.scale)), asset };
@@ -143,17 +170,7 @@ export function unshieldedExact(
         ): Promise<PaymentPayloadResult> {
             const terms = await read(req);
             const { value, asset } = terms;
-            const slot = resolvePayerSlot(opts.index, ctx?.host);
-            if (slot.provenance === "shared") {
-                // `x402()` always supplies a host; reached only from clients
-                // that do not.
-                log.warn("no resource host — paying from the shared payer slot", {
-                    index: slot.index,
-                });
-            }
-            // The spending key stays off the wallet object; the internals registry holds it.
-            const { nsk } = walletInternals(wallet).keys;
-            const account = privateKeyToAccount(deriveEphemeralKey(nsk, slot.index));
+            const { slot, account } = payerFor(ctx?.host);
 
             // Serialised per payer slot. `ensureFunded` awaits between reading
             // the balance and deciding to withdraw; without the lock,

@@ -7,7 +7,7 @@
 
 import type { CircuitAmount } from "../core/brand.js";
 import type { AssetInfo } from "../wallet/assets/index.js";
-import type { PaymentRequirements, SchemeNetworkClient } from "./types.js";
+import type { PaymentPayloadContext, PaymentRequirements, SchemeNetworkClient } from "./types.js";
 
 /**
  * What an offer would cost, in terms the wallet can reason about.
@@ -34,11 +34,25 @@ export interface PaymentQuote {
  */
 export interface PayableSchemeClient extends SchemeNetworkClient {
     /**
-     * Price `paymentRequirements`, or reject with an `X402PaymentError`
-     * whose reason is `unsupported-requirements`.
+     * Price `paymentRequirements` **and judge whether this wallet can pay them**,
+     * or reject with an `X402PaymentError` whose reason is
+     * `unsupported-requirements`.
+     *
+     * Payability is the half the selector cannot determine for itself, and it is
+     * a point-in-time answer rather than a promise: it reads the wallet as
+     * currently synced — an unsynced wallet has nothing to spend and every offer
+     * is refused — and may be stale by the time `createPaymentPayload` runs,
+     * which is seconds later for a mechanism that proves.
+     *
+     * `context` is what `createPaymentPayload` will be given, so a mechanism
+     * whose payer depends on the resource — the unshielded one derives a payer
+     * address per host — judges the same payer it will later pay from.
      *
      * MUST NOT move funds or mutate state: the selector calls this on offers
      * it may discard.
      */
-    quote(paymentRequirements: PaymentRequirements): Promise<PaymentQuote>;
+    quote(
+        paymentRequirements: PaymentRequirements,
+        context?: PaymentPayloadContext,
+    ): Promise<PaymentQuote>;
 }

@@ -3,7 +3,7 @@ import { hashTypedData, verifyTypedData } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it, vi } from "vitest";
 import { assetId, evmAddress } from "../core/brand.js";
-import { usdc, withdrawSpy, withNsk, X402_CHAIN_ID } from "../test-utils/x402.js";
+import { spendableMaxSpy, usdc, withdrawSpy, withNsk, X402_CHAIN_ID } from "../test-utils/x402.js";
 import type { WalletApi } from "../wallet/api.js";
 import { deriveEphemeralKey } from "./ephemeral.js";
 import type { PaymentRequirements } from "./types.js";
@@ -15,20 +15,24 @@ const PAY_TO = "0x209693Bc6afc0C5328bA36FaF03C514EF312287C";
 
 const USDC = usdc(1n);
 
-function stubWallet(opts: { balances?: bigint[] } = {}) {
+function stubWallet(opts: { balances?: bigint[]; pool?: bigint } = {}) {
     const balances = [...(opts.balances ?? [10_000_000n])];
     const tokenBalanceOf = vi.fn(async () =>
         balances.length > 1 ? balances.shift()! : balances[0],
     );
     const withdraw = withdrawSpy();
+    // What the pool could unshield to top the payer up; ample unless a test
+    // says otherwise.
+    const spendableMax = spendableMaxSpy(opts.pool === undefined ? {} : { 1: opts.pool });
     const wallet = {
         chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
         asset: async () => USDC,
         assets: async () => [USDC],
+        spendableMax,
         withdraw,
     } as unknown as WalletApi;
     withNsk(wallet, NSK);
-    return { wallet, tokenBalanceOf, withdraw };
+    return { wallet, tokenBalanceOf, withdraw, spendableMax };
 }
 
 const requirements = (over: Partial<PaymentRequirements> = {}): PaymentRequirements => ({
@@ -175,6 +179,14 @@ describe("unshieldedExact", () => {
         expect(withdraw).toHaveBeenCalledWith(expect.objectContaining({ gross: 100n, asset: 1n }));
     });
 
+    it("tops up with what the pool has when it cannot cover the whole multiple", async () => {
+        // The multiple amortises the proof; it is not a requirement. Refusing
+        // here would strand a payer holding less than ten calls' worth.
+        const { wallet, withdraw } = stubWallet({ balances: [0n, 10_000_000n], pool: 40n });
+        await unshieldedExact(wallet, { pollMs: 1 }).createPaymentPayload(2, requirements());
+        expect(withdraw).toHaveBeenCalledWith(expect.objectContaining({ gross: 40n }));
+    });
+
     it("gives up on a withdrawal that never lands, without signing", async () => {
         const { wallet } = stubWallet({ balances: [0n, 0n, 0n] });
         // The default poll schedule (30 polls, 2 s apart), on a fake clock.
@@ -223,6 +235,7 @@ describe("unshieldedExact.quote", () => {
                 id === 7n
                     ? OTHER
                     : { ...USDC, token: evmAddress("0x000000000000000000000000000000000000dEaD") },
+            spendableMax: spendableMaxSpy(),
             withdraw: async () => undefined,
         } as unknown as WalletApi;
         withNsk(wallet, NSK);
@@ -264,6 +277,7 @@ describe("unshieldedExact.quote", () => {
                     listed,
                 ],
                 asset,
+                spendableMax: spendableMaxSpy(),
             } as unknown as WalletApi,
             NSK,
         );
@@ -287,6 +301,68 @@ describe("unshieldedExact.quote", () => {
         );
     });
 
+    it("refuses an offer neither the payer nor the pool can fund", async () => {
+        // `unsupported-requirements`, so `select` moves to the next entry. The
+        // same refusal from `createPaymentPayload` would abort the request.
+        const { wallet, withdraw } = stubWallet({ balances: [0n], pool: 9n });
+        await expect(unshieldedExact(wallet).quote(requirements())).rejects.toThrow(
+            /payer 0x\w+ holds 0 of the 10000 base unit\(s\).*pool can add only 9 of the 10/,
+        );
+        expect(withdraw).not.toHaveBeenCalled();
+    });
+
+    it("accepts an offer the pool can cover, even with the payer empty", async () => {
+        const { wallet, withdraw } = stubWallet({ balances: [0n], pool: 10n });
+        await expect(unshieldedExact(wallet).quote(requirements())).resolves.toBeTruthy();
+        // Pricing must not move value: the top-up belongs to the payment.
+        expect(withdraw).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the adapter cannot read the payer's balance", async () => {
+        const wallet = withNsk(
+            {
+                chain: { chainId: async () => CHAIN_ID },
+                asset: async () => USDC,
+                assets: async () => [USDC],
+            } as unknown as WalletApi,
+            NSK,
+        );
+        // Static, so it is answered here rather than per payment.
+        await expect(unshieldedExact(wallet).quote(requirements())).rejects.toThrow(
+            /chain adapter has no `tokenBalanceOf`/,
+        );
+    });
+
+    it("judges the payer the payment will actually use", async () => {
+        // Payer slots are per host, so a quote that ignored the host would read
+        // a different address than the one `createPaymentPayload` funds.
+        const seen: string[] = [];
+        const wallet = withNsk(
+            {
+                chain: {
+                    chainId: async () => CHAIN_ID,
+                    tokenBalanceOf: async (_token: unknown, payer: string) => {
+                        seen.push(payer);
+                        return 10_000_000n;
+                    },
+                },
+                asset: async () => USDC,
+                assets: async () => [USDC],
+                spendableMax: spendableMaxSpy(),
+                withdraw: withdrawSpy(),
+            } as unknown as WalletApi,
+            NSK,
+        );
+        const mechanism = unshieldedExact(wallet);
+
+        await mechanism.quote(requirements(), { host: "a.example" });
+        await mechanism.createPaymentPayload(2, requirements(), { host: "a.example" });
+        expect(new Set(seen).size).toBe(1);
+
+        await mechanism.quote(requirements(), { host: "b.example" });
+        expect(new Set(seen).size).toBe(2);
+    });
+
     it("refuses a non-integer amount", () =>
         rejects({ amount: "1.5" }, /amount must be a decimal integer/));
 });
@@ -305,6 +381,7 @@ describe("unshieldedExact funding concurrency", () => {
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
             asset: async () => USDC,
             assets: async () => [USDC],
+            spendableMax: spendableMaxSpy(),
             withdraw,
         } as unknown as WalletApi;
         withNsk(wallet, NSK);
@@ -340,6 +417,7 @@ describe("unshieldedExact funding concurrency", () => {
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf },
             asset: async () => USDC,
             assets: async () => [USDC],
+            spendableMax: spendableMaxSpy(),
             withdraw,
         } as unknown as WalletApi;
         withNsk(wallet, NSK);

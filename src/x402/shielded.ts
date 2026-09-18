@@ -90,6 +90,7 @@ export function shieldedExact(
     opts: ShieldedExactOptions = {},
 ): PayableSchemeClient {
     const minTimeoutSeconds = opts.minTimeoutSeconds ?? DEFAULT_MIN_TIMEOUT_SECONDS;
+    const autoConsolidate = opts.autoConsolidate ?? true;
 
     // Memoised: an offer is read during selection and again during payment,
     // and a wallet's chain does not change. Evicted on rejection because
@@ -115,9 +116,34 @@ export function shieldedExact(
 
         async quote(req: PaymentRequirements): Promise<PaymentQuote> {
             const terms = await read(req);
+            // An offer priced in an asset this wallet cannot cover is
+            // `unsupported`, not a failure: the selector walks `accepts[]` in
+            // order and only a mechanism can say whether its own network's offer
+            // is payable. Without this, a server offering the same tool in
+            // several assets would always have its first shielded entry chosen,
+            // and the request would die inside `transfer` rather than falling
+            // through to the entry this wallet could actually have paid.
+            //
+            // Asked as `kind: "transfer"` so the gate and the spend apply one
+            // rule: a bare balance ignores the relayer fee the payment must also
+            // cover, and would pass an offer `transfer` then refuses seconds
+            // later, with no fall-through left. `slots` is added back when
+            // consolidation may run, since that is the one withheld cause a
+            // spend can still recover.
+            const { max, withheld } = await wallet.spendableMax(terms.asset, { kind: "transfer" });
+            const reachable = max + (autoConsolidate ? withheld.slots : 0n);
+            const asset = await wallet.asset(terms.asset);
+            if (reachable < terms.amount) {
+                const symbol = asset.symbol ? ` (${asset.symbol})` : "";
+                throw unsupported(
+                    SCOPE,
+                    `${reachable} spendable unit(s) of asset ${terms.asset}${symbol} is short ` +
+                        `of the ${terms.amount} this offer asks for`,
+                );
+            }
             // Already circuit units: this network quotes in the wallet's
             // denomination.
-            return { amount: terms.amount, asset: await wallet.asset(terms.asset) };
+            return { amount: terms.amount, asset };
         },
 
         async createPaymentPayload(
@@ -137,7 +163,7 @@ export function shieldedExact(
                 amount,
                 asset,
                 onPhase: opts.onPhase,
-                autoConsolidate: opts.autoConsolidate ?? true,
+                autoConsolidate,
             });
 
             // Taken from the receipt, not a fixed index: output slots are
