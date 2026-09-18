@@ -27,6 +27,15 @@
 //   client.register(`eip155:${chainId}`,      unshieldedExact(wallet));
 
 export { type Budget, BudgetLedger, type BudgetReservation } from "../x402/budget.js";
+// The `exact` EVM payload, for a payer that already holds the token and so needs
+// none of the unshielding `unshieldedExact` does: it signs from a plain viem
+// account, not from a wallet.
+export {
+    requireEip712Domain,
+    signTransferAuthorization,
+    type TransferAuthorizationTerms,
+    timeoutSeconds,
+} from "../x402/eip3009.js";
 export { deriveEphemeralKey } from "../x402/ephemeral.js";
 export { type PayingFetch, type PaymentRecord, type X402Options, x402 } from "../x402/fetch.js";
 export type { PayableSchemeClient, PaymentQuote } from "../x402/mechanism.js";
