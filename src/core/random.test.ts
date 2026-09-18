@@ -21,6 +21,18 @@ describe("randomBelow", () => {
         expect(() => randomBelow(2.5)).toThrow(InvalidArgumentError);
     });
 
+    it("rejects a bound above a four-byte draw instead of looping forever", () => {
+        // `2^32 % n === 2^32` past this point, so `limit` would be 0 and no
+        // draw could ever be accepted.
+        expect(randomBelow(2 ** 32, bytesFrom([[0, 0, 0, 9]]))).toBe(9);
+        expect(() => randomBelow(2 ** 32 + 1)).toThrow(InvalidArgumentError);
+        expect(() => randomBelow(Number.MAX_SAFE_INTEGER)).toThrow(InvalidArgumentError);
+    });
+
+    it("rejects a `bytes` stub that does not return four bytes", () => {
+        expect(() => randomBelow(3, () => Uint8Array.from([0, 0]))).toThrow(InvalidArgumentError);
+    });
+
     it("returns 0 for a bound of 1", () => {
         expect(randomBelow(1)).toBe(0);
     });
@@ -106,6 +118,17 @@ describe("field draws", () => {
         const jj = new Set(Array.from({ length: DRAWS }, () => randomJubjubScalar().toString()));
         expect(fr.size).toBe(DRAWS);
         expect(jj.size).toBe(DRAWS);
+    });
+
+    // The other half of the mask contract: the masked range must *cover* the
+    // modulus. A mask that cleared too little is only slower, but one whose
+    // bound fell under the modulus would silently sample a truncated range,
+    // and every check above would still pass.
+    it.each([
+        ["randomFr", BN254_FR, 254],
+        ["randomJubjubScalar", BABYJUB_SUBGROUP_ORDER, 251],
+    ] as const)("MASK_BOUNDS: %s's mask covers its modulus", (_name, modulus, bits) => {
+        expect(modulus).toBeLessThanOrEqual(1n << BigInt(bits));
     });
 
     // Both draws mask the top byte before rejecting. A mask that cleared too

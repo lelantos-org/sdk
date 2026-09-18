@@ -32,7 +32,14 @@ export function randomBytes(n: number): Uint8Array {
     return out;
 }
 
-/** Uniform Fr (BN254 scalar field), non-zero. */
+/**
+ * Uniform Fr (BN254 scalar field), non-zero.
+ *
+ * The mask keeps the draw in `[0, 2^254)`, which must stay >= `BN254_FR` or the
+ * rejection loop would sample a truncated range instead of the whole field.
+ * `MASK_BOUNDS` in `random.test.ts` pins that. It is otherwise free: it only
+ * lifts the acceptance rate to ~76%.
+ */
 export function randomFr(): Field {
     for (;;) {
         const b = randomBytes(32);
@@ -42,7 +49,12 @@ export function randomFr(): Field {
     }
 }
 
-/** Uniform non-zero scalar mod the Baby-Jubjub subgroup order. */
+/**
+ * Uniform non-zero scalar mod the Baby-Jubjub subgroup order.
+ *
+ * The mask bounds the draw by `2^251`, under the same invariant as
+ * {@link randomFr}: it must stay >= `BABYJUB_SUBGROUP_ORDER`.
+ */
 export function randomJubjubScalar(): Field {
     for (;;) {
         const b = randomBytes(32);
@@ -57,6 +69,9 @@ export function randomU256(): bigint {
     return fromBeBytes(randomBytes(32));
 }
 
+/** The number of distinct values in a four-byte draw. */
+const SPAN32 = 2 ** 32;
+
 /**
  * Uniform integer in `[0, n)`.
  *
@@ -65,12 +80,15 @@ export function randomU256(): bigint {
  * `n` divides that number. The resulting bias is small but would skew slot
  * permutations, whose purpose is to remove ordering bias.
  *
- * `bytes` is injectable so a test can force a permutation; it must behave like
- * {@link randomBytes}.
+ * `bytes` is injectable so a test can force a permutation; it must return
+ * exactly `k` bytes, like {@link randomBytes}.
  */
 export function randomBelow(n: number, bytes: (k: number) => Uint8Array = randomBytes): number {
-    if (!Number.isInteger(n) || n < 1) {
-        throw new InvalidArgumentError(`randomBelow: n must be a positive integer, got ${n}`, {
+    // The upper bound is `SPAN32`, not `Number.MAX_SAFE_INTEGER`: a draw is
+    // four bytes, so a larger `n` would make `SPAN32 % n === SPAN32`, leaving
+    // `limit === 0` and a loop that never accepts a draw.
+    if (!Number.isInteger(n) || n < 1 || n > SPAN32) {
+        throw new InvalidArgumentError(`randomBelow: n must be an integer in [1, 2^32], got ${n}`, {
             argument: "n",
         });
     }
@@ -79,13 +97,18 @@ export function randomBelow(n: number, bytes: (k: number) => Uint8Array = random
     // rejection rate is at most n/2^32.
     const limit = SPAN32 - (SPAN32 % n);
     for (;;) {
+        const draw = bytes(4);
+        if (draw.length !== 4) {
+            throw new InvalidArgumentError(
+                `randomBelow: bytes(4) must return 4 bytes, got ${draw.length}`,
+                { argument: "bytes" },
+            );
+        }
         let v = 0;
-        for (const b of bytes(4)) v = v * 256 + b;
+        for (const b of draw) v = v * 256 + b;
         if (v < limit) return v % n;
     }
 }
-
-const SPAN32 = 2 ** 32;
 
 /**
  * A uniformly random permutation of `items`, as a new array.
