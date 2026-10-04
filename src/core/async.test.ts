@@ -8,6 +8,8 @@ import {
     retry,
     ttlCache,
     withTimeout,
+    yieldEvery,
+    yieldToEventLoop,
 } from "./async.js";
 
 describe("retry", () => {
@@ -85,6 +87,57 @@ describe("retry", () => {
         );
 
         expect(delays.every((d) => d >= 0)).toBe(true);
+    });
+});
+
+describe("yieldToEventLoop", () => {
+    it("lets a queued task run, which awaiting a settled promise does not", async () => {
+        let ran = false;
+        setTimeout(() => {
+            ran = true;
+        }, 0);
+
+        await Promise.resolve();
+        expect(ran).toBe(false);
+
+        // One yield is a turn of the loop, not a guarantee that a given timer has fired.
+        for (let i = 0; i < 50 && !ran; i++) await yieldToEventLoop();
+        expect(ran).toBe(true);
+    });
+});
+
+describe("yieldEvery", () => {
+    /** Whether a task queued before `step` ran by the time it resolved. */
+    async function yielded(step: () => Promise<void>): Promise<boolean> {
+        let ran = false;
+        const timer = setTimeout(() => {
+            ran = true;
+        }, 0);
+        await step();
+        clearTimeout(timer);
+        return ran;
+    }
+
+    it("is immediate within the budget and yields once it is spent", async () => {
+        let clock = 0;
+        const pause = yieldEvery(50, () => clock);
+
+        clock = 49;
+        expect(await yielded(pause)).toBe(false);
+
+        clock = 50;
+        // `setTimeout(0)` is the fallback yield, so the earlier timer runs first.
+        expect(await yielded(pause)).toBe(true);
+    });
+
+    it("measures the budget from the last yield", async () => {
+        let clock = 100;
+        const pause = yieldEvery(50, () => clock);
+        clock = 160;
+        await pause();
+
+        clock = 200;
+        expect(await yielded(pause)).toBe(false);
     });
 });
 

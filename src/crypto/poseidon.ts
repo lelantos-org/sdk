@@ -1,24 +1,19 @@
-// Poseidon over BN254, circomlib-compatible.
+// Poseidon over BN254, circomlib-compatible, at arities 1 to 6.
 //
-// Two backends, split by arity:
+// Two backends:
 //
-//   arity 5  -> wasm (`sdk/wasm/poseidon`): `Poseidon(TAG_MERKLE, ..)` dominates a tree build.
-//               The `poseidon-lite` table is the fallback, loaded only when the wasm module
-//               fails to initialise.
-//   others   -> `poseidon-lite`: they run a handful of times per operation, and each extra
-//               arity enlarges the wasm module, since light-poseidon emits its round constants
-//               as code, one construction per width. See `wasm/poseidon/src/lib.rs`.
+//   wasm (`sdk/wasm/poseidon`)  every arity. `Poseidon(TAG_MERKLE, ..)` at arity 5 dominates a
+//                               tree build; the other arities dominate building a spend.
+//   `poseidon-lite`             the fallback, loaded only when the wasm module fails to
+//                               initialise, so its round-constant tables are not in a consumer
+//                               bundle's eager graph.
 //
 // Both are pinned to the same digests by `tests/vectors/poseidon.json`, which the Rust backend
 // asserts too.
 //
-// Per-arity subpaths, not the `poseidon-lite` barrel: the barrel is CommonJS and re-exports every
-// arity through `Object.defineProperty` getters, which bundlers cannot analyse statically, so
-// importing it pulls every round-constant table. `bundle-budget.mjs` enforces this.
-import { poseidon2 } from "poseidon-lite/poseidon2";
-import { poseidon3 } from "poseidon-lite/poseidon3";
-import { poseidon4 } from "poseidon-lite/poseidon4";
-import { poseidon6 } from "poseidon-lite/poseidon6";
+// The fallback imports per-arity subpaths, not the `poseidon-lite` barrel: the barrel is CommonJS
+// and re-exports every arity through `Object.defineProperty` getters, which bundlers cannot
+// analyse statically, so importing it pulls every round-constant table, used or not.
 import { FIELD_BYTES, fromBeBytes, writeBeInto } from "../core/bytes.js";
 import { assertField, type Field } from "../core/field.js";
 import { errMessage } from "../errors/base.js";
@@ -35,39 +30,57 @@ const log = getLogger("lelantos:crypto:poseidon");
 /** Which implementation served a hash. Exposed for logging and assertions. */
 export type PoseidonBackend = "wasm" | "js";
 
-/** The wasm-backed arity. Everything else stays on the JS tables. */
-const WASM_ARITY = 5;
+type Hasher = (xs: Field[]) => Field;
 
-// JS backend for every arity but `WASM_ARITY`. Parity with circomlibjs `buildPoseidon` (BN254,
-// iden3 constants) is verified by `poseidon.test.ts`.
-//
 // The protocol hashes at 2 (key derivation), 3 (note commitment, rho, subscription token),
-// 4 (note inner, nullifier, FMD expand), 5 (Merkle node, coefficient digest) and 6 (FMD bit).
-// Each arity adds a round-constant table to every consumer bundle, so unused widths are excluded.
-const JS_TABLE: Record<number, (xs: Field[]) => Field> = {
-    2: poseidon2 as (xs: Field[]) => Field,
-    3: poseidon3 as (xs: Field[]) => Field,
-    4: poseidon4 as (xs: Field[]) => Field,
-    6: poseidon6 as (xs: Field[]) => Field,
-};
+// 4 (note inner, nullifier, FMD expand), 5 (Merkle node, coefficient digest) and 6 (FMD bit);
+// 1 serves the circomlib anchor in `poseidon-vectors.test.ts`.
+const MIN_ARITY = 1;
+const MAX_ARITY = 6;
 
 /**
- * Bind arity-5 hashing to the wasm module. The scratch buffer is per-instance and reused across
+ * Bind hashing to the wasm module. One scratch buffer per arity, per instance and reused across
  * calls, which is safe because `hash` is synchronous.
  */
-function wasmHash5(mod: PoseidonWasmMod): (xs: Field[]) => Field {
-    const scratch = new Uint8Array(WASM_ARITY * FIELD_BYTES);
+function wasmHasher(mod: PoseidonWasmMod): Hasher {
+    const scratch = Array.from(
+        { length: MAX_ARITY + 1 },
+        (_, arity) => new Uint8Array(arity * FIELD_BYTES),
+    );
     return (xs) => {
-        for (const [i, x] of xs.entries()) writeBeInto(scratch, i * FIELD_BYTES, x);
-        return fromBeBytes(mod.poseidon5(scratch));
+        const buf = scratch[xs.length] as Uint8Array;
+        for (const [i, x] of xs.entries()) writeBeInto(buf, i * FIELD_BYTES, x);
+        return fromBeBytes(mod.poseidon(buf));
     };
 }
 
+/**
+ * The `poseidon-lite` tables, loaded on demand. Parity with circomlibjs `buildPoseidon` (BN254,
+ * iden3 constants) is verified by `poseidon.test.ts`.
+ */
+async function jsHasher(): Promise<Hasher> {
+    const [m1, m2, m3, m4, m5, m6] = await Promise.all([
+        import("poseidon-lite/poseidon1"),
+        import("poseidon-lite/poseidon2"),
+        import("poseidon-lite/poseidon3"),
+        import("poseidon-lite/poseidon4"),
+        import("poseidon-lite/poseidon5"),
+        import("poseidon-lite/poseidon6"),
+    ]);
+    // Indexed by `arity - MIN_ARITY`.
+    const table: Hasher[] = [
+        m1.poseidon1,
+        m2.poseidon2,
+        m3.poseidon3,
+        m4.poseidon4,
+        m5.poseidon5,
+        m6.poseidon6,
+    ];
+    return (xs) => (table[xs.length - MIN_ARITY] as Hasher)(xs);
+}
+
 export class Poseidon {
-    /**
-     * Which implementation arity-5 hashes use. `"js"` means the wasm module did not load and
-     * arity-5 hashing is slower.
-     */
+    /** Which implementation serves hashes. `"js"` means the wasm module did not load. */
     readonly backend: PoseidonBackend;
 
     /**
@@ -80,43 +93,38 @@ export class Poseidon {
      * also rejects unreduced input; checking here keeps the error identical across backends.
      *
      * A bound property rather than a prototype method, so the class stays structurally
-     * `{ backend, hash }` and the arity table is captured per instance instead of branching on the
-     * backend per hash.
+     * `{ backend, hash }` and the backend is captured per instance instead of branched on per
+     * hash.
      */
     readonly hash: (xs: Field[]) => Field;
 
-    private constructor(backend: PoseidonBackend, hash5: (xs: Field[]) => Field) {
+    private constructor(backend: PoseidonBackend, hasher: Hasher) {
         this.backend = backend;
-        const table: Record<number, (xs: Field[]) => Field> = {
-            ...JS_TABLE,
-            [WASM_ARITY]: hash5,
-        };
         this.hash = (xs) => {
-            const fn = table[xs.length];
-            if (!fn) {
-                throw new InvalidArgumentError(`Poseidon arity ${xs.length} not supported (2..6)`, {
-                    argument: "inputs",
-                });
+            if (xs.length < MIN_ARITY || xs.length > MAX_ARITY) {
+                throw new InvalidArgumentError(
+                    `Poseidon arity ${xs.length} not supported (${MIN_ARITY}..${MAX_ARITY})`,
+                    { argument: "inputs" },
+                );
             }
             for (const [i, x] of xs.entries()) assertField(x, `Poseidon input ${i}`);
-            return fn(xs);
+            return hasher(xs);
         };
     }
 
     /**
-     * Initialises the wasm backend. Failure is not fatal: the instance loads the arity-5 JS table
+     * Initialises the wasm backend. Failure is not fatal: the instance loads the JS tables
      * instead and logs a warning, since the slowdown has no other symptom.
      */
     static async build(): Promise<Poseidon> {
         try {
             await ensureInit();
-            return new Poseidon("wasm", wasmHash5(w()));
+            return new Poseidon("wasm", wasmHasher(w()));
         } catch (error) {
-            log.warn("wasm unavailable; arity-5 hashing falls back to poseidon-lite", {
+            log.warn("wasm unavailable; hashing falls back to poseidon-lite", {
                 error: errMessage(error),
             });
-            const { poseidon5 } = await import("poseidon-lite/poseidon5");
-            return new Poseidon("js", poseidon5 as (xs: Field[]) => Field);
+            return new Poseidon("js", await jsHasher());
         }
     }
 }

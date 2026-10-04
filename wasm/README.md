@@ -34,17 +34,17 @@ Wire conventions:
 Exports: `base8`, `sub_order_le`, `add_point`, `mul_point_escalar`, `in_subgroup`, `pack_point`, `unpack_point` (+ decrypt / fmd modules).
 
 ### `poseidon/`
-Poseidon-5 over BN254, circomlib-compatible. **Arity 5 only** — that is
-`Poseidon(TAG_MERKLE, c0..c3)`, ~349,525 of the calls in a full tree build.
-Every other arity the SDK uses stays on the JS backend, since each width here
-costs a round-constant table in the binary.
+Poseidon over BN254, circomlib-compatible, at arities 1 to 6. Arity 5 is
+`Poseidon(TAG_MERKLE, c0..c3)`, the Merkle node; the SDK also hashes at 2, 3, 4
+and 6. Each width costs a round-constant table in the binary. `poseidon-lite`
+is the SDK's fallback when this module fails to load.
 
 `src/poseidon/` is vendored byte-for-byte from
 `backend/crates/crypto/src/poseidon/`, so `just drift` catches an edit to
 either side. `tests/vectors/poseidon.json`, asserted by both repos, catches
 semantic drift.
 
-Export: `poseidon5(inputs_be)` — 5 × 32 bytes BE in, 32 bytes BE out.
+Export: `poseidon(inputs_be)` — 1 to 6 × 32 bytes BE in, 32 bytes BE out.
 
 ### `poseidon-params/`
 The slice of `light-poseidon`'s surface the vendored permutation uses. Renamed

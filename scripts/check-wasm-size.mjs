@@ -1,6 +1,6 @@
 // Fails if a wasm-pack `_bg.wasm` artifact grows past its budget. Raise a limit in the same PR that
-// adds the growth, so the review surfaces the cost. Poseidon carries round constants for arity 5
-// only (a build-time table, one width per exposed arity; see wasm/poseidon-params/src/lib.rs).
+// adds the growth, so the review surfaces the cost. Poseidon carries one round-constant table per
+// exposed arity, 1 to 6 (build-time tables; see wasm/poseidon-params/src/lib.rs).
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import { ROOT } from "./lib/package.mjs";
 const BUDGETS = [
     { path: "wasm/jubjub/pkg/jubjub_wasm_bg.wasm", maxKiB: 200 },
     { path: "wasm/prover/pkg/prover_bg.wasm", maxKiB: 500 },
-    { path: "wasm/poseidon/pkg/poseidon_wasm_bg.wasm", maxKiB: 120 },
+    { path: "wasm/poseidon/pkg/poseidon_wasm_bg.wasm", maxKiB: 160 },
 ];
 
 let failed = false;

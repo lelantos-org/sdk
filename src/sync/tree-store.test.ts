@@ -460,6 +460,40 @@ describe("TreeStore.syncVerified", () => {
     });
 });
 
+describe("TreeStore hashing", () => {
+    it("builds the internal nodes during sync, leaving none for the first read", async () => {
+        const hash = vi.fn(stubP.hash);
+        const P: Poseidon = { backend: "js", hash };
+        const chunks = [chunk(0, 0, CHUNK_SIZE), chunk(1, CHUNK_SIZE, 10)];
+        const store = new TreeStore(P, clientOf(chunks), 6);
+
+        await store.sync();
+        const duringSync = hash.mock.calls.length;
+        expect(duringSync).toBeGreaterThan(CHUNK_SIZE / 4);
+
+        store.root();
+        store.getPath(CHUNK_SIZE + 3);
+        expect(hash.mock.calls.length).toBe(duringSync);
+    });
+
+    it("yields the same root as hashing everything at the end", async () => {
+        const chunks = [
+            chunk(0, 0, CHUNK_SIZE),
+            chunk(1, CHUNK_SIZE, CHUNK_SIZE),
+            chunk(2, 2 * CHUNK_SIZE, 7),
+        ];
+        const store = new TreeStore(stubP, clientOf(chunks), 6);
+        await store.sync();
+
+        const reference = new TreeStore(stubP, clientOf([]), 6);
+        reference.loadState({
+            leaves: chunks.flatMap((c) => c.entries.map((e) => e.leafHash)),
+            syncedCount: 2 * CHUNK_SIZE + 7,
+        });
+        expect(store.root()).toBe(reference.root());
+    });
+});
+
 describe("TreeStore depth", () => {
     it("builds the tree at the configured depth, not the module default", async () => {
         // The spend path passes `cfg.treeDepth` to the circuit, so the tree must use that depth; a

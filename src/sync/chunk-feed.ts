@@ -62,7 +62,8 @@ export function chunkOf(entryIndex: number): number {
 
 /**
  * Page `fetchChunk` from `firstChunkId` to the tail, handing each chunk to `consume` in ascending
- * chunk-id order.
+ * chunk-id order. A promise returned by `consume` is awaited before the next chunk is consumed;
+ * the window's fetches stay in flight meanwhile.
  *
  * The window is abandoned once an incomplete chunk is seen, so a sync issues at most
  * `FETCH_WINDOW - 1` speculative requests beyond the tail. `fetchChunk` receives a signal that
@@ -71,7 +72,7 @@ export function chunkOf(entryIndex: number): number {
 export async function pageChunks<C extends Chunk>(
     fetchChunk: (chunkId: number, signal?: AbortSignal | undefined) => Promise<C>,
     firstChunkId: number,
-    consume: (chunk: C) => void,
+    consume: (chunk: C) => void | Promise<void>,
     /** `feed` names the source in the cap warning. */
     opts: PagingOpts & { feed: string },
 ): Promise<PagingSummary> {
@@ -114,7 +115,7 @@ export async function pageChunks<C extends Chunk>(
 
             const chunk = await next;
             chunksFetched++;
-            consume(chunk);
+            await consume(chunk);
             if (!chunk.isComplete) return done("complete");
         }
     } finally {

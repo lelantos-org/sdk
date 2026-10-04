@@ -14,7 +14,7 @@ import { assertField } from "../core/field.js";
 import { randomFr } from "../core/random.js";
 import { buildRho, type Field, type Jubjub, type Point, type Poseidon } from "../crypto/index.js";
 import { InvalidArgumentError, WalletConfigError } from "../errors/config.js";
-import { FMD_DEFAULT_GAMMA, fmdExpandFlagKey } from "../fmd/keys.js";
+import { FMD_DEFAULT_GAMMA, type FmdFlagKey, fmdExpandFlagKey } from "../fmd/keys.js";
 import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
 import { auxDigest } from "../protocol/abi-hash.js";
@@ -145,6 +145,29 @@ export function deriveOutputRho(P: Poseidon, nf0: Field, outputs: readonly Note[
     return outputs.map((note, index) => ({ ...note, rho: buildRho(P, nf0, index) }));
 }
 
+/** Entries kept in {@link flagKeys}. */
+const FLAG_KEY_CACHE_SIZE = 8;
+
+/**
+ * Flag keys of the most recent recipients, by `(gamma, ck)`. An expansion is a pure function of
+ * the public `ck` and costs γ scalar multiplications. A spend's outputs go to few recipients (the
+ * payee, the wallet's own change and pads, the relayer), and the last two recur in every spend.
+ */
+const flagKeys = new Map<string, FmdFlagKey>();
+
+function flagKeyFor(J: Jubjub, P: Poseidon, ck: Point, gamma: number): FmdFlagKey {
+    const key = `${gamma}:${ck[0]}:${ck[1]}`;
+    const flagKey = flagKeys.get(key) ?? fmdExpandFlagKey(J, P, ck, gamma);
+    // A `Map` iterates in insertion order, so re-inserting a hit keeps the first key the least
+    // recently used.
+    flagKeys.delete(key);
+    flagKeys.set(key, flagKey);
+    if (flagKeys.size > FLAG_KEY_CACHE_SIZE) {
+        flagKeys.delete(flagKeys.keys().next().value as string);
+    }
+    return flagKey;
+}
+
 /** @internal */
 export function buildAuxForReal(
     J: Jubjub,
@@ -157,7 +180,7 @@ export function buildAuxForReal(
     return buildOutputAux({
         J,
         P,
-        recipientFlagKey: fmdExpandFlagKey(J, P, recipient.ck, gamma),
+        recipientFlagKey: flagKeyFor(J, P, recipient.ck, gamma),
         recipientPkD: recipient.pk_d,
         note,
         esk: rng.esk,

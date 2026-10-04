@@ -23,12 +23,37 @@ describe("pageChunks", () => {
         const { fetchChunk } = feed(3);
         const seen: number[] = [];
 
-        const summary = await pageChunks(fetchChunk, 0, (c) => seen.push(c.chunkId), {
-            feed: "test",
-        });
+        const summary = await pageChunks(
+            fetchChunk,
+            0,
+            (c) => {
+                seen.push(c.chunkId);
+            },
+            {
+                feed: "test",
+            },
+        );
 
         expect(summary.stoppedBy).toBe("complete");
         expect(seen).toEqual([0, 1, 2, 3]);
+    });
+
+    it("waits for an async consume before handing over the next chunk", async () => {
+        const { fetchChunk } = feed(3);
+        const events: string[] = [];
+
+        await pageChunks(
+            fetchChunk,
+            0,
+            async (c) => {
+                events.push(`start ${c.chunkId}`);
+                await new Promise((resolve) => setTimeout(resolve, 1));
+                events.push(`end ${c.chunkId}`);
+            },
+            { feed: "test" },
+        );
+
+        expect(events).toEqual([0, 1, 2, 3].flatMap((id) => [`start ${id}`, `end ${id}`]));
     });
 
     it("never requests a chunk past the cap", async () => {

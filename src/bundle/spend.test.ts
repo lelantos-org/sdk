@@ -5,11 +5,12 @@ import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { buildNullifierFromNsk } from "../crypto/nullifier.js";
 import { Poseidon } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
-import { fmdClueKeyFromRoot } from "../fmd/keys.js";
+import { fmdClueKeyFromRoot, fmdExpandFlagKey } from "../fmd/keys.js";
+import { buildOutputAux } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
 import type { SpendKind } from "../protocol/transact.js";
 import type { Prover } from "../prover/types.js";
-import { buildInputs, type InputSlot } from "./common.js";
+import { buildAuxForReal, buildInputs, type InputSlot, type OutputRecipient } from "./common.js";
 import { buildSpend, type SpendArgs } from "./spend.js";
 
 // `kind` routes the on-chain call: a transfer tagged `withdrawNative` would reach
@@ -482,5 +483,36 @@ describe("buildInputs", () => {
         const P = await Poseidon.build();
 
         expect(() => buildInputs(P, [null, null], DEPTH)).toThrow(InvalidArgumentError);
+    });
+});
+
+describe("buildAuxForReal", () => {
+    it("uses each recipient's own flag key, across more recipients than it caches", async () => {
+        const P = await Poseidon.build();
+        const J = await Jubjub.build();
+        const recipients: OutputRecipient[] = Array.from({ length: 12 }, () => ({
+            pk_d: J.mulPointEscalar(J.base8, randomJubjubScalar()),
+            pk: randomFr(),
+            ck: fmdClueKeyFromRoot(J, randomFr()),
+        }));
+        const n = note(J, 7n, randomFr());
+        const rng = { esk: randomJubjubScalar(), fmdR: randomJubjubScalar() };
+        const direct = (r: OutputRecipient) =>
+            buildOutputAux({
+                J,
+                P,
+                recipientFlagKey: fmdExpandFlagKey(J, P, r.ck),
+                recipientPkD: r.pk_d,
+                note: n,
+                esk: rng.esk,
+                fmdR: rng.fmdR,
+            });
+
+        // Two passes: the second meets every recipient again, the early ones after eviction.
+        for (let pass = 0; pass < 2; pass++) {
+            for (const r of recipients) {
+                expect(buildAuxForReal(J, P, n, r, rng)).toEqual(direct(r));
+            }
+        }
     });
 });

@@ -1,12 +1,15 @@
-// WASM module loading for Poseidon-5, kept apart from the hashing. Built on the factory in
+// WASM module loading for Poseidon, kept apart from the hashing. Built on the factory in
 // `runtime/wasm/module-loader.ts`, shared with `../jubjub-wasm/loader.ts`.
 
 import type { WasmLoaderOverride, WasmModuleBase } from "../../runtime/wasm/loader.js";
 import { createModuleLoader } from "../../runtime/wasm/module-loader.js";
 
 export interface PoseidonWasmMod extends WasmModuleBase {
-    /** 5 x 32B big-endian in, 32B big-endian out. Throws on non-canonical input. */
-    poseidon5(inputs_be: Uint8Array): Uint8Array;
+    /**
+     * 1 to 6 field elements of 32B big-endian in, 32B big-endian out. Throws on non-canonical
+     * input or any other length.
+     */
+    poseidon(inputs_be: Uint8Array): Uint8Array;
 }
 
 /**

@@ -29,11 +29,11 @@ const parsed = JSON.parse(readFileSync(vectorFile, "utf8")) as {
 };
 
 /**
- * Arities the SDK's table serves (see `poseidon.ts`). The shared vector file covers the Rust
- * crate's wider range, so rows outside these widths are skipped here and asserted by
+ * Arities the SDK serves (see `poseidon.ts`). The shared vector file covers the Rust crate's
+ * wider range, so rows outside these widths are skipped here and asserted by
  * `backend/crates/crypto`.
  */
-const MIN_ARITY = 2;
+const MIN_ARITY = 1;
 const MAX_ARITY = 6;
 const served = (v: Vector) => v.inputs.length >= MIN_ARITY && v.inputs.length <= MAX_ARITY;
 
@@ -52,9 +52,9 @@ describe("poseidon vectors", () => {
         expect(vectors.length).toBeGreaterThan(0);
     });
 
-    it("skips only widths the table does not serve", () => {
+    it("skips only widths the SDK does not serve", () => {
         // Guards the filter so a change to the bounds or the file cannot silently reduce coverage.
-        expect(skipped).toBe(4);
+        expect(skipped).toBe(2);
         for (const v of [...anchors, ...vectors]) {
             expect(v.inputs.length).toBeGreaterThanOrEqual(MIN_ARITY);
             expect(v.inputs.length).toBeLessThanOrEqual(MAX_ARITY);
@@ -64,7 +64,7 @@ describe("poseidon vectors", () => {
     it.each([
         MIN_ARITY - 1,
         MAX_ARITY + 1,
-    ])("rejects arity %i, which the table does not serve", (n) => {
+    ])("rejects arity %i, which the SDK does not serve", (n) => {
         expect(() => P.hash(Array.from({ length: n }, (_, i) => BigInt(i)))).toThrow(
             /not supported/,
         );

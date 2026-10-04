@@ -65,10 +65,11 @@ const PROVER_PATH = ["prover/wasm-prover.js", "prover/snarkjs.js", "prover/worke
  */
 const ENTRIES = [
     {
-        // No BIP-39 word list and no arity-5 Poseidon table: both load on demand.
+        // No BIP-39 word list and no Poseidon round-constant tables: the first loads with a
+        // mnemonic, the second only if the Poseidon wasm module fails to initialise.
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/entry/index.js";`,
-        max: 204_000,
+        max: 135_000,
         module: "dist/entry/index.js",
         forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
@@ -91,7 +92,7 @@ const ENTRIES = [
         // stack and the scan loop, so it tracks `primitives: keys`.
         name: "watch: connectWatch",
         source: `export { connectWatch } from "${ROOT}/dist/entry/watch.js";`,
-        max: 140_000,
+        max: 70_500,
         module: "dist/entry/watch.js",
         forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
@@ -99,7 +100,7 @@ const ENTRIES = [
         // Key derivation and address encoding: the crypto stack's eager graph.
         name: "primitives: keys",
         source: `export { deriveKeysFromMnemonic, encodeAddress } from "${ROOT}/dist/entry/primitives.js";`,
-        max: 125_000,
+        max: 55_500,
     },
     {
         // Pure arithmetic: none of the bundle builders `./protocol` also forwards.
@@ -117,7 +118,7 @@ const ENTRIES = [
         // the viem adapter and the signers, which the split harness shares into the entry chunk.
         name: "advanced: createWallet",
         source: `export { createWallet } from "${ROOT}/dist/entry/advanced.js";`,
-        max: 194_000,
+        max: 124_500,
         module: "dist/entry/advanced.js",
         forbid: SPEND_PATH,
     },

@@ -6,19 +6,30 @@
 //!
 //! `light-poseidon` emits its constants as code, one arm per width from 2 to
 //! 13, dispatched on a runtime `t`, so a wasm build carries every arm. Here
-//! `build.rs` runs light-poseidon on the host and writes one width out as
-//! data: the numbers are light-poseidon's own, and
+//! `build.rs` runs light-poseidon on the host and writes the served widths out
+//! as data: the numbers are light-poseidon's own, and
 //! `sdk/tests/vectors/poseidon.json` pins the resulting digests.
 //!
-//! Width 6 only (arity 5), the one width `poseidon-wasm` exposes; every other
-//! arity the SDK uses stays on the JS backend. Any other width is an error.
+//! Widths 2 to 7 (arities 1 to 6), the range `poseidon-wasm` exposes. Any
+//! other width is an error.
 
 use core::fmt;
 
 use ark_ff::{BigInteger256, PrimeField};
 
 mod table {
-    include!(concat!(env!("OUT_DIR"), "/bn254_x5_w6.rs"));
+    /// One width's constants, as canonical little-endian limbs.
+    pub(crate) struct Table {
+        pub width: usize,
+        pub full_rounds: usize,
+        pub partial_rounds: usize,
+        /// Round constants, `width` per round, flattened.
+        pub ark: &'static [[u64; 4]],
+        /// MDS matrix, row-major.
+        pub mds: &'static [[u64; 4]],
+    }
+
+    include!(concat!(env!("OUT_DIR"), "/bn254_x5.rs"));
 }
 
 /// Stands in for `light_poseidon::PoseidonError`.
@@ -34,9 +45,10 @@ impl fmt::Display for PoseidonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "no bn254_x5 parameters for width {}: this crate builds width {} only",
+            "no bn254_x5 parameters for width {}: this crate builds widths {} to {} only",
             self.requested,
-            table::WIDTH,
+            table::MIN_WIDTH,
+            table::MAX_WIDTH,
         )
     }
 }
@@ -80,19 +92,21 @@ pub mod parameters {
             t: u8,
         ) -> Result<PoseidonParameters<F>, PoseidonError> {
             let requested = usize::from(t);
-            if requested != table::WIDTH {
-                return Err(PoseidonError { requested });
-            }
+            let table = table::TABLES
+                .iter()
+                .find(|table| table.width == requested)
+                .ok_or(PoseidonError { requested })?;
 
             Ok(PoseidonParameters {
-                ark: table::ARK.iter().copied().map(decode).collect(),
-                mds: table::MDS
-                    .chunks_exact(table::WIDTH)
+                ark: table.ark.iter().copied().map(decode).collect(),
+                mds: table
+                    .mds
+                    .chunks_exact(table.width)
                     .map(|row| row.iter().copied().map(decode).collect())
                     .collect(),
-                full_rounds: table::FULL_ROUNDS,
-                partial_rounds: table::PARTIAL_ROUNDS,
-                width: table::WIDTH,
+                full_rounds: table.full_rounds,
+                partial_rounds: table.partial_rounds,
+                width: table.width,
                 alpha: table::ALPHA,
             })
         }

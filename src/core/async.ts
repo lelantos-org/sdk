@@ -25,6 +25,34 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<SleepOutcome> {
 }
 
 /**
+ * Let the event loop run pending tasks (rendering, input, timers, I/O callbacks) before
+ * continuing. An `await` of a settled promise does not: it runs microtasks only.
+ */
+export function yieldToEventLoop(): Promise<void> {
+    // `scheduler.yield` resumes ahead of other queued tasks and is not clamped like a nested
+    // `setTimeout`. Absent from Node and some browsers.
+    const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+    if (typeof scheduler?.yield === "function") return scheduler.yield();
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A checkpoint for long synchronous work done in steps. Awaiting the returned function yields to
+ * the event loop once `budgetMs` has passed since the last yield, and is otherwise immediate.
+ */
+export function yieldEvery(
+    budgetMs: number,
+    now: () => number = () => performance.now(),
+): () => Promise<void> {
+    let sliceStart = now();
+    return async () => {
+        if (now() - sliceStart < budgetMs) return;
+        await yieldToEventLoop();
+        sliceStart = now();
+    };
+}
+
+/**
  * Reject with `mkError()` if `p` has not settled within `ms`. The timer is
  * cleared on every outcome; a bare `Promise.race` leaves it pending and keeps
  * the Node event loop alive until it fires.

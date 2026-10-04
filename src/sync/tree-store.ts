@@ -8,6 +8,10 @@
 //
 // Paging lives in `./chunk-feed.js`; this file keeps the leaves in order.
 //
+// Hashing: each chunk's internal nodes are built as the chunk arrives, while the following
+// chunks download, and the event loop is released between slices. Left to the first `root()`,
+// a cold sync would hash every node in one uninterrupted block.
+//
 // Persistence: `TreeStore.withPersistence` runs `load` once at startup and `save` after each
 // successful `sync()` that holds unsaved leaves.
 //
@@ -15,7 +19,7 @@
 // Otherwise a reset racing a paging sync would hand the sync an empty tree mid-page (a spurious
 // `WireFormatError`), and a spend could read a root and paths from two different trees.
 
-import { createMutex } from "../core/async.js";
+import { createMutex, yieldEvery } from "../core/async.js";
 import type { Field, Poseidon } from "../crypto/index.js";
 import { type MerkleNode, type MerkleProof, MerkleTree } from "../crypto/merkle.js";
 import type { IsKnownRoot } from "../crypto/path.js";
@@ -37,6 +41,9 @@ import {
 export type { MerkleNode };
 
 const log = getLogger("lelantos:wallet:tree");
+
+/** Hashing time after which a sync releases the event loop before the next chunk. */
+const HASH_SLICE_MS = 50;
 
 export interface TreeStoreState {
     leaves: bigint[];
@@ -212,22 +219,26 @@ export class TreeStore {
 
     private async syncUnlocked(opts: TreeSyncOpts): Promise<TreeSyncSummary> {
         const startCount = this.syncedCount;
+        const pause = yieldEvery(HASH_SLICE_MS);
 
         const { chunksFetched, stoppedBy } = await pageChunks(
             (chunkId, signal) => this.fmd.fetchCommitmentChunk(chunkId, { signal }),
             chunkOf(this.syncedCount),
-            (chunk) => {
+            async (chunk) => {
                 const fresh = chunk.entries.filter((e) => e.leafIndex >= this.syncedCount);
                 if (fresh.length > 0) {
                     assertContiguous(fresh, this.tree.leaves.length, chunk.chunkId);
                     this.tree.bulkInsert(fresh.map((e) => e.leafHash));
                     this.syncedCount = fresh.at(-1)!.leafIndex + 1;
+                    // Builds this chunk's nodes; earlier chunks' are cached.
+                    this.tree.root();
                 }
                 opts.onProgress?.({
                     chunkId: chunk.chunkId,
                     leaves: fresh.length,
                     syncedCount: this.syncedCount,
                 });
+                await pause();
             },
             {
                 // Derived from the configured depth, since a deeper tree has more chunks.
@@ -255,8 +266,7 @@ export class TreeStore {
     /** Write the current tree to persistence, if configured. Caller holds the lock. */
     private async persist(): Promise<void> {
         if (!this.persistence) return;
-        // The node cache fills lazily, so the internal nodes are built before snapshotting;
-        // otherwise an empty cache would be persisted.
+        // A sync builds the nodes as it inserts; this covers leaves loaded without them.
         this.tree.root();
         try {
             await this.persistence.save(this.saveState());
