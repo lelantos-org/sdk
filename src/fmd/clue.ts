@@ -107,7 +107,7 @@ export function fmdTest(J: Jubjub, P: Poseidon, dk: FmdDetectionKey, clue: FmdCl
 
 /**
  * Legendre-symbol bit of Poseidon([TAG_FMD_BIT, R.x, R.y, i, S.x, S.y]): 1 iff the hash is a
- * quadratic residue. Same six-input layout as the in-circuit `ClueCheck`.
+ * quadratic residue. Computed off-circuit by sender and detector alike.
  *
  * @internal
  */

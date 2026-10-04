@@ -3,6 +3,7 @@
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
+    derivePk,
     type Field,
     type Poseidon,
 } from "../crypto/index.js";
@@ -41,9 +42,10 @@ export function toSpentNoteFromPath(
 /**
  * A dummy input slot: the zero-value note under `rho` and `rcm`, nullified with `nsk`.
  *
- * `is_dummy = 1` skips Merkle membership and the `pk` check, so `pk`, `d` and the path are zero.
- * `cm` and `nf` are the values `SpentNote` recomputes from the slot's fields:
- * `nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm)`.
+ * `is_dummy = 1` skips Merkle membership and the `asset != 0` check, so the path is zero. The
+ * circuit derives the slot's `pk` from `nsk` and `d` on every slot, so the note is committed
+ * under `Poseidon(TAG_PK, ivk, 0)`. `cm` and `nf` are the values `SpentNote` recomputes from the
+ * slot's fields: `nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm)`.
  *
  * The nullifier is public and an observer must not be able to recompute it. Preconditions: `nsk`
  * is the key the spend's real inputs open with, and `rho` and `rcm` are sampled uniformly per
@@ -56,7 +58,8 @@ export function dummyInputAt(
     depth: number,
     { nsk, rho, rcm }: { nsk: Field; rho: Field; rcm: Field },
 ): SpentNote {
-    const note: Note = { asset: 0n, value: 0n, pk: 0n, rho, rcm };
+    const d = 0n;
+    const note: Note = { asset: 0n, value: 0n, pk: derivePk(P, nsk, d), rho, rcm };
     const cm = buildNoteCommitment(P, note);
     const nf = buildNullifierFromNsk(P, nsk, rho, cm);
     const pathElements: Field[][] = [];
@@ -64,7 +67,7 @@ export function dummyInputAt(
     return {
         ...note,
         nsk,
-        d: 0n,
+        d,
         cm,
         nf,
         leafIndex: 0,

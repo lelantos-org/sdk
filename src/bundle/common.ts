@@ -35,6 +35,11 @@ export interface OutputRecipient {
      * flag-key points, never detection scalars.
      */
     ck: Point;
+    /**
+     * Set for a key no later output is addressed to (a pad's). Its flag key is expanded without
+     * entering the cache of recent recipients.
+     */
+    oneTime?: boolean;
 }
 
 /**
@@ -150,8 +155,8 @@ const FLAG_KEY_CACHE_SIZE = 8;
 
 /**
  * Flag keys of the most recent recipients, by `(gamma, ck)`. An expansion is a pure function of
- * the public `ck` and costs γ scalar multiplications. A spend's outputs go to few recipients (the
- * payee, the wallet's own change and pads, the relayer), and the last two recur in every spend.
+ * the public `ck` and costs γ scalar multiplications. A spend's paying outputs go to few recipients
+ * (the payee, the wallet's own change, the relayer), and the last two recur in every spend.
  */
 const flagKeys = new Map<string, FmdFlagKey>();
 
@@ -180,7 +185,9 @@ export function buildAuxForReal(
     return buildOutputAux({
         J,
         P,
-        recipientFlagKey: flagKeyFor(J, P, recipient.ck, gamma),
+        recipientFlagKey: recipient.oneTime
+            ? fmdExpandFlagKey(J, P, recipient.ck, gamma)
+            : flagKeyFor(J, P, recipient.ck, gamma),
         recipientPkD: recipient.pk_d,
         note,
         esk: rng.esk,

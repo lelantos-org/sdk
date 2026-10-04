@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { beforeAll, describe, expect, it } from "vitest";
 import { POW_2_64 } from "../core/field.js";
 import { buildInner, buildNoteCommitment, commitWithInner } from "./commit.js";
+import { derivePk } from "./derive.js";
 import { buildNullifierFromNsk } from "./nullifier.js";
 import { Poseidon } from "./poseidon.js";
 import * as tags from "./tags.js";
@@ -24,10 +25,10 @@ interface TransactVectors {
         witness: Record<
             | "in_asset"
             | "in_value"
-            | "in_pk"
             | "in_rho"
             | "in_rcm"
             | "in_nsk"
+            | "in_d"
             | "out_asset"
             | "out_value"
             | "out_pk"
@@ -109,7 +110,7 @@ describe("note commitment vectors", () => {
             const note = {
                 asset: word(w.in_asset, i),
                 value: word(w.in_value, i),
-                pk: word(w.in_pk, i),
+                pk: derivePk(P, word(w.in_nsk, i), word(w.in_d, i)),
                 rho: word(w.in_rho, i),
                 rcm: word(w.in_rcm, i),
             };

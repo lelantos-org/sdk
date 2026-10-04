@@ -507,26 +507,17 @@ wasmDescribe("transact vectors", () => {
                         }
                     });
 
-                    it("opens every real input's pk under its nsk and in_d", () => {
-                        im.inputs.forEach((slot, i) => {
-                            if (slot.isDummy) {
-                                expect(w.in_d[i], `in_d ${i}`).toBe("0");
-                                return;
-                            }
-                            expect(derivePk(P, f(w.in_nsk[i]), f(w.in_d[i])), `pk ${i}`).toBe(
-                                f(w.in_pk[i]),
-                            );
-                        });
-                    });
-
-                    it("rebuilds every spent note", () => {
+                    // The witness carries no `in_pk`: the circuit derives each slot's pk from
+                    // its nsk and in_d, so the commitment only rebuilds under that key.
+                    it("rebuilds every spent note under the pk derived from nsk and in_d", () => {
                         expect(im.inputs).toHaveLength(w.nullifier.length);
                         im.inputs.forEach((slot, i) => {
                             expect(slot.slot).toBe(i);
+                            if (slot.isDummy) expect(w.in_d[i], `in_d ${i}`).toBe("0");
                             const note = {
                                 asset: f(w.in_asset[i]),
                                 value: f(w.in_value[i]),
-                                pk: f(w.in_pk[i]),
+                                pk: derivePk(P, f(w.in_nsk[i]), f(w.in_d[i])),
                                 rho: f(w.in_rho[i]),
                                 rcm: f(w.in_rcm[i]),
                             };
@@ -555,12 +546,11 @@ wasmDescribe("transact vectors", () => {
                             expect(d.cm, `cm ${slot}`).toBe(f(im.inputs[slot]?.cm));
                             expect(d.nf, `nf ${slot}`).toBe(f(w.nullifier[slot]));
                             expect(
-                                [d.asset, d.value, d.pk, d.rho, d.rcm, d.nsk, d.d].map(String),
+                                [d.asset, d.value, d.rho, d.rcm, d.nsk, d.d].map(String),
                                 `fields ${slot}`,
                             ).toEqual([
                                 w.in_asset[slot],
                                 w.in_value[slot],
-                                w.in_pk[slot],
                                 w.in_rho[slot],
                                 w.in_rcm[slot],
                                 w.in_nsk[slot],
@@ -707,7 +697,7 @@ wasmDescribe("transact vectors", () => {
                         const spent = im.inputs.map((slot, i) => ({
                             asset: f(w.in_asset[i]),
                             value: f(w.in_value[i]),
-                            pk: f(w.in_pk[i]),
+                            pk: derivePk(P, f(w.in_nsk[i]), f(w.in_d[i])),
                             rho: f(w.in_rho[i]),
                             rcm: f(w.in_rcm[i]),
                             nsk: f(w.in_nsk[i]),

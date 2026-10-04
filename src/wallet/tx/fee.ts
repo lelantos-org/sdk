@@ -39,8 +39,6 @@ export interface ResolvedFee {
      * spend's target.
      */
     cover?: { asset: AssetId; value: CircuitAmount } | undefined;
-    /** Output slots this fee occupies: the note itself, plus one for a cross-asset fee's change. */
-    slots: number;
 }
 
 interface ResolveFeeArgs {
@@ -80,7 +78,6 @@ export async function resolveFee(
         value,
         crossAsset,
         ...(crossAsset ? { cover: { asset: assetId(asset), value } } : {}),
-        slots: crossAsset ? 2 : 1,
     };
 }
 
@@ -154,7 +151,7 @@ export function relayerMoney(feeAsset: AssetInfo, fee: ResolvedFee | null): Mone
 
 /**
  * The output slots a resolved fee occupies: the relayer's note, then the change from the notes
- * that funded it.
+ * that funded it, when any is left.
  *
  * `feeSelection` is the cover `runSpend` took for a cross-asset fee, and is absent for a same-asset
  * one, whose change is part of the spend's own.
@@ -181,7 +178,7 @@ export function feeSlots(
             ownAddr,
             asset: fee.asset,
             remainder: feeSelection.sum - fee.value,
-            slots: 1,
+            maxNotes: 1,
         }),
     ];
 }

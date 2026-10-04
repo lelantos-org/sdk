@@ -177,8 +177,9 @@ describe.skipIf(!paths || !vkeyPath)("buildSpend against the 4x6 circuit", () =>
         await expectVerifies(made);
     }, 120_000);
 
-    // SpentNote constrains `in_pk == Poseidon(TAG_PK, ivk, in_d)` on a real slot, so witness
-    // generation fails before any proving.
+    // SpentNote derives the slot's pk from `nsk` and `in_d` and opens the commitment under it, so
+    // a note committed under any other key is not in the tree: witness generation fails before
+    // any proving.
     it("rejects an input opened under a diversifier its pk was not derived with", async () => {
         const d0 = (me: SpendingKey) => defaultDiversifier(me.ivk);
 

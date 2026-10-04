@@ -64,11 +64,14 @@ export interface CircomTransactInput extends CircomCoeffInputs {
 
     in_asset: string[];
     in_value: string[];
-    in_pk: string[];
     in_rho: string[];
     in_rcm: string[];
     in_nsk: string[];
-    /** Diversifier per input slot: `in_pk = Poseidon(TAG_PK, ivk, in_d)`. Free on a dummy. */
+    /**
+     * Diversifier per input slot. The circuit derives the slot's owner key as
+     * `Poseidon(TAG_PK, ivk, in_d)` and opens the commitment under it, on real and dummy slots
+     * alike.
+     */
     in_d: string[];
     in_path_elements: string[][][];
     in_path_indices: string[][];
@@ -141,7 +144,6 @@ export function circuitSignals(w: TransactWitnessBundle): CircomTransactInput {
         public_out: w.public_out,
         in_asset: w.in_asset,
         in_value: w.in_value,
-        in_pk: w.in_pk,
         in_rho: w.in_rho,
         in_rcm: w.in_rcm,
         in_nsk: w.in_nsk,
@@ -212,7 +214,6 @@ export function toCircomInput(P: Poseidon, opts: BuildOpts): TransactWitnessBund
 
         in_asset: col(inputs, "asset"),
         in_value: col(inputs, "value"),
-        in_pk: col(inputs, "pk"),
         in_rho: col(inputs, "rho"),
         in_rcm: col(inputs, "rcm"),
         in_nsk: col(inputs, "nsk"),

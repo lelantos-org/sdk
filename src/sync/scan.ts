@@ -39,8 +39,9 @@ export interface ScanStats {
     /** Tag verified but the plaintext was not a NotePayload. Should be 0. */
     decodeFailed: number;
     /**
-     * Value-0 notes (self-pad outputs, the fee note of a deposit that charged no fee): decrypt
-     * cleanly, unspendable.
+     * Value-0 notes addressed to this wallet (the fee note of a deposit that charged no fee):
+     * decrypt cleanly, unspendable. A spend's pads are addressed to no one and count as
+     * `notOurs`.
      */
     zeroValue: number;
     /**

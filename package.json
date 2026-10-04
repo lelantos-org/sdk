@@ -1,6 +1,6 @@
 {
     "name": "@lelantos-org/sdk",
-    "version": "0.43.0",
+    "version": "0.44.0",
     "description": "Lelantos MASP client SDK — keys, notes, FMD, prover.",
     "license": "MIT",
     "author": "Lelantos",
@@ -119,7 +119,7 @@
         "prepublishOnly": "cd wasm && just build && cd .. && npm run build && npm run check:dist && node scripts/check-wasm-size.mjs"
     },
     "peerDependencies": {
-        "@lelantos-org/circuits": "0.18.0",
+        "@lelantos-org/circuits": "0.19.0",
         "circom_runtime": "^0.1.28",
         "snarkjs": "^0.7.4",
         "viem": "^2.49.3"
@@ -145,7 +145,7 @@
     "devDependencies": {
         "@arethetypeswrong/cli": "^0.18.5",
         "@biomejs/biome": "^2.4.13",
-        "@lelantos-org/circuits": "0.18.0",
+        "@lelantos-org/circuits": "0.19.0",
         "@lelantos-org/contracts": "0.11.0",
         "@types/node": "^24.0.0",
         "@vitest/coverage-v8": "^4.1.11",

@@ -29,8 +29,8 @@ import type { ArtifactDigests } from "./types.js";
 export const PROVER_ARTIFACT_SHA256: Readonly<Record<string, Readonly<ArtifactDigests>>> =
     Object.freeze({
         "4x6": Object.freeze({
-            circuit: "0b07cb426a80f8b15a2bb6380f5d1ad3414cecedfc57ae084f077201f801fa75",
-            zkey: "47a183c9cc954882035c2d35eed6fdc3de24aca99352fad2a76b28316aa0d64e",
+            circuit: "649c97e48ecf7f91fd41a4c1eed8c7c3d3d29d1ab3709f6b5e235276b06e3c21",
+            zkey: "04e6daecd8a4a7da4ccc41492cd6aad76f5ea5ee44107120eb50ef2ef1948692",
         }),
     });
 

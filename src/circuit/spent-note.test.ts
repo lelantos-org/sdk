@@ -3,6 +3,7 @@ import { randomFr } from "../core/random.js";
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
+    derivePk,
     Poseidon,
     TAG_CM,
     TAG_INNER,
@@ -28,8 +29,13 @@ describe("dummyInputAt", () => {
     it("is the zero-value note under the given nsk, rho and rcm", () => {
         const d = dummy();
 
-        expect(d).toMatchObject({ asset: 0n, value: 0n, pk: 0n, ...SECRETS });
-        // The circuit leaves `in_d` free on a dummy slot.
+        // The circuit derives the slot's pk from `nsk` and `in_d`; the SDK uses `in_d = 0`.
+        expect(d).toMatchObject({
+            asset: 0n,
+            value: 0n,
+            pk: derivePk(P, SECRETS.nsk, 0n),
+            ...SECRETS,
+        });
         expect(d.d).toBe(0n);
         expect(d.isDummy).toBe(true);
         expect(d.pathElements).toEqual(Array.from({ length: DEPTH }, () => [0n, 0n, 0n]));
@@ -44,17 +50,18 @@ describe("dummyInputAt", () => {
 
         // SpentNote: cm = Poseidon(TAG_CM, asset·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm)),
         // nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm).
-        const cm = P.hash([TAG_CM, 0n, P.hash([TAG_INNER, 0n, rho, rcm])]);
+        const pk = derivePk(P, nsk, 0n);
+        const cm = P.hash([TAG_CM, 0n, P.hash([TAG_INNER, pk, rho, rcm])]);
         expect(d.cm).toBe(cm);
         expect(d.nf).toBe(P.hash([TAG_NF, P.hash([TAG_NK, nsk]), rho, cm]));
     });
 
-    it("keys the nullifier by nsk", () => {
+    it("keys the commitment and the nullifier by nsk", () => {
         const a = dummy();
         const b = dummy({ ...SECRETS, nsk: 23n });
 
-        // Same note, so the same commitment; only the key differs.
-        expect(a.cm).toBe(b.cm);
+        // The pk the note is committed under is derived from nsk, so both differ.
+        expect(a.cm).not.toBe(b.cm);
         expect(a.nf).not.toBe(b.nf);
     });
 

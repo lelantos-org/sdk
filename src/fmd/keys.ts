@@ -31,8 +31,8 @@ import { InvalidArgumentError } from "../errors/config.js";
 /**
  * γ every sender emits, the default detection γ, and the ceiling on any detection γ.
  *
- * Circuit-pinned: `out_clue_bits` is a public input constrained by `ClueCheck`, so raising it is
- * a `@lelantos-org/circuits` change.
+ * Fixed pool-wide: a sender does not know the recipient's detection γ. The circuit does not
+ * constrain the clue; its words are bound to the proof through the Fiat-Shamir challenge only.
  *
  * A clue packs `c_1..c_γ` into a 16-bit prefix with the unused bits zero (`clueBitsToPrefix`),
  * while `fmdTest` requires `bit_i ⊕ c_i = 1` for every `i` in the detection key. A longer

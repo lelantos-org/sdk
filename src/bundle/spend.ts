@@ -29,14 +29,15 @@ export interface SpendArgs extends BundleCommon {
     inputs: InputSlots;
     merkleRoot: Field;
     /**
-     * One note per output slot. For a transfer these are the send note and the change notes;
-     * for a withdraw all are change back to self. Per asset, they must sum to the real input
-     * value, less `publicOut` for `asset`.
+     * One note per output slot: the send note of a transfer, the relayer's fee note, change back
+     * to self, and zero-value pads. Per asset, they must sum to the real input value, less
+     * `publicOut` for `asset`.
      */
     outputs: readonly Note[];
     /**
      * Recipient address per output slot, used for the FMD clue and ECDH. Change slots take
-     * the sender's own address.
+     * the sender's own address. A pad takes keys drawn for it, never the sender's: a clue for
+     * the sender's key on every unused slot would mark the spend as the sender's to a detector.
      */
     outputRecipients: readonly OutputRecipient[];
     outputRandomness: readonly OutputRandomness[];

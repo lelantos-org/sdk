@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChainReader } from "../../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { NetworkError } from "../../errors/network.js";
+import type { OutputAux } from "../../notes/aux.js";
+import { stripClueBitsPrefix } from "../../notes/codec.js";
+import { decryptNote } from "../../notes/encrypt.js";
 import {
     type CircuitShape,
     DEFAULT_SHAPE,
@@ -13,6 +16,7 @@ import { storedNote, unreconciled } from "../../test-utils/wallet.js";
 import type { StoredNote } from "../notes/note-store.js";
 import { executeTransfer } from "../ops/transfer.js";
 import { executeWithdraw } from "../ops/withdraw.js";
+import { MAX_CHANGE_NOTES } from "./outputs.js";
 
 // The executors depend on `WalletContext`, not on `Wallet`, so the fixture is a context over stubs:
 // no chain adapter, prover or note store.
@@ -77,7 +81,7 @@ describe("executeTransfer", () => {
         expect(res.amount).toMatchObject({ asset: 1n, amount: 30n, baseUnits: 30n });
     });
 
-    it("credits only the change slots when sending to someone else", async () => {
+    it("credits only the change notes when sending to someone else", async () => {
         const { ctx } = await makeCtx([storedNote("01", 100n)]);
         const { address: recipient } = await makeCtx([]);
         const res = await executeTransfer(ctx, {
@@ -85,19 +89,38 @@ describe("executeTransfer", () => {
             recipient,
             amount: circuitAmount(30n),
         });
-        // One slot is the recipient's; every other slot is change to the sender.
+        // One slot is the recipient's and the change is capped; the rest are pads to no one.
         expect(res.commitments).toHaveLength(DEFAULT_SHAPE.nOut);
-        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut - 1);
+        expect(res.ownCommitments).toHaveLength(MAX_CHANGE_NOTES);
+        expect(res.nonZeroCommitments).toHaveLength(1 + MAX_CHANGE_NOTES);
     });
 
-    it("credits every slot on a self-transfer", async () => {
+    it("addresses the unused slots to no one: the sender opens only its change", async () => {
+        // A pad addressed to the sender would carry a clue for the sender's detection key.
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const { address: recipient } = await makeCtx([]);
+        await executeTransfer(ctx, { asset: A1, recipient, amount: circuitAmount(30n) });
+
+        const { aux } = submitted[0] as { aux: OutputAux[] };
+        const opened = aux.filter((a) => {
+            const note = {
+                epk: ctx.J.packPoint(a.ephPub),
+                ciphertext: stripClueBitsPrefix(a.ciphertext).body,
+            };
+            return decryptNote({ J: ctx.J, ivk: ctx.keys.ivk, note }) !== null;
+        });
+        expect(aux).toHaveLength(DEFAULT_SHAPE.nOut);
+        expect(opened).toHaveLength(MAX_CHANGE_NOTES);
+    });
+
+    it("credits the payee note and the change on a self-transfer", async () => {
         const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
         const res = await executeTransfer(ctx, {
             asset: A1,
             recipient: address,
             amount: circuitAmount(30n),
         });
-        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
+        expect(res.ownCommitments).toHaveLength(1 + MAX_CHANGE_NOTES);
     });
 
     it("recognises a self-transfer written in uppercase bech32m", async () => {
@@ -112,12 +135,12 @@ describe("executeTransfer", () => {
             amount: circuitAmount(30n),
         });
 
-        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
+        expect(res.ownCommitments).toHaveLength(1 + MAX_CHANGE_NOTES);
     });
 });
 
 describe("executeWithdraw", () => {
-    it("splits change across every slot and tags the kind", async () => {
+    it("caps the change notes and tags the kind", async () => {
         const { ctx, submitted, markedSpent } = await makeCtx([storedNote("01", 100n)]);
 
         const res = await executeWithdraw(ctx, {
@@ -130,9 +153,10 @@ describe("executeWithdraw", () => {
         expect(markedSpent).toEqual([["01"]]);
         expect(res.gross).toMatchObject({ asset: 1n, amount: 40n });
         expect(res.change).toBe(60n);
-        // Every slot is change, so all belong to the sender.
+        // No payee slot: the change notes are the sender's and the rest are pads.
         expect(res.commitments).toHaveLength(DEFAULT_SHAPE.nOut);
-        expect(res.ownCommitments).toHaveLength(DEFAULT_SHAPE.nOut);
+        expect(res.ownCommitments).toHaveLength(MAX_CHANGE_NOTES);
+        expect(res.nonZeroCommitments).toHaveLength(MAX_CHANGE_NOTES);
     });
 
     it("routes withdrawNative to the native entry point", async () => {
@@ -200,7 +224,7 @@ describe.each(SHAPES)("shape $id", ({ shape }) => {
         asset: assetId(1n),
     };
 
-    it("fills every output slot, one for the recipient and the rest as change", async () => {
+    it("fills every output slot: the recipient's, the change, and pads", async () => {
         const { ctx, submitted } = await makeCtx(FUNDED, shape);
         const { address: recipient } = await makeCtx([]);
 
@@ -212,7 +236,7 @@ describe.each(SHAPES)("shape $id", ({ shape }) => {
         });
 
         expect(res.commitments).toHaveLength(nOut);
-        expect(res.ownCommitments).toHaveLength(nOut - 1);
+        expect(res.ownCommitments).toHaveLength(Math.min(MAX_CHANGE_NOTES, nOut - 1));
         expect(res.change).toBe(300n - 30n);
 
         // The payload the relayer receives carries one slot per arity.
@@ -222,12 +246,12 @@ describe.each(SHAPES)("shape $id", ({ shape }) => {
         expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(nOut);
     });
 
-    it("withdraws with every output slot as change", async () => {
+    it("withdraws with change and pads filling every output slot", async () => {
         const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], shape);
         const res = await executeWithdraw(ctx, withdrawArgs);
 
         expect(res.commitments).toHaveLength(nOut);
-        expect(res.ownCommitments).toHaveLength(nOut);
+        expect(res.ownCommitments).toHaveLength(Math.min(MAX_CHANGE_NOTES, nOut));
         expect(res.change).toBe(60n);
         expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(nOut);
     });

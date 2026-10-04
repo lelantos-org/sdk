@@ -1,6 +1,6 @@
 // Per-output OutputAux builder. Joins ECDH `epk`, FMD clue `(R, c_bits)`,
 // and ChaCha20-Poly1305 ciphertext (prefixed with 2B big-endian clueBits).
-// Both real and pad slots go through `buildOutputAux`.
+// Paying and pad slots both go through `buildOutputAux`.
 
 import { BABYJUB_INV8 } from "../core/field.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
@@ -34,8 +34,9 @@ export interface OutputAux {
 export interface OutputAuxWithWitness {
     aux: OutputAux;
     /**
-     * Public inputs for the clue, computed off-circuit and PolyEval-bound to the proof: a
-     * relayer cannot alter them without invalidating it.
+     * The clue's words of the Fiat-Shamir preimage. They are hashed into the challenge `z` and
+     * are not circuit signals: a relayer cannot alter them without invalidating the proof, and
+     * the circuit does not check how they were derived.
      */
     witness: {
         clueBits: Field;
@@ -45,9 +46,9 @@ export interface OutputAuxWithWitness {
 }
 
 /**
- * Twisted-Edwards identity. Placeholder for fields that must be on-curve but
- * are unused (e.g. pad-output `aux.ephPub` when no plaintext exists). Not valid
- * for SNARK-bound `clueR`: the circuit forces `R = r·G_8` for any witnessed `r ≠ 0`.
+ * Twisted-Edwards identity. Placeholder for a field that must be on-curve and is otherwise
+ * unused. Not valid as `clueR` or `ephPub` of a submitted output: the pool rejects the identity
+ * in both (`AuxValidation.validate`).
  *
  * @internal
  */

@@ -5,7 +5,7 @@
 //   fee            resolve the relayer's fee (and its asset); refuse one above the caller's limit
 //   cover          select and lease notes, consolidating if allowed        (→ "consolidating")
 //   witness        sync and verify the tree, read root and paths atomically
-//   outputs        spec.outputs (payee) + change + fee slots, shuffled
+//   outputs        spec.outputs (payee) + change + fee slots + pads, shuffled
 //   spec.bind      the proof's public bindings, and any pre-proof work
 //   prove                                                                  → phase "proving"
 //   deadline       refuse to submit at or past the cut-off (DEADLINE_PASSED)
@@ -22,6 +22,7 @@ import { buildSpend } from "../../bundle/spend.js";
 import type { AssetId, CircuitAmount, Hex32 } from "../../core/brand.js";
 import { branded } from "../../core/brand.js";
 import { randomHex } from "../../core/random.js";
+import { assertInvariant } from "../../errors/base.js";
 import { InsufficientCoverError } from "../../errors/funds.js";
 import { TreeOutOfSyncError } from "../../errors/network.js";
 import { type DecodedAddress, decodeAddress } from "../../keys/address.js";
@@ -47,7 +48,13 @@ import {
     resolveSpendFee,
 } from "./fee.js";
 import { buildInputSlots } from "./inputs.js";
-import { changeSlots, finalizeSlots, type OutputSlotSpec } from "./outputs.js";
+import {
+    changeSlots,
+    finalizeSlots,
+    MAX_CHANGE_NOTES,
+    type OutputSlotSpec,
+    padSlots,
+} from "./outputs.js";
 import { type OutputCommitments, outputCommitments } from "./result-builder.js";
 import { submitSpend, withOperation } from "./steps.js";
 
@@ -166,19 +173,28 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
         const change = branded<CircuitAmount>(picked.sum - covered);
         const { pk } = ctx.keys;
         const extra = spec.outputs?.(ctx, plan) ?? [];
-        // Roles are carried on the slots, not positions, because `finalizeSlots` shuffles them.
-        // Change is split onto the ladder so it can be withdrawn later.
-        const slots = finalizeSlots([
+        const feeOut = feeSlots(fee, feeSelection, pk, ownAddr);
+        const free = ctx.cfg.shape.nOut - extra.length - feeOut.length;
+        assertInvariant(free >= 1, `${plan.feeKind}: no output slot left for change`);
+        // A cross-asset fee's change counts against the cap; the spend's own keeps at least one
+        // note. Change is split onto the ladder so it can be withdrawn later.
+        const feeChange = feeOut.filter((s) => s.own).length;
+        const paying = [
             ...extra,
             ...changeSlots({
                 pk,
                 ownAddr,
                 asset: plan.asset.id,
                 remainder: change,
-                slots: ctx.cfg.shape.nOut - extra.length - (fee?.slots ?? 0),
+                maxNotes: Math.min(free, Math.max(1, MAX_CHANGE_NOTES - feeChange)),
                 ladder: plan.asset.ladder,
             }),
-            ...feeSlots(fee, feeSelection, pk, ownAddr),
+            ...feeOut,
+        ];
+        // Roles are carried on the slots, not positions, because `finalizeSlots` shuffles them.
+        const slots = finalizeSlots([
+            ...paying,
+            ...padSlots(ctx.J, plan.asset.id, ctx.cfg.shape.nOut - paying.length),
         ]);
         const binding = await spec.bind(ctx, plan, { fee, selection: picked, change });
         signal?.throwIfAborted();

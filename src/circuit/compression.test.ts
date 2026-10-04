@@ -92,7 +92,7 @@ describe("witness and challenge layout", () => {
         const bundle = toCircomInput(P, opts());
         const words = flatten(bundle);
         expect(sha256(JSON.stringify(bundle))).toBe(
-            "fc14e28887e0e3e6b88afe098615c52d5467fb7dee68becb9cc5b57b26973d41",
+            "24822194418fb0ccacd5f5a3cd4d74d792bbfb362941a68c80bf8868d694c6ac",
         );
         expect(words).toHaveLength(24);
         expect(sha256(words.join(","))).toBe(
@@ -179,7 +179,6 @@ describe("toCircomInput", () => {
                 "public_out",
                 "in_asset",
                 "in_value",
-                "in_pk",
                 "in_rho",
                 "in_rcm",
                 "in_nsk",
