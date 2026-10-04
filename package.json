@@ -143,7 +143,7 @@
         "poseidon-lite": "^0.3.0"
     },
     "devDependencies": {
-        "@arethetypeswrong/cli": "^0.17.0",
+        "@arethetypeswrong/cli": "^0.18.5",
         "@biomejs/biome": "^2.4.13",
         "@lelantos-org/circuits": "0.18.0",
         "@lelantos-org/contracts": "0.11.0",
