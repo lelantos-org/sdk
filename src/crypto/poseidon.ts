@@ -3,6 +3,8 @@
 // Two backends, split by arity:
 //
 //   arity 5  -> wasm (`sdk/wasm/poseidon`): `Poseidon(TAG_MERKLE, ..)` dominates a tree build.
+//               The `poseidon-lite` table is the fallback, loaded only when the wasm module
+//               fails to initialise.
 //   others   -> `poseidon-lite`: they run a handful of times per operation, and each extra
 //               arity enlarges the wasm module, since light-poseidon emits its round constants
 //               as code, one construction per width. See `wasm/poseidon/src/lib.rs`.
@@ -13,11 +15,9 @@
 // Per-arity subpaths, not the `poseidon-lite` barrel: the barrel is CommonJS and re-exports every
 // arity through `Object.defineProperty` getters, which bundlers cannot analyse statically, so
 // importing it pulls every round-constant table. `bundle-budget.mjs` enforces this.
-import { poseidon1 } from "poseidon-lite/poseidon1";
 import { poseidon2 } from "poseidon-lite/poseidon2";
 import { poseidon3 } from "poseidon-lite/poseidon3";
 import { poseidon4 } from "poseidon-lite/poseidon4";
-import { poseidon5 } from "poseidon-lite/poseidon5";
 import { poseidon6 } from "poseidon-lite/poseidon6";
 import { FIELD_BYTES, fromBeBytes, writeBeInto } from "../core/bytes.js";
 import { assertField, type Field } from "../core/field.js";
@@ -38,19 +38,16 @@ export type PoseidonBackend = "wasm" | "js";
 /** The wasm-backed arity. Everything else stays on the JS tables. */
 const WASM_ARITY = 5;
 
-// JS backend for every arity and fallback for `WASM_ARITY`. Parity with circomlibjs
-// `buildPoseidon` (BN254, iden3 constants) is verified by `poseidon.test.ts`.
+// JS backend for every arity but `WASM_ARITY`. Parity with circomlibjs `buildPoseidon` (BN254,
+// iden3 constants) is verified by `poseidon.test.ts`.
 //
-// Arities 1-6 only. The protocol hashes at 2 (key derivation), 3 (note commitment, rho,
-// subscription token), 4 (note inner, nullifier, FMD expand), 5 (Merkle node, coefficient digest)
-// and 6 (FMD bit); 1 serves the circomlib anchor in `poseidon-vectors.test.ts`. Each arity adds a
-// round-constant table to every consumer bundle, so unused widths are excluded.
+// The protocol hashes at 2 (key derivation), 3 (note commitment, rho, subscription token),
+// 4 (note inner, nullifier, FMD expand), 5 (Merkle node, coefficient digest) and 6 (FMD bit).
+// Each arity adds a round-constant table to every consumer bundle, so unused widths are excluded.
 const JS_TABLE: Record<number, (xs: Field[]) => Field> = {
-    1: poseidon1 as (xs: Field[]) => Field,
     2: poseidon2 as (xs: Field[]) => Field,
     3: poseidon3 as (xs: Field[]) => Field,
     4: poseidon4 as (xs: Field[]) => Field,
-    5: poseidon5 as (xs: Field[]) => Field,
     6: poseidon6 as (xs: Field[]) => Field,
 };
 
@@ -97,7 +94,7 @@ export class Poseidon {
         this.hash = (xs) => {
             const fn = table[xs.length];
             if (!fn) {
-                throw new InvalidArgumentError(`Poseidon arity ${xs.length} not supported (1..6)`, {
+                throw new InvalidArgumentError(`Poseidon arity ${xs.length} not supported (2..6)`, {
                     argument: "inputs",
                 });
             }
@@ -107,9 +104,8 @@ export class Poseidon {
     }
 
     /**
-     * Initialises the wasm backend. Failure is not fatal: the JS tables cover every arity, so the
-     * instance falls back to the slower backend and logs a warning, since the slowdown has no
-     * other symptom.
+     * Initialises the wasm backend. Failure is not fatal: the instance loads the arity-5 JS table
+     * instead and logs a warning, since the slowdown has no other symptom.
      */
     static async build(): Promise<Poseidon> {
         try {
@@ -119,6 +115,7 @@ export class Poseidon {
             log.warn("wasm unavailable; arity-5 hashing falls back to poseidon-lite", {
                 error: errMessage(error),
             });
+            const { poseidon5 } = await import("poseidon-lite/poseidon5");
             return new Poseidon("js", poseidon5 as (xs: Field[]) => Field);
         }
     }

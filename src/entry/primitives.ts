@@ -111,7 +111,6 @@ export {
     buildViewingKey,
     type DerivedWalletKeys,
     type DeriveFromMnemonicOpts,
-    deriveKeysFromMnemonic,
     deriveKeysFromNsk,
     detectionKeyFor,
     type FullViewingKey,
@@ -125,6 +124,7 @@ export {
     lelantosTypedDataHash,
     reduceSignatureToScalar,
 } from "../keys/metamask.js";
+export { deriveKeysFromMnemonic } from "../keys/mnemonic.js";
 export { LELANTOS_PRF_SALT, prfOutputToNsk } from "../keys/passkey.js";
 export { FVK_HRP, IVK_HRP } from "../keys/viewing-key.js";
 export {

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import { bytesToHex } from "../core/hex.js";
 import { InvalidArgumentError } from "../errors/config.js";
-import { hexPrivateKeyToNsk, resolveNsk } from "./key-source.js";
+import { hexPrivateKeyToNsk } from "./key-source.js";
+import { resolveNsk } from "./mnemonic.js";
 import { deriveNskFromPasskey, LELANTOS_PRF_SALT, prfOutputToNsk } from "./passkey.js";
 
 // No mnemonic backs a passkey, so a change to either pinned constant here strands every wallet

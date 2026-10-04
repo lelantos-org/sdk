@@ -12,8 +12,7 @@ import {
     mnemonicToAccountKey,
     ZIP32_PURPOSE,
 } from "./hd.js";
-import { resolveNsk } from "./key-source.js";
-import { deriveKeysFromMnemonic } from "./keys.js";
+import { deriveKeysFromMnemonic, resolveNsk } from "./mnemonic.js";
 
 const TEST_MNEMONIC = "test test test test test test test test test test test junk";
 

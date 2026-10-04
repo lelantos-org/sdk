@@ -2,7 +2,7 @@
 
 import type { ChainAdapter, ChainReader } from "../../chain/port.js";
 import { WalletConfigError } from "../../errors/config.js";
-import { type KeySource, resolveNsk } from "../../keys/key-source.js";
+import { type KeySource, loadNsk } from "../../keys/key-source.js";
 import { deriveNskFromSigner } from "../../keys/metamask.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
 import type { ConnectExtras, NetworkPreset } from "./options.js";
@@ -60,7 +60,7 @@ function silentKeySource(opts: ConnectOptionsLoose): KeySource | undefined {
 export function keyThunk(opts: ConnectOptionsLoose, chainId: bigint): () => Promise<bigint> {
     return async () => {
         const silent = silentKeySource(opts);
-        if (silent) return resolveNsk(silent);
+        if (silent) return loadNsk(silent);
         let signer = opts.signer;
         if (!signer && opts.provider && opts.address) {
             const { Eip1193Signer } = await import("../../chain/signer/eip1193.js");

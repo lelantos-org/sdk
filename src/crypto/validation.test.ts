@@ -19,12 +19,12 @@ describe("Poseidon canonical inputs", () => {
 
     it("rejects an unreduced input rather than aliasing it", () => {
         // poseidon-lite reduces mod r internally, so unchecked `x` and `x + r` hash identically.
-        expect(() => P.hash([BN254_FR])).toThrow(/canonical field element/);
+        expect(() => P.hash([BN254_FR, 0n])).toThrow(/canonical field element/);
         expect(() => P.hash([1n, 2n + BN254_FR])).toThrow(/canonical field element/);
     });
 
     it("rejects a negative input", () => {
-        expect(() => P.hash([-1n])).toThrow(/canonical field element/);
+        expect(() => P.hash([-1n, 0n])).toThrow(/canonical field element/);
     });
 
     it("still accepts the full canonical range", () => {

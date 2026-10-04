@@ -60,13 +60,14 @@ async function connectWatchUnchecked(options: ConnectWatchOptions): Promise<Read
     const rpcUrl = options.rpcUrl ?? preset.rpcUrl;
     let scanner: BuiltScanner | undefined;
     try {
-        let reader: ChainReader | undefined = options.reader;
-        if (!reader && rpcUrl) {
+        const loadReader = async (): Promise<ChainReader | undefined> => {
+            if (options.reader || !rpcUrl) return options.reader;
             const { ViemChainReader } = await import("../../chain/viem/reader.js");
-            reader = new ViemChainReader(viemChainOptions(preset, rpcUrl, options.http?.fetch));
-        }
-        const P = await Poseidon.build();
-        const J = await Jubjub.build();
+            return new ViemChainReader(viemChainOptions(preset, rpcUrl, options.http?.fetch));
+        };
+        // Independent loads (the reader's dynamic import and the two wasm modules), so they run
+        // concurrently.
+        const [reader, P, J] = await Promise.all([loadReader(), Poseidon.build(), Jubjub.build()]);
         scanner = await buildScanner(options.scanner, { P, J });
         const built = scanner.scanner;
         return await createWatchWallet(

@@ -10,7 +10,7 @@ import { Poseidon } from "../crypto/index.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { InternalError } from "../errors/base.js";
 import { boundary } from "../errors/boundary.js";
-import { type KeySource, resolveNsk } from "../keys/key-source.js";
+import { type KeySource, loadNsk } from "../keys/key-source.js";
 import { addressFromSpendingKey, buildSpendingKey } from "../keys/keys.js";
 import { getLogger } from "../log/logger.js";
 import type { Scanner } from "../sync/scanner.js";
@@ -43,7 +43,7 @@ const log = getLogger("lelantos:wallet");
 export function createWallet(source: KeySource, cfg: WalletConfig): Promise<WalletApi> {
     return boundary("createWallet", async () => {
         validateConfig(cfg);
-        return assembleWallet(async () => resolveNsk(source), cfg);
+        return assembleWallet(() => loadNsk(source), cfg);
     });
 }
 
@@ -71,8 +71,7 @@ export async function assembleWallet(
     cfg: WalletConfig,
     deps: AssembleDeps = {},
 ): Promise<WalletApi> {
-    const P = deps.P ?? (await Poseidon.build());
-    const J = deps.J ?? (await Jubjub.build());
+    const [P, J] = await Promise.all([deps.P ?? Poseidon.build(), deps.J ?? Jubjub.build()]);
     const prover = deps.prover ?? proverHandleFor(cfg);
     const scannerOwned = deps.scannerOwned ?? cfg.scanner === undefined;
     let scanner: Scanner | undefined = cfg.scanner;

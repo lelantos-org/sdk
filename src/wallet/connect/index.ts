@@ -191,25 +191,28 @@ async function connectUnchecked(options: ConnectOptions): Promise<WalletApi> {
     let prover: ProverHandle | undefined;
     let scanner: BuiltScanner | undefined;
     try {
-        const chain = await defaultChainAdapter(
-            {
-                chain: opts.chain,
-                reader: opts.reader,
-                readOnly: opts.readOnly,
-                signer: opts.signer,
-                provider: opts.provider,
-                address: opts.address,
-                privateKey: opts.privateKey,
-                rpcUrl,
-                fetch: opts.http?.fetch,
-            },
-            preset,
-        );
+        // Independent loads (the chain adapter's dynamic import and the two wasm modules), so
+        // they run concurrently.
+        const [chain, P, J] = await Promise.all([
+            defaultChainAdapter(
+                {
+                    chain: opts.chain,
+                    reader: opts.reader,
+                    readOnly: opts.readOnly,
+                    signer: opts.signer,
+                    provider: opts.provider,
+                    address: opts.address,
+                    privateKey: opts.privateKey,
+                    rpcUrl,
+                    fetch: opts.http?.fetch,
+                },
+                preset,
+            ),
+            Poseidon.build(),
+            Jubjub.build(),
+        ]);
 
         prover = buildProverHandle(opts.prover, { runtime, shape: opts.shape });
-
-        const P = await Poseidon.build();
-        const J = await Jubjub.build();
         scanner = await buildScanner(opts.scanner, { P, J });
 
         const cfg: WalletConfig = {

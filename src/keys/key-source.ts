@@ -1,14 +1,15 @@
 // Key-source resolver: mnemonic / EIP-712 signature / private key / passkey PRF / raw nsk → nsk
 // field element. Callers persist the source, never the derived nsk.
+//
+// This module does not import the mnemonic derivation statically: `loadNsk` loads it on first
+// use, so a wallet built from another source does not bundle the BIP-39 word list. The synchronous
+// resolver, which needs it statically, is in `./mnemonic.ts`.
 
-import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english";
 import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER, reduceWideToField } from "../core/field.js";
 import { hexToBytes } from "../core/hex.js";
 import { keccakExpand } from "../crypto/keccak.js";
 import type { Field } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
-import { mnemonicToAccountKey } from "./hd.js";
 import { reduceSignatureToScalar } from "./metamask.js";
 import { prfOutputToNsk } from "./passkey.js";
 
@@ -32,11 +33,16 @@ export type KeySource =
  */
 const PK_DOMAIN_TAG_HEX = "6c656c616e746f732e707269766174654b65792e6e736b2e763100";
 
-export function resolveNsk(source: KeySource): Field {
+/** A key source that resolves without the mnemonic derivation. */
+export type DirectKeySource = Exclude<KeySource, { type: "mnemonic" }>;
+
+/**
+ * The nsk of every source but a mnemonic.
+ *
+ * @internal
+ */
+export function resolveDirectNsk(source: DirectKeySource): Field {
     switch (source.type) {
-        case "mnemonic":
-            // ZIP-32-lite at m/32'/LELANTOS_COIN_TYPE'/account'.
-            return mnemonicToAccountKey(source.mnemonic, source.account, source.passphrase).nsk;
         case "signature":
             // `reduceSignatureToScalar` enforces length and canonical form.
             return reduceSignatureToScalar(source.signature);
@@ -55,6 +61,18 @@ export function resolveNsk(source: KeySource): Field {
 }
 
 /**
+ * The nsk of any source. A mnemonic loads its derivation (ZIP-32-lite at
+ * m/32'/LELANTOS_COIN_TYPE'/account') on first use.
+ *
+ * @internal
+ */
+export async function loadNsk(source: KeySource): Promise<Field> {
+    if (source.type !== "mnemonic") return resolveDirectNsk(source);
+    const { mnemonicToAccountKey } = await import("./hd.js");
+    return mnemonicToAccountKey(source.mnemonic, source.account, source.passphrase).nsk;
+}
+
+/**
  * `keccakExpand(domainTag || privKey, 2) mod BABYJUB_SUBGROUP_ORDER`.
  * Domain-separated from the EIP-712 signature reduction so a signature equal to the raw key bytes
  * cannot collide. Two keccak blocks: see `reduceWideToField` on folding a bare digest.
@@ -70,14 +88,4 @@ export function hexPrivateKeyToNsk(hex: string): Field {
     }
     const preimage = hexToBytes(`0x${PK_DOMAIN_TAG_HEX}${hex.slice(2).toLowerCase()}`);
     return reduceWideToField(keccakExpand(preimage, 2), BABYJUB_SUBGROUP_ORDER, "nsk");
-}
-
-/** 24 words (default) = 256-bit; 12 = 128-bit. */
-export function generateMnemonic(opts: { words?: 12 | 24 } = {}): string {
-    const strength = (opts.words ?? 24) === 12 ? 128 : 256;
-    return bip39GenerateMnemonic(wordlist, strength);
-}
-
-export function isValidMnemonic(mnemonic: string): boolean {
-    return validateMnemonic(mnemonic, wordlist);
 }

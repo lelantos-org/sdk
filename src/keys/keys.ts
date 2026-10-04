@@ -34,7 +34,6 @@ import {
 } from "../fmd/keys.js";
 import { encodeAddress } from "./address.js";
 import { deriveDefaultPk } from "./diversified.js";
-import { mnemonicToAccountKey } from "./hd.js";
 
 /**
  * Incoming viewing key: detects and decrypts this account's incoming notes.
@@ -180,13 +179,4 @@ export interface DeriveFromMnemonicOpts {
     /** Optional pre-built primitives (e.g. from `preloadWasm`). */
     P?: Poseidon | undefined;
     J?: Jubjub | undefined;
-}
-
-/** Mnemonic → `{ keys, address, nsk }`. Wraps `mnemonicToAccountKey` + `deriveKeysFromNsk`. */
-export async function deriveKeysFromMnemonic(
-    opts: DeriveFromMnemonicOpts,
-): Promise<DerivedWalletKeys & { nsk: Field }> {
-    const esk = mnemonicToAccountKey(opts.mnemonic, opts.account ?? 0, opts.passphrase ?? "");
-    const out = await deriveKeysFromNsk(esk.nsk, { P: opts.P, J: opts.J });
-    return { ...out, nsk: esk.nsk };
 }

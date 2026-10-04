@@ -32,18 +32,19 @@ export async function resolveConfig(
 ): Promise<ResolvedWalletConfig> {
     const fmdClient = lazyFmdClient(cfg);
     const { prover: _option, ...rest } = cfg;
+    // Each default store restores its persisted state; the two reads are independent.
+    const [treeStore, nullifierStore] = await Promise.all([
+        cfg.treeStore ?? defaultTreeStore(fmdClient(), deps.P, cfg.treePersistence, cfg.treeDepth),
+        cfg.nullifierStore ?? defaultNullifierStore(fmdClient(), cfg.nullifierPersistence),
+    ]);
 
     return {
         ...rest,
         shape: cfg.shape ?? DEFAULT_SHAPE,
         noteStore: cfg.noteStore ?? new InMemoryNoteStore(),
         noteSource: cfg.noteSource ?? defaultNoteSource(fmdClient(), cfg),
-        treeStore:
-            cfg.treeStore ??
-            (await defaultTreeStore(fmdClient(), deps.P, cfg.treePersistence, cfg.treeDepth)),
-        nullifierStore:
-            cfg.nullifierStore ??
-            (await defaultNullifierStore(fmdClient(), cfg.nullifierPersistence)),
+        treeStore,
+        nullifierStore,
         submitter: cfg.submitter ?? defaultSubmitter(cfg),
         prover: (deps.prover ?? proverHandleFor(cfg)).prover,
         selector: cfg.selector ?? new SfrtCoinSelector(),

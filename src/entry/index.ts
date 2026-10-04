@@ -100,8 +100,8 @@ export {
 export { type WorkerErrorCode, WorkerRpcError } from "../errors/worker.js";
 export { X402PaymentError, type X402RefusalReason } from "../errors/x402.js";
 export { parseAddress } from "../keys/convenience.js";
-export { generateMnemonic, isValidMnemonic } from "../keys/key-source.js";
 export { deriveNskFromSigner } from "../keys/metamask.js";
+export { generateMnemonic, isValidMnemonic } from "../keys/mnemonic.js";
 export { deriveNskFromPasskey, type PrfEvaluator } from "../keys/passkey.js";
 export type { Eip1193ProviderLike, EthSigner } from "../keys/signer.js";
 export {
