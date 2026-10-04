@@ -148,7 +148,7 @@
         "@lelantos-org/circuits": "0.18.0",
         "@lelantos-org/contracts": "0.11.0",
         "@types/node": "^24.0.0",
-        "@vitest/coverage-v8": "^4.1.5",
+        "@vitest/coverage-v8": "^4.1.11",
         "circom_runtime": "^0.1.28",
         "esbuild": "^0.28.2",
         "fast-check": "^4.9.0",
@@ -158,7 +158,7 @@
         "tsx": "^4.19.0",
         "typescript": "^5.7.2",
         "viem": "^2.49.3",
-        "vitest": "^4.1.5"
+        "vitest": "^4.1.11"
     },
     "overrides": {
         "underscore": "^1.13.8"
