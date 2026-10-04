@@ -51,7 +51,6 @@ describe("unshieldedExact", () => {
         const { wallet } = stubWallet();
         const result = await unshieldedExact(wallet).createPaymentPayload(2, requirements());
 
-        // The EIP-3009 authorization has a fixed field set; each is asserted.
         const payload = result.payload as {
             signature: `0x${string}`;
             authorization: {
@@ -180,8 +179,8 @@ describe("unshieldedExact", () => {
     });
 
     it("tops up with what the pool has when it cannot cover the whole multiple", async () => {
-        // The multiple amortises the proof; it is not a requirement. Refusing
-        // here would strand a payer holding less than ten calls' worth.
+        // The multiple amortises the proof; it is not a requirement, so the
+        // top-up is capped at what the pool can add.
         const { wallet, withdraw } = stubWallet({ balances: [0n, 10_000_000n], pool: 40n });
         await unshieldedExact(wallet, { pollMs: 1 }).createPaymentPayload(2, requirements());
         expect(withdraw).toHaveBeenCalledWith(expect.objectContaining({ gross: 40n }));
@@ -226,8 +225,6 @@ describe("unshieldedExact.quote", () => {
     });
 
     it("prices a non-default asset id, which the selector must not second-guess", async () => {
-        // If the selector re-priced against asset 1n, an `assetIds` override
-        // would skip every offer.
         const OTHER = { ...USDC, id: assetId(7n) };
         const wallet = {
             chain: { chainId: async () => CHAIN_ID, tokenBalanceOf: async () => 0n },
@@ -302,8 +299,7 @@ describe("unshieldedExact.quote", () => {
     });
 
     it("refuses an offer neither the payer nor the pool can fund", async () => {
-        // `unsupported-requirements`, so `select` moves to the next entry. The
-        // same refusal from `createPaymentPayload` would abort the request.
+        // `unsupported-requirements`, so `select` moves to the next entry.
         const { wallet, withdraw } = stubWallet({ balances: [0n], pool: 9n });
         await expect(unshieldedExact(wallet).quote(requirements())).rejects.toThrow(
             /payer 0x\w+ holds 0 of the 10000 base unit\(s\).*pool can add only 9 of the 10/,
@@ -439,8 +435,7 @@ describe("unshieldedExact funding concurrency", () => {
     });
 
     it("reports a top-up before the value leaves the pool", async () => {
-        // `topUpMultiple` moves more than one payment costs, and a poll timeout
-        // leaves no other record.
+        // A poll timeout leaves no other record of the withdrawal.
         const seen: Array<{ amount: bigint }> = [];
         const { wallet } = stubWallet({ balances: [0n, 0n, 0n] });
 

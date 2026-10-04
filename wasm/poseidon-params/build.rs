@@ -1,18 +1,6 @@
-//! Generates the `bn254_x5` width-6 constant table that `src/lib.rs` includes.
-//!
-//! `light-poseidon` emits its round constants as *code*: `bn254_x5.rs` is a
-//! 43k-line `if t == N` chain over every width from 2 to 13, one
-//! `F::from(BigInteger256::new(..))` per element. The width reaching it is
-//! known only at run time, so nothing drops the twelve arms this crate never
-//! asks for, and the pre-optimiser wasm lands at ~2 MB. `wasm-opt -O4` did cut
-//! that back to ~190 KB by propagating the width through the whole chain — at
-//! 12+ minutes a build.
-//!
-//! Resolving the width here makes that work unnecessary rather than faster:
-//! light-poseidon runs once, on the host, and the single table this crate
-//! serves is written out as *data*. Generating rather than transcribing keeps
-//! the numbers identical to light-poseidon's by construction; the far side is
-//! pinned by `sdk/tests/vectors/poseidon.json`.
+//! Generates the `bn254_x5` width-6 constant table that `src/lib.rs` includes,
+//! by running `light-poseidon` on the host and writing its parameters out as
+//! data. The crate docs in `src/lib.rs` give the reason.
 
 use std::{env, fs, path::Path};
 
@@ -33,9 +21,8 @@ fn main() {
     let p = get_poseidon_parameters::<Fq>(WIDTH)
         .expect("light-poseidon publishes bn254_x5 parameters for every width in 2..=13");
 
-    // The shape `src/poseidon/circom.rs` assumes on the far side, asserted here
-    // so a light-poseidon bump that changed it fails the build rather than the
-    // digests.
+    // The shape the vendored `circom.rs` in `poseidon-wasm` assumes. Asserted so
+    // a light-poseidon bump that changes it fails the build, not the digests.
     assert_eq!(p.width, width);
     assert_eq!(p.alpha, ALPHA);
     assert_eq!(p.ark.len(), width * (p.full_rounds + p.partial_rounds));

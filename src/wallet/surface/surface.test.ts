@@ -1,11 +1,13 @@
-// The read surface: one `sync` with a report per stream, `balance` whose split
-// adds up, an immutable coalesced `state()`, operations tracked with their `opId`, and
-// `walletInternals` as the only way to the plumbing.
+// The read surface: one `sync` with a report per stream, `balance` whose split adds up, an
+// immutable coalesced `state()`, operations tracked with their `opId`, and `walletInternals` as the
+// only way to the plumbing.
 
 import { describe, expect, it, vi } from "vitest";
+import { NOTE_PAYLOAD_TOPIC, ROOT_ADVANCED_TOPIC } from "../../chain/operation.js";
 import type { ChainAdapter } from "../../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { isWalletError } from "../../errors/guard.js";
+import { deriveClaimLinkNsk } from "../../keys/claim-link.js";
 import type { TreeStore } from "../../sync/tree-store.js";
 import { scannerYielding, storedNote, testWallet } from "../../test-utils/wallet.js";
 import type { SyncProgress, WalletState } from "../types/sync.js";
@@ -86,7 +88,7 @@ describe("sync", () => {
 
     it("reloads the note store first when asked", async () => {
         const { wallet, noteStore } = await testWallet({ chain, scanner: scannerYielding([]) });
-        await noteStore.save({ version: 1, notes: [storedNote("a", 5n)] });
+        await noteStore.save({ version: 2, notes: [storedNote("a", 5n)] });
         expect(await wallet.notes()).toHaveLength(0);
         await wallet.sync({ scope: "notes", reload: true });
         expect(await wallet.notes()).toHaveLength(1);
@@ -255,5 +257,88 @@ describe("walletInternals", () => {
         expect(internals.keys.nsk).toBe(11n);
         expect(internals.noteStore).toBe(noteStore);
         expect(Object.keys(wallet)).not.toContain("noteStore");
+    });
+});
+
+// A note in `notes()` is what the indexer served. A payee crediting a receipt needs the pool's own
+// word that the commitment exists.
+describe("confirmCommitment", () => {
+    const cm = `0x${"ab".repeat(32)}`;
+    const tx = `0x${"cd".repeat(32)}`;
+    const pool = `0x${"cc".repeat(20)}`;
+    const topics = { root: ROOT_ADVANCED_TOPIC, payload: NOTE_PAYLOAD_TOPIC };
+    const published = (address: string) => [
+        { address: pool, topics: [topics.root] },
+        { address, topics: [topics.payload, cm] },
+    ];
+
+    async function walletOver(txReceiptLogs?: (hash: string) => Promise<unknown>) {
+        const { wallet } = await testWallet({
+            chain: { ...chain, ...(txReceiptLogs ? { txReceiptLogs } : {}) } as ChainAdapter,
+            scanner: scannerYielding([]),
+        });
+        return wallet;
+    }
+
+    it("is true when the pool published the commitment in that transaction", async () => {
+        const txReceiptLogs = vi.fn(async () => published(pool));
+        const wallet = await walletOver(txReceiptLogs);
+
+        await expect(wallet.confirmCommitment(cm, tx)).resolves.toBe(true);
+        expect(txReceiptLogs).toHaveBeenCalledWith(tx);
+    });
+
+    it("is false when the transaction does not carry it, or another contract emitted it", async () => {
+        const absent = await walletOver(async () => [{ address: pool, topics: [topics.root] }]);
+        await expect(absent.confirmCommitment(cm, tx)).resolves.toBe(false);
+
+        const spoofed = await walletOver(async () => published(`0x${"ee".repeat(20)}`));
+        await expect(spoofed.confirmCommitment(cm, tx)).resolves.toBe(false);
+    });
+
+    it("rejects rather than answering without a chain layer that reads receipts", async () => {
+        const wallet = await walletOver();
+        await expect(wallet.confirmCommitment(cm, tx)).rejects.toMatchObject({
+            code: "UNSUPPORTED_OPERATION",
+            missing: ["chain.txReceiptLogs"],
+        });
+    });
+
+    it("refuses a malformed commitment or hash before any read", async () => {
+        const txReceiptLogs = vi.fn(async () => published(pool));
+        const wallet = await walletOver(txReceiptLogs);
+
+        await expect(wallet.confirmCommitment("0x12", tx)).rejects.toMatchObject({
+            code: "INVALID_ARGUMENT",
+        });
+        await expect(wallet.confirmCommitment(cm, "nope")).rejects.toMatchObject({
+            code: "INVALID_ARGUMENT",
+        });
+        expect(txReceiptLogs).not.toHaveBeenCalled();
+    });
+});
+
+// A claim link's key is recomputed from the seed to take an unclaimed link back.
+describe("claimLinkKey", () => {
+    it("derives the same account for an index every time, from the wallet's own key", async () => {
+        const { wallet } = await testWallet({ chain, scanner: scannerYielding([]) });
+        const { keys, cfg } = walletInternals(wallet);
+
+        const first = await wallet.claimLinkKey(0);
+        expect(await wallet.claimLinkKey(0)).toEqual(first);
+        expect(first).toMatchObject({
+            index: 0,
+            nsk: deriveClaimLinkNsk((keys as { nsk: bigint }).nsk, cfg.chainId, 0),
+        });
+        expect(first.address).toMatch(/^lelantos1/);
+        expect(first.address).not.toBe(wallet.address);
+    });
+
+    it("gives each index its own account, and refuses a bad index", async () => {
+        const { wallet } = await testWallet({ chain, scanner: scannerYielding([]) });
+
+        const [a, b] = await Promise.all([wallet.claimLinkKey(0), wallet.claimLinkKey(1)]);
+        expect(a.address).not.toBe(b.address);
+        await expect(wallet.claimLinkKey(-1)).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
     });
 });

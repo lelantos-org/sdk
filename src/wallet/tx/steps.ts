@@ -1,8 +1,6 @@
-// Submitting a proven spend and settling its notes.
-//
-// What a failed submit means for the notes it consumed (spent, reserved or
-// untouched), the error the caller receives, and where a landed spend sits in
-// its transaction. Used by `run-spend.ts` for every spend.
+// Submitting a proven spend and settling its notes: what a failed submit means for the notes it
+// consumed (spent, reserved or untouched), the error the caller receives, and where a landed spend
+// sits in its transaction.
 
 import { locateOperation } from "../../chain/operation.js";
 import type { ChainReader } from "../../chain/port.js";
@@ -24,21 +22,16 @@ import { SPEND_RESERVATION_MS } from "../constants.js";
 const log = getLogger("lelantos:wallet:spend");
 
 /**
- * Whether a failed submit leaves it unknown whether the spend was accepted.
- *
- * An explicit rejection (bad payload, stale root) means nothing was spent and
- * the notes stay available. A submit without a definite answer may have
+ * Whether a failed submit leaves it unknown whether the spend was accepted. Such a spend may have
  * landed, and reselecting its notes leads to repeated duplicate rejections.
  *
- *   - no status: a timeout or dropped connection; the request may have been
- *     received and acted on.
- *   - any earlier attempt without a response: the transport resends a submit
- *     under the same `Idempotency-Key`, so a later definite answer (a 400, a
- *     429) does not rule out that the first copy landed.
+ *   - no status: a timeout or dropped connection; the request may have been received.
+ *   - any earlier attempt without a response: the transport resends a submit under the same
+ *     `Idempotency-Key`, so a later definite answer (a 400, a 429) does not rule out that the
+ *     first copy landed.
  *   - 502 naming an unknown outcome: broadcast succeeded, no receipt arrived.
  *
- * A 409 is a definite answer about the nullifiers, classified separately by
- * {@link classifySubmitFailure}.
+ * A 409 is a definite answer about the nullifiers; see {@link classifySubmitFailure}.
  *
  * @internal — exported for direct testing.
  */
@@ -50,9 +43,9 @@ export function outcomeUnknown(err: unknown): boolean {
 }
 
 /**
- * A 409 reason whose notes are withheld from selection: the nullifiers are
- * spent, or held by another pending submission, or (stale estimate) the
- * refusal came after admission. Only a key collision says nothing about them.
+ * A 409 reason whose notes are withheld from selection: the nullifiers are spent, or held by
+ * another pending submission, or (stale estimate) the refusal came after admission. Only a key
+ * collision says nothing about them.
  */
 function reservesNotes(reason: RelayerRejectReason): boolean {
     return reason !== "idempotency-key-reused";
@@ -72,16 +65,15 @@ type SubmitFailure =
     | { kind: "other" };
 
 /**
- * What a failed submit means, as the error the caller receives, and what to do
- * to the spend's notes first.
+ * What a failed submit means: the error the caller receives, and what happens to the spend's notes
+ * first.
  *
  *   - outcome unknown → `SpendOutcomeUnknownError`, notes reserved;
- *   - 409 → `RelayerRejectedError` with the parsed reason, notes reserved
- *     (except a reused idempotency key);
- *   - any other 4xx, or a 502 reporting a revert → `RelayerRejectedError`,
- *     notes untouched;
- *   - anything else (a 500/503, which stays a retryable `NetworkError`; a
- *     custom submitter's own error) → rethrown unchanged, notes untouched.
+ *   - 409 → `RelayerRejectedError` with the parsed reason, notes reserved (except a reused
+ *     idempotency key);
+ *   - any other 4xx, or a 502 reporting a revert → `RelayerRejectedError`, notes untouched;
+ *   - anything else (a 500/503, which stays a retryable `NetworkError`; a custom submitter's own
+ *     error) → rethrown unchanged, notes untouched.
  *
  * @internal — exported for direct testing.
  */
@@ -102,15 +94,12 @@ export function classifySubmitFailure(err: unknown): SubmitFailure {
 /** What {@link submitSpend} does to a spend's notes. */
 interface SpendSettlement {
     markSpent(ids: string[]): Promise<void>;
-    /**
-     * Withhold notes from selection after a spend with unknown outcome. Weaker
-     * than `markSpent` and reversible; see `StoredNote.pendingSpendAt`.
-     */
+    /** Withhold notes from selection. Reversible; see `StoredNote.pendingSpendAt`. */
     markPendingSpend(ids: string[]): Promise<void>;
     /**
-     * Sync the spent-nullifier set and reconcile local notes against it, after
-     * the relayer refuses a spend because a nullifier is already spent.
-     * Optional: without it the consumed notes stay offered until the next sync.
+     * Sync the spent-nullifier set and reconcile local notes against it, after the relayer refuses
+     * a spend because a nullifier is already spent. Without it the consumed notes stay offered
+     * until the next sync.
      */
     resyncSpent?(): Promise<void>;
 }
@@ -118,12 +107,12 @@ interface SpendSettlement {
 /**
  * Submit a spend and record what it did to the notes it consumed.
  *
- * On success they are marked spent; on a definite failure they are untouched.
- * Otherwise they are reserved: withheld from the selector until the nullifier
- * feed resolves them or the reservation expires. See `StoredNote.pendingSpendAt`.
+ * On success they are marked spent. On an unknown outcome or a reserving 409 they are reserved:
+ * withheld from the selector until the nullifier feed resolves them or the reservation expires
+ * (see `StoredNote.pendingSpendAt`). On any other failure they are untouched.
  *
- * A refusal because a nullifier is already spent triggers a spent-set resync
- * first, so the next selection no longer offers the consumed notes.
+ * A refusal because a nullifier is already spent triggers a spent-set resync before the error is
+ * thrown, so the next selection no longer offers the consumed notes.
  */
 export async function submitSpend<T>(
     ctx: SpendSettlement,
@@ -152,8 +141,7 @@ async function settleFailedSubmit(
     const reserve = c.kind === "unknown" || c.reserve;
     const reservedUntil = new Date(Date.now() + SPEND_RESERVATION_MS);
     if (reserve) {
-        // Leaves these notes unresolved, so a balance can drop without a
-        // matching transaction; logged for diagnosis.
+        // Leaves these notes unresolved, so a balance can drop without a matching transaction.
         log.warn("spend not confirmed; reserving its notes", {
             notes: spent.length,
             outcome: c.kind === "unknown" ? "unknown" : c.reason,
@@ -170,8 +158,7 @@ async function settleFailedSubmit(
     }
 
     if (c.reason === "nullifier-spent" && ctx.resyncSpent) {
-        // Best effort: the refusal is the answer the caller needs, and a
-        // failed resync only means the next sync picks the spend up instead.
+        // Best effort: a failed resync only means the next sync picks the spend up instead.
         await ctx.resyncSpent().catch((resyncErr: unknown) => {
             log.warn("spent-set resync after a nullifier-spent refusal failed", {
                 error: errMessage(resyncErr),
@@ -192,13 +179,12 @@ async function settleFailedSubmit(
 /**
  * Attach where a landed spend sits in its transaction, when that can be read.
  *
- * A relayer may bundle several operations into one transaction, so the hash
- * alone does not identify this one. The receipt is read through the chain
- * adapter and matched locally against the spend's commitments, so the read RPC
- * learns the hash but not which operation belongs to this wallet.
+ * A relayer may bundle several operations into one transaction, so the hash alone does not identify
+ * this one. The receipt is read through the chain adapter and matched locally against the spend's
+ * commitments, so the read RPC learns the hash but not which operation belongs to this wallet.
  *
- * Never throws. The spend has already landed, so an adapter without log access,
- * a lagging read RPC, or an unexpected layout leaves `operation` absent.
+ * Never throws. The spend has already landed, so an adapter without log access, a lagging read RPC,
+ * or an unexpected layout leaves `operation` absent.
  */
 export async function withOperation<R extends { txHash: Hex32; commitments: readonly Hex32[] }>(
     chain: ChainReader,

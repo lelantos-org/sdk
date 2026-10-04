@@ -11,10 +11,13 @@ export const DEPOSIT_TX = branded<Hex32>(`0x${"11".repeat(32)}`);
 /**
  * What `submitDeposit` (or the native / authorized path) resolves to once `deposit` is mined: the
  * `DepositEscrowed` payload the pool emits for exactly that request, at `block`.
+ *
+ * `pulled` defaults to `0n`, what the pool emits for a plain asset; pass the amount pulled to stand
+ * in for a yield asset's escrow.
  */
 export function minedDeposit(
     deposit: DepositRequest,
-    opts: { id?: bigint; block?: number; txHash?: Hex32 } = {},
+    opts: { id?: bigint; block?: number; txHash?: Hex32; pulled?: bigint | undefined } = {},
 ): DepositSubmitted {
     const id = opts.id ?? 1n;
     const block = opts.block ?? 1_000;
@@ -29,13 +32,11 @@ export function minedDeposit(
             publicAssetId: branded<AssetId>(deposit.publicAssetId),
             publicIn: deposit.publicIn,
             feeBpsAtSubmit: 20,
-            cm: branded<Hex32>(deposit.outCm),
-            cvDep: deposit.cvDep,
-            rcv: deposit.rcv,
+            inner: branded<Hex32>(deposit.inner),
             feeIn: deposit.feeIn,
             feeAssetId: branded<AssetId>(deposit.feeAssetId),
-            feeCm: branded<Hex32>(deposit.feeCm),
-            feeCvDep: deposit.feeCvDep,
+            feeInner: branded<Hex32>(deposit.feeInner),
+            pulled: opts.pulled ?? 0n,
             submittedAt: block,
         },
     };

@@ -6,8 +6,9 @@ import { WalletConfigError } from "../errors/config.js";
 /**
  * A deployed network: everything `connect()` needs to reach it.
  *
- * Both addresses are required. A placeholder (not yet deployed) is a {@link PlaceholderNetworkPreset},
- * which `connect()` does not accept, so naming one fails to compile.
+ * Both addresses are required. A network not yet deployed is a
+ * {@link PlaceholderNetworkPreset}, which `connect()` does not accept, so naming one fails to
+ * compile.
  */
 export interface NetworkPreset {
     chainId: bigint;
@@ -22,21 +23,22 @@ export interface NetworkPreset {
     /** MetaQuoter base URL. Without it `capabilities.swap` is `false`. */
     quoterUrl?: string | undefined;
     /**
-     * JSON-RPC endpoint for chain reads. `NetworkOptions.rpcUrl` overrides it. `anvil` ships
-     * `http://localhost:8545`; public networks ship none, since a shared default endpoint would
-     * rate-limit and observe every user.
+     * JSON-RPC endpoint for chain reads. `NetworkOptions.rpcUrl` overrides it. Public networks
+     * ship none, since a shared default endpoint would rate-limit and observe every user.
      */
     rpcUrl?: string | undefined;
     treeDepth: number;
     /** Defaults to the canonical CREATE2 deployment. */
     permit2Address?: EvmAddressLike | undefined;
-    /** `NativeAdapter`. Without it `capabilities.nativeDeposit` and `nativeWithdraw` are `false`. */
+    /**
+     * `NativeAdapter`. Without it `capabilities.nativeDeposit` and `nativeWithdraw` are `false`.
+     */
     nativeAdapterAddress?: EvmAddressLike | undefined;
     /** `SwapWrapper`. Else read from the relayer's `/chains` (TTL-cached). */
     swapWrapperAddress?: EvmAddressLike | undefined;
     /**
-     * Per-attempt submit deadline in ms: block time plus bundling wait. `HttpOptions.submitTimeoutMs`
-     * overrides it. Default 30 000.
+     * Per-attempt submit deadline in ms: block time plus bundling wait.
+     * `HttpOptions.submitTimeoutMs` overrides it. Default 30 000.
      */
     submitTimeoutMs?: number | undefined;
 }
@@ -57,15 +59,14 @@ export interface PlaceholderNetworkPreset
 /** `sepolia` is a placeholder pending public deployment. */
 export const NETWORKS = {
     /**
-     * The `backend/stack` compose stack: anvil on 8545, `fmd-webserver` on 3001, `relayer` on 3003,
-     * `metaquoter` on 8081, tree depth 11.
+     * The `backend/stack` compose stack.
      *
      * The contract addresses are deploy-dependent: the stack's one-shot deploy mints them from the
-     * deployer's nonce, and `just redeploy` mints new ones. The values here are those of a first
-     * deploy on a fresh anvil at the time of writing. Read the live ones with `just addresses` and
-     * override: `{ ...NETWORKS.anvil, maspAddress: MASP, relayerAddress: BUNDLER,
-     * nativeAdapterAddress: NATIVE_ADAPTER, swapWrapperAddress: SWAP_WRAPPER }`. `relayerAddress`
-     * must be the relayer's `Bundler`, which the stack's relayer submits through.
+     * deployer's nonce, and `just redeploy` mints new ones. Read the live ones with
+     * `just addresses` and override: `{ ...NETWORKS.anvil, maspAddress: MASP,
+     * relayerAddress: BUNDLER, nativeAdapterAddress: NATIVE_ADAPTER,
+     * swapWrapperAddress: SWAP_WRAPPER }`. `relayerAddress` must be the relayer's `Bundler`, which
+     * the stack's relayer submits through.
      */
     anvil: {
         chainId: 31337n,

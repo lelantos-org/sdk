@@ -132,8 +132,7 @@ describe("shieldedExact.quote", () => {
 
     it("refuses an offer in an asset this wallet cannot cover", async () => {
         // `unsupported-requirements`, so `select` moves to the next `accepts[]`
-        // entry rather than aborting: a server pricing one tool in several
-        // assets is paid in whichever of them the wallet actually holds.
+        // entry instead of aborting.
         const { wallet, transfer } = stubWallet({ 1: 1_499n });
         await expect(shieldedExact(wallet).quote(shieldedRequirements())).rejects.toThrow(
             /1499 spendable unit\(s\) of asset 1 \(WETH\) is short of the 1500/,
@@ -143,8 +142,8 @@ describe("shieldedExact.quote", () => {
 
     it("counts value stranded beyond the input arity, which consolidation recovers", async () => {
         // `slots` is withheld by note count, not by time, and `autoConsolidate`
-        // merges those notes before paying — so an offer this wallet can reach
-        // in two spends is still one it can pay.
+        // merges those notes before paying, so an offer reachable in two
+        // spends is still payable.
         const thin = { 1: { max: 1_000n, withheld: { ...NOTHING_WITHHELD, slots: 1_000n } } };
 
         await expect(

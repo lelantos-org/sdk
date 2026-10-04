@@ -1,12 +1,8 @@
 // Trial-decrypt scanning.
-//
-// Lazy-root model: the chain holds only `roots[ring]` + `isKnownRoot` +
-// `committedCount`. Leaves and merkle paths live with the relayer; wallets
-// verify by recomputing the root and asserting `isKnownRoot` (see
-// `crypto/path.ts`).
 
 import type { Field, Jubjub, Poseidon } from "../crypto/index.js";
-import { buildNoteCommitment, derivePkFromIvk } from "../crypto/index.js";
+import { buildNoteCommitment } from "../crypto/index.js";
+import { deriveDefaultPk } from "../keys/diversified.js";
 import { getLogger } from "../log/logger.js";
 import { decodeNotePayload, type NotePayload, stripClueBitsPrefix } from "../notes/codec.js";
 import { decryptNote } from "../notes/encrypt.js";
@@ -18,6 +14,11 @@ export interface ScanInput {
     ciphertext: Uint8Array;
     /** Packed Baby-Jubjub recipient ECDH ephemeral pubkey. */
     epk: Uint8Array;
+    /**
+     * The tree leaf at `leafIndex`, i.e. the note commitment: a spend output's published `outCm`,
+     * or for a deposit `commitWithInner(publicAssetId, publicIn, inner)` over the escrow's public
+     * fields (the fee note: `feeAssetId`, `feeIn`, `feeInner`), as the batch circuit builds it.
+     */
     cm: Field;
     leafIndex: number;
     /** Block the note landed in. Stored as `StoredNote.firstSeenBlock`. */
@@ -30,23 +31,22 @@ export interface ScanHit extends NotePayload {
     blockNumber: number;
 }
 
-/**
- * Per-scan tallies, which distinguish a systematic decode failure from an
- * empty result.
- */
+/** Per-scan tallies, which distinguish a systematic decode failure from an empty result. */
 export interface ScanStats {
     scanned: number;
     /** ECDH/ChaCha tag mismatch; expected for notes addressed to other keys. */
     notOurs: number;
     /** Tag verified but the plaintext was not a NotePayload. Should be 0. */
     decodeFailed: number;
-    /** Self-pad outputs: decrypt cleanly, value 0, unspendable. */
+    /**
+     * Value-0 notes (self-pad outputs, the fee note of a deposit that charged no fee): decrypt
+     * cleanly, unspendable.
+     */
     zeroValue: number;
     /**
-     * Decrypted cleanly but the payload does not reproduce the feed's `cm`.
-     * Should be 0: a non-zero count means the feed is serving commitments that
-     * do not match their ciphertexts, or a sender built an unspendable
-     * output. See the check in {@link scanNotes}.
+     * Decrypted cleanly but the payload does not open the feed's `cm`. Should be 0: otherwise the
+     * feed serves commitments that do not match their ciphertexts, or a sender built an
+     * unspendable output or deposit. See the check in {@link scanNotes}.
      */
     cmMismatch: number;
     hits: number;
@@ -57,11 +57,10 @@ export function emptyScanStats(): ScanStats {
 }
 
 /**
- * Trial-decrypt with `ivk`; return notes whose ChaCha tag verifies and whose
- * plaintext decodes.
+ * Trial-decrypt `inputs` with `ivk`; return the non-zero-value notes whose ChaCha tag verifies,
+ * whose plaintext decodes and whose commitment matches the feed's `cm`.
  *
- * Pass `stats` to collect tallies; it is mutated in place so the hot loop
- * allocates nothing.
+ * `stats`, when passed, is mutated in place.
  */
 export function scanNotes(
     J: Jubjub,
@@ -70,9 +69,9 @@ export function scanNotes(
     inputs: ScanInput[],
     stats?: ScanStats,
 ): ScanHit[] {
-    // `pk` is not transmitted; it is derived once from `ivk` to reproduce each
-    // hit's commitment.
-    const pk = derivePkFromIvk(P, ivk);
+    // `pk` is not transmitted; it is derived once from `ivk`, under the account's default
+    // diversifier, to reproduce each hit's commitment.
+    const pk = deriveDefaultPk(P, ivk);
     const hits: ScanHit[] = [];
     for (const inp of inputs) {
         if (stats) stats.scanned++;
@@ -84,20 +83,21 @@ export function scanNotes(
         }
         try {
             const payload = decodeNotePayload(plain);
-            // Self-pad outputs decrypt cleanly but are unspendable; they
-            // would otherwise pile up as phantom unspent notes.
+            // Value-0 notes are unspendable and would otherwise pile up as phantom unspent notes.
             if (payload.value === 0n) {
                 if (stats) stats.zeroValue++;
                 continue;
             }
-            // The feed supplies `cm`, and this is the only check that the
-            // plaintext opens it. Without it, a note committed under a different
-            // `pk` would be stored, counted in the balance and selected, then
-            // fail at spend time after a full Groth16 prove, because
-            // `toSpentNoteFromPath` recomputes `cm` from
-            // `(asset, value, ownPk, rho, rcm)` and it does not match the leaf at
-            // `leafIndex`. The cost is one Poseidon-4 per hit.
-            if (buildNoteCommitment(P, { ...payload, pk }) !== inp.cm) {
+            // The only check that the plaintext opens the feed's `cm`, which commits to
+            // `(asset, value)` and, through `inner`, to `(pk, rho, rcm)`. A deposit's leaf is
+            // built from the escrow's public `(asset, value)` and published `inner`, so this also
+            // checks that the plaintext states the escrowed amount. Without it, a note committed
+            // under another `pk`, or a deposit whose ciphertext overstates its value, would be
+            // stored, counted in the balance and selected, then fail at spend time.
+            //
+            // Asset id 0 means "no asset": the circuits put no value under it, so a valued
+            // plaintext naming it opens no leaf.
+            if (payload.asset === 0n || buildNoteCommitment(P, { ...payload, pk }) !== inp.cm) {
                 if (stats) stats.cmMismatch++;
                 if (log.enabled("debug")) {
                     log.debug("note decrypted but its commitment does not match the feed", {
@@ -115,9 +115,8 @@ export function scanNotes(
             });
             if (stats) stats.hits++;
         } catch (err) {
-            // One corrupt note must not abort a scan, but a decode failure
-            // after a verified ChaCha tag indicates a payload encoding mismatch,
-            // so it is counted and logged.
+            // One corrupt note must not abort a scan. A decode failure after a verified ChaCha tag
+            // indicates a payload encoding mismatch, so it is counted and logged.
             if (stats) stats.decodeFailed++;
             if (log.enabled("debug")) {
                 log.debug("note decrypted but failed to decode", {

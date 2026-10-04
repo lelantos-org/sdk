@@ -9,11 +9,7 @@ import { SPEND_RESERVATION_MS } from "../constants.js";
 import { type StoredNote, withinReservation } from "../notes/note-store.js";
 import { DEFAULT_COOLDOWN_BLOCKS, type SelectOpts, type WithheldValue } from "./types.js";
 
-/**
- * Per-rule tally of notes excluded from a selection. Carried by
- * `NotesHeldError`, which otherwise could not distinguish an all-dust
- * wallet from a fully-reserved or fully-cooled-down one.
- */
+/** Per-rule count of notes excluded from a selection; reported by `NotesHeldError`. */
 interface RejectionCounts {
     spent: number;
     reserved: number;
@@ -35,9 +31,9 @@ export function partitionSpendable(
         now: number;
         only?: ReadonlySet<string> | undefined;
         /**
-         * Notes an in-flight spend of this wallet holds. Counted as reserved.
-         * `ensureCover` removes them before calling a selector, so a selector
-         * never sees them; the funding error it raises is rebuilt with them.
+         * Notes an in-flight spend of this wallet holds; counted as reserved.
+         * `ensureCover` removes them before calling a selector and rebuilds
+         * the selector's funding error with them.
          */
         leased?: { has(id: string): boolean } | undefined;
     },
@@ -56,7 +52,6 @@ export function partitionSpendable(
         cooldown: 0,
         notNamed: 0,
     };
-    // Value held back per rule, used to explain why a max is below the balance.
     const withheld: WithheldValue = { reserved: 0n, dust: 0n, cooldown: 0n, slots: 0n };
     const candidates: StoredNote[] = [];
     let reservedUntilMs: number | undefined;
@@ -72,7 +67,6 @@ export function partitionSpendable(
             // counted into this asset's withheld totals.
             rejected.otherAsset++;
         } else if (rules.leased?.has(n.id)) {
-            // A spend running in this wallet holds it.
             rejected.reserved++;
             withheld.reserved += value;
         } else if (withinReservation(n.pendingSpendAt, rules.now)) {
@@ -140,12 +134,7 @@ export function fundingError(
     });
 }
 
-/**
- * The spendability rules `opts` asks for, with every default resolved.
- *
- * Shared by `selectNotes` and `spendableMax` so the latter's prediction uses
- * the same defaults as the former.
- */
+/** The spendability rules `opts` asks for, with every default resolved. */
 export function spendRules(opts: SelectOpts) {
     return {
         dust: opts.dustThreshold ?? 0n,

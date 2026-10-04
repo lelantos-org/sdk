@@ -1,8 +1,5 @@
-// Unit tests for the narrow EIP-712 encoder.
-//
-// `src/encoding-parity.test.ts` pins the digest for the SDK's own schema
-// against an ethers@6 constant. These cover that every input reaches the
-// output.
+// `src/encoding-parity.test.ts` pins the digest for the SDK's own schema against an ethers@6
+// constant. These tests cover that every input reaches the output.
 
 import { describe, expect, it } from "vitest";
 import { hashStringStruct, typedDataDigest } from "./eip712.js";

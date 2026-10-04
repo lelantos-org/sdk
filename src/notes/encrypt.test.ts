@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { BABYJUB_SUBGROUP_ORDER, Jubjub, Poseidon } from "../crypto/index.js";
 import { buildSpendingKey } from "../keys/keys.js";
 import { clueBitsToPrefix, packClueBits } from "./codec.js";
-import { decryptNote, encryptNote } from "./encrypt.js";
+import { decryptNote, encryptNote, openNoteAsSender } from "./encrypt.js";
 
 describe("note encryption", () => {
     let P: Poseidon;
@@ -35,11 +35,49 @@ describe("note encryption", () => {
     });
 });
 
+// The sender's side of the same ciphertext: opened with the ephemeral secret
+// and the payee's public key, which is what a payment proof hands a verifier.
+describe("opening a note as its sender", () => {
+    let P: Poseidon;
+    let J: Jubjub;
+    beforeAll(async () => {
+        P = await Poseidon.build();
+        J = await Jubjub.build();
+    });
+
+    const PLAINTEXT = new Uint8Array([1, 2, 3, 4, 5]);
+    const ESK = 123456789n;
+
+    it("opens what the recipient's ivk opens", () => {
+        const payee = buildSpendingKey(P, J, 11n);
+        const note = encryptNote({ J, recipientPkD: payee.pk_d, esk: ESK, plaintext: PLAINTEXT });
+
+        expect(openNoteAsSender({ J, recipientPkD: payee.pk_d, esk: ESK, note })).toEqual(
+            PLAINTEXT,
+        );
+        expect(decryptNote({ J, ivk: payee.ivk, note })).toEqual(PLAINTEXT);
+    });
+
+    it("is null for a secret that is not the note's ephemeral", () => {
+        const payee = buildSpendingKey(P, J, 11n);
+        const note = encryptNote({ J, recipientPkD: payee.pk_d, esk: ESK, plaintext: PLAINTEXT });
+
+        expect(openNoteAsSender({ J, recipientPkD: payee.pk_d, esk: ESK + 1n, note })).toBeNull();
+        expect(openNoteAsSender({ J, recipientPkD: payee.pk_d, esk: 0n, note })).toBeNull();
+    });
+
+    it("is null for an address the note was not encrypted to", () => {
+        const payee = buildSpendingKey(P, J, 11n);
+        const other = buildSpendingKey(P, J, 12n);
+        const note = encryptNote({ J, recipientPkD: payee.pk_d, esk: ESK, plaintext: PLAINTEXT });
+
+        expect(openNoteAsSender({ J, recipientPkD: other.pk_d, esk: ESK, note })).toBeNull();
+    });
+});
+
 describe("clue-bit packing", () => {
-    // The wire prefix the indexer reads and the `out_clue_bits` witness slot
-    // the proof commits to must share one packing. The contract recomputes the
-    // second from the first, so any mismatch fails verification with no local
-    // symptom.
+    // The wire prefix and the `out_clue_bits` witness slot must share one packing: the contract
+    // recomputes the second from the first.
     it("derives the wire prefix from the same packing as the witness slot", () => {
         const bits = new Uint8Array([0b10101]);
         const gamma = 5;

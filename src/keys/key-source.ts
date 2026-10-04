@@ -1,5 +1,5 @@
-// Key-source resolver: mnemonic / EIP-712 sig / passkey PRF / raw nsk → nsk field
-// element. Callers persist the source, never the derived nsk.
+// Key-source resolver: mnemonic / EIP-712 signature / private key / passkey PRF / raw nsk → nsk
+// field element. Callers persist the source, never the derived nsk.
 
 import { generateMnemonic as bip39GenerateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
@@ -21,19 +21,14 @@ export type KeySource =
       }
     | { type: "signature"; signature: string }
     | { type: "privateKey"; hex: string }
-    /**
-     * Raw WebAuthn PRF output, 32 bytes, from a caller-run ceremony. See `passkey.ts` for why PRF
-     * is used rather than the assertion signature.
-     */
+    /** Raw WebAuthn PRF output, 32 bytes, from a caller-run ceremony. See `passkey.ts`. */
     | { type: "passkeyPrf"; prf: Uint8Array }
     | { type: "nsk"; nsk: Field };
 
 /**
- * ASCII bytes of `"lelantos.privateKey.nsk.v1\0"`. Changing it invalidates every nsk derived from
- * this path and requires a coordinated migration.
- *
- * The version tracks the two-block reduction below, so keys from different reduction versions
- * never share a keccak input.
+ * ASCII bytes of `"lelantos.privateKey.nsk.v1\0"`. Changing it changes every nsk derived from a
+ * private key. The version denotes the two-block reduction below, so different reductions never
+ * share a keccak input.
  */
 const PK_DOMAIN_TAG_HEX = "6c656c616e746f732e707269766174654b65792e6e736b2e763100";
 
@@ -62,10 +57,7 @@ export function resolveNsk(source: KeySource): Field {
 /**
  * `keccakExpand(domainTag || privKey, 2) mod BABYJUB_SUBGROUP_ORDER`.
  * Domain-separated from the EIP-712 signature reduction so a signature equal to the raw key bytes
- * cannot collide.
- *
- * Two keccak blocks, not one: a bare 256-bit digest folded into the 251-bit
- * subgroup order skews residues by about 30:29. See `reduceWideToField`.
+ * cannot collide. Two keccak blocks: see `reduceWideToField` on folding a bare digest.
  *
  * @internal
  */

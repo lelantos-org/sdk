@@ -1,8 +1,5 @@
-// Context-free wrappers over the key and FMD primitives.
-//
-// The primitives take explicit `Poseidon` / `Jubjub` instances because the worker and benchmark
-// paths supply their own. These wrappers resolve the shared `cryptoContext` instead and are the
-// variants the root barrel exports.
+// Wrappers over the key and FMD primitives that resolve the shared `cryptoContext` in place of
+// explicit `Poseidon` / `Jubjub` instances. These are the variants the entry points export.
 
 import { cryptoContext } from "../crypto/context.js";
 import { FMD_DEFAULT_GAMMA, type FmdDetectionKey } from "../fmd/keys.js";

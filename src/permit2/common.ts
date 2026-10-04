@@ -5,10 +5,8 @@ import { asUserRejection } from "../errors/chain.js";
 import { PERMIT2_ADDRESS } from "../protocol/deposit-request.js";
 
 /**
- * The EIP-712 domain every Permit2 signature is bound to.
- *
- * Shared by every signature family (`./witness.ts`, `./allowance.ts`) so a non-canonical deployment
- * or domain-field change applies to each consistently.
+ * The EIP-712 domain every Permit2 signature (`./witness.ts`, `./allowance.ts`) is bound to.
+ * `permit2Address` names a non-canonical deployment.
  */
 export function permit2Domain(chainId: bigint, permit2Address?: string): TypedDataDomain {
     return {

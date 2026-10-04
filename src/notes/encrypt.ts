@@ -14,8 +14,10 @@
 //   nonce  = same blake2b
 //   plaintext = ChaCha20-Poly1305 decrypt; null on tag failure.
 //
-// epk is fresh per note → key is single-use → nonce reuse impossible.
+// epk is unique per note → key is single-use → nonce reuse impossible.
 // Per-note nonce derivation is defense-in-depth against key reuse.
+// A wallet's own spends derive esk from the note instead of drawing it; see
+// `./outgoing.ts` for why that keeps epk unique.
 // Must match `sdk/wasm/jubjub/src/decrypt.rs` byte-for-byte.
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
@@ -70,6 +72,46 @@ export function encryptNote({ J, recipientPkD, esk, plaintext }: EncryptArgs): E
 // Returns null on tag failure (not-for-me / corrupted).
 export function decryptNote({ J, ivk, note }: DecryptArgs): Uint8Array | null {
     return J.tryDecryptNote(ivk, note.epk, note.ciphertext);
+}
+
+/** @internal */
+export interface OpenAsSenderArgs {
+    J: Jubjub;
+    /** The address the note was encrypted to. */
+    recipientPkD: Point;
+    /** The output's ECDH ephemeral secret. */
+    esk: Field;
+    note: EncryptedNote;
+}
+
+/**
+ * Open a note from the sender's side: with its ephemeral secret and the
+ * recipient's public key, instead of the recipient's `ivk`.
+ *
+ * Returns `null` on a tag failure: `esk` is not this note's ephemeral secret,
+ * or the note was encrypted to another address. The two are not told apart
+ * here; a caller that must can compare `esk · B` with `note.epk` first.
+ *
+ * @internal
+ */
+export function openNoteAsSender({
+    J,
+    recipientPkD,
+    esk,
+    note,
+}: OpenAsSenderArgs): Uint8Array | null {
+    const eskMod = esk % BABYJUB_SUBGROUP_ORDER;
+    if (eskMod === 0n || !J.inSubgroup(recipientPkD)) return null;
+
+    // Keyed on the published `epk`, as the recipient's side is: a secret that
+    // is not behind it yields another shared point and so another key.
+    const shared = J.mulPointEscalar(recipientPkD, eskMod);
+    const key = noteKey(note.epk, J.packPoint(shared));
+    try {
+        return chacha20poly1305(key, noteNonce(note.epk)).decrypt(note.ciphertext);
+    } catch {
+        return null;
+    }
 }
 
 function noteKey(epkPacked: Uint8Array, sharedPacked: Uint8Array): Uint8Array {

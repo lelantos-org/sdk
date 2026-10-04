@@ -7,7 +7,7 @@ import { deriveNskFromSigner } from "../../keys/metamask.js";
 import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
 import type { ConnectExtras, NetworkPreset } from "./options.js";
 
-/** Widened view of `ConnectOptions` used internally, after the union is enforced at the call site. */
+/** Widened view of `ConnectOptions`, used after the union is enforced at the call site. */
 export type ConnectOptionsLoose = ConnectExtras & {
     network: string | NetworkPreset;
     rpcUrl?: string | undefined;
@@ -52,10 +52,10 @@ function silentKeySource(opts: ConnectOptionsLoose): KeySource | undefined {
 /**
  * The shielded spending key, as a thunk `connect()` calls last.
  *
- * An explicit `mnemonic` / `signature` / `nsk` always wins. Otherwise the chain layer supplies it: a
+ * An explicit `mnemonic` / `signature` / `nsk` wins. Otherwise the chain layer supplies it: a
  * `privateKey` through a domain-separated reduction, a `signer` or `provider` through one EIP-712
  * signature (the only prompt `connect` issues). A pre-built `chain`, `reader` or `readOnly` holds
- * no key; validation has already refused those without an explicit source.
+ * no key; validation refuses those without an explicit source.
  */
 export function keyThunk(opts: ConnectOptionsLoose, chainId: bigint): () => Promise<bigint> {
     return async () => {

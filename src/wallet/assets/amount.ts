@@ -5,9 +5,9 @@
 //   circuit  CircuitAmount   note values, `publicIn` / `publicOut`
 //   base     TokenAmount     ERC-20 base units: `circuit * scale * index / RAY`
 //
-// Every conversion here is one exact rational division, rounded once by the caller's `Rounding`, so
+// Every conversion is one exact rational division, rounded once by the caller's `Rounding`, so
 // `parseAmount(formatAmount(x, a), a) === x` holds for plain assets and for yield assets whose unit
-// is worth at least one base unit (`scale * index >= RAY`, every registered asset).
+// is worth at least one base unit (`scale * index >= RAY`).
 //
 // Pure functions of `AssetUnits`: formatting a balance bundles no registry code.
 
@@ -20,12 +20,12 @@ import type { AssetInfo } from "./info.js";
 
 const DECIMAL = /^(-)?(\d+)(?:\.(\d+))?$/;
 
-/** An asset whose index moves: off-unit amounts round up by default rather than refusing. */
+/** Whether the asset's index is not `RAY`; its off-unit amounts then round up by default. */
 export function isYieldUnits(asset: AssetUnits): boolean {
     return (asset.index ?? RAY) !== RAY;
 }
 
-/** The rounding an `Amount` gets when the caller names none. See `Amount`. */
+/** The rounding an `Amount` gets when the caller names none. */
 function defaultRounding(asset: AssetUnits): Rounding {
     return isYieldUnits(asset) ? "up" : "exact";
 }
@@ -399,7 +399,7 @@ export function resolveOutAmount(
         const amount = o.net as Amount;
         let target: bigint;
         if (typeof amount === "object" && amount !== null && "baseUnits" in amount) {
-            // The target is the exact base units; they are never converted to units.
+            // The target is the base units as given, never converted to circuit units.
             if (typeof amount.baseUnits !== "bigint") {
                 throw new InvalidArgumentError("net.baseUnits must be a bigint", {
                     argument: "net",
@@ -421,8 +421,6 @@ export function resolveOutAmount(
         fee: branded<TokenAmount>(split.fee),
     };
 }
-
-// --- Money ---------------------------------------------------------------------------------------
 
 /**
  * A shielded figure (note value, `publicIn` / `publicOut`, a unit-denominated fee): `amount` is
@@ -459,17 +457,6 @@ export function chargedMoney(money: Money): Money | null {
     return money.amount === 0n && money.baseUnits === 0n ? null : money;
 }
 
-// --- the amount contract: how a caller states an amount and names an asset ----------------------
-//
-// Three amount spaces exist (human string, circuit units, ERC-20 base units). An `Amount` names
-// which one it is by its runtime shape, never by magnitude:
-//
-//   "12.5"                        human decimal string of the asset's token
-//   circuitAmount(12_500_000n)    circuit units (branded; a plain `bigint` does not compile)
-//   { baseUnits: 12_500_000n }    ERC-20 base units
-//
-// `number` does not compile, and is refused at runtime with `INVALID_ARGUMENT` for JS callers.
-
 export type { AssetRef } from "./asset-ref.js";
 
 /**
@@ -482,11 +469,16 @@ export type { AssetRef } from "./asset-ref.js";
 export type Rounding = "exact" | "down" | "up";
 
 /**
- * An amount of one asset, in whichever space the caller holds it.
+ * An amount of one asset. Its runtime shape, never its magnitude, names the space it is in:
  *
- * A plain `bigint` is deliberately not accepted: `100n` could be circuit units or base units, which
- * differ by `scale` (up to 10^12). Brand it with `circuitAmount(x)`, pass `{ baseUnits: x }`, or pass
- * a value the SDK returned.
+ * - `"12.5"`: human decimal string of the asset's token.
+ * - `circuitAmount(12_500_000n)`: circuit units.
+ * - `{ baseUnits: 12_500_000n }`: ERC-20 base units.
+ *
+ * A plain `bigint` does not compile: `100n` could be circuit units or base units, which differ by
+ * `scale`. Brand it with `circuitAmount(x)`, pass `{ baseUnits: x }`, or pass a value the SDK
+ * returned. A `number` does not compile either, and is refused at runtime with
+ * `INVALID_ARGUMENT`.
  *
  * Off-unit strings and base units round by the asset's default: `"exact"` for a plain asset,
  * `"up"` for a yield asset (the inverse of `formatAmount`, so a formatted balance parses back to
@@ -504,7 +496,8 @@ export type Amount =
 /**
  * Which side of the protocol fee an outbound amount names. Exactly one of the two.
  *
- * - `gross`: the `publicOut` leaving the pool, published on-chain; the protocol fee comes out of it.
+ * - `gross`: the `publicOut` leaving the pool, published on-chain; the protocol fee is taken from
+ *   it.
  * - `net`: what reaches the recipient (withdraw) or the venue (swap), `gross − protocol fee`. The
  *   SDK grosses it up to the smallest `publicOut` whose net covers it; results then report
  *   `onLadder`, since that `publicOut` is rarely a denomination.
@@ -522,8 +515,8 @@ export type OutAmount =
 export type OutAmountSide = "gross" | "net";
 
 /**
- * The fields amount conversion reads. `AssetInfo` satisfies it, so SDK-returned assets pass as-is;
- * an app's own registry row with these three fields does too.
+ * The fields amount conversion reads. `AssetInfo` satisfies it, as does an app's own registry row
+ * with these three fields.
  */
 export interface AssetUnits {
     /**

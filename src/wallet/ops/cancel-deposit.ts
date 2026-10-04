@@ -124,7 +124,7 @@ export async function executeCancelDeposit(
     });
 }
 
-/** The tip minus the cancel delay and a margin, when the chain can say; else the adapter's default. */
+/** Tip minus the cancel delay and a margin, when the chain can say; else the adapter's default. */
 async function lookbackFrom(ctx: WalletContext): Promise<bigint | undefined> {
     const { chain } = ctx.cfg;
     if (!chain.blockNumber || !chain.cancelDelay) return undefined;
@@ -138,21 +138,21 @@ function checkInputs(v: unknown): CancelDepositInputs {
     const i = v as Partial<Record<keyof CancelDepositInputs, unknown>>;
     const big = (x: unknown) => typeof x === "bigint";
     const hex = (x: unknown) => typeof x === "string" && /^0x[0-9a-fA-F]+$/.test(x);
-    const pair = (x: unknown) => Array.isArray(x) && x.length === 2 && x.every(big);
     const ok =
         typeof v === "object" &&
         v !== null &&
         big(i.publicIn) &&
-        hex(i.cm) &&
-        pair(i.cvDep) &&
+        hex(i.inner) &&
         big(i.publicAssetId) &&
         Number.isInteger(i.feeBpsAtSubmit) &&
         hex(i.payer) &&
         Number.isInteger(i.submittedAt) &&
         big(i.feeIn) &&
         big(i.feeAssetId) &&
-        hex(i.feeCm) &&
-        pair(i.feeCvDep);
+        hex(i.feeInner) &&
+        // Required, never defaulted: it is digest-bound, so a guessed zero
+        // makes a yield escrow's cancel revert `DigestMismatch`.
+        big(i.pulled);
     if (!ok) {
         throw new InvalidArgumentError(
             "cancelDeposit: cancelInputs is not the DepositEscrowed payload a deposit returned",

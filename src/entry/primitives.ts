@@ -1,5 +1,5 @@
-// `@lelantos-org/sdk/primitives`: hex/bytes/field/randomness, Poseidon and Jubjub, keys and addresses,
-// the note codec and FMD.
+// `@lelantos-org/sdk/primitives`: hex/bytes/field/randomness, Poseidon and Jubjub, keys and
+// addresses, the note codec and FMD.
 
 export { bitAt, packBits, unpackBits } from "../core/bits.js";
 export type { Brand } from "../core/brand.js";
@@ -30,7 +30,12 @@ export {
     shuffled,
 } from "../core/random.js";
 export { isHttpUrl, toAbsoluteUrl, type Url, urlToString } from "../core/url.js";
-export { buildNoteCommitment, type NoteCommitInput } from "../crypto/commit.js";
+export {
+    buildInner,
+    buildNoteCommitment,
+    commitWithInner,
+    type NoteCommitInput,
+} from "../crypto/commit.js";
 export { type CryptoContext, cryptoContext, cryptoContextIfReady } from "../crypto/context.js";
 export {
     deriveDk,
@@ -40,7 +45,7 @@ export {
     derivePkFromIvk,
     deriveSubscriptionToken,
 } from "../crypto/derive.js";
-export { H_BASE, type Point } from "../crypto/jubjub.js";
+export type { Point } from "../crypto/jubjub.js";
 export { Jubjub } from "../crypto/jubjub-wasm/index.js";
 export { configureJubjubWasm, type JubjubWasmLoader } from "../crypto/jubjub-wasm/loader.js";
 export { type MerkleProof, MerkleTree } from "../crypto/merkle.js";
@@ -51,13 +56,13 @@ export { configurePoseidonWasm, type PoseidonWasmLoader } from "../crypto/poseid
 export { buildRho } from "../crypto/rho.js";
 export { fmdLegendreWitness, legendreSymbol, modInverse, modSqrt } from "../crypto/sqrt.js";
 export {
-    TAG_ASSET,
     TAG_CM,
+    TAG_DIGEST,
     TAG_DK,
     TAG_FMD_BIT,
     TAG_FMD_EXPAND,
+    TAG_INNER,
     TAG_IVK,
-    TAG_LEAF,
     TAG_MERKLE,
     TAG_NF,
     TAG_NK,
@@ -85,6 +90,7 @@ export {
     fmdGenDetectionKey,
 } from "../fmd/keys.js";
 export { ADDRESS_HRP, type DecodedAddress, decodeAddress, encodeAddress } from "../keys/address.js";
+export { deriveClaimLinkNsk } from "../keys/claim-link.js";
 export { detectionKey } from "../keys/convenience.js";
 export {
     accountPath,

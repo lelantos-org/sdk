@@ -2,9 +2,8 @@
 //   node = Poseidon(TAG_MERKLE, c0, c1, c2, c3)
 // Mirrors `circuits/src/lib/merkle.circom`.
 //
-// Internal nodes are memoized in `nodeCache`. On insert, only the O(depth) dirty path from leaf to
-// root is evicted. `bulkInsert` evicts the minimal range instead of per-leaf paths, using ~7.5×
-// fewer cache operations per chunk.
+// Internal nodes are memoized in `nodeCache`. `insert` evicts the O(depth) path from leaf to root;
+// `bulkInsert` evicts the minimal range instead of one path per leaf.
 
 import { InvalidArgumentError } from "../errors/config.js";
 import type { Field, Poseidon } from "./poseidon.js";
@@ -12,29 +11,26 @@ import { TAG_MERKLE } from "./tags.js";
 
 const ARITY = 4;
 
-// Beyond this the (level, index) cache key would exceed 2^53.
+// Beyond this the `level * keyStride + index` cache key exceeds Number.MAX_SAFE_INTEGER:
+// 2·25−2 = 48 bits of index + 5 of level = 53.
 const MAX_DEPTH = 25;
 
 /**
  * Stride that makes `level * stride + index` injective over every (level, index) the tree can
- * reach.
+ * reach. At level L a cached index is < 4^(depth-L), so the widest level is L=1 with indices
+ * < 4^(depth-1) = 2^(2·depth-2); a smaller stride aliases one level into the next.
  *
- * At level L a cached index is < 4^(depth-L), so the widest level is L=1 with indices
- * < 4^(depth-1) = 2^(2·depth-2). Anything smaller aliases one level into the next, so the stride
- * must track `depth`.
- *
- * @internal exported for the injectivity test; not part of the public API.
+ * @internal exported for the injectivity test.
  */
 export function cacheKeyStride(depth: number): number {
     return 2 ** (2 * depth - 2);
 }
 
 /**
- * A memoized internal node, addressed by `(level, index)`.
- *
- * Not the packed `nodeCache` key, whose encoding depends on `cacheKeyStride(depth)`.
- * `(level, index)` denotes the same subtree in any tree containing those leaves, so a snapshot
- * stays meaningful if the configured depth changes.
+ * A memoized internal node, addressed by `(level, index)` rather than by the packed `nodeCache`
+ * key, whose encoding depends on `cacheKeyStride(depth)`. `(level, index)` denotes the same
+ * subtree in any tree containing those leaves, so a snapshot stays meaningful if the configured
+ * depth changes.
  *
  * @internal
  */
@@ -54,10 +50,8 @@ export interface MerkleProof {
 /** @internal */
 export class MerkleTree {
     /**
-     * Private backing store, exposed read-only via `leaves`.
-     *
-     * Every mutation path evicts the dirty range from the node cache; external mutation would
-     * bypass that and leave `root()` stale.
+     * Exposed read-only via `leaves`. Every mutation path evicts the dirty range from the node
+     * cache; external mutation would bypass that and leave `root()` stale.
      */
     private _leaves: Field[] = [];
 
@@ -74,8 +68,6 @@ export class MerkleTree {
         private readonly P: Poseidon,
         readonly depth: number,
     ) {
-        // keyStride · depth must stay within Number.MAX_SAFE_INTEGER:
-        // 2·25−2 = 48 bits of index + 5 of level = 53.
         if (depth < 1 || depth > MAX_DEPTH) {
             throw new InvalidArgumentError(
                 `MerkleTree: depth must be 1..${MAX_DEPTH}, got ${depth}`,
@@ -100,10 +92,7 @@ export class MerkleTree {
         return idx;
     }
 
-    /**
-     * Insert multiple leaves and evict only the minimal dirty range.
-     * Use instead of repeated insert() when adding a contiguous block.
-     */
+    /** Append a contiguous block of leaves, evicting only the minimal dirty range. */
     bulkInsert(leaves: Field[]): void {
         if (leaves.length === 0) return;
         const lo = this._leaves.length;
@@ -111,21 +100,15 @@ export class MerkleTree {
         this.invalidateRange(lo, this._leaves.length - 1);
     }
 
-    /**
-     * Replace the whole leaf array. Clears the node cache, so this is safe
-     * on a tree that already holds inserts.
-     */
+    /** Replace the whole leaf array and clear the node cache. */
     setLeaves(leaves: Field[]): void {
         this._leaves = [...leaves];
         this.nodeCache.clear();
     }
 
     /**
-     * Memoized internal nodes, for persistence.
-     *
-     * Restoring these lets a reloaded tree skip rebuilding; otherwise the first `root()` or
-     * `getPath()` recomputes every internal node from the leaves (~350K Poseidon-5 hashes on a
-     * full tree) on every app open.
+     * Memoized internal nodes, for persistence. Without them a reloaded tree recomputes every
+     * internal node from the leaves on its first `root()` or `proof()`.
      */
     exportNodes(): MerkleNode[] {
         const out: MerkleNode[] = [];
@@ -137,11 +120,10 @@ export class MerkleTree {
     }
 
     /**
-     * Reload previously exported nodes. Call *after* `setLeaves`, which clears the cache.
+     * Reload previously exported nodes. Call after `setLeaves`, which clears the cache.
      *
-     * A level outside `1..depth` cannot come from a tree this one can represent, and caching it
-     * under a key read as a different level would produce a wrong root, so it is rejected rather
-     * than skipped.
+     * A level outside `1..depth` would be cached under a key read back as a different level and
+     * produce a wrong root, so it is rejected rather than skipped.
      */
     importNodes(nodes: Iterable<MerkleNode>): void {
         for (const { level, index, value } of nodes) {
@@ -151,11 +133,10 @@ export class MerkleTree {
                     { argument: "nodes" },
                 );
             }
-            // `index` is rejected for the same reason. The cache key is
-            // `level * keyStride + index`, so an index at or past `keyStride` aliases into the next
-            // level: at the deployed depth 10, `{level: 1, index: 262144}` is the key for
-            // `{level: 2, index: 0}`. `root()` and `proof()` would then describe a tree the chain
-            // never held, and `exportNodes()` would persist the corruption.
+            // Likewise for `index`: the cache key is `level * keyStride + index`, so an index at or
+            // past `keyStride` aliases into the next level. At depth 10 `{level: 1, index: 262144}`
+            // is the key for `{level: 2, index: 0}`; `root()` and `proof()` would then describe a
+            // tree the chain never held, and `exportNodes()` would persist it.
             const width = ARITY ** (this.depth - level);
             if (!Number.isInteger(index) || index < 0 || index >= width) {
                 throw new InvalidArgumentError(

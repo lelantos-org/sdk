@@ -8,9 +8,9 @@ import { RelayerRejectedError, SpendOutcomeUnknownError } from "../../errors/spe
 import type { TransferResult } from "../types/results.js";
 import { classifySubmitFailure, outcomeUnknown, submitSpend, withOperation } from "./steps.js";
 
-// `outcomeUnknown` and `classifySubmitFailure` decide whether a failed submit
-// leaves notes spendable or reserved, and what the caller is told. Tested
-// directly on errors so each status is its own case.
+// `outcomeUnknown` and `classifySubmitFailure` decide whether a failed submit leaves notes
+// spendable or reserved, and what the caller is told. Tested directly on errors so each status is
+// its own case.
 
 const relayerError = (status?: number, body?: string) =>
     new NetworkError("RELAYER_FAILED", "/v1/spend", `HTTP ${status ?? "-"}`, {
@@ -30,8 +30,8 @@ describe("outcomeUnknown", () => {
     });
 
     it("cannot rule out a spend when an earlier attempt got no response", () => {
-        // The resend carried the same Idempotency-Key; a definite answer to it
-        // says nothing about whether the first copy landed.
+        // The resend carried the same Idempotency-Key; a definite answer to it says nothing about
+        // whether the first copy landed.
         const err = new NetworkError("RELAYER_FAILED", "/v1/spend", "HTTP 400", {
             status: 400,
             body: "bad request: nullifier already used",

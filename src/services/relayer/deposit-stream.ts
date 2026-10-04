@@ -5,9 +5,9 @@
 // `flushBatch`. Nothing on the deposit tx says when that landed, so the
 // relayer publishes it here and callers wait with `awaitFlush`.
 //
-// Transport is injected. `EventSource` is a browser global with no Node
-// equivalent (Node 24 ships none), so a Node caller supplies a polyfill rather
-// than the SDK importing one into the browser bundle.
+// Transport is injected: `EventSource` is a browser global, so a Node caller
+// supplies a polyfill rather than the SDK importing one into the browser
+// bundle.
 
 import { type Hex32, hex32 } from "../../core/brand.js";
 import { EnvironmentError } from "../../errors/config.js";
@@ -33,12 +33,9 @@ export type RelayerDepositEvent = DepositFlushed;
 /**
  * Outcome of {@link DepositStream.awaitFlush}, discriminated on `kind`.
  *
- * A value rather than a rejection, matching `awaitCommitments`: this runs
- * after a successful broadcast, so neither an abort nor a dead feed means the
- * deposit failed, only that its settlement went unobserved.
- *
- * The success arm *is* the event, so a narrowed `wait` reads its fields
- * directly rather than through a wrapper.
+ * A value rather than a rejection: this runs after a successful broadcast, so
+ * neither an abort nor a dead feed means the deposit failed, only that its
+ * settlement went unobserved. The success arm is the event itself.
  */
 export type FlushWait = DepositFlushed | { kind: "aborted" } | { kind: "closed" };
 
@@ -46,20 +43,17 @@ export type FlushWait = DepositFlushed | { kind: "aborted" } | { kind: "closed" 
 const READY_STATE_CLOSED = 2;
 
 /**
- * The slice of `EventSource` this client uses.
- *
- * Structural, so a browser `EventSource`, a Node polyfill, or a test double
- * all satisfy it without a cast. `readyState` is required because it is the
- * only way to tell a transient drop the source will retry from a fatal error
- * it will not.
+ * The slice of `EventSource` this client uses. Structural, so a browser
+ * `EventSource`, a Node polyfill or a test double satisfies it without a cast.
+ * `readyState` is required: only it tells a transient drop, which the source
+ * retries, from a fatal error.
  */
 export interface EventSourceLike {
     readonly readyState: number;
     addEventListener(type: string, listener: (ev: { data?: unknown }) => void): void;
     /**
-     * Optional so a minimal custom source stays valid, but implement it where
-     * possible: without it a closed stream's handlers stay attached to the
-     * source for as long as the source itself is reachable.
+     * Optional, but without it a closed stream's handlers stay attached to the
+     * source for as long as the source is reachable.
      */
     removeEventListener?(type: string, listener: (ev: { data?: unknown }) => void): void;
     close(): void;
@@ -76,8 +70,7 @@ export interface DepositStreamOptions {
     /**
      * Events retained for replay to late subscribers. The relayer does not
      * replay, so without a buffer a flush published between broadcasting the
-     * deposit and calling `awaitFlush` is missed and the caller waits for an
-     * event that has already passed. Default 64.
+     * deposit and calling `awaitFlush` is missed. Default 64.
      */
     replayBuffer?: number | undefined;
 }
@@ -128,11 +121,7 @@ export class DepositStream {
     private readonly recent: DepositFlushed[] = [];
     private closed = false;
 
-    /**
-     * Retained so {@link markClosed} can detach them. An inline arrow cannot be
-     * removed and would keep a closed stream's handlers attached to the source
-     * for as long as the source stays reachable.
-     */
+    /** Retained so {@link markClosed} can detach them. */
     private readonly onMessageEvent = (ev: { data?: unknown }): void => this.onMessage(ev.data);
     private readonly onErrorEvent = (): void => this.onError();
 
@@ -152,8 +141,8 @@ export class DepositStream {
     /**
      * Observe every event from now on. Returns an unsubscribe function.
      *
-     * A no-op once closed: `markClosed` has already cleared the listener set,
-     * so a listener added then could never fire or be cleaned up.
+     * A no-op once closed: the listener set is already cleared, so a listener
+     * added then could never fire.
      */
     subscribe(listener: (ev: RelayerDepositEvent) => void): () => void {
         if (this.closed) return () => {};
@@ -212,9 +201,7 @@ export class DepositStream {
 
     /**
      * Register a one-shot close callback. Returns an unregister function.
-     *
-     * Fires immediately on an already-closed stream: the event it waits for
-     * has happened, and queueing it would leave it unreachable.
+     * Fires immediately on an already-closed stream.
      */
     private onClose(listener: () => void): () => void {
         if (this.closed) {
@@ -245,9 +232,9 @@ export class DepositStream {
     }
 
     /**
-     * `error` fires on a transient drop as well as a fatal one. The browser
+     * `error` fires on a transient drop as well as a fatal one. The source
      * reconnects by itself in the first case, and only `readyState` tells them
-     * apart; treating every error as fatal would abandon a recoverable stream.
+     * apart.
      */
     private onError(): void {
         if (this.source.readyState !== READY_STATE_CLOSED) {

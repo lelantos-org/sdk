@@ -65,7 +65,7 @@ describe("redenominate", () => {
             throw relayerDown;
         });
 
-        // Swallowed, this read as "nothing left to reshape".
+        // Swallowed, it would read as "nothing left to reshape".
         await expect(redenominate(h, info)).rejects.toBe(relayerDown);
         expect(h.transfer).toHaveBeenCalledOnce();
     });

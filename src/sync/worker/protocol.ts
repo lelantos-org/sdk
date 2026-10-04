@@ -1,22 +1,16 @@
-// Scanner worker wire types. Transport is in `src/runtime/rpc/`; this module defines
-// only the payload shapes and their codecs.
+// Scanner worker wire types. Transport is in `src/runtime/rpc/`; this module defines only the
+// payload shapes and their codecs.
 //
-// No client-side FMD pre-filter
-// -----------------------------
-// The protocol carries no detection key or per-input clue: `/v1/notes` does
-// not return `clue.R`, so the worker cannot FMD-reject before trial-decrypt.
-// Adding one would need a wire change on fmd-webserver, and the local saving is
-// marginal: γ=5 with early exit costs ~2 Baby-Jubjub scalar muls plus two
-// Poseidon-6 hashes per non-matching note, against one wasm call for
-// trial-decrypt. FMD's benefit is server-side bandwidth, provided by
+// The protocol carries no detection key or per-input clue: `/v1/notes` does not return `clue.R`,
+// so the worker cannot FMD-reject before trial-decrypt. FMD filtering is server-side, through
 // `FmdMatchesNoteSource` (`syncStrategy: { kind: "matches" }`).
 
 import type { ScanHit, ScanInput } from "../scan.js";
 
 /**
- * Wasm loader overrides forwarded on `init`. Required for bundlers that
- * rewrite `new URL(..., import.meta.url)` inside worker chunks; without it the
- * worker's wasm load hangs silently.
+ * Wasm loader overrides forwarded on `init`. Required for bundlers that rewrite
+ * `new URL(..., import.meta.url)` inside worker chunks; without it the worker's wasm load hangs
+ * silently.
  */
 export interface WireWasmConfig {
     jubjubModuleUrl: string;
@@ -36,7 +30,6 @@ export interface WireScanHit {
     value: string;
     rho: string;
     rcm: string;
-    rcvDep: string;
     cm: string;
     leafIndex: number;
     blockNumber: number;
@@ -79,7 +72,6 @@ export function encodeHit(h: ScanHit): WireScanHit {
         value: h.value.toString(),
         rho: h.rho.toString(),
         rcm: h.rcm.toString(),
-        rcvDep: h.rcvDep.toString(),
         cm: h.cm.toString(),
         leafIndex: h.leafIndex,
         blockNumber: h.blockNumber,
@@ -92,7 +84,6 @@ export function decodeHit(w: WireScanHit): ScanHit {
         value: BigInt(w.value),
         rho: BigInt(w.rho),
         rcm: BigInt(w.rcm),
-        rcvDep: BigInt(w.rcvDep),
         cm: BigInt(w.cm),
         leafIndex: w.leafIndex,
         blockNumber: w.blockNumber,
@@ -100,12 +91,8 @@ export function decodeHit(w: WireScanHit): ScanHit {
 }
 
 /**
- * Buffers to transfer rather than copy.
- *
- * These are the caller's arrays from `NoteSource.listNotes`. Transferring
- * detaches them, so a scan request cannot be re-sent. The pool must recycle a
- * failed worker rather than retry: a resend would scan zero-length ciphertexts
- * and report no hits.
+ * Buffers to transfer rather than copy. Transferring detaches the caller's arrays, so a scan
+ * request cannot be re-sent; see `WorkerPoolScanner.recycle`.
  */
 export function transferablesOf(inputs: WireScanInput[]): Transferable[] {
     const xs: Transferable[] = [];

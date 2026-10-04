@@ -17,6 +17,7 @@ import type {
     WalletConfigError,
 } from "./config.js";
 import type {
+    FeeAboveLimitError,
     FeeAssetNotQuotedError,
     InsufficientBalanceError,
     InsufficientCoverError,
@@ -49,13 +50,11 @@ const CODE_SET: ReadonlySet<string> = new Set(WALLET_ERROR_CODES);
  * Union of every concrete SDK error, discriminated on `code`. Switching on
  * `code` narrows to the class carrying that variant's context fields.
  *
- * The two classes that cover several codes are expanded one code per member.
- * `Extract` (the basis of {@link WalletErrorOf} and the `code` overload of
- * {@link isWalletError}) matches a member only when its `code` is assignable to
- * the requested literal, which a union-typed `code` never is. Listing
- * `NetworkError` or `WorkerRpcError` once would make `WalletErrorOf` resolve to
- * `never` for their codes: the guard would return `true` at runtime while
- * narrowing away `url`, `status`, `body` and `method` at the type level.
+ * `NetworkError` and `WorkerRpcError` cover several codes and are expanded one code per
+ * member. `Extract` (the basis of {@link WalletErrorOf} and the `code` overload of
+ * {@link isWalletError}) matches a member only when its `code` is assignable to the requested
+ * literal, which a union-typed `code` never is, so listing either class once would resolve
+ * `WalletErrorOf` to `never` for its codes.
  */
 export type AnyWalletError =
     | WalletConfigError
@@ -68,6 +67,7 @@ export type AnyWalletError =
     | NotesHeldError
     | InsufficientCoverError
     | FeeAssetNotQuotedError
+    | FeeAboveLimitError
     | DeadlinePassedError
     | QuoteStaleError
     | UserRejectedError

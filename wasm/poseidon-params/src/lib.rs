@@ -1,23 +1,17 @@
 //! The slice of `light-poseidon`'s surface that the vendored permutation uses.
 //!
 //! `poseidon-wasm` renames this crate to `light-poseidon` in its manifest, so
-//! `src/poseidon/circom.rs` — vendored byte-for-byte from the backend, where
-//! that name is the real crate — keeps compiling unedited and stays diffable.
-//! The numbers are light-poseidon's own: `build.rs` runs it on the host and
-//! writes the table out, so they are identical by construction rather than by
-//! transcription. `sdk/tests/vectors/poseidon.json` pins the far side.
+//! its `src/poseidon/circom.rs`, vendored byte-for-byte from the backend where
+//! that name is the real crate, compiles unedited and stays diffable.
 //!
-//! # Why not the crate
+//! `light-poseidon` emits its constants as code, one arm per width from 2 to
+//! 13, dispatched on a runtime `t`, so a wasm build carries every arm. Here
+//! `build.rs` runs light-poseidon on the host and writes one width out as
+//! data: the numbers are light-poseidon's own, and
+//! `sdk/tests/vectors/poseidon.json` pins the resulting digests.
 //!
-//! `light-poseidon` emits its constants as code, one arm per width, dispatched
-//! on a runtime `t`. Nothing drops the arms the caller never asks for, so the
-//! module reached `wasm-opt` at ~2 MB and only `-O4` — 12+ minutes of constant
-//! propagation through 43k lines — brought it back to ~190 KB. Resolving the
-//! width at build time makes that work unnecessary rather than faster.
-//!
-//! **Width 6 only** (arity 5). That is the one width `poseidon-wasm` exposes;
-//! every other arity the SDK uses stays on the JS backend. Asking for another
-//! width is an error here rather than a silently missing table.
+//! Width 6 only (arity 5), the one width `poseidon-wasm` exposes; every other
+//! arity the SDK uses stays on the JS backend. Any other width is an error.
 
 use core::fmt;
 

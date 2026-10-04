@@ -1,17 +1,10 @@
-// Nominal types for the values callers most often confuse.
-//
-// The SDK's API uses `string` for four address and hash formats and `bigint` for
-// asset ids plus three amount spaces. Structurally interchangeable values can be
-// transposed without a compile error and then fail at runtime or succeed
-// against the wrong recipient. Branding makes each one nominal.
+// Nominal types for values that are structurally interchangeable (address and
+// hash strings; asset ids and amounts as `bigint`), so transposing two of them
+// is a compile error rather than a payment to the wrong recipient.
 //
 // Brands are erased at runtime: a `CircuitAmount` is a `bigint`, an
-// `EvmAddress` is a string, and arithmetic or interpolation works unchanged.
-// JavaScript consumers are unaffected.
-//
-// Each constructor validates and brands. Values returned by the SDK are already
-// branded, so a typical flow (`wallet.asset(...)` into `parseAmount` into
-// `wallet.transfer`) needs no calls here.
+// `EvmAddress` is a string. Each constructor validates and brands; values
+// returned by the SDK are already branded.
 
 import { InvalidArgumentError } from "../errors/config.js";
 
@@ -34,9 +27,7 @@ export type ShieldedAddress = Brand<`lelantos1${string}`, "ShieldedAddress">;
 
 /**
  * bech32m viewing key: `lelantosivk1…` (incoming) or `lelantosfvk1…` (full).
- *
- * One brand covers both tiers, which are interchangeable as input. The tier is
- * carried by the decoded value's shape rather than by the string's type.
+ * One brand covers both tiers; the decoded value's shape carries the tier.
  */
 export type ViewingKeyString = Brand<
     `lelantosivk1${string}` | `lelantosfvk1${string}`,
@@ -47,28 +38,27 @@ export type ViewingKeyString = Brand<
 export type AssetId = Brand<bigint, "AssetId">;
 
 /**
- * Accepted wherever an asset id is an *input*. Branding guards internal
- * invariants, so inputs take a plain `bigint` and are branded on the way in.
- * Outputs stay `AssetId`.
+ * Accepted wherever an asset id is an input: a plain `bigint` is branded on the
+ * way in. Outputs stay `AssetId`.
  */
 export type AssetIdLike = AssetId | bigint;
 
 /**
- * Accepted wherever a shielded address is an *input*. `decodeAddress`
- * validates the string regardless of branding.
+ * Accepted wherever a shielded address is an input. `decodeAddress` validates
+ * the string regardless of branding.
  */
 export type ShieldedAddressLike = ShieldedAddress | string;
 
-/** Accepted wherever an EVM address is an *input*. */
+/** Accepted wherever an EVM address is an input. */
 export type EvmAddressLike = EvmAddress | `0x${string}`;
 
 /**
- * Accepted wherever a circuit-unit amount is an *input*. Use `parseAmount` to
+ * Accepted wherever a circuit-unit amount is an input. Use `parseAmount` to
  * convert a human string to circuit units.
  */
 export type CircuitAmountLike = CircuitAmount | bigint;
 
-/** Amount in circuit units — the denomination every wallet method takes. */
+/** Amount in circuit units, the denomination every wallet method takes. */
 export type CircuitAmount = Brand<bigint, "CircuitAmount">;
 
 /** Amount in ERC-20 base units: `token = circuit * asset.scale`. */
@@ -95,13 +85,18 @@ export function evmAddress(value: string): EvmAddress {
     return value as EvmAddress;
 }
 
+/** Whether `value` is `0x` and 64 hex digits. */
+export function isHex32(value: unknown): value is Hex32 {
+    return typeof value === "string" && HEX_32.test(value);
+}
+
 /**
  * Validate and brand a 32-byte hex value.
  *
  * @throws {InvalidArgumentError} on anything that is not `0x` + 64 hex digits.
  */
 export function hex32(value: string): Hex32 {
-    if (!HEX_32.test(value)) {
+    if (!isHex32(value)) {
         throw new InvalidArgumentError(
             `not a 32-byte 0x-prefixed hex value: ${JSON.stringify(value)}`,
             { argument: "hex32" },
@@ -113,8 +108,8 @@ export function hex32(value: string): Hex32 {
 /**
  * Validate and brand a shielded address.
  *
- * Checks the HRP and the bech32m charset only. `decodeAddress` performs the
- * checksum and curve checks when the payload is actually needed.
+ * Checks the HRP and the bech32m charset only; `decodeAddress` performs the
+ * checksum and curve checks.
  *
  * @throws {InvalidArgumentError} when the string is not a well-formed
  * `lelantos1…` bech32m address.
@@ -122,8 +117,8 @@ export function hex32(value: string): Hex32 {
 export function shieldedAddress(value: string): ShieldedAddress {
     if (!SHIELDED.test(value)) {
         throw new InvalidArgumentError(
-            // The address is kept out of the message, as in `decodeAddress`: error text reaches
-            // application logs verbatim, and an address identifies a payee.
+            // The address is kept out of the message: error text reaches application logs, and
+            // an address identifies a payee.
             "not a bech32m shielded address (expected `lelantos1…`)",
             { argument: "address" },
         );
@@ -176,9 +171,9 @@ function nonNegativeAmount(value: bigint): bigint {
 }
 
 /**
- * Apply a brand without validating. For SDK-internal use where the value's
- * provenance guarantees the invariant: a freshly formatted hex word, a wire
- * field a decoder has checked, or arithmetic on branded values.
+ * Apply a brand without validating, where the value's provenance guarantees
+ * the invariant: a freshly formatted hex word, a wire field a decoder has
+ * checked, or arithmetic on branded values.
  *
  * The overloads tie each brand to its base primitive, so
  * `branded<CircuitAmount>("0x…")` does not compile.

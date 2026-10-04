@@ -22,8 +22,7 @@ describe("randomBelow", () => {
     });
 
     it("rejects a bound above a four-byte draw instead of looping forever", () => {
-        // `2^32 % n === 2^32` past this point, so `limit` would be 0 and no
-        // draw could ever be accepted.
+        // Past `2^32`, `limit` would be 0 and no draw could be accepted.
         expect(randomBelow(2 ** 32, bytesFrom([[0, 0, 0, 9]]))).toBe(9);
         expect(() => randomBelow(2 ** 32 + 1)).toThrow(InvalidArgumentError);
         expect(() => randomBelow(Number.MAX_SAFE_INTEGER)).toThrow(InvalidArgumentError);
@@ -48,8 +47,8 @@ describe("randomBelow", () => {
     });
 
     it("redraws instead of folding the short final bucket", () => {
-        // n = 3 over 32 bits: 2^32 - 1 is the one value above `limit`, so it
-        // must be rejected. Folding it would return 0 and bias the split.
+        // n = 3 over 32 bits: `limit` is 2^32 - 1, the one draw that must be
+        // rejected. Folding it would return 0 and bias the split.
         const top = [255, 255, 255, 255];
         expect(randomBelow(3, bytesFrom([top, [0, 0, 0, 7]]))).toBe(1);
     });
@@ -90,8 +89,7 @@ describe("shuffled", () => {
 
 // The masks in `randomFr` / `randomJubjubScalar` only set the acceptance rate;
 // correctness rests on the `v < modulus` rejection, so these pin the contract
-// rather than the mask. Reducing instead of rejecting would pass a range check
-// but introduce bias, so the moduli are asserted at their exact bit widths.
+// rather than the mask.
 describe("field draws", () => {
     const DRAWS = 400;
 
@@ -120,10 +118,8 @@ describe("field draws", () => {
         expect(jj.size).toBe(DRAWS);
     });
 
-    // The other half of the mask contract: the masked range must *cover* the
-    // modulus. A mask that cleared too little is only slower, but one whose
-    // bound fell under the modulus would silently sample a truncated range,
-    // and every check above would still pass.
+    // The masked range must cover the modulus: a bound under it would sample a
+    // truncated range while every check above still passes.
     it.each([
         ["randomFr", BN254_FR, 254],
         ["randomJubjubScalar", BABYJUB_SUBGROUP_ORDER, 251],
@@ -131,9 +127,8 @@ describe("field draws", () => {
         expect(modulus).toBeLessThanOrEqual(1n << BigInt(bits));
     });
 
-    // Both draws mask the top byte before rejecting. A mask that cleared too
-    // much would pass the range checks above while capping the draw well below
-    // the modulus, so pin that the high end is reachable.
+    // A mask that cleared too much would pass the range checks above while
+    // capping the draw below the modulus, so the top quarter must be reachable.
     it("reaches the top of each range", () => {
         const frTop = BN254_FR >> 2n;
         const jjTop = BABYJUB_SUBGROUP_ORDER >> 2n;
@@ -145,9 +140,6 @@ describe("field draws", () => {
 });
 
 describe("noteId", () => {
-    // The id keys the nullifier memo, `markSpent` and selection's `only`
-    // filter, so a collision retires an unrelated note; 4 bytes would collide
-    // with ~1% probability by 10k notes.
     it("is 128 bits of hex", () => {
         expect(noteId()).toMatch(/^[0-9a-f]{32}$/);
     });

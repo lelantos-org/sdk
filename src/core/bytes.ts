@@ -1,9 +1,7 @@
 // Byte conversions for field elements.
 //
 // Little-endian is the default: on-chain serialisation uses 32-byte LE. The
-// big-endian pair exists for the wasm Poseidon boundary, whose wire contract
-// is BE, and writes into a caller-owned buffer because that path runs ~350K
-// times in a full tree build and must not allocate per call.
+// big-endian pair serves the wasm Poseidon boundary, whose wire contract is BE.
 
 import { InvalidArgumentError } from "../errors/config.js";
 import type { Field } from "./field.js";
@@ -33,10 +31,9 @@ export function fromLeBytes(b: Uint8Array): Field {
 /**
  * Write `x` big-endian into `dst` at `offset`, over `FIELD_BYTES`.
  *
- * Writes in place rather than returning a fresh array: the caller reuses one
- * scratch buffer across calls. Unlike `toLeBytes` this does not check for
- * overflow — every caller has already run `assertField`, which is strictly
- * stronger than "fits in 32 bytes".
+ * Writes in place so a hot path can reuse one scratch buffer without allocating
+ * per call. Unlike `toLeBytes`, does not check for overflow: every caller has
+ * already run `assertField`.
  */
 export function writeBeInto(dst: Uint8Array, offset: number, x: Field): void {
     let v = x;
@@ -50,4 +47,18 @@ export function fromBeBytes(b: Uint8Array): Field {
     let v = 0n;
     for (const byte of b) v = (v << 8n) | BigInt(byte);
     return v;
+}
+
+/**
+ * `bytes` is exactly `length` bytes long.
+ *
+ * @throws {InvalidArgumentError} otherwise.
+ * @internal
+ */
+export function assertByteLength(bytes: Uint8Array, length: number, what: string): void {
+    if (bytes.length !== length) {
+        throw new InvalidArgumentError(`${what} must be ${length} bytes; got ${bytes.length}`, {
+            argument: what,
+        });
+    }
 }

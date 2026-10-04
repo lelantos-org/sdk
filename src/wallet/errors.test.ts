@@ -64,10 +64,9 @@ describe("error codes", () => {
 
 // `WalletErrorOf` is an `Extract` over `AnyWalletError`, which matches a member only when its
 // `code` is assignable to the requested literal. A class covering several codes (`NetworkError`,
-// `WorkerRpcError`) declares a union-typed `code`, which is not assignable to a single literal;
-// listed once in `AnyWalletError`, each of its codes would resolve to `never` and narrowing would
-// drop `url`, `status`, `body` and `method`. `AnyWalletError` therefore lists those classes once
-// per code. The check below ensures every code narrows to a non-`never` type.
+// `WorkerRpcError`) declares a union-typed `code`, so `AnyWalletError` lists it once per code:
+// listed once, each of its codes would resolve to `never` and narrowing would drop `url`, `status`,
+// `body` and `method`. The check below ensures every code narrows to a non-`never` type.
 type UnnarrowableCode = {
     [K in WalletErrorCode]: [WalletErrorOf<K>] extends [never] ? K : never;
 }[WalletErrorCode];
@@ -84,8 +83,7 @@ describe("WalletErrorOf", () => {
             body: "gateway timeout",
         });
         if (!isWalletError(net, "RELAYER_TIMEOUT")) throw new Error("guard failed");
-        // Type-level assertion: these compile only if the code does not narrow
-        // to `never`.
+        // Type-level assertion: these compile only if the code does not narrow to `never`.
         expect(net.url).toBe("http://r");
         expect(net.status).toBe(504);
         expect(net.body).toBe("gateway timeout");
@@ -111,7 +109,7 @@ describe("NoEvmAccountError", () => {
 
         expect(err).toBeInstanceOf(NoEvmAccountError);
         expect(err).toMatchObject({ code: "NO_EVM_ACCOUNT", operation: "cancelDeposit" });
-        // Neutral: names the operation, never "add funds", which misdirects a user getting funds back.
+        // Names the operation, never "add funds", which misdirects a user getting funds back.
         expect((err as Error).message).toMatch(/cancelDeposit/);
         expect((err as Error).message).not.toMatch(/add funds/);
     });

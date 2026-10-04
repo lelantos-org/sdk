@@ -1,7 +1,5 @@
-// Note storage: the `NoteStore` port and the in-memory default.
-//
-// The record schema (`StoredNote`, `NotesFile`) lives in `protocol/note-record.ts` so the
-// wallet-agnostic sync engine can name it; `ConsolidateHint` lives with `InsufficientCoverError`.
+// Note storage: the `NoteStore` port and the in-memory default. The record schema (`StoredNote`,
+// `NotesFile`) is defined in `protocol/note-record.ts` and re-exported here.
 
 import { fieldToBytes32 } from "../../core/hex.js";
 import { noteId } from "../../core/random.js";
@@ -21,9 +19,9 @@ import { SPEND_RESERVATION_MS } from "../constants.js";
 /**
  * Whether a note's spend reservation is still active at `now`.
  *
- * Shared by the selector (which withholds reserved notes) and reconciliation (which releases
- * expired ones). An absent or unparseable stamp counts as no reservation, so a bad timestamp can
- * only offer a note early, never strand it.
+ * The selector withholds reserved notes; reconciliation releases expired ones. An absent or
+ * unparseable stamp counts as no reservation, so a bad timestamp can only offer a note early,
+ * never strand it.
  */
 export function withinReservation(pendingSpendAt: string | undefined, now: number): boolean {
     if (pendingSpendAt === undefined) return false;
@@ -33,12 +31,15 @@ export function withinReservation(pendingSpendAt: string | undefined, now: numbe
 }
 
 /**
- * The notes-file schema version this SDK reads and writes.
+ * The notes-file schema version this SDK reads and writes. It names the note layout as well as
+ * the record's fields: a stored note is spendable only under the commitment
+ * `cm = Poseidon(TAG_CM, asset·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm))`, so a file on
+ * any other version is refused by `NoteCache` instead of being read as this one.
  *
  * `StoredNote.id` is 16 random bytes. The id keys the nullifier memo, `markSpent` and selection's
  * `only` filter, so a collision would retire an unrelated note.
  */
-export const NOTES_FILE_VERSION = 1;
+export const NOTES_FILE_VERSION = 2;
 
 export interface NoteStore {
     load(): Promise<NotesFile>;
@@ -69,9 +70,9 @@ function cursorOf(file: NotesFile): { cursor?: number } {
 /**
  * Append `ScanHit[]` to a `NotesFile`. Idempotent: existing `cm`s are skipped.
  *
- * `known` lets a repeated caller (the sync loop, once per page) reuse the commitment set instead
- * of rebuilding it per call, which is O(notes x pages). It is updated in place and must not be
- * reused against a different file.
+ * `known` lets a caller that runs once per page reuse the commitment set instead of rebuilding
+ * it per call, which is O(notes x pages). It is updated in place and must not be reused against
+ * a different file.
  */
 export function addHits(
     file: NotesFile,
@@ -93,7 +94,6 @@ export function addHits(
             value: h.value.toString(),
             rho: h.rho.toString(),
             rcm: h.rcm.toString(),
-            rcvDep: h.rcvDep.toString(),
             cm: cmHex,
             leafIndex: h.leafIndex,
             spent: false,

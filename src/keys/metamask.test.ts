@@ -16,8 +16,7 @@ const sig = (r: string, s: string | bigint, v: string) =>
 
 describe("reduceSignatureToScalar", () => {
     it("pins the derivation", () => {
-        // Golden vector for the version "1" two-keccak-block reduction. A change here changes
-        // every signature-derived address, so it must be deliberate.
+        // Golden vector for the version "1" two-keccak-block reduction.
         expect(reduceSignatureToScalar(sig(R, S_LOW, "1b")).toString()).toBe(
             "1023816015239521581944689410812393643341180842685041365067078398366631624545",
         );
@@ -34,8 +33,7 @@ describe("reduceSignatureToScalar", () => {
     });
 
     it("is stable under s-malleability", () => {
-        // `(r, s)` and `(r, n - s)` are both valid signatures over the same
-        // digest; only some signers normalise to the low half.
+        // `(r, s)` and `(r, n - s)` both verify; only some signers normalise to the low half.
         const low = BigInt(`0x${S_LOW}`);
         const high = SECP256K1_N - low;
 
@@ -71,7 +69,6 @@ describe("reduceSignatureToScalar", () => {
 });
 
 describe("deriveNskFromSigner", () => {
-    // The key-derivation prompt is the first thing a browser user sees; declining it is an answer.
     it("reports a declined prompt as USER_REJECTED derive-key, through any signer", async () => {
         const provider = {
             request: async () => {

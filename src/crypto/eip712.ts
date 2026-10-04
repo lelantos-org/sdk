@@ -1,8 +1,8 @@
 // EIP-712 typed-data shapes and a narrow encoder for them.
 //
-// The types match viem's of the same name structurally; `chain/signer/` passes
-// them to `signTypedData`. Declaring them here keeps viem out of `core/` and
-// `keys/`, in source and in emitted declarations. viem is an optional peer.
+// The types match viem's of the same name structurally; `chain/signer/` passes them to
+// `signTypedData`. Declaring them here keeps viem, an optional peer, out of `core/` and `keys/`
+// in source and in emitted declarations.
 
 /** EIP-712 domain separator fields. Every member is optional per the spec. */
 export interface TypedDataDomain {
@@ -20,12 +20,9 @@ export interface TypedDataParameter {
     type: string;
 }
 
-// --- Encoding ------------------------------------------------------------
-//
-// Structs whose every member is a `string`. `encodeData` is then a
-// concatenation of 32-byte words: `keccak(typeString)`, then `keccak(utf8(v))`
-// per member. Dynamic arrays, nested structs and numeric members are not
-// supported; `chain/` uses viem for those.
+// The encoder covers structs whose every member is a `string`: `encodeData` is then a
+// concatenation of 32-byte words, `keccak(typeString)` then `keccak(utf8(v))` per member. Dynamic
+// arrays, nested structs and numeric members are not supported; `chain/` uses viem for those.
 
 import { keccak_256 } from "@noble/hashes/sha3";
 import { branded, type Hex32 } from "../core/brand.js";
@@ -34,11 +31,9 @@ import { bytesToHex } from "../core/hex.js";
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 /**
- * `hashStruct` for an all-`string` struct:
- * `keccak256(keccak(typeString) || keccak(v)...)`.
+ * `hashStruct` for an all-`string` struct: `keccak256(keccak(typeString) || keccak(v)...)`.
  *
- * Also produces the domain separator. The type string must list exactly the
- * members present.
+ * Also produces the domain separator. The type string must list exactly the members present.
  */
 export function hashStringStruct(typeString: string, values: readonly string[]): Uint8Array {
     const words = [typeString, ...values].map((v) => keccak_256(utf8(v)));

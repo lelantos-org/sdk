@@ -1,13 +1,12 @@
 name: CI
 
 # Static lints live in `lint.yml` and dependency auditing in `audit.yml`; both
-# run without a Rust toolchain and start in parallel with this workflow.
+# run without a Rust toolchain, in parallel with this workflow.
 #
-# What is left is everything that needs the compiled WASM packages. Those are
-# built once in `wasm` and handed to the three consumers as an artifact, so the
-# build/test/bench legs run concurrently instead of queueing behind each other
-# on a single runner. Splitting them into separate *workflows* instead would
-# mean three independent WASM builds — artifacts are scoped to a run.
+# This workflow holds everything that needs the compiled WASM packages. They
+# are built once in `wasm` and passed to the three consumers as an artifact, so
+# the build, test and bench jobs run concurrently. Artifacts are scoped to a
+# run, so separate workflows would each rebuild the WASM.
 
 on:
   push:
@@ -27,35 +26,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Builds `wasm/*/pkg` and publishes it. Everything below `needs:` this.
-  # ---------------------------------------------------------------------------
+  # Builds `wasm/*/pkg` and uploads it as an artifact. Every job below `needs:`
+  # this.
   wasm:
     name: "WASM build"
     runs-on: ubuntu-latest
     env:
-      # Pinned here rather than on the install step: the WASM package cache key
-      # below names the same version, and the two must not drift.
+      # Pinned at job level: the install step and the WASM package cache key
+      # below must use the same version.
       BINARYEN_VERSION: "132"
       BINARYEN_SHA256: "195ddc94f9bc89f45abdabb0b9eea86023d727ba90eac8b35b80f2544fc30572"
     steps:
       - uses: actions/checkout@v4
 
-      # Git already hashes the tree: `HEAD:wasm` is the id of the `wasm/`
-      # directory as committed, so it changes exactly when a tracked file under
-      # it does. `hashFiles('wasm/**')` would instead walk `wasm/target/`, which
-      # `Swatinem/rust-cache` restores below and whose build-script output is not
-      # reproducible run to run.
+      # `HEAD:wasm` is the git tree id of `wasm/` as committed, so it changes
+      # exactly when a tracked file under it does. `hashFiles('wasm/**')` would
+      # also walk `wasm/target/`, which `Swatinem/rust-cache` restores below and
+      # whose build-script output is not reproducible run to run.
       - name: Identify the WASM source tree
         id: wasm-tree
         run: echo "id=$(git rev-parse HEAD:wasm)" >> "$GITHUB_OUTPUT"
 
-      # The three `pkg/` directories are a pure function of that tree plus the
-      # toolchain and binaryen — both pinned by files inside it, bar the version
-      # in the key — and nothing else in this job writes to them. So on a run
-      # that touches no Rust, restoring them skips the build outright.
-      # `Swatinem/rust-cache` covers `target/`, but not `wasm-bindgen` or
-      # `wasm-opt`, which is the rest of the wall clock.
+      # The three `pkg/` directories are a function of that tree, the toolchain
+      # it pins and the binaryen version in the key, and nothing else in this
+      # job writes to them, so a run that touches no Rust restores them and
+      # skips the build. `Swatinem/rust-cache` covers `target/` but not the
+      # `wasm-bindgen` and `wasm-opt` passes.
       - name: Cache built WASM packages
         id: wasm-pkg
         uses: actions/cache@v4
@@ -66,15 +62,11 @@ jobs:
             wasm/poseidon/pkg
           key: wasm-pkg-${{ runner.os }}-binaryen${{ env.BINARYEN_VERSION }}-${{ steps.wasm-tree.outputs.id }}
 
-      # Every toolchain step below is gated on the cache miss. On a hit this job
-      # is a checkout, a cache restore and an upload — roughly a minute — and
-      # the three consumers start that much sooner.
+      # Every toolchain step below runs only on a cache miss.
       - uses: rui314/setup-mold@v1
         if: steps.wasm-pkg.outputs.cache-hit != 'true'
 
-      # The nightly is pinned once, in `wasm/rust-toolchain.toml`; rustup
-      # honours it for every cargo call under `wasm/`, so restating it here
-      # could only drift from it.
+      # The nightly is pinned only in `wasm/rust-toolchain.toml`.
       - name: Read pinned toolchain
         id: toolchain
         if: steps.wasm-pkg.outputs.cache-hit != 'true'
@@ -100,18 +92,16 @@ jobs:
         with:
           tool: wasm-pack
 
-      # wasm-pack uses `wasm-opt` from PATH when it can find one, and otherwise
-      # downloads a pinned binaryen from GitHub releases — a fetch that is not
-      # reliable from hosted runners and has no retry. All three crates set
-      # load-bearing `wasm-opt` flags (`-O4`, and SIMD/threads where the crate
-      # uses them) and the build is
-      # size-budgeted, so skipping the optimiser is not an option; installing it
-      # is. Keep this before any `just build`.
+      # wasm-pack uses `wasm-opt` from PATH and otherwise downloads a pinned
+      # binaryen from GitHub releases, a fetch with no retry that is unreliable
+      # from hosted runners. All three crates set `wasm-opt` flags (`-O4`, and
+      # SIMD/threads where the crate uses them) and the build is size-budgeted,
+      # so the optimiser cannot be skipped. Keep this before any `just build`.
       #
       # Not `apt-get install binaryen`: the runners' `azure.archive.ubuntu.com`
-      # mirrorlist intermittently stalls `apt-get update` for tens of minutes
-      # with no retry cap, and noble ships binaryen 116. Fetch the upstream
-      # release tarball instead — pinned by version and sha256, retried, ~2s.
+      # mirrorlist intermittently stalls `apt-get update`, and noble ships
+      # binaryen 116. The upstream release tarball is pinned by version and
+      # sha256, and the download is retried.
       - name: Install binaryen (provides wasm-opt)
         if: steps.wasm-pkg.outputs.cache-hit != 'true'
         run: |
@@ -133,14 +123,13 @@ jobs:
         if: steps.wasm-pkg.outputs.cache-hit != 'true'
         run: cd wasm && just build
 
-      # Reads the three `_bg.wasm` files and nothing else, so it belongs here
-      # rather than in a consumer — and it runs on a cache hit too, which keeps
-      # the budget honest if the limits in the script are ever lowered.
+      # Reads only the three `_bg.wasm` files. Runs on a cache hit too, so a
+      # lowered limit in the script takes effect.
       - name: WASM size budget
         run: node scripts/check-wasm-size.mjs
 
       # The three paths share the `wasm/` prefix, so the artifact is rooted
-      # there and `path: wasm` on the download side puts them back exactly.
+      # there and `path: wasm` on the download side restores them in place.
       - name: Upload WASM packages
         uses: actions/upload-artifact@v4
         with:
@@ -152,9 +141,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # ---------------------------------------------------------------------------
   # Type-check, compile, and everything that inspects the compiled `dist/`.
-  # ---------------------------------------------------------------------------
   build:
     name: "Build and package checks"
     needs: wasm
@@ -183,10 +170,8 @@ jobs:
       - name: Package checks
         run: npm run check:dist
 
-  # ---------------------------------------------------------------------------
   # Unit suite. Runs from `src/`, but `runtime/wasm/rayon/exit.test.ts` drives a child process
   # against `dist/` and skips itself when it is absent, so build first.
-  # ---------------------------------------------------------------------------
   test:
     name: "Unit tests"
     needs: wasm
@@ -217,10 +202,7 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
 
-  # ---------------------------------------------------------------------------
-  # The long pole. Its own job so it overlaps `build` and `test` rather than
-  # adding its wall clock to theirs.
-  # ---------------------------------------------------------------------------
+  # The slowest job, kept separate so it runs alongside `build` and `test`.
   bench:
     name: "Prover parity"
     needs: wasm
@@ -238,19 +220,16 @@ jobs:
           name: wasm-pkg
           path: wasm
 
-      # The only coverage that runs the Rust prover and verifies its output
-      # against the companion's verification key, for both shapes. `npm test`
-      # excludes `*.bench.ts` to stay fast, so without this step nothing in CI
-      # would catch a wasm prover that produces invalid proofs.
+      # The only step that runs the Rust prover and verifies its output against
+      # the companion's verification key, for both shapes; `npm test` excludes
+      # `*.bench.ts`. Without it nothing in CI would catch a wasm prover that
+      # produces invalid proofs.
       - name: "Prover parity (wasm vs snarkjs, both shapes)"
         run: npm run test:bench
 
-  # ---------------------------------------------------------------------------
-  # Single stable check for branch protection. Job names above can change
-  # freely; a required status named `CI` keeps pointing at this one. `always()`
-  # is what makes a skipped or cancelled upstream job fail the gate rather than
-  # silently pass it.
-  # ---------------------------------------------------------------------------
+  # Single stable check for branch protection: a required status named `CI`
+  # points here whatever the jobs above are called. `always()` makes a skipped
+  # or cancelled upstream job fail the gate instead of skipping it.
   ci:
     name: CI
     if: always()

@@ -1,12 +1,8 @@
-// Narrow runtime validators for inbound wire data. Dependency-free, so no
-// schema library becomes a hard runtime dependency of the package.
+// Runtime validators for inbound wire data, with no schema-library dependency.
 //
 // Every helper takes a JSON path, so a malformed response raises a
-// `WireFormatError` naming the offending value rather than a TypeError deep
-// inside a deserializer.
-//
-// INBOUND ONLY. Outbound payloads are constructed by the SDK and are not
-// re-validated.
+// `WireFormatError` naming the offending value. Outbound payloads are built by
+// the SDK and are not validated.
 
 import { hexToBytes, strip0x } from "../../core/hex.js";
 import { WireFormatError } from "../../errors/network.js";
@@ -33,7 +29,7 @@ export function arr(v: unknown, path: string): unknown[] {
     return v;
 }
 
-/** Fixed-length array. Length is part of most of these wire contracts. */
+/** Fixed-length array. */
 export function arrN(v: unknown, path: string, n: number): unknown[] {
     const a = arr(v, path);
     if (a.length !== n) fail(path, `an array of length ${n}`, v);
@@ -62,12 +58,12 @@ const HEX = /^0[xX][0-9a-fA-F]+$/;
 const HEX_BODY = /^[0-9a-fA-F]*$/;
 
 /**
- * A field element as a decimal string, a `0x`-hex string, or a JSON number.
+ * An integer as a decimal string, a `0x`-hex string, or a JSON number.
  *
- * Accepts all three for the relayer, whose Rust DTOs vary per field (`String`
- * or `u64`; see `services/relayer/codec.ts`). Use only where the wire form is
- * not pinned: a field known to be hex must go through `hexInt`, or a bare-hex
- * value made only of decimal digits decodes as the wrong number.
+ * Accepts all three for the relayer, whose DTOs vary per field (`String` or
+ * `u64`; see `services/relayer/codec.ts`). A field known to be hex must go
+ * through `hexInt`: a bare-hex value made only of decimal digits ("1234") is
+ * also a valid decimal string and would decode here as the wrong number.
  */
 export function bigintFrom(v: unknown, path: string): bigint {
     if (typeof v === "bigint") return v;
@@ -77,11 +73,8 @@ export function bigintFrom(v: unknown, path: string): bigint {
 }
 
 /**
- * A hex integer, `0x`-prefixed or bare.
- *
- * Separate from `bigintFrom`: a bare-hex value made only of decimal digits
- * ("1234") is also a valid decimal string, which `bigintFrom` would silently
- * decode as the wrong number. Use this wherever the server emits unprefixed hex.
+ * A hex integer, `0x`-prefixed or bare; an empty body is rejected. Required
+ * wherever the server emits unprefixed hex (see `bigintFrom`).
  */
 export function hexInt(v: unknown, path: string): bigint {
     const body = strip0x(str(v, path));
@@ -99,11 +92,9 @@ export function hexBytes(v: unknown, path: string): Uint8Array {
 }
 
 /**
- * Hex bytes of an exactly-known width, e.g. a packed curve point or a digest.
- *
- * Where the width is part of the wire contract, a wrong-length value is a
- * malformed response; rejecting it here names the offending field instead of
- * failing later in whatever consumes the bytes.
+ * Hex bytes of an exact width, e.g. a packed curve point or a digest. A wrong
+ * length is rejected here, naming the field, rather than failing later in
+ * whatever consumes the bytes.
  */
 export function hexBytesN(v: unknown, path: string, n: number): Uint8Array {
     const b = hexBytes(v, path);

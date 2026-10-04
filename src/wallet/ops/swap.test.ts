@@ -16,13 +16,12 @@ import { resolveRefundAddress } from "./swap-escrow.js";
 
 /**
  * Amount `MASP.deposit*` pulls for a B note of `v`: principal, the pool's floored fee, and the
- * flush fee note, priced by the SDK's one model of `MASP._quoteShield` (tested in
- * `protocol/fees.test.ts`) rather than a copy of it.
+ * flush fee note, priced by `depositTotal`, the SDK's model of `MASP._quoteShield`.
  */
 const pullFor = (v: bigint, scale: bigint, feeBps: bigint, relayerFee = 0n): bigint =>
     depositTotal({ publicIn: v, feeIn: relayerFee, depositBps: feeBps, scale });
 
-const FEE_BPS = 500n; // 5%, as deployed in the e2e stack
+const FEE_BPS = 500n; // 5%
 
 // `SwapWrapper` bounds the refund pull by what leg 1 delivered, so the refund note must be the
 // largest value that fits under `received`.
@@ -61,7 +60,7 @@ describe("sizeBNote", () => {
     it("covers minOut where the closed form falls one short", () => {
         const minOut = 94n;
         const closedForm = (minOut * 10_000n) / (1n * (10_000n + FEE_BPS));
-        expect(pullFor(closedForm, 1n, FEE_BPS)).toBe(93n); // closed form falls short
+        expect(pullFor(closedForm, 1n, FEE_BPS)).toBe(93n);
         expect(closedForm).toBe(89n);
 
         const v = sizeBNote(minOut, 1n, FEE_BPS);

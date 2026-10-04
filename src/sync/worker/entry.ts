@@ -1,13 +1,10 @@
 // Scanner worker entrypoint.
 //
-// Crypto modules are imported dynamically so the worker can boot, install
-// its handler, and report an init failure back to the client. Static
-// imports would crash module evaluation before any diagnostic could leave
-// the worker.
+// Crypto modules are imported dynamically so the worker can boot, install its handler and report
+// an init failure to the client. A failing static import would crash module evaluation before any
+// diagnostic could leave the worker.
 //
-// Poseidon is built alongside Jubjub only for the per-hit commitment check in
-// `scanNotes`, not for a client-side FMD pre-filter (see `./protocol.ts`). An
-// FMD filter would run per input; the commitment check runs per hit.
+// Poseidon is built alongside Jubjub for the per-hit commitment check in `scanNotes`.
 
 import { memoAsync } from "../../core/async.js";
 import type { Jubjub as JubjubT } from "../../crypto/jubjub-wasm/index.js";
@@ -15,8 +12,8 @@ import type { Poseidon as PoseidonT } from "../../crypto/poseidon.js";
 import { serveWorkerRpc } from "../../runtime/rpc/serve.js";
 import { decodeInput, encodeHit, type ScannerMethods, type WireWasmConfig } from "./protocol.js";
 
-// Both memoised with eviction on rejection, so a transient import or wasm
-// failure does not permanently disable this worker.
+// Both memoised with eviction on rejection, so a transient import or wasm failure does not
+// permanently disable this worker.
 const jubjub = memoAsync<JubjubT>(() =>
     import("../../crypto/jubjub-wasm/index.js").then((m) => m.Jubjub.build()),
 );

@@ -1,5 +1,5 @@
-// Read operations over a note set, shared so spending and watch-only wallets return identical results
-// for identical notes. `./sync-ops.ts` covers the write side.
+// Read operations over a note set, shared by spending and watch-only wallets. `./sync-ops.ts`
+// covers the write side.
 
 import {
     type AssetId,
@@ -27,7 +27,6 @@ function toWalletNote(s: StoredNote): WalletNote {
             value: branded<CircuitAmount>(BigInt(s.value)),
             rho: BigInt(s.rho),
             rcm: BigInt(s.rcm),
-            rcvDep: BigInt(s.rcvDep),
         }),
     };
 }

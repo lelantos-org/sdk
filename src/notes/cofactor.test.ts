@@ -54,7 +54,7 @@ describe("cofactor-cleared trial decryption", () => {
         J = await Jubjub.build();
         P = await Poseidon.build();
         me = buildSpendingKey(P, J, 4242n);
-        plaintext = encodeNotePayload({ asset: 1n, value: 500n, rho: 11n, rcm: 22n, rcvDep: 33n });
+        plaintext = encodeNotePayload({ asset: 1n, value: 500n, rho: 11n, rcm: 22n });
         Q = J.mulPointEscalar(J.base8, esk);
     });
 

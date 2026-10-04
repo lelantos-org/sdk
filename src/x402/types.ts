@@ -2,10 +2,7 @@
 //
 // These mirror `@x402/core`'s Zod-inferred types field for field, declared
 // locally so the SDK builds and ships without any `@x402/*` package. Values
-// returned here are assignable to the matching `@x402/core` interfaces:
-//
-//   import { x402Client } from "@x402/core";
-//   client.register(`shielded:${chainId}`, shieldedExact(wallet));
+// are assignable to the matching `@x402/core` interfaces.
 //
 // Spec: https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md
 

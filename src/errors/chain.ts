@@ -61,8 +61,8 @@ export class UnsupportedOperationError extends WalletError<"UNSUPPORTED_OPERATIO
 export type UserRejectedAction = "derive-key" | "sign-permit" | "send-tx";
 
 /**
- * The user declined a prompt in their wallet: EIP-1193 code `4001`, or viem's
- * `UserRejectedRequestError`. Nothing was signed or sent.
+ * The user declined a prompt in their wallet: EIP-1193 code `4001`, ethers'
+ * `ACTION_REJECTED`, or viem's `UserRejectedRequestError`. Nothing was signed or sent.
  */
 export class UserRejectedError extends WalletError<"USER_REJECTED"> {
     readonly action: UserRejectedAction;
@@ -83,9 +83,8 @@ export class UserRejectedError extends WalletError<"USER_REJECTED"> {
 /**
  * Whether `err` is a wallet's "user rejected" answer, at any depth of `cause`.
  *
- * Recognises EIP-1193 code `4001` (on an `Error` or the plain object some
- * providers reject with), ethers' `ACTION_REJECTED`, and viem's
- * `UserRejectedRequestError` by name, so no viem import is needed.
+ * Code `4001` is matched on an `Error` or on the plain object some providers reject with;
+ * viem's error is matched by name, so no viem import is needed.
  */
 function isUserRejection(err: unknown): boolean {
     for (const cur of causeChain(err)) {
@@ -98,8 +97,8 @@ function isUserRejection(err: unknown): boolean {
 }
 
 /**
- * Rethrow `err` as {@link UserRejectedError} for `action` when it is a wallet
- * rejection; otherwise return it unchanged for the caller to throw.
+ * `err` as a {@link UserRejectedError} for `action` when it is a wallet rejection, otherwise
+ * `err` unchanged. The caller throws the result.
  *
  * @internal
  */
@@ -159,8 +158,7 @@ export class TxMiningError extends WalletError<"TX_MINING"> {
     constructor(message: string, opts?: WalletErrorOptions & { txHash?: string | undefined }) {
         super("TX_MINING", message, { ...opts, retryable: true });
         this.name = "TxMiningError";
-        // Exposed as a field and excluded from `context`. A transaction hash
-        // links an error report to a specific on-chain operation.
+        // A field, never `context`, for the same reason as `TxRevertedError.txHash`.
         this.txHash = opts?.txHash;
     }
 }

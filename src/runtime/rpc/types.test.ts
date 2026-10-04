@@ -1,9 +1,7 @@
-// Assignability pins for `WorkerLike`.
-//
-// The interface accepts a DOM `Worker` and a `node:worker_threads` Worker
-// through one type. This is a compile-time property, so narrowing a handler
-// parameter would break consumers (forcing `as unknown as WorkerLike`) without
-// failing a runtime test. These assertions are checked by `npm run typecheck`.
+// Assignability pins for `WorkerLike`, which accepts a DOM `Worker` and a
+// `node:worker_threads` Worker through one type. The property is compile-time
+// only, so no runtime test would catch a narrowed handler parameter; these
+// assertions are checked by `npm run typecheck`.
 
 import type { Worker as NodeWorker } from "node:worker_threads";
 import { expect, it } from "vitest";

@@ -6,9 +6,8 @@ import type { PermitBatch, PermitSingle } from "../protocol/deposit-request.js";
 import { permit2Domain, signPermit } from "./common.js";
 
 /**
- * The `PermitDetails` member list, shared by both allowance structs.
- *
- * Must match `PermitHash._PERMIT_DETAILS_TYPEHASH` on chain.
+ * The `PermitDetails` member list, shared by both allowance structs. Must match
+ * `PermitHash._PERMIT_DETAILS_TYPEHASH` on chain.
  */
 const PERMIT_DETAILS: TypedDataParameter[] = [
     { name: "token", type: "address" },
@@ -22,8 +21,8 @@ const PERMIT_DETAILS: TypedDataParameter[] = [
  * struct or an array.
  *
  * For the batch, Permit2 hashes the array member as `keccak256(abi.encodePacked(perDetailHashes))`
- * (see `PermitHash.hash(IAllowanceTransfer.PermitBatch)`), which is the EIP-712 encoding for a
- * struct array, so viem's `hashTypedData` produces it without manual encoding.
+ * (`PermitHash.hash(IAllowanceTransfer.PermitBatch)`), which is the EIP-712 encoding of a struct
+ * array, so viem's `hashTypedData` matches it.
  */
 function allowanceTypes(
     primaryType: "PermitSingle" | "PermitBatch",
@@ -55,9 +54,8 @@ export interface SignPermit2AllowanceArgs extends AllowanceSignArgs<PermitSingle
 export interface SignPermit2AllowanceBatchArgs extends AllowanceSignArgs<PermitBatch> {}
 
 /**
- * Sign a Permit2 `PermitSingle` for AllowanceTransfer-mode deposits. The
- * resulting `(permit, signature)` pair is submitted on-chain via
- * `IAllowanceTransfer.permit(owner, permitSingle, signature)` once; later
+ * Sign a Permit2 `PermitSingle` for AllowanceTransfer-mode deposits. The `(permit, signature)`
+ * pair is submitted once via `IAllowanceTransfer.permit(owner, permitSingle, signature)`; later
  * deposits within the window pull via `transferFrom` without a signature.
  *
  * @internal
@@ -69,13 +67,11 @@ export async function signPermit2Allowance(
 }
 
 /**
- * Sign a Permit2 `PermitBatch`, the N-token counterpart of
- * {@link signPermit2Allowance}. Submitted on-chain via the
- * `permit(owner, PermitBatch, signature)` overload, after which every token in
- * the batch pulls through `transferFrom` with no further signature.
+ * Sign a Permit2 `PermitBatch`, the N-token counterpart of {@link signPermit2Allowance},
+ * submitted via the `permit(owner, PermitBatch, signature)` overload.
  *
- * Permit2 reverts the whole batch if any one `details[i].nonce` is stale, so
- * read the nonces immediately before calling this.
+ * Permit2 reverts the whole batch if any one `details[i].nonce` is stale, so read the nonces
+ * immediately before calling this.
  *
  * @internal
  */
@@ -85,7 +81,7 @@ export async function signPermit2AllowanceBatch(
     return signAllowanceStruct(args, "PermitBatch");
 }
 
-/** Shared body of both allowance signers: bind to the Permit2 domain, sign the struct, return the pair. */
+/** Shared body of both allowance signers. */
 async function signAllowanceStruct<P>(
     args: AllowanceSignArgs<P>,
     primaryType: "PermitSingle" | "PermitBatch",

@@ -1,7 +1,6 @@
-// The spend methods: phases and `opId`, the caller's signal
-// and deadline, gross/net withdrawals, native withdrawals, relayer fees as `Money`, and
-// `spendableMax`'s fee reservation. Driven through `spendMethods` over a stubbed context, so each
-// runs the real operation envelope (`runOp`) and the real spend pipeline.
+// The spend methods: phases and `opId`, the caller's signal and deadline, gross/net withdrawals,
+// native withdrawals, relayer fees as `Money`, and `spendableMax`'s fee reservation. Driven through
+// `spendMethods` over a stubbed context, so each runs `runOp` and the spend pipeline unstubbed.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";

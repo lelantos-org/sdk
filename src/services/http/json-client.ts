@@ -1,8 +1,6 @@
-// JSON over HTTP: the layer every service client is built on.
-//
-// URL assembly, query-param merging, and `Response` → `T` decoding: what a route
-// takes and returns. Delivery (timeout, retry, backoff, redaction) lives in
-// `./client.ts`, whose `createHttpClient` this composes.
+// JSON over HTTP, the layer every service client is built on: URL assembly,
+// query-param merging and `Response` → `T` decoding. Delivery (timeout, retry,
+// backoff, redaction) is `createHttpClient` in `./client.ts`.
 
 import {
     type NetworkFailureCode,
@@ -14,29 +12,19 @@ import { redactUrl } from "./redact.js";
 
 export type QueryParams = Record<string, string | number | boolean | undefined>;
 
-/**
- * `headers` keeps per-request credentials out of the URL: proxies and browser
- * history record a query string or path segment, but not a request header.
- */
+/** `headers` keeps per-request credentials out of the URL; see `bearerAuth`. */
 export interface JsonRequestOptions {
     params?: QueryParams | undefined;
     headers?: Record<string, string> | undefined;
     /**
-     * Overrides the `no-store` in {@link PRIVACY_REQUEST_DEFAULTS}.
-     *
+     * Overrides the `no-store` in {@link PRIVACY_REQUEST_DEFAULTS} on GET.
      * Only for global routes identical for every caller, where the URL
      * discloses nothing about who asked. Wallet-scoped routes (notes, matches,
      * subscriptions) must keep the default: a cache entry records the request
      * on the device and in any intermediary that honors it.
      */
     cache?: RequestCache | undefined;
-    /**
-     * Cancels the request and the retry loop.
-     *
-     * `createHttpClient` composes it with the per-attempt timeout controller,
-     * so an abort ends the in-flight request instead of leaving the connection
-     * open beside a retry.
-     */
+    /** Cancels the in-flight request and the retry loop. */
     signal?: AbortSignal | undefined;
     /**
      * Declares a non-GET request safe to repeat, so it retries on 5xx like a
@@ -59,8 +47,8 @@ export interface JsonClientOptions extends HttpClientOptions {
 }
 
 /**
- * JSON-over-HTTP client. Sole `getJson`/`postJson` implementation; every
- * service client in the SDK is built on it.
+ * JSON-over-HTTP client. Transport failures surface as `NetworkError` with
+ * `codes`; a body that is not valid JSON raises `WireFormatError`.
  */
 export function createJsonClient(
     baseUrl: string,
@@ -79,8 +67,7 @@ export function createJsonClient(
     };
 
     // Every caller redacts `where`: the message reaches application logs
-    // verbatim, and a query string may carry a detection key or token. Same
-    // reason `createHttpClient` reports `safeUrl` rather than `url`.
+    // verbatim, and a query string may carry a detection key or token.
     const json = async <T>(res: Response, where: string): Promise<T> => {
         try {
             return (await res.json()) as T;

@@ -1,6 +1,5 @@
-// `NETWORKS` asserts its address literals as `EvmAddress` rather than running
-// them through `evmAddress()`, so the table stays a pure declaration. These
-// tests verify that assertion.
+// `NETWORKS` asserts its address literals as `EvmAddress` without running them
+// through `evmAddress()`; these tests validate them.
 
 import { describe, expect, it } from "vitest";
 import { evmAddress } from "../core/brand.js";
@@ -66,7 +65,6 @@ describe("DeployedNetworkName", () => {
 });
 
 describe("anvil", () => {
-    // `backend/stack`: relayer on 3003, fmd-webserver on 3001, tree depth 11.
     it("points at the backend stack's ports and ships an RPC endpoint", () => {
         expect(NETWORKS.anvil).toMatchObject({
             relayerUrl: "http://localhost:3003",
@@ -95,8 +93,7 @@ describe("resolveNetwork", () => {
     });
 
     // A preset name comes from application config, so an unknown one is a
-    // caller wiring error, which `WalletConfigError` covers and `isWalletError`
-    // recognises.
+    // caller wiring error.
     it("reports an unknown name as a typed config error", () => {
         let thrown: unknown;
         try {

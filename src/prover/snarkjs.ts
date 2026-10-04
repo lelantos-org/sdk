@@ -1,6 +1,5 @@
-// snarkjs Groth16 backend. The only SDK module that imports `snarkjs` (an
-// optional peer dependency), and only lazily: an eager import on the default path would make the
-// peer mandatory. Everything else depends on `./types.js`.
+// snarkjs Groth16 backend. The only SDK module that imports `snarkjs` (an optional peer
+// dependency), and only lazily: an eager import would make the peer mandatory.
 
 import type * as SnarkjsT from "snarkjs";
 import { memoAsync } from "../core/async.js";
@@ -26,12 +25,11 @@ export async function prove(
     paths: ProverPaths,
 ): Promise<ProveResult> {
     const snarkjs = await snarkjsModule.get();
-    // Bytes are cached across proofs; snarkjs (via fastfile) treats a
-    // Uint8Array as an in-memory file, avoiding a per-proof read or fetch of
-    // the ~48 MB zkey.
+    // Bytes are memoised across proofs; snarkjs (via fastfile) treats a
+    // Uint8Array as an in-memory file, so the zkey is not re-read per proof.
     const [wasmBytes, zkeyBytes] = await Promise.all([
-        loadArtifactBytes(paths.wasmPath),
-        loadArtifactBytes(paths.zkeyPath),
+        loadArtifactBytes(paths.wasmPath, { sha256: paths.sha256?.circuit }),
+        loadArtifactBytes(paths.zkeyPath, { sha256: paths.sha256?.zkey }),
     ]);
     const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, wasmBytes, zkeyBytes);
     return { proof, publicSignals };
@@ -48,7 +46,7 @@ export async function verify(
 }
 
 /**
- * Runs snarkjs Groth16 in-process against local wasm + zkey files.
+ * Runs snarkjs Groth16 in-process over the wasm + zkey artifacts.
  *
  * @internal
  */
@@ -68,9 +66,8 @@ export class SnarkjsProver implements Prover {
      *
      * `groth16.fullProve` installs `globalThis.curve_bn128` and its worker
      * threads without tearing them down, which keeps a Node process from
-     * exiting. Idempotent and safe when nothing was proved. Unlike
-     * `WasmProver.shutdown` this is reversible: snarkjs rebuilds the curve on
-     * the next proof.
+     * exiting. Idempotent and safe when nothing was proved. Reversible, unlike
+     * `WasmProver.shutdown`: snarkjs rebuilds the curve on the next proof.
      */
     async dispose(): Promise<void> {
         await disposeCurve();

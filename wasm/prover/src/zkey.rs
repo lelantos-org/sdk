@@ -130,9 +130,8 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         self.seek_to(SEC_COEFFS)?;
         let num_coeffs = self.reader.read_u32::<LittleEndian>()?;
 
-        // Grow rows on demand instead of preallocating `domain_size` empty Vec slots.
-        // snarkjs domains can be 2^20+, so the dense preallocation wastes >10MB
-        // of outer-Vec headers in wasm32 even though most slots stay empty.
+        // Rows grow on demand: a snarkjs domain can exceed 2^20, and preallocating
+        // `domain_size` mostly-empty `Vec`s costs over 10 MB of headers on wasm32.
         let mut a_rows: Vec<Vec<(Fr, usize)>> = Vec::new();
         let mut b_rows: Vec<Vec<(Fr, usize)>> = Vec::new();
         let mut max_constraint = 0u32;
@@ -166,11 +165,10 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         let b_num_non_zero = b_rows.iter().map(Vec::len).sum();
         Ok(ConstraintMatricesFr {
             num_instance_variables: h.n_public + 1,
-            // `n_vars` counts the whole witness, and the leading `1` belongs to
-            // the instance half, so the private half is `n_vars` minus the
-            // public signals *and* that `1`. ark-groth16 never read this field;
-            // taceo checks the witness against it, which is what turned the
-            // off-by-one up.
+            // `n_vars` counts the whole witness and the leading `1` belongs to
+            // the instance half, so the private half excludes the public signals
+            // and that `1`. `taceo-groth16` checks the witness length against
+            // this field.
             num_witness_variables: h.n_vars - (h.n_public + 1),
             num_constraints,
             a_num_non_zero,
@@ -320,15 +318,12 @@ fn parse_g2(bytes: &[u8]) -> IoResult<G2Affine> {
 mod tests {
     use super::*;
 
-    /// The witness length the prover checks against is `nVars`, and `nVars` is
-    /// the circuit's wire count — so `num_instance_variables` plus
-    /// `num_witness_variables` must reproduce it exactly.
+    /// `num_instance_variables + num_witness_variables` must equal `nVars`, the
+    /// circuit's wire count and the witness length the prover checks.
     ///
-    /// This is worth pinning because the two halves are derived, not read:
-    /// `num_witness_variables` subtracts the public signals *and* the leading
-    /// `1`. Getting that off by one is invisible under `ark-groth16`, which
-    /// never read the field, but `taceo-groth16` rejects the witness — so the
-    /// error surfaces at prove time, against a real user, rather than here.
+    /// Both halves are derived, not read: `num_witness_variables` subtracts the
+    /// public signals and the leading `1`. `taceo-groth16` rejects the witness
+    /// when the sum is off, which would otherwise surface only at prove time.
     ///
     /// Skipped unless `ZKEY_DIR` holds `4x6_final.zkey`; `circuits/build` is one
     /// such directory. Native-only: the crate ships to wasm32, but nothing in

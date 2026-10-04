@@ -121,6 +121,21 @@ describe("DepositStream", () => {
             });
         });
 
+        // The relayer may add fields to a frame, the escrow's refund cap `pulled`
+        // among them. They are neither required nor surfaced.
+        it("ignores a field the relayer adds to the frame", async () => {
+            const { s, src } = stream();
+            const pending = s.awaitFlush(7n);
+            src.emit({ ...flushed(7), pulled: "10050" });
+            await expect(pending).resolves.toEqual({
+                kind: "flushed",
+                depositId: 7n,
+                chainId: 31337n,
+                txHash: TX,
+                blockNumber: 42,
+            });
+        });
+
         // A heartbeat comment, an unknown event kind, or a malformed frame
         // must not tear down a stream a caller is still waiting on.
         it("survives undecodable and unrecognised frames", async () => {
@@ -257,9 +272,7 @@ describe("DepositStream", () => {
 
 describe("DepositStream teardown", () => {
     it("detaches its transport handlers on close", async () => {
-        // Inline arrow handlers cannot be removed, leaving every closed
-        // stream attached to its source for as long as the source is
-        // reachable.
+        // Handlers left attached keep a closed stream reachable from its source.
         const stream = new DepositStream("http://relayer.test", 1n, {
             eventSourceFactory: (url) => new FakeSource(url),
         });
@@ -287,8 +300,8 @@ describe("DepositStream teardown", () => {
     });
 
     it("ignores a subscriber registered after close", async () => {
-        // `markClosed` clears the listener set, so a later `subscribe` would
-        // add to a set nothing drains, unreachable and never cleaned up.
+        // `markClosed` clears the listener set, so a listener added afterwards
+        // would never fire or be cleaned up.
         const stream = new DepositStream("http://relayer.test", 1n, {
             eventSourceFactory: (url) => new FakeSource(url),
         });

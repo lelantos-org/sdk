@@ -1,10 +1,9 @@
 // viem-based `ChainReader`: the read-only half of the adapter.
 //
-// `ViemChainAdapter` extends this class and adds only the members that sign or
-// broadcast. This class covers what a wallet without an EVM key can do: resolve
-// the registry, follow the tree, read balances and wait on receipts. A shielded
-// spend needs nothing more, since the circuit authorises it and the relayer
-// puts it on chain.
+// Covers what a wallet without an EVM key can do: resolve the registry, follow
+// the tree, read balances and wait on receipts. A shielded spend needs nothing
+// more, since the circuit authorises it and the relayer puts it on chain.
+// `ViemChainAdapter` extends this class with the members that sign or broadcast.
 
 import { createPublicClient, http, type PublicClient } from "viem";
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../../core/brand.js";
@@ -16,6 +15,7 @@ import type {
     AssetEntry,
     DepositEscrowedRecord,
     EscrowedDepositView,
+    PublishedNote,
     TokenMeta,
     TxLog,
 } from "../types.js";
@@ -28,18 +28,19 @@ import * as token from "./token.js";
 /**
  * Calls per JSON-RPC batch.
  *
- * Must stay at or below the read proxy's `max_batch` of 100. viem defaults to
- * 1000, which a page issuing many concurrent reads would exceed and receive a
- * 413. The two are deployed independently; only this margin keeps them in step.
+ * Must stay at or below the `max_batch` of 100 on the read proxy, which is
+ * deployed independently. Under viem's default of 1000, a page issuing many
+ * concurrent reads would exceed that limit and receive a 413.
  */
 const RPC_BATCH_SIZE = 20;
 
 /**
- * Per-request deadline. Above viem's 10s default; see the transport below.
+ * Per-request deadline. Above viem's 10s default, so a slow or rate-limited endpoint surfaces its
+ * own 429/502, which viem retries honouring `Retry-After`, before the client aborts with an opaque
+ * transport failure.
  *
- * `retryCount` and `retryDelay` stay at viem's defaults. Layering
- * `services/http/client.ts`'s retries here would stack three on three and turn one logical
- * read into nine upstream attempts.
+ * `retryCount` and `retryDelay` stay at viem's defaults: layering `services/http/client.ts`'s
+ * retries on top would multiply the upstream attempts per read.
  */
 const RPC_TIMEOUT_MS = 15_000;
 
@@ -49,24 +50,22 @@ export interface ViemChainReaderOpts {
     permit2Address?: string | undefined;
     /**
      * `NativeAdapter` deployed alongside the pool. Required for native-coin
-     * deposits and unshields: MASP is ERC-20 only, so without it those paths
-     * have no entry point and the adapter reports them as unsupported.
+     * deposits and unshields: the pool is ERC-20 only, so without it those
+     * paths are reported as unsupported.
      */
     nativeAdapterAddress?: string | undefined;
     chainId?: bigint | undefined;
     /**
-     * Replaces `fetch` for RPC traffic, mirroring `HttpOptions.fetch`.
-     *
-     * Used to instrument or redirect reads in tests. To replace the whole
-     * transport, pass a pre-built `chain` adapter to `connect()` instead.
+     * Replaces `fetch` for RPC traffic, mirroring `HttpOptions.fetch`, to
+     * instrument or redirect reads. To replace the whole transport, pass a
+     * pre-built `chain` adapter to `connect()` instead.
      */
     fetch?: typeof fetch | undefined;
     /**
      * How long viem may answer `eth_blockNumber` from its cache, in ms. Default `0`: every
-     * `blockNumber()` reads the chain.
-     *
-     * viem's own default (4s) lets a spend's cooldown check and a consolidation wait act on a stale
-     * tip. Raise it only where read volume matters more than freshness.
+     * `blockNumber()` reads the chain. viem's own default (4s) lets a spend's cooldown check and a
+     * consolidation wait act on a stale tip; raise it only where read volume matters more than
+     * freshness.
      */
     cacheTimeMs?: number | undefined;
 }
@@ -82,18 +81,12 @@ export class ViemChainReader implements ChainReader {
 
     constructor(opts: ViemChainReaderOpts) {
         this.publicClient = createPublicClient({
-            // Block and tree freshness checks read the tip; see `cacheTimeMs`.
+            // Uncached by default; see `cacheTimeMs`.
             cacheTime: opts.cacheTimeMs ?? 0,
             transport: http(opts.rpcUrl, {
-                // Batches only calls that are already concurrent, so a lone
-                // read pays no added latency. `wait: 8` would also catch
-                // sequentially-awaited pairs, at the cost of taxing every
-                // single-call read.
+                // `wait: 0` batches only calls that are already concurrent,
+                // so a lone read pays no added latency.
                 batch: { wait: 0, batchSize: RPC_BATCH_SIZE },
-                // Above viem's 10s default, so a slow or rate-limited endpoint
-                // surfaces its own 429/502, which viem retries honouring
-                // `Retry-After`, rather than the client aborting first with an
-                // opaque transport failure.
                 timeout: RPC_TIMEOUT_MS,
                 ...(opts.fetch ? { fetchFn: opts.fetch } : {}),
             }),
@@ -114,7 +107,6 @@ export class ViemChainReader implements ChainReader {
         };
     }
 
-    // ── reads ────────────────────────────────────────────────────────────
     async chainId(): Promise<bigint> {
         if (this.chainIdOverride !== undefined) return this.chainIdOverride;
         if (this.cachedChainId !== undefined) return this.cachedChainId;
@@ -150,7 +142,6 @@ export class ViemChainReader implements ChainReader {
         return chainCall("isKnownRoot", () => reads.isKnownRoot(this.readCtx, root));
     }
 
-    // ── tokens ───────────────────────────────────────────────────────────
     tokenMeta(a: EvmAddress): Promise<TokenMeta> {
         return chainCall("tokenMeta", () => token.tokenMeta(this.readCtx, a));
     }
@@ -173,11 +164,15 @@ export class ViemChainReader implements ChainReader {
     txReceiptLogs(txHash: Hex32): Promise<readonly TxLog[]> {
         return chainCall("txReceiptLogs", () => token.txReceiptLogs(this.readCtx, txHash));
     }
+    fetchNotePayload(txHash: Hex32, cm: Hex32): Promise<PublishedNote | null> {
+        return chainCall("fetchNotePayload", () =>
+            reads.fetchNotePayload(this.readCtx, txHash, cm),
+        );
+    }
     nativeBalance(account: EvmAddress): Promise<bigint> {
         return chainCall("nativeBalance", () => token.nativeBalance(this.readCtx, account));
     }
 
-    // ── permit2 (reads) ──────────────────────────────────────────────────
     permit2Allowance(
         tok: EvmAddress,
         owner: EvmAddress,
@@ -195,7 +190,6 @@ export class ViemChainReader implements ChainReader {
         return this._permit2Address;
     }
 
-    // ── addresses ────────────────────────────────────────────────────────
     async maspAddress(): Promise<EvmAddress> {
         return this._maspAddress;
     }

@@ -41,9 +41,8 @@ describe("supportsSigning", () => {
     });
 
     it("rejects a layer with only half the signing surface", () => {
-        // Neither alone suffices: a deposit needs the payer named *and* the
-        // Permit2 witness signed, and a partial adapter would fail mid-flow
-        // with value already committed to a strategy.
+        // A deposit needs both the payer named and the Permit2 witness signed,
+        // so a partial adapter would fail mid-flow.
         expect(supportsSigning(reader({ payerAddress }))).toBe(false);
         expect(supportsSigning(reader({ signPermit2 }))).toBe(false);
     });
@@ -79,8 +78,7 @@ describe("the deposit-path guards imply signing", () => {
     });
 
     it("requires the native adapter address, not just the call", () => {
-        // The deposit builder names this address as `payer`, so an adapter
-        // that can encode the call but not name the contract is unusable.
+        // The deposit builder names this address as `payer`.
         const noAddr = reader({
             ...SIGNING,
             submitDepositNative: (async () => ({})) as never,

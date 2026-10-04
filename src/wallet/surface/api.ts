@@ -1,7 +1,7 @@
 // `createWalletApi(ctx)`: the frozen wallet object `connect()` and `createWallet()` return.
 //
-// Methods are closures bound over the `WalletContext`, so `const { sync } = wallet` works; each runs
-// through `boundary()`. The spend path loads with `await import(...)`, so a wallet that never
+// Methods are closures bound over the `WalletContext`, so `const { sync } = wallet` works; each
+// runs through `boundary()`. The spend path loads with `await import(...)`, so a wallet that never
 // spends never downloads the prover, the bundle builders or viem.
 //
 // Spends and quotes live in `./spend.ts`; deposits, cancels and Permit2 setup in `./deposit.ts`.
@@ -115,6 +115,8 @@ export function createWalletApi(ctx: WalletContext, extras: WalletApiExtras): Wa
         cancelDeposit: d("cancelDeposit"),
         setupDepositAllowance: d("setupDepositAllowance"),
         transfer: s("transfer"),
+        paymentProof: s("paymentProof"),
+        claimLinkKey: s("claimLinkKey"),
         withdraw: s("withdraw"),
         swap: s("swap"),
         redenominate: s("redenominate"),

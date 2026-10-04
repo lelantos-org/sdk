@@ -25,10 +25,8 @@ function assertClueGamma(gamma: number): void {
 }
 
 /**
- * Encode a `FmdDetectionKey` as the `γ * 32`-byte little-endian blob the
- * fmd-webserver subscription endpoint expects. Each scalar is reduced
- * mod `BABYJUB_SUBGROUP_ORDER` then serialized LE-32, matching the Rust
- * `Buffer::concat` over `to_le_bytes()` encoding.
+ * Encode a `FmdDetectionKey` as the `γ * 32`-byte blob the fmd-webserver subscription endpoint
+ * expects: each scalar reduced mod `BABYJUB_SUBGROUP_ORDER`, then 32 bytes little-endian.
  *
  * @internal
  */
@@ -49,13 +47,11 @@ export function detectionKeyToHex(dk: FmdDetectionKey): string {
 }
 
 /**
- * Encode a `deriveSubscriptionToken` output as the bare 32-byte hex that
- * `POST /v1/subscriptions` and `GET /v1/matches` expect. LE-32, matching
- * `detectionKeyToHex`.
+ * Encode a `deriveSubscriptionToken` output as the bare 32-byte little-endian hex that
+ * `POST /v1/subscriptions` and `GET /v1/matches` expect.
  *
- * Not reduced mod `BABYJUB_SUBGROUP_ORDER`, unlike the detection scalars: the
- * token is an opaque identifier the server hashes and compares, not a curve
- * scalar, and reducing it would discard entropy.
+ * Not reduced mod `BABYJUB_SUBGROUP_ORDER`: the token is an opaque identifier the server hashes
+ * and compares, not a curve scalar, and reducing it would discard entropy.
  */
 export function subscriptionTokenToHex(token: Field): string {
     return bytesToBareHex(toLeBytes(token, FIELD_BYTES));
@@ -81,9 +77,8 @@ export function decodeClue(buf: Uint8Array): FmdClue {
     }
     assertClueGamma(gamma);
     const want = CLUE_HEADER_BYTES + Math.ceil(gamma / 8);
-    // Exact length, not a minimum, so the encoding is canonical: distinct byte
-    // strings never decode to the same `FmdClue`, keeping byte-level dedup and
-    // hashing consistent with decoded comparison.
+    // Exact length, not a minimum, so the encoding is canonical: distinct byte strings never
+    // decode to the same `FmdClue`, and byte-level dedup agrees with decoded comparison.
     if (buf.length !== want) {
         throw new WireFormatError(
             "$.clue",

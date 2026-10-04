@@ -1,9 +1,9 @@
-// The error contract of the public wallet surface: every rejection is a
-// `WalletError` (checked with the duplicate-bundle-safe `isWalletError`), except
-// the reason of the caller's own `AbortSignal`, which passes through untouched.
+// The error contract of the public wallet surface: every rejection is a `WalletError` (checked with
+// the duplicate-bundle-safe `isWalletError`), except the reason of the caller's own `AbortSignal`,
+// which passes through untouched.
 //
-// Each public method is driven with an invalid input, or with a plugin that
-// misbehaves by throwing something that is not a `WalletError`.
+// Each public method is driven with an invalid input, or with a plugin that throws something that
+// is not a `WalletError`.
 
 import { describe, expect, it } from "vitest";
 import type { ChainAdapter } from "../chain/port.js";

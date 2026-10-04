@@ -58,7 +58,7 @@ describe("NullifierStore.sync", () => {
         expect(summary.added).toBe(2);
         expect(summary.syncedCount).toBe(12);
         expect(store.size).toBe(12);
-        // Only the chunk id is checked; the second argument is the abort signal from `pageChunks`.
+        // Only the chunk id is checked; the second argument carries `pageChunks`' abort signal.
         expect(server.chunk.mock.calls.map((c) => c[0])).toContain(0);
     });
 
@@ -116,10 +116,6 @@ describe("NullifierStore.sync", () => {
     });
 });
 
-// The fold implies position: a chunk's k-th entry has sequence `chunkId * CHUNK_SIZE + k`, and
-// `syncedCount` advances by the chunk's length. These tests check that malformed chunks are
-// rejected.
-
 const full = (chunkId: number, isComplete = true): NullifierChunkOut => ({
     chunkId,
     isComplete,
@@ -142,8 +138,6 @@ describe("NullifierStore chunk validation", () => {
     });
 
     it("rejects an over-long chunk instead of skipping real entries", async () => {
-        // An over-long chunk pushes `syncedCount` into the next chunk's range, so the next fold's
-        // `slice` would drop that many genuine nullifiers and their notes would never be spent.
         const { store } = storeOver((id) => {
             const c = full(id, false);
             return { ...c, nullifiers: [...c.nullifiers, 999_999n] };
@@ -163,8 +157,6 @@ describe("NullifierStore chunk validation", () => {
     });
 
     it("rejects an untruncated entry, which every lookup would miss", async () => {
-        // Entries arrive truncated to 10 bytes and `has()` truncates its argument, so a full-width
-        // entry would never match.
         const { store } = storeOver((id) => ({
             ...full(id, false),
             nullifiers: [1n << 200n],

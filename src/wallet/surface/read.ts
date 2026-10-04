@@ -1,12 +1,13 @@
-// The read half of the wallet object, shared by `connect()` / `createWallet()` and `connectWatch()`.
+// The read half of the wallet object, shared by `connect()`, `createWallet()` and `connectWatch()`.
 //
 // Every method is a closure over a context (never `this`), goes through `boundary()`, and rejects
 // once the wallet is disposed. Nothing here reaches the spend path: `connectWatch` builds on it.
 
 import type { ChainReader } from "../../chain/port.js";
 import { settleAll } from "../../core/async.js";
-import type { ShieldedAddress } from "../../core/brand.js";
+import { hex32, type ShieldedAddress } from "../../core/brand.js";
 import { boundary } from "../../errors/boundary.js";
+import { UnsupportedOperationError } from "../../errors/chain.js";
 import { InvalidArgumentError } from "../../errors/config.js";
 import type { FullViewingKey, ViewingKey } from "../../keys/keys.js";
 import {
@@ -172,6 +173,26 @@ export function createReadMethods(
                 },
                 opts?.signal,
             ),
+
+        confirmCommitment: (commitment, txHash) =>
+            gated(ctx.state, "confirmCommitment", async (): Promise<boolean> => {
+                const cm = hex32(commitment);
+                const tx = hex32(txHash);
+                const chain = ctx.chain;
+                if (!chain?.txReceiptLogs) {
+                    throw new UnsupportedOperationError("confirmCommitment", [
+                        "chain.txReceiptLogs",
+                    ]);
+                }
+                // Loaded on demand: a wallet that never confirms a receipt never downloads the
+                // pool's log layout.
+                const [logs, pool, { commitmentPublished }] = await Promise.all([
+                    chain.txReceiptLogs(tx),
+                    chain.maspAddress(),
+                    import("../../chain/operation.js"),
+                ]);
+                return commitmentPublished(logs, pool, cm);
+            }),
 
         state: () => ctx.state.state(),
         subscribe: (listener) => {

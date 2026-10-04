@@ -1,22 +1,16 @@
-// `x402()`: wrap a `fetch` so 402 responses are paid and retried.
-//
-// This is the entire integration surface. The result is an ordinary `fetch`, so
-// agent frameworks accept it directly:
+// `x402()`: wrap a `fetch` so 402 responses are paid and retried. The result is an
+// ordinary `fetch`:
 //
 //   createOpenAI({ fetch: pay });                            // Vercel AI SDK
 //   new StreamableHTTPClientTransport(url, { fetch: pay });   // MCP
 //
-// The 402 handling is implemented here rather than delegated to `@x402/fetch`,
-// so no extra install is needed. Callers with an existing `x402Client` (e.g. to
-// combine with Solana or use `@x402/mcp`) should register `shieldedExact` /
+// Callers with an existing `x402Client` register `shieldedExact` /
 // `unshieldedExact` on it directly; both are structurally `SchemeNetworkClient`.
 //
-// Exactly-once
-// ------------
-// A payment is attached to at most one retry per call. A paid request that
-// returns 402 is `payment-rejected` and is not paid again. For the same reason
-// this wrapper sits outside `createHttpClient`'s retry logic: 5xx retries must
-// never re-run a payment.
+// A payment is attached to at most one retry per call: a paid request that
+// returns 402 is `payment-rejected` and is not paid again. The wrapper sits
+// outside `createHttpClient`'s retry logic so a 5xx retry never re-runs a
+// payment.
 
 import { X402PaymentError } from "../errors/x402.js";
 import { getLogger } from "../log/logger.js";
@@ -44,15 +38,9 @@ export interface PaymentRecord {
 }
 
 export interface X402Options {
-    /**
-     * Required, so an autonomous payer always has a ceiling. Human decimal
-     * units, applied per asset.
-     */
+    /** Required spend ceiling. Human decimal units, applied per asset. */
     budget: Budget;
-    /**
-     * Also pay servers that only speak standard EVM `exact`. Unshields into a
-     * throwaway address, so it is off by default.
-     */
+    /** Also pay standard EVM `exact` servers, unshielding into a throwaway address. Default off. */
     allowUnshielded?: boolean | undefined;
     /** Only pay these hostnames. Unset means any host. */
     allowHosts?: string[] | undefined;
@@ -110,8 +98,8 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
     }
 
     const paying = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-        // Normalised up front and cloned for the first fetch, which consumes the
-        // body; the original is kept intact for the paid retry.
+        // The first fetch consumes the body, so it gets a clone; the original
+        // is kept for the paid retry.
         const req = new Request(input instanceof URL ? input.toString() : input, init);
         const res = await doFetch(req.clone());
         if (res.status !== 402) return res;
@@ -151,8 +139,8 @@ export function x402(wallet: WalletApi, opts: X402Options): PayingFetch {
             ...(result.extensions ? { extensions: result.extensions } : {}),
         };
 
-        // The payment is made. Commit before the retry so a network failure on
-        // the retry does not under-count spend.
+        // The payment is made: committed before the retry so a network failure
+        // there does not under-count spend.
         chosen.reservation.commit();
 
         const paid = await doFetch(withPaymentRequest(req, payload));
@@ -188,13 +176,12 @@ interface Choice {
 }
 
 /**
- * Pick an offer to pay: shielded networks first, original order within a
- * tier, first affordable one wins.
+ * Pick an offer to pay: shielded networks first, server order within a tier,
+ * first payable one wins.
  *
  * An offer this wallet cannot satisfy (wrong chain, unknown token, too little of
- * the asset it is priced in, a window too short to prove in) moves on to the
- * next offer — which is what lets a server price one resource in several assets
- * and be paid in whichever of them the payer holds. A budget breach aborts:
+ * the asset it is priced in, a window too short to prove in) is skipped, so a
+ * server may price one resource in several assets. A budget breach aborts:
  * falling through to a cheaper offer would hide that the caller's ceiling was
  * reached.
  */
@@ -214,12 +201,11 @@ async function select(
             continue;
         }
         try {
-            // The mechanism prices its own network and judges whether this
-            // wallet can pay it; see `PaymentQuote`. The host goes with the
-            // offer, so a per-host payer is judged as it will be paid.
+            // The host goes with the offer, so a per-host payer is judged as
+            // it will be paid.
             const quote = await mechanism.quote(requirements, { host: hostOf(url) });
-            // Reserved, not only checked: minting the payload takes seconds and
-            // concurrent payments must account for this one.
+            // Reserved, not only checked, so concurrent payments account for
+            // this one while its payload is minted.
             const reservation = ledger.reserve(quote.amount, quote.asset, url);
             return { mechanism, requirements, namespace, quote, reservation };
         } catch (err) {

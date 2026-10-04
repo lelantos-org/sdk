@@ -74,7 +74,7 @@ describe("autoConsolidate", () => {
             required: 121n,
             context: expect.objectContaining({ op: "consolidate" }),
         });
-        // Nothing is proved or relayed, and nothing retries: no fee makes these notes reach it.
+        // Nothing is proved or relayed.
         expect(h.transfer).not.toHaveBeenCalled();
     });
 

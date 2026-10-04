@@ -5,17 +5,12 @@ import { InvalidArgumentError } from "../errors/config.js";
 import { RAY, toTokenUnitsAtRate, type YieldRate } from "./units.js";
 
 /**
- * Basis-points denominator. `feeBps` is a uint16 fraction of 10_000;
- * `fee = amount * feeBps / BPS_DENOMINATOR` mirrors `MASP._takeFee`
- * on-chain.
+ * Basis-points denominator. `feeBps` is a uint16; `fee = amount * feeBps / BPS_DENOMINATOR`
+ * mirrors `MASP._takeFee`.
  */
 export const BPS_DENOMINATOR = 10_000n;
 
-/**
- * Mirrors the `MASP.PublicInTooLarge` bound: `d.publicIn > type(uint48).max`
- * reverts on-chain. The SDK pre-checks against this to surface an actionable
- * error instead of a relayer 500.
- */
+/** The pool's bound on `publicIn`: above `type(uint48).max` it reverts `MASP.PublicInTooLarge`. */
 export const PUBLIC_IN_MAX = (1n << 48n) - 1n;
 
 /** Fee on `amount` at `feeBps`, truncated — matches Solidity integer division. */
@@ -24,14 +19,11 @@ export function applyFee(amount: bigint, feeBps: bigint): bigint {
 }
 
 /**
- * Fee on a count of normalized units, rounded **up** — mirrors `Fees.unitFee`.
+ * Fee on a count of normalized units, rounded up; mirrors `Fees.unitFee`.
  *
- * The plain path ({@link applyFee}) multiplies `scale` in before dividing, so it
- * floors at base-unit granularity. A yield asset charges its fee in units, so
- * the escrow digest stays index-free; since one unit is worth `scale` base
- * units, flooring would discard up to a whole `scale` per operation and charge
- * nothing below `BPS_DENOMINATOR / feeBps` units (under 400 at 25 bps). The pool
- * rounds up, so every yield-branch quote must too: a quote one unit low produces
+ * A yield asset charges its fee in units, which keeps the escrow digest index-free. One unit is
+ * worth `scale` base units, so flooring would charge nothing below `BPS_DENOMINATOR / feeBps`
+ * units. The pool rounds up, so every yield-branch quote must too: a quote one unit low produces
  * a Permit2 pull the pool refuses.
  */
 export function unitFee(units: bigint, feeBps: bigint): bigint {
@@ -42,18 +34,13 @@ export function unitFee(units: bigint, feeBps: bigint): bigint {
 
 /** An asset's two protocol fee rates, in basis points. */
 export interface FeeRates {
-    /** Charged **on top of** the principal on a shield. */
+    /** Charged on top of the principal on a shield. */
     depositBps: bigint;
-    /** **Skimmed from** the proceeds on an unshield. */
+    /** Skimmed from the proceeds on an unshield. */
     withdrawBps: bigint;
 }
 
-/**
- * A caller-supplied replacement for what the pool reports.
- *
- * A bare `bigint` sets both legs (typical for a test pool or fixture). Pass the
- * pair to price the legs separately.
- */
+/** Caller-supplied replacement for the pool's reported rates. A bare `bigint` sets both legs. */
 export type FeeOverride = bigint | FeeRates;
 
 /** {@link FeeOverride} applied to what the chain reported, or that unchanged. */
@@ -64,8 +51,7 @@ export function resolveFeeRates(reported: FeeRates, override?: FeeOverride | und
 }
 
 /**
- * Guard a value destined for `DepositRequest.publicIn` against the uint48
- * bound the pool enforces.
+ * Guard a value destined for `DepositRequest.publicIn` against {@link PUBLIC_IN_MAX}.
  *
  * @throws {InvalidArgumentError} naming the asset and the representable max.
  */
@@ -86,9 +72,9 @@ export function assertPublicInFits(
     );
 }
 
-/** What a withdrawal of `publicOut` costs and delivers. See {@link withdrawNet}. */
+/** Inputs of {@link withdrawNet}. */
 export interface WithdrawNetArgs {
-    /** The gross leaving the pool — a ladder denomination, in circuit units. */
+    /** The gross leaving the pool, in circuit units. */
     publicOut: bigint;
     /** The asset's withdraw rate. */
     feeBps: bigint;
@@ -109,22 +95,18 @@ export interface WithdrawNet {
 }
 
 /**
- * Split a withdrawal's gross into what the recipient receives and what the
- * protocol keeps.
+ * Split a withdrawal's gross into what the recipient receives and what the protocol keeps.
  *
- * `publicOut` is the **gross**: `MASP._unshieldLeg` skims the fee out of the
- * amount leaving the pool (`net = outAmt - fee`) rather than charging it on
- * top. A caller picks the gross (a ladder denomination, since that figure is
+ * `publicOut` is the gross: `MASP._unshieldLeg` skims the fee out of the amount leaving the pool
+ * (`net = outAmt - fee`). A caller picks the gross (a ladder denomination, since that figure is
  * published on chain) and receives slightly less.
  *
- * The two branches mirror the contract exactly and are **not**
- * interchangeable: they round at different points, so the wrong one misreports
+ * The two branches mirror the contract and round at different points, so the wrong one misreports
  * the net by up to a unit.
  *
  *   plain  the fee is taken from the converted token amount, floored
- *   yield  the fee is taken in normalized units *before* conversion and
- *          rounded up (`YieldOps._unshield` → `Fees.unitFee`), which is what
- *          keeps `_drainDeposit` index-free and the escrow digest stable
+ *   yield  the fee is taken in normalized units before conversion and rounded up
+ *          (`YieldOps._unshield` → `Fees.unitFee`)
  */
 export function withdrawNet(args: WithdrawNetArgs): WithdrawNet {
     const { publicOut, feeBps, scale, index = RAY, yieldEnabled = false } = args;
@@ -140,7 +122,7 @@ export function withdrawNet(args: WithdrawNetArgs): WithdrawNet {
     return { net: gross - fee, fee };
 }
 
-/** Inputs of {@link grossForNet}: {@link WithdrawNetArgs} with the target net in place of the gross. */
+/** {@link WithdrawNetArgs} with the target net in place of the gross. */
 export interface GrossForNetArgs extends Omit<WithdrawNetArgs, "publicOut"> {
     /** Base units the recipient must receive at least. */
     net: bigint;
@@ -150,9 +132,8 @@ export interface GrossForNetArgs extends Omit<WithdrawNetArgs, "publicOut"> {
  * The smallest `publicOut` (circuit units) whose {@link withdrawNet} delivers at least `net` base
  * units.
  *
- * Inverts `withdrawNet` on both of its branches, so the yield branch's unit-denominated, rounded-up
- * fee is accounted for exactly. `withdrawNet(publicOut).net` is non-decreasing in `publicOut` on
- * both branches, so the minimum is found by bisection over a bound that is checked, never assumed.
+ * `withdrawNet(publicOut).net` is non-decreasing in `publicOut` on both branches, so the minimum is
+ * found by bisection over a checked upper bound.
  *
  * The result is rarely a denomination: publishing it makes the withdrawal distinguishable.
  * Returns `0n` for a `net` of zero or less.
@@ -186,7 +167,7 @@ export function grossForNet(args: GrossForNetArgs): bigint {
     return hi;
 }
 
-/** What a shield charges the payer, and the pieces it is made of. */
+/** Inputs of {@link depositTotal}. */
 export interface DepositTotalArgs {
     /** Principal, in circuit units. */
     publicIn: bigint;
@@ -203,25 +184,19 @@ export interface DepositTotalArgs {
 }
 
 /**
- * What the pool will pull from the payer for one shield, in ERC-20 base units.
+ * What the pool pulls from the payer for one shield, in ERC-20 base units.
  *
- * Counterpart to {@link withdrawNet}, branching for the same reason: a shield is
- * charged **on top of** the principal while a withdrawal is skimmed out of it,
- * and the two unit spaces round at different points.
+ * Counterpart to {@link withdrawNet}: a shield is charged on top of the principal, and the two
+ * branches round at different points.
  *
- *   plain  fee is taken on the converted token amount, as
- *          `MASP._computeAmounts` does
- *   yield  fee is taken in normalized units, rounded up (as `YieldOps._deposit`
- *          does through `Fees.unitFee`), and the *total* is converted once,
- *          rounding up again; this keeps `_drainDeposit` index-free and the
- *          escrow digest stable
+ *   plain  the fee is taken on the converted token amount, as `MASP._computeAmounts` does
+ *   yield  the fee is taken in normalized units, rounded up (`YieldOps._deposit` →
+ *          `Fees.unitFee`), and the total is converted once, rounding up again
  *
- * The yield branch converts with `rate`, never with the reported index; see
- * {@link YieldRate}.
+ * The yield branch converts with `rate`, never with the reported index; see {@link YieldRate}.
  *
- * @throws {InvalidArgumentError} when the asset yields but no `rate` was
- * supplied. `scale` is not a safe fallback: it under-quotes by whatever the
- * venue has earned, which makes the pull revert.
+ * @throws {InvalidArgumentError} when the asset yields but no `rate` was supplied. `scale` is not
+ * a safe fallback: it under-quotes by whatever the venue has earned, which makes the pull revert.
  */
 export function depositTotal(args: DepositTotalArgs): TokenAmount {
     const { publicIn, feeIn, depositBps, scale, yieldEnabled = false, rate } = args;
@@ -241,49 +216,36 @@ export function depositTotal(args: DepositTotalArgs): TokenAmount {
 }
 
 /**
- * Whether a deposit's relayer note is charged in the deposit token, on the
- * single-token path. Mirrors `MASP._sameFeeAsset`.
+ * Whether a deposit's relayer note is charged in the deposit token, on the single-token path.
+ * Mirrors `MASP._sameFeeAsset`.
  *
- * Decided by asset id, not token address: a plain id and a yield id may share
- * one ERC-20 yet price and book differently. On this path the payer signs one
- * `PermitWitnessTransferFrom` (or holds one allowance) covering principal,
- * protocol fee and relayer note together, with `maxFee = 0`. Otherwise the fee
- * token is pulled separately, under a two-entry batch permit.
+ * Decided by asset id, not token address: a plain id and a yield id may share one ERC-20 yet
+ * price and book differently. On this path the payer signs one `PermitWitnessTransferFrom` (or
+ * holds one allowance) covering principal, protocol fee and relayer note, with `maxFee = 0`.
+ * Otherwise the fee token is pulled separately, under a two-entry batch permit.
  */
 export function isSameFeeAsset(feeIn: bigint, feeAssetId: bigint, publicAssetId: bigint): boolean {
     return feeIn === 0n || feeAssetId === publicAssetId;
 }
 
-/**
- * The inputs of `depositTotal`, plus where the relayer note is priced.
- *
- * The split follows the pool's own branch over the two asset ids
- * ({@link isSameFeeAsset}).
- */
+/** The inputs of `depositTotal`, plus where the relayer note is priced. */
 export interface DepositTotalsArgs extends DepositTotalArgs {
     /**
-     * The fee asset's `scale`. Read only when the pool pulls the note
-     * separately, and then required.
-     *
-     * The pool accepts only a plain asset there, so the note is priced exactly
-     * at `feeIn * feeScale` and never through a yield rate.
+     * The fee asset's `scale`. Required when the pool pulls the note separately, unread otherwise.
+     * The pool accepts only a plain asset there, so the note is priced at `feeIn * feeScale`,
+     * never through a yield rate.
      */
     feeScale?: bigint | undefined;
     /** Registry id of the deposited asset. */
     publicAssetId: bigint;
-    /**
-     * Registry id of the asset paying the relayer: `publicAssetId` when the fee
-     * is in the deposited asset.
-     */
+    /** Registry id of the fee asset: `publicAssetId` when the fee is in the deposited asset. */
     feeAssetId: bigint;
 }
 
 /**
  * A shield's cost split by what it pays for, in ERC-20 base units.
  *
- * `principal` is always in the deposit token; `relayer` is in the fee token,
- * which is the deposit token when the pool takes the single-token path. In that
- * case the pool pulls the two as one amount, and `principal + relayer` equals
+ * On the single-token path the pool pulls the two as one amount, and `principal + relayer` equals
  * `depositTotal` exactly.
  */
 export interface DepositTotals {
@@ -294,21 +256,16 @@ export interface DepositTotals {
 }
 
 /**
- * `depositTotal`, split per token: what the pool pulls for the principal
- * and protocol fee, and what it pulls for the relayer's note.
+ * `depositTotal`, split per token; mirrors `MASP._quoteShield`.
  *
- * Mirrors `MASP._quoteShield`. When the note is pulled separately it is priced
- * under the fee asset alone (`feeIn * feeScale`) and the principal is quoted
- * with `feeIn = 0`, so each figure is one token's pull. Otherwise the note
- * joins the principal's quote, and on a yield asset the two are converted
- * together, rounding once; `relayer` is then the difference that note makes,
- * so the sum still matches the single pull.
+ * {@link isSameFeeAsset} over `publicAssetId` and `feeAssetId` picks the branch. When the note is
+ * pulled separately it is priced under the fee asset alone (`feeIn * feeScale`) and the principal
+ * is quoted with `feeIn = 0`, so each figure is one token's pull. Otherwise the note joins the
+ * principal's quote, and on a yield asset the two are converted together, rounding once;
+ * `relayer` is then the difference the note makes, so the sum matches the single pull.
  *
- * Which of the two applies is {@link isSameFeeAsset} over `publicAssetId` and
- * `feeAssetId`.
- *
- * @throws {InvalidArgumentError} as `depositTotal`; or when the ids say the
- * note is pulled separately and no `feeScale` was given.
+ * @throws {InvalidArgumentError} as `depositTotal`; or when the note is pulled separately and no
+ * `feeScale` was given.
  */
 export function depositTotals(args: DepositTotalsArgs): DepositTotals {
     const { feeIn, feeScale, publicAssetId, feeAssetId } = args;
@@ -327,25 +284,20 @@ export function depositTotals(args: DepositTotalsArgs): DepositTotals {
 }
 
 /**
- * Headroom added to a yield asset's signed deposit ceiling, in basis points.
- *
- * 50 bps is roughly a thousand times the drift a 5% APY produces over the
- * default Permit2 deadline, while still bounding what a misbehaving pool could
- * pull beyond the quote.
+ * Headroom added to a yield asset's signed deposit ceiling, in basis points. Covers index drift
+ * before inclusion while bounding what a misbehaving pool could pull beyond the quote.
  */
 const DEPOSIT_INDEX_HEADROOM_BPS = 50n;
 
 /**
  * What to sign for a deposit, given what it currently costs.
  *
- * The result is a ceiling, not an estimate: Permit2 transfers only what the
- * pool asks for, an allowance is a cap, and `NativeAdapter` refunds the unused
- * part of `msg.value`. Overshooting costs the payer nothing; undershooting
- * reverts the deposit.
+ * A ceiling, not an estimate: Permit2 transfers only what the pool asks for, an allowance is a
+ * cap, and `NativeAdapter` refunds the unused part of `msg.value`. Overshooting costs the payer
+ * nothing; undershooting reverts the deposit.
  *
- * A yield asset's cost is `units * gross / supply` and `gross` grows every
- * block, so a ceiling at exactly the quote is stale once signed. Plain assets
- * add no headroom: their cost is exact and fixed.
+ * A yield asset's cost is `units * gross / supply` and `gross` grows every block, so a ceiling at
+ * exactly the quote is stale once signed. A plain asset's cost is fixed and gets no headroom.
  */
 export function depositCeiling(quoted: TokenAmount, yieldEnabled: boolean): TokenAmount {
     if (!yieldEnabled) return quoted;

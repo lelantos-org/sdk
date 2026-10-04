@@ -1,7 +1,5 @@
-// Witness builders for the MASP transact circuit. Shared by the SDK, circuit tests
-// and Foundry fixture generators so all three stay byte-identical.
+// Input-slot builders for the transact circuit witness.
 
-import { randomJubjubScalar } from "../core/random.js";
 import {
     buildNoteCommitment,
     buildNullifierFromNsk,
@@ -13,6 +11,8 @@ import type { Note, SpentNote } from "../notes/note.js";
 export interface SpendableCachedNote {
     note: Note;
     nsk: Field;
+    /** Diversifier of the address the note was sent to: `note.pk = Poseidon(TAG_PK, ivk, d)`. */
+    d: Field;
     leafIndex: number;
 }
 
@@ -28,6 +28,7 @@ export function toSpentNoteFromPath(
     return {
         ...cached.note,
         nsk: cached.nsk,
+        d: cached.d,
         cm,
         nf,
         leafIndex: cached.leafIndex,
@@ -37,42 +38,25 @@ export function toSpentNoteFromPath(
     };
 }
 
-/** Per-dummy blinders. Defaults are fresh; pass values only for fixtures. */
-export interface DummyBlinders {
-    /** Spend-time value-commitment blinder. MUST be fresh per transaction. */
-    rcv?: Field;
-    /** Deposit-anchor blinder. Unconstrained here: the leaf check is skipped. */
-    rcvDep?: Field;
-}
-
-// Dummy spent slot. is_dummy=1 bypasses Merkle membership + pk check.
-//
-// nf = Poseidon(TAG_NF, nk, rho, cm) with nk = Poseidon(TAG_NK, 0); fresh `rho`
-// keeps nf distinct from prior dummies and any real spend. `cm` must be the
-// commitment SpentNote recomputes from the dummy's (zero) fields, since the
-// circuit feeds that into the nullifier; a placeholder 0 fails.
-//
-// `rho` has no default and `rcv` defaults to a fresh scalar because both are
-// publicly visible: a reused rho repeats the nullifier, and `cv = 0·gen +
-// rcv·H` with rcv = 0 is the identity point in every transaction, which tags
-// the slot as a dummy in the public inputs.
-/** @internal */
+/**
+ * A dummy input slot: the zero-value note under `rho` and `rcm`, nullified with `nsk`.
+ *
+ * `is_dummy = 1` skips Merkle membership and the `pk` check, so `pk`, `d` and the path are zero.
+ * `cm` and `nf` are the values `SpentNote` recomputes from the slot's fields:
+ * `nf = Poseidon(TAG_NF, Poseidon(TAG_NK, nsk), rho, cm)`.
+ *
+ * The nullifier is public and an observer must not be able to recompute it. Preconditions: `nsk`
+ * is the key the spend's real inputs open with, and `rho` and `rcm` are sampled uniformly per
+ * dummy. A repeated `(nsk, rho, rcm)` repeats the nullifier.
+ *
+ * @internal
+ */
 export function dummyInputAt(
     P: Poseidon,
     depth: number,
-    rho: Field,
-    blinders: DummyBlinders = {},
+    { nsk, rho, rcm }: { nsk: Field; rho: Field; rcm: Field },
 ): SpentNote {
-    const nsk = 0n;
-    const note: Note = {
-        asset: 0n,
-        value: 0n,
-        pk: 0n,
-        rho,
-        rcm: 0n,
-        rcv: blinders.rcv ?? randomJubjubScalar(),
-        rcvDep: blinders.rcvDep ?? randomJubjubScalar(),
-    };
+    const note: Note = { asset: 0n, value: 0n, pk: 0n, rho, rcm };
     const cm = buildNoteCommitment(P, note);
     const nf = buildNullifierFromNsk(P, nsk, rho, cm);
     const pathElements: Field[][] = [];
@@ -80,6 +64,7 @@ export function dummyInputAt(
     return {
         ...note,
         nsk,
+        d: 0n,
         cm,
         nf,
         leafIndex: 0,

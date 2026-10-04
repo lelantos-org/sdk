@@ -1,20 +1,16 @@
 // Shared state and cast helpers for the viem adapter's call modules.
 //
-// This adapter is the trust boundary between viem's structural hex types and
+// The adapter is the trust boundary between viem's structural hex types and
 // the SDK's branded ones: values read off the chain are branded here, and
-// branded values pass straight back into viem, which accepts them because a
-// brand is an intersection over the same `0x${string}`. `as never` is reserved
-// for the spots where viem's `encodeFunctionData` generic cannot infer a tuple
-// argument.
+// branded values pass back into viem unchanged, a brand being an intersection
+// over the same `0x${string}`. `as never` is reserved for the spots where
+// viem's `encodeFunctionData` generic cannot infer a tuple argument.
 
 import type { PublicClient } from "viem";
 import { branded, type EvmAddress } from "../../core/brand.js";
 import type { EthSigner } from "../../keys/signer.js";
 
-/**
- * State needed for reads. Carries no signer: the reads in `reads.ts` and the
- * balance/allowance/receipt functions in `token.ts` work without an EVM key.
- */
+/** State needed for reads, which work without an EVM key. */
 export interface ViemReadCtx {
     readonly publicClient: PublicClient;
     readonly maspAddress: EvmAddress;

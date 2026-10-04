@@ -23,6 +23,13 @@ export {
     feeOutput,
     feeOutputFromEstimate,
 } from "../bundle/fee.js";
+export {
+    PAYMENT_PROOF_VERSION,
+    type PaymentProofFailure,
+    type PaymentProofReader,
+    type PaymentProofResult,
+    verifyPaymentProof,
+} from "../bundle/payment-proof.js";
 export { buildSpend, type SpendArgs } from "../bundle/spend.js";
 export {
     type SignPermit2AllowanceArgs,

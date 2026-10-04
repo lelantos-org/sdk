@@ -53,8 +53,7 @@ describe("listNotes", () => {
         expect(n.id).toBe(7);
         expect(n.ciphertext).toEqual(new Uint8Array([0xde, 0xad]));
         // Byte-for-byte, in order: `epk` goes straight to `decryptNote`, and
-        // decoding it as a big-endian integer would silently reverse it. The
-        // packed form is little-endian `y` with the sign bit in the last byte.
+        // decoding it as a big-endian integer would reverse it.
         expect(n.epk).toEqual(hexToBytes(PACKED_BASE8));
     });
 
@@ -115,19 +114,17 @@ describe("listMatches", () => {
         expect(m.id).toBe(42);
         const [target, init] = fetchMock.mock.calls[0]!;
         const url = new URL(target as string);
-        // The token is a stable pseudonymous identifier sent on every poll. In
-        // a URL it is copied into every proxy and access log on the path, so it
-        // must travel in a header and nowhere else.
+        // The token is a stable pseudonymous identifier: it must travel in a
+        // header, never in the URL.
         expect(url.search).not.toContain("abcd");
         expect(url.searchParams.has("token")).toBe(false);
         expect((init as RequestInit).headers).toMatchObject({
             Authorization: "Bearer abcd",
         });
-        // The subscription does NOT pin the chain: `detection_key` is globally
-        // unique, so one subscription spans every chain a deployment serves.
-        // Without chainId the feed returns other chains' notes, which decrypt
-        // against the same chain-independent key and land in the wallet as
-        // unspendable balance.
+        // A subscription spans every chain a deployment serves. Without
+        // `chainId` the feed returns other chains' notes, which decrypt under
+        // the same chain-independent key and land in the wallet as unspendable
+        // balance.
         expect(url.searchParams.get("chainId")).toBe(String(CHAIN));
     });
 
@@ -156,7 +153,7 @@ describe("deleteSubscription", () => {
 });
 
 describe("chunk feeds", () => {
-    it("decodes commitment entries into a pre-hashed leaf", async () => {
+    it("decodes commitment entries into a ready leaf", async () => {
         respondWith({
             chunkId: 0,
             entries: [{ leafIndex: 0, leafHash: "0x0a" }],
@@ -165,8 +162,7 @@ describe("chunk feeds", () => {
 
         const chunk = await client().fetchCommitmentChunk(0);
 
-        // The leaf arrives ready to insert; `cm`/`cvDep` are not served, so
-        // nothing recomputes it.
+        // The leaf arrives ready to insert; nothing recomputes it.
         expect(chunk.entries[0]).toEqual({ leafIndex: 0, leafHash: 10n });
         expect(chunk.isComplete).toBe(false);
     });
@@ -187,11 +183,11 @@ describe("chunk feeds", () => {
     });
 
     it("rejects a commitment entry with no leaf hash", async () => {
-        // A server without the pre-hashed feed must fail rather than yield a
-        // tree of undefined leaves.
+        // A server naming the leaf anything else must fail rather than yield
+        // a tree of undefined leaves.
         respondWith({
             chunkId: 0,
-            entries: [{ leafIndex: 0, cmHex: "0a", cvDepX: "0x01", cvDepY: "0x02" }],
+            entries: [{ leafIndex: 0, cmHex: "0a" }],
             isComplete: false,
         });
 

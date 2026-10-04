@@ -10,7 +10,7 @@ import { SCOPE } from "./funding.js";
 import { unsupported } from "./requirements.js";
 import type { PaymentPayloadResult, PaymentRequirements } from "./types.js";
 
-/** EIP-3009 `TransferWithAuthorization`, the default `exact` EVM mechanism. */
+/** EIP-712 types of `TransferWithAuthorization`, the default `exact` EVM transfer method. */
 const TRANSFER_WITH_AUTHORIZATION = {
     TransferWithAuthorization: [
         { name: "from", type: "address" },
@@ -25,7 +25,8 @@ const TRANSFER_WITH_AUTHORIZATION = {
 /**
  * Ceiling on an EIP-3009 authorization window: 1 hour.
  *
- * The authorization is a bearer instrument until it expires, so longer
+ * The authorization is a bearer instrument until it expires: a facilitator
+ * could hold it and replay it against a later top-up, so longer
  * server-requested windows are clamped.
  */
 const MAX_AUTHORIZATION_SECONDS = 3600;
@@ -103,13 +104,10 @@ export function requireEip712Domain(req: PaymentRequirements): { name: string; v
 }
 
 /**
- * `maxTimeoutSeconds` from the offer, validated and clamped.
- *
- * Server-supplied. An invalid value throws `X402PaymentError` (not a
- * `RangeError` from `BigInt`) so `isRoutable` falls through to the next
- * `accepts[]` entry. The clamp prevents a long-lived authorization that a
- * facilitator could hold and replay against a later top-up. The shielded
- * mechanism applies an equivalent check.
+ * Server-supplied `maxTimeoutSeconds`, validated and clamped to
+ * `MAX_AUTHORIZATION_SECONDS`. An invalid value throws `X402PaymentError` (not
+ * a `RangeError` from `BigInt`), so the selector falls through to the next
+ * `accepts[]` entry.
  */
 export function timeoutSeconds(req: PaymentRequirements): number {
     const seconds = req.maxTimeoutSeconds;

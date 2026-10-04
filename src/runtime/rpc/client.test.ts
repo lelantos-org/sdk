@@ -75,9 +75,8 @@ describe("createWorkerRpc", () => {
         expect(await b).toBe(20);
     });
 
-    // The client holds one persistent `onmessage` handler and correlates by
-    // id. A per-call save/replace/restore of the handler would let two
-    // concurrent calls clobber each other, leaving one unsettled.
+    // One persistent `onmessage` handler correlates by id, so concurrent calls
+    // cannot displace each other's listener and leave one unsettled.
     it("settles both of two concurrent calls on one worker", async () => {
         const w = new FakeWorker();
         const c = rpc(w);
@@ -239,10 +238,8 @@ describe("serveWorkerRpc", () => {
     });
 });
 
-// The logging handshake. A worker is a separate module realm that starts at
-// `silent`, so `timed()` spans short-circuit and the `forwardLogs` sink receives
-// nothing. These cover both halves: the client announcing its config and the
-// worker applying it.
+// The logging handshake (see `RpcControl`), covered in two halves: the client
+// announcing its config and the worker applying it.
 //
 // Not an end-to-end round trip: in one process `installLogForwarder` replaces
 // the module-global sink the client reads from, so a forwarded record would
@@ -255,7 +252,6 @@ describe("log config handshake", () => {
         configureLogging({ level: "silent", sink: null, namespaces: null });
         const w = new FakeWorker();
         createWorkerRpc<TestMethods>(w);
-        // The common path: no control message.
         expect(w.sent).toEqual([]);
     });
 
@@ -306,9 +302,8 @@ describe("createWorkerRpc abort", () => {
         const w = new FakeWorker();
         const rpc = createWorkerRpc<TestMethods>(w, { name: "t" });
 
-        // `addEventListener("abort", …)` does not fire for a signal that has
-        // already aborted, so an already-aborted signal must be checked
-        // eagerly or the call stays pending when no timeout is configured.
+        // An already-aborted signal never fires `abort`, so it must be
+        // checked eagerly or the call stays pending.
         await expect(
             rpc.call("echo", { v: 1 }, { signal: AbortSignal.abort(new Error("gone")) }),
         ).rejects.toThrow("gone");

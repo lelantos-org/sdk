@@ -1,4 +1,4 @@
-// Per-output randomness factories: blinders for a Note (rho/rcm/rcv/rcvDep)
+// Per-output randomness factories: blinders for a Note (rho/rcm)
 // and for the per-output aux payload (esk for ECDH, fmdR for the FMD clue
 // blinder).
 
@@ -9,8 +9,6 @@ import type { Field } from "../crypto/poseidon.js";
 export interface NoteRandomness {
     rho: Field;
     rcm: Field;
-    rcv: Field;
-    rcvDep: Field;
 }
 
 /**
@@ -36,12 +34,7 @@ export interface NoteOutputRandomness extends NoteRandomness {
 
 /** @internal */
 export function freshNoteRandomness(): NoteRandomness {
-    return {
-        rho: randomFr(),
-        rcm: randomFr(),
-        rcv: randomJubjubScalar(),
-        rcvDep: randomJubjubScalar(),
-    };
+    return { rho: randomFr(), rcm: randomFr() };
 }
 
 /** @internal */

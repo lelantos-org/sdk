@@ -1,8 +1,5 @@
-// The shapes fmd-webserver returns, as domain values.
-//
-// Types only: no decoding, no HTTP. `./decode.ts` builds these from raw JSON
-// and `./client.ts` fetches them, so a module that only names a response (a
-// store, a test fixture) imports nothing else.
+// The shapes fmd-webserver returns, as domain values. `./decode.ts` builds them
+// from raw JSON.
 
 import type { Field } from "../../crypto/index.js";
 
@@ -14,10 +11,8 @@ export interface FmdTreeState {
 }
 
 /**
- * The two watermarks a wallet syncs against.
- *
- * Polled more often than any other route, so it carries only what a client
- * needs to decide whether to make the expensive reads.
+ * The two watermarks a wallet syncs against: what a client needs to decide
+ * whether to make the expensive reads.
  */
 export interface FmdHead {
     chainId: number;
@@ -33,12 +28,10 @@ export interface FmdNoteOut {
     cm: Field;
     ciphertext: Uint8Array;
     /**
-     * Sender's ECDH ephemeral public point, already packed by the server the
-     * way `babyJub.packPoint` packs one: 32 bytes of `y` little-endian with
-     * the high bit of the last byte carrying `sign(x)`.
-     *
-     * Bytes, not a `Point`: `decryptNote` takes this form as `epk`, so nothing
-     * on this path unpacks it.
+     * Sender's ECDH ephemeral public point, packed as `babyJub.packPoint`
+     * does: 32 bytes of `y` little-endian with the high bit of the last byte
+     * carrying `sign(x)`. `decryptNote` takes this form as `epk`, so it is
+     * never unpacked on this path.
      */
     epk: Uint8Array;
 }
@@ -51,15 +44,13 @@ export interface FmdMatchOut extends FmdNoteOut {}
  *
  * `matches` is filled from both ends at once: the indexer's live tick inserts
  * rows for notes at the head while its backfill walks history upward. The
- * highest `id` in a page is therefore NOT a safe resume cursor: rows below it
- * may still be pending, and a cursor placed above the gap would skip them
- * permanently.
+ * highest `id` in a page is therefore not a safe resume cursor: rows below it
+ * may still be pending, and a cursor above the gap would skip them permanently.
  *
  * `backfilledThroughNoteId` is the highest note id already scanned against
  * this subscription's key; a persisted cursor must be clamped to it. Rows
- * above it are still delivered, so a new note never waits for a backfill; they
- * are re-delivered until the watermark passes them, and `addHits` dedupes them
- * by `cm`.
+ * above it are delivered anyway and re-delivered until the watermark passes
+ * them; `addHits` dedupes them by `cm`.
  */
 export interface FmdMatchesPage {
     matches: FmdMatchOut[];
@@ -70,10 +61,10 @@ export interface FmdMatchesPage {
  * Result of `POST /v1/subscriptions`. Neither the token nor the detection key
  * is echoed: the caller derives and supplies both.
  *
- * `created` is `false` when the token already had a subscription behind it
- * and this call re-attached to it, as when a wallet re-derives after losing
- * local state. That subscription's backfill is already under way or complete,
- * so matches may be available immediately.
+ * `created` is `false` when the token already had a subscription and this
+ * call re-attached to it, as when a wallet re-derives after losing local
+ * state. Its backfill is already under way or complete, so matches may be
+ * available immediately.
  */
 export interface SubscriptionOut {
     gamma: number;
@@ -84,15 +75,15 @@ export interface SubscriptionOut {
 export interface CommitmentChunkEntry {
     leafIndex: number;
     /**
-     * `Poseidon(TAG_LEAF, cm, cvDep.x, cvDep.y)`, computed server-side.
+     * The tree leaf: the note commitment
+     * `Poseidon(TAG_CM, asset · 2^64 + value, inner)`.
      *
-     * Sending the hash rather than `cm` and the `cvDep` point is one field
-     * element instead of three: it avoids ~1.05M pure-JS Poseidon-4 calls over
-     * a full tree, the largest single term in a cold sync, and cuts this feed
-     * roughly threefold on the wire.
+     * A spend output's leaf is the `cm` the pool published in `NotePayload`.
+     * A deposit's is in no event: the server computes it from the escrow's
+     * asset, amount and `inner`, as the batch circuit does.
      *
-     * The client does not derive leaves from primary data, so a wrong value
-     * here yields a wrong root: a rejected transaction, not a loss of funds.
+     * Trusted, not re-derived by the client: a wrong value yields a wrong
+     * root, so a rejected transaction, not a loss of funds.
      * `TreeStore.verifyRoot` catches it.
      */
     leafHash: Field;
@@ -111,23 +102,22 @@ export interface NullifierChunkOut {
      * Ascending by insertion order.
      *
      * `bigint`, not `Field`: the server sends the low 10 bytes of each
-     * nullifier, so these are truncations rather than field elements and must
-     * not be fed anywhere a real nullifier is expected. Compare against one
-     * only through `NullifierStore.has`, which truncates its argument the same
-     * way.
+     * nullifier, so these are truncations, not field elements. Compare against
+     * a full nullifier only through `NullifierStore.has`, which truncates its
+     * argument the same way.
      */
     nullifiers: bigint[];
     isComplete: boolean;
 }
 
 /**
- * γ sets the false-positive rate at `2^-γ`. Server-enforced range; it
- * additionally caps γ against the current note count so a match set always
- * keeps enough decoys, and rejects a `detectionKeyHex` that is not exactly
+ * γ sets the false-positive rate at `2^-γ`. The range is server-enforced; the
+ * server also caps γ against the current note count so a match set keeps
+ * enough decoys, and rejects a `detectionKeyHex` that is not exactly
  * `gamma * 32` bytes.
  */
 export const GAMMA_MIN = 1;
-// Mirrors the server's declared range. Two lower limits bind first:
+// The server's declared maximum. Two lower limits bind first:
 // `AuxValidation.sol` masks the on-chain clue-bits field to 0x3FFF, so bits
 // 14-15 are never set, and senders pack only `FMD_DEFAULT_GAMMA` bits. The
 // effective limit is `assertDetectionGamma`.
@@ -135,8 +125,7 @@ export const GAMMA_MAX = 16;
 
 export interface CreateSubscriptionInput {
     /**
-     * The γ expanded detection scalars, from `detectionKeyFor` +
-     * `detectionKeyToHex`.
+     * The γ expanded detection scalars, from `detectionKeyFor` + `detectionKeyToHex`.
      *
      * Confers the full detection capability, which cannot be scoped or
      * revoked: `h_i` is public, so `dk = x_i - h_i` recovers the root. The

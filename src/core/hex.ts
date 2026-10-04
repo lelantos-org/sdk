@@ -1,4 +1,4 @@
-// Hex codecs, shared by the whole SDK.
+// Hex codecs.
 
 import { InvalidArgumentError } from "../errors/config.js";
 import { branded, type Hex32 } from "./brand.js";
@@ -55,9 +55,9 @@ const TWO_POW_256 = 1n << 256n;
 /**
  * Format a field element as a `0x`-prefixed, zero-padded 32-byte hex word.
  *
- * Range-checked because the result is branded `Hex32` without validation and
- * feeds ABI encoding and persisted note records. Unchecked, `-1n` pads to a
- * 64-character string containing a minus sign, and `2n ** 256n` yields 65 digits.
+ * Range-checked because the result is branded `Hex32` without validation:
+ * unchecked, `-1n` pads to a string containing a minus sign and `2n ** 256n`
+ * yields 65 digits.
  */
 export function fieldToBytes32(x: Field): Hex32 {
     assertRange(x, 0n, TWO_POW_256, "fieldToBytes32 input", "a 32-byte unsigned integer");

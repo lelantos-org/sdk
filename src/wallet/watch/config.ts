@@ -1,9 +1,7 @@
 // Runtime configuration for a watch-only wallet.
 //
-// The shape is picked from `WalletConfig` and the per-pluggable defaults in
-// `../defaults/pluggables.ts` are shared. Resolution is separate:
-// `../defaults/resolveConfig` builds a prover and a submitter, and a watch
-// wallet uses neither.
+// The per-pluggable defaults in `../defaults/pluggables.ts` are shared. Resolution is separate:
+// `../defaults/resolveConfig` builds a prover and a submitter, and a watch wallet uses neither.
 
 import type { ChainReader } from "../../chain/port.js";
 import type { Jubjub, Poseidon } from "../../crypto/index.js";
@@ -17,10 +15,8 @@ import { InMemoryNoteStore, type NoteStore } from "../notes/note-store.js";
 import type { WalletConfig } from "../types/config.js";
 
 /**
- * Configuration for `createWatchWallet`, picked from `WalletConfig`.
- *
- * A `Pick`, so a new `WalletConfig` field must be opted into here. Fields
- * serving a proof, a submission or the Merkle tree are excluded.
+ * Configuration for `createWatchWallet`: a `Pick` of `WalletConfig`, so a field added there must
+ * be opted into here. Fields serving a proof, a submission or the Merkle tree are excluded.
  */
 export interface WatchWalletConfig
     extends Pick<
@@ -38,9 +34,7 @@ export interface WatchWalletConfig
         | "feeBps"
     > {
     /**
-     * Chain reads, for asset metadata and the chain tip only.
-     *
-     * Optional: notes come from the note cache. When omitted, `asset()`, `assets()`
+     * Chain reads, for asset metadata and the chain tip only. When omitted, `asset()`, `assets()`
      * and `balance()` reject `WALLET_CONFIG` and no RPC is contacted.
      */
     reader?: ChainReader | undefined;
@@ -48,9 +42,9 @@ export interface WatchWalletConfig
     /**
      * Permit `syncStrategy: { kind: "matches" }`. Off by default.
      *
-     * A `matches` subscription posts the γ detection scalars, from which the
-     * server recovers `dk` and detects the account's incoming notes
-     * permanently. The secret released is the owner's, not the viewer's.
+     * A `matches` subscription posts the γ detection scalars, from which the server recovers `dk`
+     * and detects the account's incoming notes permanently. The secret released is the owner's,
+     * not the viewer's.
      */
     allowDetectionKeyRelease?: boolean | undefined;
 }

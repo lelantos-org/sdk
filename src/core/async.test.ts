@@ -10,8 +10,6 @@ import {
     withTimeout,
 } from "./async.js";
 
-// `retry` is the backoff behind every HTTP call in the SDK.
-
 describe("retry", () => {
     const policy = { retries: 2, backoffMs: 0, jitter: 0 };
 
@@ -30,17 +28,14 @@ describe("retry", () => {
     });
 
     it("throws a real Error rather than undefined on a negative cap", async () => {
-        // Unclamped, `retries: -1` would skip the loop and throw
-        // `lastErr === undefined`, a non-Error that defeats downstream
-        // `instanceof` and `isWalletError` checks.
+        // `retries: -1` is clamped to 0, so `fn` still runs once.
         const fn = vi.fn(async () => "ok");
         await expect(retry(fn, { ...policy, retries: -1 })).resolves.toBe("ok");
         expect(fn).toHaveBeenCalledOnce();
     });
 
     it("does not let a throwing onRetry replace the real error", async () => {
-        // The hook is documented "must not throw"; a hook that does must not
-        // mask the network error it reports on.
+        // A hook that throws must not mask the error it reports on.
         const fn = vi.fn(async () => {
             throw new Error("network down");
         });
@@ -53,8 +48,6 @@ describe("retry", () => {
     });
 
     it("rejects with the caller's abort reason when aborted during backoff", async () => {
-        // Not the failure being backed off from: the caller ended the call, and
-        // `fetch` rejects with the reason too.
         const ctrl = new AbortController();
         const reason = new Error("user cancelled");
         const fn = vi.fn(async () => {
@@ -97,8 +90,6 @@ describe("retry", () => {
 
 describe("withTimeout", () => {
     it("rejects with an Error when the abort reason is a bare string", async () => {
-        // `AbortSignal.reason` is whatever was passed to `abort()`, often a
-        // string, which defeats downstream `instanceof` checks.
         const ctrl = new AbortController();
         const pending = withTimeout(
             new Promise<never>(() => {}),
@@ -141,7 +132,7 @@ describe("createMutex", () => {
             events.push(`${name}:end`);
         };
 
-        // `a` is slower, so without the mutex `b` would start first.
+        // `a` is slower, so without the mutex `b` would finish first.
         vi.useFakeTimers();
         try {
             const done = Promise.all([mutex.run(op("a", 10)), mutex.run(op("b", 0))]);
@@ -222,8 +213,6 @@ describe("memoAsync", () => {
     });
 
     it("does not cache a rejection", async () => {
-        // A plain `promise ??= build()` would replay one transient failure to
-        // every later caller in the realm, permanently.
         let attempt = 0;
         const build = vi.fn(async () => {
             if (++attempt === 1) throw new Error("transient");
@@ -248,8 +237,6 @@ describe("memoAsync", () => {
     });
 
     it("exposes an in-flight build without starting one", async () => {
-        // Teardown must not start a build, but must await one already under
-        // way rather than leak it.
         let release: (v: string) => void = () => {};
         const build = vi.fn(
             () =>
@@ -297,8 +284,7 @@ describe("linkAbort", () => {
     });
 
     it("honours a parent that already aborted", () => {
-        // `addEventListener("abort", …)` never fires on an already-aborted
-        // signal.
+        // `addEventListener("abort", …)` never fires on an already-aborted signal.
         const child = linkAbort(AbortSignal.abort(new Error("already")));
         expect(child.signal.aborted).toBe(true);
     });
@@ -332,8 +318,7 @@ describe("linkAbort", () => {
     });
 
     it("detaches and aborts on scope exit", () => {
-        // `[Symbol.dispose]` also aborts: leaving the scope ends the work, so
-        // the speculative tail must stop. `dispose()` only unlinks.
+        // `[Symbol.dispose]` also aborts; `dispose()` only unlinks.
         const parent = new AbortController();
         let child!: LinkedAbort;
         {

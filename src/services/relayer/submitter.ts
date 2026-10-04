@@ -16,10 +16,9 @@ import { RelayerClient } from "./client.js";
 /**
  * Operation kinds a fee quote can be requested for.
  *
- * Extends {@link SpendKind} with swap and deposit, which have their own endpoints. A swap's gas
- * covers two legs plus the on-chain swap, so a spend estimate would under-quote it; a deposit is
- * not relayed at submit time and is priced against the later `flushBatch`. Neither is a
- * `SpendKind`: no transact payload is tagged `"swap"`, and a deposit has no transact payload.
+ * Extends {@link SpendKind} with swap and deposit, which have their own endpoints: a swap's gas
+ * covers two legs plus the on-chain swap, and a deposit is not relayed at submit time, so it is
+ * priced against the later `flushBatch`.
  */
 export type EstimateKind = SpendKind | "swap" | "deposit";
 
@@ -31,22 +30,21 @@ export interface Submitter {
     /**
      * Fee this relayer charges to relay `kind`, and the assets it accepts.
      *
-     * Optional: when absent the wallet builds no fee slot, which suits a relayer that subsidises
-     * gas. A relayer that charges fees rejects such a submit with a 402.
+     * When absent the wallet builds no fee slot, which suits a relayer that subsidises gas. A
+     * relayer that charges fees rejects such a submit with a 402.
      */
     estimate?(chainId: bigint, kind: EstimateKind): Promise<EstimateResponse>;
     /**
-     * Assets registered on `chainId`, with their symbols, decimals and scales.
-     *
-     * Optional: when absent the wallet resolves assets by numeric id from the chain registry.
+     * Assets registered on `chainId`, with their symbols, decimals and scales. When absent the
+     * wallet resolves assets by numeric id from the chain registry.
      */
     assets?(chainId: bigint): Promise<readonly ChainToken[]>;
     /**
      * Account the relayer offers as a swap's `refundTo` on `chainId`, for a wallet without its
-     * own EVM account. Optional.
+     * own EVM account.
      */
     refundAddress?(chainId: bigint): Promise<string | undefined>;
-    /** The `SwapWrapper` the relayer relays swaps through on `chainId`, if any. Optional. */
+    /** The `SwapWrapper` the relayer relays swaps through on `chainId`, if any. */
     swapWrapperAddress?(chainId: bigint): Promise<string | undefined>;
 }
 

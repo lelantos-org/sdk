@@ -8,16 +8,15 @@ import type { CancelDepositInputs, DepositEscrowedRecord } from "../../chain/typ
 export function cancelInputsOf(e: DepositEscrowedRecord): CancelDepositInputs {
     return Object.freeze({
         publicIn: e.publicIn,
-        cm: e.cm,
-        cvDep: [e.cvDep[0], e.cvDep[1]] as [bigint, bigint],
+        inner: e.inner,
         publicAssetId: e.publicAssetId,
         feeBpsAtSubmit: e.feeBpsAtSubmit,
         payer: e.payer,
         submittedAt: e.submittedAt,
         feeIn: e.feeIn,
         feeAssetId: e.feeAssetId,
-        feeCm: e.feeCm,
-        feeCvDep: [e.feeCvDep[0], e.feeCvDep[1]] as [bigint, bigint],
+        feeInner: e.feeInner,
+        pulled: e.pulled,
     });
 }
 

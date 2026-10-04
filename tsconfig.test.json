@@ -1,14 +1,13 @@
 {
-  // Type-checks everything the build config excludes: tests, benches, and
-  // test utils. `tsconfig.json` drives emit and must stay narrow; this one
-  // exists purely so a moved module breaks the fast `typecheck` gate rather
-  // than surfacing 90 seconds later as a runtime failure in vitest.
+  // Type-checks what the build config excludes (tests, benches, test utils)
+  // and `scripts/`. `tsconfig.json` drives emit and stays narrow; with this
+  // config a moved module fails the `typecheck` gate instead of a vitest run.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     // The build config pins `rootDir` to `src` for emit layout. Nothing is
-    // emitted here, and `scripts/**` sits outside `src`, so widen to the
-    // package root; otherwise every script raises TS6059.
+    // emitted here and `scripts/**` sits outside `src`, so the root widens to
+    // the package; otherwise every script raises TS6059.
     "rootDir": ".",
     // Inherited from the build config; with `noEmit` they only produce
     // TS4023 noise about vitest's internal types being unnameable.

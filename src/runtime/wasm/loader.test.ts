@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWasmLoader, type WasmModuleBase } from "./loader.js";
 
-// The loader memoises the module promise, which is what makes `load()` cheap
-// to call from anywhere. Two properties make that memo safe rather than a
-// trap: a rejection must not be cached, and teardown must be able to clear it.
+// The loader memoises the module promise. A rejection must not be cached, and
+// teardown must be able to clear the memo.
 
 type Mod = WasmModuleBase & { tag: string };
 
@@ -32,10 +31,8 @@ describe("createWasmLoader", () => {
     });
 
     it("does not cache a rejection", async () => {
-        // A cached rejection — one EMFILE on the Node wasm read, one 502 on
-        // the browser fetch, one `postInit` timeout — would be replayed to
-        // every later caller in the realm, surviving a working loader
-        // override.
+        // A cached rejection would replay one transient failure to every
+        // later caller in the realm.
         let attempt = 0;
         const load = vi.fn(async () => {
             if (++attempt === 1) throw new Error("transient");
@@ -50,9 +47,8 @@ describe("createWasmLoader", () => {
     });
 
     it("reset() makes the next load re-run postInit", async () => {
-        // `postInit` is what starts the rayon thread pool. Tearing the pool
-        // down leaves the module loaded but unusable, so the memo has to be
-        // droppable or the pool could never be rebuilt.
+        // `postInit` starts the rayon thread pool, so teardown of the pool
+        // must be able to drop the memo for `postInit` to run again.
         const postInit = vi.fn();
         const load = vi.fn(async () => okModule());
         const loader = loaderOver(load, postInit);

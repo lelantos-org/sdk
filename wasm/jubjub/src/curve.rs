@@ -1,16 +1,11 @@
 //! Vendored minimal Baby Jubjub Edwards arithmetic.
 //!
-//! Adapted from `babyjubjub-rs` v0.0.11 (Apache-2.0, arnaucube). The EdDSA,
-//! Schnorr and Poseidon paths are omitted, which drops the `blake-hash`,
-//! `blake`, `poseidon-rs`, `arrayref`, `generic-array`, `lazy_static` and
-//! `rand` dependencies.
-//!
-//! Public surface: `Point`, `PointProjective`, `decompress_point`, `compress`,
-//! `mul_scalar`, `add`, `double`.
+//! Adapted from `babyjubjub-rs` v0.0.11 (Apache-2.0, arnaucube), without its
+//! EdDSA, Schnorr and Poseidon paths.
 //!
 //! `decompress_point` and `mul_scalar` run once per note during a wallet sync
-//! and dominate its cost; both are tuned for that and diverge from upstream.
-//! See their doc comments.
+//! and dominate its cost; both diverge from upstream, as their doc comments
+//! describe.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -23,9 +18,8 @@ use std::sync::OnceLock;
 #[PrimeFieldGenerator = "7"]
 pub struct Fr(FrRepr);
 
-// Cached singletons. `Fr::from_str` allocates + parses decimal — avoid in
-// hot paths (`PointProjective::add` calls `d`/`a_coeff` per iteration of
-// scalar mul; `is_identity` uses 0/1 per check).
+// Cached constants: `Fr::from_str` allocates and parses decimal, and
+// `PointProjective::add` reads `d` and `a_coeff` on every call.
 fn d() -> Fr {
     static V: OnceLock<Fr> = OnceLock::new();
     *V.get_or_init(|| Fr::from_str("168696").unwrap())
@@ -43,7 +37,7 @@ pub fn fr_one() -> Fr {
     *V.get_or_init(Fr::one)
 }
 
-// (q - 1) / 2 as FrRepr — used by `compress` for x sign bit. Cached.
+// `(q - 1) / 2`, the sign threshold for `x` in a packed point.
 fn q_half_repr() -> &'static FrRepr {
     static V: OnceLock<FrRepr> = OnceLock::new();
     V.get_or_init(|| {
@@ -127,10 +121,9 @@ impl PointProjective {
 
     // dbl-2008-bbjlp https://hyperelliptic.org/EFD/g1p/auto-twisted-projective.html#doubling-dbl-2008-bbjlp
     //
-    // 3M + 4S, against 10M + 1S for `add`. `mul_scalar` doubles once per bit
-    // and adds only on set bits, so doublings are roughly two thirds of its
-    // work. Guarded by `double_matches_add`, which covers the identity and a
-    // low-order point.
+    // 3M + 4S, against 10M + 1S for `add`; `mul_scalar` doubles once per
+    // scalar bit. Checked against `add` by `double_matches_add`, including the
+    // identity and a low-order point.
     pub fn double(&self) -> PointProjective {
         let mut b = self.x;
         b.add_assign(&self.y);
@@ -186,19 +179,17 @@ impl Point {
 
     /// Fixed-window scalar multiplication, window width [`MUL_WINDOW_BITS`].
     ///
-    /// Two of these run per note during a trial decrypt — the ECDH plus
-    /// `in_subgroup` — so this is the innermost loop of a wallet sync.
+    /// One runs per note during a trial decrypt (the ECDH), so this is the
+    /// innermost loop of a wallet sync.
     ///
     /// Double-and-add costs one addition per set bit: ~126 for a 251-bit
-    /// scalar. A width-`w` window instead precomputes `2^w - 2` multiples of
-    /// the base and spends one addition per window, for `2^w - 2 + bits/w`.
-    /// At 251 bits that is minimised at `w = 4` (14 + 63 = 77 additions,
-    /// against 126), and rises again at `w = 5` as the table outgrows the
-    /// saving. Doublings are unchanged at one per bit.
+    /// scalar. A width-`w` window precomputes `2^w - 2` multiples of the base
+    /// and spends one addition per window, for `2^w - 2 + bits/w`. At 251 bits
+    /// that is minimised at `w = 4` (14 + 63 = 77 additions); at `w = 5` the
+    /// table outgrows the saving. Doublings stay at one per bit.
     ///
-    /// Bit-for-bit identical to double-and-add — same group law, same
-    /// operations in a different order — which `mul_scalar_matches_naive`
-    /// pins down against the previous implementation.
+    /// The result equals double-and-add's, which `mul_scalar_matches_naive`
+    /// checks.
     pub fn mul_scalar(&self, n: &BigInt) -> Point {
         let one = fr_one();
         let identity = PointProjective {
@@ -212,8 +203,7 @@ impl Point {
             return identity.affine();
         }
 
-        // table[i] = [i] * self. Built with additions rather than doublings so
-        // every entry is reachable; table[0] is never read.
+        // table[i] = [i] * self; table[0] is never read.
         let base = self.projective();
         let mut table: Vec<PointProjective> = Vec::with_capacity(MUL_TABLE_SIZE);
         table.push(identity.clone());
@@ -225,9 +215,8 @@ impl Point {
         let (_, b) = n.to_bytes_le();
         let windows = bits.div_ceil(MUL_WINDOW_BITS);
 
-        // Most-significant window first. Starting from the identity and
-        // doubling through the leading windows is a no-op on the identity, so
-        // no special case for the first iteration is needed.
+        // Most-significant window first. Doubling the identity is a no-op, so
+        // the first iteration needs no special case.
         let mut r = identity;
         for w in (0..windows).rev() {
             for _ in 0..MUL_WINDOW_BITS {
@@ -249,8 +238,7 @@ impl Point {
 
     pub fn compress(&self) -> [u8; 32] {
         let mut r = [0u8; 32];
-        // Direct FrRepr → 32B LE. circomlibjs `isNegative(x)` ≡ x > (q-1)/2;
-        // compare FrRepr (Ord-derived) instead of going through BigInt.
+        // circomlibjs `isNegative(x)` is `x > (q-1)/2`, compared on `FrRepr`.
         self.y
             .into_repr()
             .write_le(&mut r[..])
@@ -267,10 +255,8 @@ impl Point {
 ///
 /// Recovers `x` from `x² = (1 - y²) / (a - d·y²)`.
 ///
-/// Every step stays in `Fr`, whose Montgomery `inverse()` and `sqrt()` take
-/// their Tonelli-Shanks constants from the `PrimeField` derive. Performing the
-/// same arithmetic over `num_bigint` costs roughly 8x, largely in re-deriving
-/// those constants per call.
+/// Every step stays in `Fr`, whose `inverse()` and `sqrt()` take their
+/// constants from the `PrimeField` derive instead of re-deriving them per call.
 pub fn decompress_point(bb: [u8; 32]) -> Result<Point, String> {
     let mut b = bb;
     let x_is_negative = b[31] & 0x80 != 0;
@@ -306,8 +292,6 @@ pub fn decompress_point(bb: [u8; 32]) -> Result<Point, String> {
     Ok(Point { x, y })
 }
 
-// ---------- helpers ----------
-
 fn test_bit(b: &[u8], i: usize) -> bool {
     b[i / 8] & (1 << (i % 8)) != 0
 }
@@ -329,8 +313,8 @@ mod tests {
             .collect()
     }
 
-    /// The double-and-add `mul_scalar` that the windowed one replaced, kept
-    /// verbatim as the differential reference.
+    /// Double-and-add scalar multiplication, the differential reference for
+    /// the windowed `mul_scalar`.
     fn mul_scalar_naive(p: &Point, n: &BigInt) -> Point {
         let one = fr_one();
         let mut r = PointProjective {
@@ -379,10 +363,9 @@ mod tests {
     /// The identity `(0, 1)` does not decompress, diverging from circomlibjs
     /// `unpackPoint`, which accepts it.
     ///
-    /// This has no effect in practice: `ON_CURVE_IDENTITY` appears only as a
-    /// placeholder for an unused pad-output `ephPub`, and a pad note is
-    /// discarded either way — here by the decompress failure, otherwise by the
-    /// AEAD tag. Asserted so that any change to it is deliberate.
+    /// `ON_CURVE_IDENTITY` appears only as a placeholder for an unused
+    /// pad-output `ephPub`, and a pad note is discarded either way: here by
+    /// the decompress failure, otherwise by the AEAD tag.
     #[test]
     fn identity_does_not_decompress() {
         let id = Point {
@@ -394,8 +377,7 @@ mod tests {
 
     #[test]
     fn decompress_rejects_y_outside_the_field() {
-        // q - 1 is the largest valid y; q and above must be refused. Take the
-        // modulus itself, low 255 bits (sign bit cleared by construction).
+        // q - 1 is the largest valid y; q and above must be refused.
         let mut b = [0xffu8; 32];
         b[31] = 0x7f; // 2^255 - 1 > q
         assert!(decompress_point(b).is_err());
@@ -403,8 +385,8 @@ mod tests {
 
     #[test]
     fn decompress_rejects_a_y_with_no_matching_x() {
-        // Search for a y where (1-y²)/(a-d·y²) is a non-residue. Roughly half
-        // of all y qualify, so this terminates immediately.
+        // Search for a y where (1-y²)/(a-d·y²) is a non-residue; roughly half
+        // of all y qualify.
         let mut found = false;
         for i in 2u32..64 {
             let y = Fr::from_str(&i.to_string()).unwrap();
@@ -442,7 +424,7 @@ mod tests {
     #[test]
     fn in_subgroup_rejects_a_low_order_point() {
         let t = order_two();
-        // Sanity: it really is order 2 and really is on the curve.
+        // Sanity: `t` has order 2.
         assert!(crate::common::is_identity(
             &t.mul_scalar(&BigInt::from(2u32))
         ));
@@ -451,8 +433,8 @@ mod tests {
 
     #[test]
     fn double_matches_add() {
-        // The dedicated doubling must agree with the generic addition on every
-        // input, including the identity and a low-order point.
+        // `double` must agree with `add` on every input, including the identity
+        // and a low-order point.
         let g = base8_point();
         let mut points: Vec<Point> = scalars().iter().map(|k| g.mul_scalar(k)).collect();
         points.push(Point {
@@ -470,10 +452,8 @@ mod tests {
 
     #[test]
     fn mul_scalar_matches_naive() {
-        // The windowed loop feeds Merkle roots and note decryption, so it has
-        // to agree with double-and-add on every input, not merely on typical
-        // ones. Boundaries first: 0 (empty loop), 1, and scalars that land
-        // exactly on and just past a window edge.
+        // Boundaries first: 0 (empty loop), 1, and scalars exactly on and just
+        // past a window edge.
         let mut ks: Vec<BigInt> = vec![
             BigInt::from(0u32),
             BigInt::from(1u32),
@@ -497,7 +477,7 @@ mod tests {
 
     #[test]
     fn mul_scalar_is_additively_homomorphic() {
-        // [j]B + [k]B == [j+k]B. Guards any rewrite of the scalar-mult loop.
+        // [j]B + [k]B == [j+k]B.
         let g = base8_point();
         let ks = scalars();
         for w in ks.chunks(2).filter(|c| c.len() == 2) {

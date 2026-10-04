@@ -198,7 +198,7 @@ describe("selectNotes", () => {
             },
         });
         expect(held.reservedUntil?.getTime()).toBeGreaterThan(Date.now());
-        // Counts, never amounts or ids, in the message; the long-standing wording is kept.
+        // The message carries counts, never amounts or ids.
         expect(held.message).toMatch(/1 awaiting an earlier spend, 1 in spend cooldown/);
         expect(held.message).not.toMatch(/60|reserved"/);
     });
@@ -227,7 +227,7 @@ describe("selectNotes", () => {
 
     it("returns consolidate-first when sum sufficient but no 2-cover", () => {
         // max pair=90, total=120, target=100 → consolidate. Pinned to two
-        // inputs: at the default 4×4 arity, 30+40+50 covers 100 directly.
+        // inputs: at the default four, 30+40+50 covers 100 directly.
         const notes = [storedNote("a", 30n), storedNote("b", 40n), storedNote("c", 50n)];
         const r = selectNotes(notes, assetId(1n), circuitAmount(100n), baseOpts({ maxInputs: 2 }));
         expect(r.plan).toBe("consolidate-first");
@@ -292,8 +292,6 @@ describe("maxInputs", () => {
     // lets consolidation merge more per round.
     it("defaults to the default shape's arity, so a third note is reachable", () => {
         // 30+40+50 = 120 covers 115; the best 2-cover, 40+50 = 90, does not.
-        // Without `maxInputs` the default 4×4 arity applies, so this resolves
-        // directly.
         const notes = [storedNote("a", 30n), storedNote("b", 40n), storedNote("c", 50n)];
         const r = selectNotes(notes, assetId(1n), circuitAmount(115n), baseOpts());
         if (r.plan !== "direct") throw new Error("expected direct");
@@ -384,10 +382,9 @@ describe("notes reserved by an outstanding spend", () => {
 });
 
 describe("cover search cost", () => {
-    // Without a seeded incumbent, the branch-and-bound prune would not engage
-    // for a wallet whose largest notes cannot reach the target, enumerating
-    // every C(n, size) (~1.7e8 bigint operations at size 3) before reporting
-    // `consolidate-first`.
+    // Without a seeded incumbent the prune never engages for a wallet whose
+    // largest notes cannot reach the target, and every C(n, size) (~1.7e8 at
+    // size 3) is enumerated before `consolidate-first` is reported.
     it("reports consolidate-first on a large dust wallet without enumerating", () => {
         const notes = Array.from({ length: 1000 }, (_, i) => storedNote((i + 1).toString(16), 1n));
 
@@ -396,8 +393,7 @@ describe("cover search cost", () => {
         const elapsedMs = Date.now() - started;
 
         expect(r.plan).toBe("consolidate-first");
-        // Three orders of magnitude below the unpruned walk, so this checks the
-        // complexity class rather than machine speed.
+        // Far below the unpruned walk: checks the complexity class, not machine speed.
         expect(elapsedMs).toBeLessThan(1000);
     });
 
@@ -500,7 +496,6 @@ describe("spendableMax", () => {
     });
 
     it("is a target the selector actually accepts", () => {
-        // The returned max must never be rejected as insufficient cover.
         const notes = [
             storedNote("01", 1n),
             storedNote("02", 50n),

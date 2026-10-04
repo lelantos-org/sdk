@@ -5,13 +5,10 @@ import { emptyScanStats, type ScanHit, type ScanInput, type ScanStats, scanNotes
 
 export interface Scanner {
     /**
-     * Trial-decrypt `inputs` with `ivk`. Result order MUST match input order
-     * (filtered to hits).
+     * Trial-decrypt `inputs` with `ivk`. Result order must match input order (filtered to hits).
      *
-     * There is no client-side FMD pre-filter: the note feed does not carry
-     * `clue.R`. For FMD filtering use `syncStrategy: { kind: "matches", token }`,
-     * which filters server-side, trading some anonymity for bandwidth. See
-     * `./worker/protocol.ts`.
+     * For FMD filtering use `syncStrategy: { kind: "matches", token }`, which filters server-side,
+     * trading some anonymity for bandwidth.
      */
     scan(ivk: Field, inputs: ScanInput[]): Promise<ScanHit[]>;
 
@@ -19,7 +16,7 @@ export interface Scanner {
     dispose?(): Promise<void> | void;
 }
 
-/** In-process scanner. No worker/scheduler overhead. */
+/** In-process scanner. */
 export class LocalScanner implements Scanner {
     /** Tallies from the most recent `scan`. */
     lastStats: ScanStats = emptyScanStats();

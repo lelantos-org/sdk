@@ -1,7 +1,6 @@
-// Every typed error the SDK throws.
+// Every typed error the SDK throws, split by domain; the root entry (`@lelantos-org/sdk`)
+// publishes every class.
 //
-// Throwing rule
-// -------------
 // Every failure that leaves the SDK is a `WalletError`, so a caller branches on
 // `err.code` and never on message text:
 //
@@ -20,8 +19,6 @@
 //
 // Tier 0: `errors/` imports only `core/` (enforced by `scripts/check-layers.mjs`), so every layer
 // can throw typed errors without an upward dependency.
-//
-// Split by domain; the root entry (`@lelantos-org/sdk`) publishes every class.
 
 import type { WalletErrorCode } from "./codes.js";
 import { isWalletError } from "./guard.js";
@@ -48,9 +45,8 @@ export function* causeChain(err: unknown): Generator<object> {
 }
 
 /**
- * Ambient facts about the operation that failed. Populated as the error
- * travels outward, so a failure deep in a swap still reports the id and name
- * of the operation it belongs to.
+ * Ambient facts about the operation that failed, populated as the error travels outward, so a
+ * failure deep in a swap still reports the id and name of its operation.
  *
  * Closed: facts specific to one failure are typed fields on its class, or
  * {@link WalletError.details}.
@@ -139,9 +135,8 @@ export class InternalError extends WalletError<"INTERNAL"> {
 /**
  * Throw {@link InternalError} unless `condition` holds.
  *
- * For states the SDK itself guarantees: a failure is a bug, never the
- * caller's input (use `InvalidArgumentError`) or a server's response (use
- * `WireFormatError`).
+ * For states the SDK itself guarantees: a failure is a bug. A caller's input takes
+ * `InvalidArgumentError` and a server's response `WireFormatError`.
  */
 export function assertInvariant(
     condition: unknown,
@@ -154,11 +149,9 @@ export function assertInvariant(
 }
 
 /**
- * Assert a union has been handled exhaustively.
- *
- * Call it where a discriminated union's variants have all been consumed. An
- * unhandled variant stops `x` narrowing to `never`, so the call fails to
- * compile. The runtime throw covers only values arriving from untyped input.
+ * Assert a union has been handled exhaustively: an unhandled variant stops `x` narrowing to
+ * `never`, so the call fails to compile. The runtime throw covers only values arriving from
+ * untyped input.
  *
  * ```ts
  * if (s === "native") return a();

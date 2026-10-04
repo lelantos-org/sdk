@@ -2,9 +2,9 @@
 // Fail if the npm tarball is missing a raw asset the build copies rather than emits.
 //
 // Anything under `src/` that is not TypeScript is copied into `dist/` by the build instead of being
-// emitted by `tsc`, which is easy to forget. Each one must appear at its mirrored `dist/` path.
-// `runtime/wasm/rayon/bootstrap.mjs` is the case in point: Node spawns it as a file, so a missing
-// copy is a runtime failure in the rayon pool, not a compile error.
+// emitted by `tsc`, and must appear at its mirrored `dist/` path. Node spawns
+// `runtime/wasm/rayon/bootstrap.mjs` as a file, for example, so a missing copy is a runtime failure
+// in the rayon pool, not a compile error.
 //
 // Targets named by `exports`, `main` and `types` are publint's job (`check:publish`), which also
 // packs before linting. Run after `npm run build`; `npm pack` packs what is on disk.

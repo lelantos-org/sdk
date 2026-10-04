@@ -1,8 +1,8 @@
 // EthSigner → nsk derivation: EIP-712 typed-data signature over a fixed, version-stamped domain,
 // hashed with keccak and reduced mod the Baby-Jubjub subgroup order.
 //
-// The domain must never be reused across versions. Bumping `LELANTOS_NSK_DOMAIN.version`
-// invalidates all derived keys.
+// `LELANTOS_NSK_DOMAIN.version` denotes the reduction: a different reduction must use a different
+// version, and changing the version changes every derived key.
 
 import { BABYJUB_SUBGROUP_ORDER, reduceWideToField, SECP256K1_N } from "../core/field.js";
 import { hexToBytes, strip0x } from "../core/hex.js";
@@ -20,8 +20,7 @@ import type { EthSigner } from "./signer.js";
 
 export const LELANTOS_NSK_DOMAIN: TypedDataDomain = {
     name: "Lelantos",
-    // Version "1" denotes the two-keccak-block reduction below. A future reduction must bump it, so
-    // each version signs a visibly different message.
+    // "1" denotes the two-keccak-block reduction below, so each reduction signs a distinct message.
     version: "1",
     // chainId omitted: nsk is chain-independent.
 };
@@ -47,7 +46,7 @@ export async function deriveNskFromSigner(signer: EthSigner): Promise<Field> {
     try {
         sig = await signer.signTypedData(LELANTOS_NSK_DOMAIN, TYPES, PRIMARY_TYPE, MESSAGE);
     } catch (err) {
-        // A declined prompt is the user's answer, not a failure of the signer.
+        // A declined prompt is reported as a user rejection, not a signer failure.
         throw asUserRejection(err, "derive-key");
     }
     return reduceSignatureToScalar(sig);
@@ -59,18 +58,13 @@ const SECP256K1_HALF_N = SECP256K1_N >> 1n;
 /**
  * `nsk` from an EIP-712 signature, computed over a canonical form of that signature.
  *
- * ECDSA admits several valid encodings of the same signature over the same digest:
+ * ECDSA admits several valid encodings of the same signature over the same digest: `v` is 27/28
+ * or 0/1 depending on the wallet, and `(r, s)` and `(r, n - s)` are both valid. `v` is dropped and
+ * `s` folded into its low form before hashing, so every encoding derives the same `nsk` and
+ * address.
  *
- *   - `v` is written as 27/28 by some wallets and 0/1 by others;
- *   - `(r, s)` and `(r, n - s)` are both valid, and only some signers normalise to the low half.
- *
- * Hashing the raw 65 bytes would derive a different `nsk`, and so a different address, from
- * the same signature encoded differently. `v` is dropped and `s` folded into its low form before
- * hashing, so the derivation is stable across encodings. Mnemonic and private-key sources are
- * unaffected.
- *
- * Two keccak blocks, not one: a bare 256-bit digest folded into the 251-bit subgroup order skews
- * residues by about 30:29. See `reduceWideToField`.
+ * Two keccak blocks, not one: a bare 256-bit digest leaves 5 spare bits over the 251-bit subgroup
+ * order, which biases the result. See `reduceWideToField`.
  */
 export function reduceSignatureToScalar(sigHex: string): Field {
     const canonical = hexToBytes(canonicalSignature(sigHex));
@@ -102,10 +96,9 @@ function canonicalSignature(sigHex: string): `0x${string}` {
 /**
  * The digest a wallet signs, recomputed without a signer.
  *
- * Encoded by `crypto/eip712.ts` rather than viem, so `keys/` has no runtime dependency on viem.
- * Every member of both structs is a `string`, the only case that encoder supports.
- * `eip712-parity.test.ts` pins the result byte-for-byte against `viem.hashTypedData`, since any
- * drift derives a different `nsk` from the same wallet.
+ * Encoded by `crypto/eip712.ts`, which supports only all-`string` structs, so `keys/` has no
+ * runtime dependency on viem. `encoding-parity.test.ts` pins the result against an independent
+ * implementation: any drift derives a different `nsk` from the same wallet.
  */
 export function lelantosTypedDataHash(): string {
     return typedDataDigest(

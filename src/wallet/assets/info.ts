@@ -33,60 +33,50 @@ export interface AssetInfo {
     /** Owner-flipped. Disabled assets block new deposits; existing notes stay spendable. */
     disabled: boolean;
     /**
-     * Protocol fee on the shield leg, in basis points, charged **on top of**
-     * the principal.
-     *
-     * Per-asset and per-leg; there is no pool-wide rate. See
-     * {@link AssetInfo.withdrawBps}, which is deducted rather than added and may
-     * differ.
+     * Protocol fee on the shield leg, in basis points, charged on top of the
+     * principal. Per-asset, and independent of {@link AssetInfo.withdrawBps},
+     * which is deducted rather than added.
      */
     depositBps: bigint;
     /**
-     * Protocol fee on the unshield leg, in basis points, **skimmed from** the
+     * Protocol fee on the unshield leg, in basis points, deducted from the
      * gross leaving the pool, so a withdrawal of `publicOut` delivers less than
      * `publicOut`. See `withdrawNetFor` (`@lelantos-org/sdk/protocol`).
      */
     withdrawBps: bigint;
-    /** From `chain.tokenMeta`; undefined when the adapter does not implement it. */
+    /** From `chain.tokenMeta` or the relayer's list; undefined when neither supplies it. */
     symbol?: string | undefined;
-    /** ERC-20 decimals. Undefined when the adapter has no `tokenMeta`. */
+    /** ERC-20 decimals, from the same sources as `symbol`; undefined when neither has them. */
     decimals?: number | undefined;
     /**
      * Pool-managed yield index, RAY-scaled, `RAY` when the pool reports none.
-     *
-     * `tokenUnits = circuitUnits * scale * index / RAY`. The underlying value of
-     * a fixed circuit amount grows over time while the circuit amount stays
-     * constant, which is why a withdrawal denomination is a circuit-unit integer
-     * rather than a human amount.
+     * A fixed circuit amount is worth more token units as the index grows, so
+     * withdrawal denominations are circuit-unit integers, not human amounts.
      */
     index: bigint;
     /** Whether the pool routes this asset to a yield venue. */
     yieldEnabled: boolean;
     /**
-     * The pool's own measure of what a unit is worth, for sizing a payment.
+     * The pair the pool divides by to value a unit, for sizing a payment.
      *
      * Present only for a yield asset the source has priced. `index` is floored
-     * on chain, so converting a charge through it can fall below what the
-     * contract takes; this pair is what the pool divides by. A yielding asset
-     * without `rate` cannot be quoted: `scale` is off by whatever the venue has
-     * earned.
+     * on chain, so a charge converted through it can fall below what the
+     * contract takes. A yielding asset without `rate` cannot be quoted: `scale`
+     * is off by whatever the venue has earned.
      */
     rate?: YieldRate;
     /**
      * Withdrawal denominations for this asset, ascending, derived from its
      * `scale` and `decimals`; `[]` only when the wallet opted out via
-     * `WalletConfig.denominations`. Resolved here so downstream code does not
-     * need the policy.
+     * `WalletConfig.denominations`.
      */
     ladder: Ladder;
 }
 
 /**
- * An asset whose ERC-20 `decimals` is known. Human-unit conversion is only
- * defined against this variant, so `parseAmount` / `formatAmount` reject an
- * unresolved `AssetInfo` at compile time instead of throwing.
- *
- * Narrow with {@link hasTokenMeta}, or assert with {@link requireTokenMeta}.
+ * An asset whose ERC-20 `decimals` is known, as `parseAmount` / `formatAmount`
+ * require. Narrow with {@link hasTokenMeta}, or assert with
+ * {@link requireTokenMeta}.
  */
 export interface AssetInfoWithMeta extends AssetInfo {
     decimals: number;
@@ -100,8 +90,8 @@ export function hasTokenMeta(asset: AssetInfo): asset is AssetInfoWithMeta {
 /**
  * Assert that `decimals` resolved.
  *
- * @throws {InvalidArgumentError} when the chain adapter exposed no
- * `tokenMeta`, so no human-unit conversion is defined for this asset.
+ * @throws {InvalidArgumentError} when `decimals` is undefined, so no human-unit
+ * conversion is defined for this asset.
  */
 export function requireTokenMeta(asset: AssetInfo): AssetInfoWithMeta {
     if (!hasTokenMeta(asset)) {
@@ -135,9 +125,9 @@ export async function fetchAssetInfo(
         try {
             meta = await chain.tokenMeta(entry.token);
         } catch (err) {
-            // Non-standard ERC-20s omit symbol()/decimals(); amounts still work. Only the token's
-            // own refusal means that: a failed read propagates, since an entry built without
-            // `decimals` resolves a different ladder and callers cache what this returns.
+            // A token that reverts on symbol()/decimals() is resolved without them. Any other
+            // failure propagates: an entry built without `decimals` resolves a different ladder,
+            // and callers cache what this returns.
             if (!isContractRevert(err)) throw err;
         }
     }
@@ -193,9 +183,9 @@ export interface MakeAssetInfoArgs {
  * Build an {@link AssetInfo} with every optional field defaulted.
  *
  * For tests, mocks, and custom registries that construct assets by hand rather
- * than through `fetchAssetInfo`. Prefer it to an object literal: it derives
- * `ladder` from `scale` and `decimals`, so the three cannot disagree, whereas a
- * mismatched literal type-checks and splits change onto the wrong denominations.
+ * than through `fetchAssetInfo`. It derives `ladder` from `scale` and
+ * `decimals`; an object literal whose three disagree type-checks and splits
+ * change onto the wrong denominations.
  *
  * ```ts
  * const usdc = makeAssetInfo({

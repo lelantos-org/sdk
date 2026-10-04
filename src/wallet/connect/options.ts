@@ -23,7 +23,7 @@ import type { NullifierPersistence } from "../../sync/nullifier-store.js";
 import type { Scanner } from "../../sync/scanner.js";
 import type { TreePersistence } from "../../sync/tree-store.js";
 import type { NoteStore } from "../notes/note-store.js";
-import type { SyncStrategy } from "../types/config.js";
+import type { RelayerFeeCheck, SyncStrategy } from "../types/config.js";
 
 export type { DeployedNetworkName, SyncStrategy };
 
@@ -36,10 +36,7 @@ export type Hex = `0x${string}`;
  */
 type Only<T, Keys extends PropertyKey> = T & { [K in Exclude<Keys, keyof T>]?: never };
 
-// --- network -------------------------------------------------------------------------------------
-
-// `NetworkPreset` / `PlaceholderNetworkPreset` live in `chain/networks.ts` (tier 4), which
-// `NETWORKS` is typed against; re-exported so there is one definition.
+// Defined in `chain/networks.ts`; re-exported so there is one definition.
 export type { NetworkPreset, PlaceholderNetworkPreset };
 
 export interface NetworkOptions {
@@ -51,8 +48,6 @@ export interface NetworkOptions {
      */
     rpcUrl?: string | undefined;
 }
-
-// --- key source ----------------------------------------------------------------------------------
 
 type KeyKeys = "mnemonic" | "account" | "passphrase" | "signature" | "nsk";
 
@@ -80,8 +75,6 @@ export type KeyOptions =
 
 /** No explicit key source. */
 type NoKey = { [K in KeyKeys]?: never };
-
-// --- chain layer ---------------------------------------------------------------------------------
 
 type ChainKeys = "chain" | "reader" | "readOnly" | "signer" | "provider" | "address" | "privateKey";
 
@@ -113,8 +106,6 @@ type SelfKeyingChainOptions = Exclude<
     ChainOptions,
     { chain: ChainAdapter } | { reader: ChainReader } | { readOnly: true }
 >;
-
-// --- pluggables ----------------------------------------------------------------------------------
 
 /**
  * How proofs are made.
@@ -151,9 +142,9 @@ export interface ProverConfig {
  * How notes are trial-decrypted: a `Scanner`, a worker pool (`size` default 2–8 by concurrency),
  * or `"inline"` (default, main thread).
  *
- * A `Scanner` instance is owned by the caller: `wallet.dispose()` and a failed `connect` leave it
- * running, so release it yourself. A pool built from `{ workers }` is the SDK's and is disposed
- * with the wallet (or when `connect` fails).
+ * A `Scanner` instance is owned by the caller: neither `wallet.dispose()` nor a failed `connect`
+ * disposes it. A pool built from `{ workers }` is disposed with the wallet, or when `connect`
+ * fails.
  */
 export type ScannerOption =
     | Scanner
@@ -199,17 +190,22 @@ export interface ConnectStorage {
 
 /** Everything that is neither the network, a key source nor a chain layer. */
 export interface ConnectExtras {
-    /** See {@link ProverOption}; a `Prover` instance is caller-owned and never disposed. */
+    /** See {@link ProverOption}. */
     prover?: ProverOption | undefined;
-    /** See {@link ScannerOption}; a `Scanner` instance is caller-owned and never disposed. */
+    /** See {@link ScannerOption}. */
     scanner?: ScannerOption | undefined;
     http?: HttpOptions | undefined;
-    /** See {@link ConnectStorage}; never closed by the SDK. */
+    /** See {@link ConnectStorage}. */
     storage?: ConnectStorage | undefined;
     /** Transact circuit arity. Default 4×6, the only shape with published keys. */
     shape?: CircuitShape | undefined;
     /** Withdrawal ladders. Default `true`. */
     denominations?: DenominationPolicy | undefined;
+    /**
+     * Whether to pay a relayer fee quote; `false` rejects the operation with `FEE_ABOVE_LIMIT`.
+     * Default: every quote is paid. See `WalletConfig.acceptRelayerFee`.
+     */
+    acceptRelayerFee?: ((quote: RelayerFeeCheck) => boolean) | undefined;
     /** Default `{ kind: "full" }`. */
     syncStrategy?: SyncStrategy | undefined;
     /** Pre-resolved wasm module URLs for bundlers that rewrite `#wasm/*`. */
@@ -222,22 +218,20 @@ export interface ConnectExtras {
  * Everything `connect()` accepts.
  *
  * A key source may be omitted only when the chain layer derives one, so
- * `connect({ network: "base", rpcUrl, privateKey })` is complete and `connect({ network, readOnly: true })`
- * does not compile.
+ * `connect({ network: "base", rpcUrl, privateKey })` is complete and
+ * `connect({ network, readOnly: true })` does not compile.
  */
 export type ConnectOptions = NetworkOptions &
     ConnectExtras &
     ((KeyOptions & ChainOptions) | (NoKey & SelfKeyingChainOptions));
-
-// --- watch ---------------------------------------------------------------------------------------
 
 /** Everything `connectWatch()` accepts. Returns a `ReadOnlyWalletApi`. */
 export interface ConnectWatchOptions extends NetworkOptions {
     /** Either viewing-key tier, or its bech32m encoding. */
     viewingKey: ViewingKey | FullViewingKey | ViewingKeyString | string;
     /**
-     * Asset metadata source. Else built from `rpcUrl` when one is known; with neither, `asset()`
-     * and `assets()` reject `WALLET_CONFIG` and no RPC is contacted.
+     * Asset metadata source. Else built from `rpcUrl` when one is known; with neither, `asset()`,
+     * `assets()` and `balance()` reject `WALLET_CONFIG` and no RPC is contacted.
      */
     reader?: ChainReader | undefined;
     scanner?: ScannerOption | undefined;

@@ -1,16 +1,15 @@
 // What the relayer publishes about a chain (`/chains`), cached.
 //
-// `HttpRelayerSubmitter` answers both `assets` and `refundAddress` from one
-// `/chains` read, and every swap asks for the refund address, so an uncached
-// read would cost a round trip per call.
+// `HttpRelayerSubmitter` answers both `assets` and `refundAddress` from one `/chains` read, and
+// every swap asks for the refund address, so an uncached read would cost a round trip per call.
 
 import { ttlCache } from "../core/async.js";
 import type { ChainToken, EstimateResponse } from "../protocol/responses.js";
 import type { EstimateKind, Submitter } from "../services/relayer/submitter.js";
 
 /**
- * How long a `/chains` answer is reused. Registered assets and the refund
- * account change rarely; a minute bounds how stale either can be.
+ * How long a `/chains` answer is reused: bounds how stale the registered assets and the refund
+ * account can be.
  */
 const RELAYER_INFO_TTL_MS = 60_000;
 

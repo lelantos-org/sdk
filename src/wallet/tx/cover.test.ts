@@ -88,10 +88,8 @@ describe("ensureCover", () => {
     });
 
     it("re-reads the selection options on every attempt", async () => {
-        // The merged note is younger than the first attempt's tip, so a captured
-        // `tipBlock` would exclude it from the retry via the cooldown rule.
-        // Two aged notes that together cover the target but individually do not,
-        // at `maxInputs: 1`, which yields `consolidate-first`.
+        // Two aged notes that together cover the target but individually do not, at `maxInputs: 1`,
+        // which yields `consolidate-first`.
         let notes = [
             storedNote("01", 10n, { firstSeenBlock: 90 }),
             storedNote("02", 45n, { firstSeenBlock: 90 }),
@@ -105,9 +103,8 @@ describe("ensureCover", () => {
             () => notes,
             { asset: ASSET, target: circuitAmount(50n), autoConsolidate: true, selectOpts: opts },
             async () => {
-                // Simulated consolidation: inputs are consumed, one merged note
-                // lands at block 101, and `awaitCooldown` waits for the tip to
-                // pass it.
+                // Simulated consolidation: inputs are consumed, one merged note lands at block 101,
+                // and `awaitCooldown` waits for the tip to pass it.
                 notes = [merged];
                 tip = 102;
             },
@@ -115,8 +112,8 @@ describe("ensureCover", () => {
 
         expect(sel.plan).toBe("direct");
         expect(sel.notes.map((n) => n.id)).toEqual(["03"]);
-        // Once before consolidating and once after; reusing tip 100 would exclude
-        // `merged` (first seen at block 101) under the cooldown rule.
+        // Once before consolidating and once after; reusing tip 100 would exclude `merged` (first
+        // seen at block 101) under the cooldown rule.
         expect(opts).toHaveBeenCalledTimes(2);
     });
 
@@ -145,7 +142,6 @@ describe("ensureCover", () => {
     });
 
     it("stops as soon as a round changes nothing", async () => {
-        // A consolidation that makes no progress must not run to the round cap.
         const same = consolidateFirst([storedNote("01", 1n), storedNote("02", 2n)], 99n);
         const consolidate = vi.fn(async () => undefined);
         const err = await ensureCover(
@@ -165,8 +161,8 @@ describe("ensureCover", () => {
     });
 });
 
-// A spend losing a race with a concurrent one sees only the notes no lease holds.
-// Its error must say the notes are busy, not that the balance is short.
+// A spend losing a race with a concurrent one sees only the notes no lease holds. Its error must
+// say the notes are busy, not that the balance is short.
 describe("ensureCover with in-flight leases", () => {
     it("reports leased notes as held, retryably", async () => {
         const notes = [storedNote("01", 100n), storedNote("02", 100n)];

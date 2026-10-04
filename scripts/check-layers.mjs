@@ -1,18 +1,15 @@
 // Enforces the dependency ladder and barrel discipline in src/.
 //
-// Without this the structure re-rots on the first convenient import: each layering inversion is
-// individually reasonable at the time, and nothing else watches the whole.
-//
 // Rules:
-//   1. No module may import from a HIGHER tier.
-//   2. No `export *` in any barrel — package.json#exports has no wildcard, so a barrel forwarding
-//      blindly is what makes @internal symbols public API.
-//   3. No leaf module below tier 3 may import another domain's BARREL. Worker and wasm bundles pull
+//   1. No module may import from a higher tier.
+//   2. No `export *` in any barrel: package.json#exports has no wildcard, so a barrel forwarding
+//      blindly would make @internal symbols public API.
+//   3. No leaf module below tier 3 may import another domain's barrel. Worker and wasm bundles pull
 //      the whole barrel's graph; leaf imports keep them small.
 //   4. Every directory under `src/` carries an explicit tier.
 //   5. `wallet/watch/` may not import the spend path, so a viewer does not download the prover.
-//   6. `errors/` imports only `core/` (and itself), so every layer — `core/` included — can throw a
-//      typed error without an upward or domain dependency.
+//   6. `errors/` imports only `core/` (and itself), so every layer can throw a typed error without
+//      an upward or domain dependency.
 //   7. `wallet/ops/*` (one module per operation) never imports another operation, so an operation
 //      composes others only through `WalletContext` hooks bound by the wallet shell. The one
 //      exception is `swap.ts` → `swap-escrow.ts`, its own second leg. `wallet/tx/` (the pipeline
@@ -28,11 +25,8 @@ import { loadTs, SRC, shippedSources } from "./lib/package.mjs";
 const ts = loadTs();
 
 /**
- * First path segment -> tier.
- *
- * Every directory under `src/` must appear here (rule 4). An unlisted module would be checked
- * against nothing and could silently acquire any dependency it likes, which is the failure this
- * script exists to prevent.
+ * First path segment -> tier. Every directory under `src/` must appear here (rule 4): an unlisted
+ * one would be checked against nothing.
  */
 const TIERS = {
     core: 0,
@@ -81,8 +75,7 @@ const ABOVE_TX = [OPS, "wallet/create.ts", "wallet/connect/"];
  *
  * A watch wallet cannot sign, so none is reachable at runtime. `wallet/create.ts` is listed because
  * it statically reaches the per-tx modules and the prover. Direct imports only; `bundle-budget.mjs`
- * measures the transitive graph. An entry ending in `/` forbids the whole directory, so splitting a
- * listed module into one does not silently unforbid its parts.
+ * measures the transitive graph. An entry ending in `/` forbids the whole directory.
  */
 const WATCH_FORBIDDEN = [
     "prover/",

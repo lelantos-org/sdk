@@ -160,7 +160,7 @@ describe("quoteAgeSecs", () => {
         const q = { ...WIRE, quotedAt: 1_000 } as unknown as Parameters<typeof quoteAgeSecs>[0];
         expect(quoteAgeSecs(q, 1_030)).toBe(30);
         expect(quoteAgeSecs(q, 1_000)).toBe(0);
-        // A clock behind the server's must not read as a fresh quote.
+        // A clock behind the server's clamps to 0.
         expect(quoteAgeSecs(q, 900)).toBe(0);
     });
 });

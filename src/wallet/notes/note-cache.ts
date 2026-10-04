@@ -40,7 +40,7 @@ export interface AwaitCommitmentsOpts {
     timeoutMs?: number | undefined;
     /**
      * Give up after this many syncs, whichever of this and `timeoutMs` comes first. Unbounded by
-     * default. Internal callers that poll on a fixed budget use it.
+     * default.
      */
     maxAttempts?: number | undefined;
     /** Feed page size for each sync. Default: the sync's own. */
@@ -59,9 +59,8 @@ export interface AwaitCommitmentsResult {
 /**
  * Poll until every commitment in `cms` appears in `read()`.
  *
- * Returns a status so a lagging indexer or an aborted wait is distinguishable from success.
- * Does not throw by default because it runs after a successful broadcast, where a slow indexer
- * is not a failed transaction; set `throwOnTimeout` to throw instead.
+ * Returns a status instead of throwing: it runs after a successful broadcast, where a slow
+ * indexer is not a failed transaction. Set `throwOnTimeout` to throw on timeout.
  *
  * `sync` receives the page size to use, `undefined` for the sync's default.
  */
@@ -139,8 +138,8 @@ export class NoteCache implements NoteSink {
      */
     private readonly writes = createMutex();
     /**
-     * Commitment membership for {@link NoteCache.addHits}, kept in step with the snapshot to
-     * avoid an O(notes x pages) rebuild per call. Cleared when the snapshot is replaced.
+     * Commitments of the snapshot's notes, reused across {@link NoteCache.addHits} calls. Cleared
+     * whenever the snapshot's notes are replaced.
      */
     private known: Set<string> | undefined;
     /** Called after each committed change to the note set; see {@link NoteCache.onChange}. */
@@ -214,8 +213,6 @@ export class NoteCache implements NoteSink {
         if (out.removed > 0) this.notify();
         return out;
     }
-
-    // --- NoteSink ------------------------------------------------------------
 
     /**
      * Append scan hits to the live file. Synchronous, so it cannot interleave with a queued write;

@@ -1,9 +1,8 @@
 // Spend limits for an autonomous payer.
 //
 // An agent chooses its own purchases, so the risk to bound is an unbounded run
-// of individually valid payments. Every check runs before any wallet method is
-// called, so a refusal never leaves value in flight and an
-// `X402PaymentError.reason` from these checks means no payment was made.
+// of individually valid payments. Every check runs before a payment is minted,
+// so an `X402PaymentError` from these checks means no payment was made.
 //
 // Limits are in human decimal units, applied per asset: `{ total: "5" }` means
 // five of each asset paid, not five across all assets (assets are not
@@ -23,10 +22,9 @@ export interface Budget {
 }
 
 /**
- * A payment that has passed the limits and is being minted.
- *
- * Exactly one of `commit` / `release` must be called; both are idempotent, so
- * a `finally` that releases after a `commit` is safe.
+ * A payment that has passed the limits and is being minted. Exactly one of
+ * `commit` / `release` must be called; both are idempotent, so a `finally`
+ * that releases after a `commit` is safe.
  */
 export interface BudgetReservation {
     /** The payment landed: move the hold into recorded spend. */
@@ -108,14 +106,12 @@ export class BudgetLedger {
     }
 
     /**
-     * Check the limits and hold `amount` against them in one step.
+     * Check the limits and hold `amount` against them in one synchronous step.
      *
-     * Minting a payment takes seconds (a Groth16 prove, then a submit), so
-     * checking and recording separately would let concurrent payments all pass
-     * the check before any is recorded, exceeding the budget.
-     *
-     * The reservation is synchronous and counts toward the limits until it is
-     * committed or released, so concurrent callers see it.
+     * Minting a payment spans a Groth16 prove and a submit, so checking and
+     * recording separately would let concurrent payments all pass the check
+     * before any is recorded. The hold counts toward the limits until it is
+     * committed or released.
      *
      * @throws {X402PaymentError} `per-request-limit` or `budget-exceeded`
      */

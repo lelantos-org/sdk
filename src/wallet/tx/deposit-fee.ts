@@ -1,14 +1,12 @@
 // The relayer's fee on a deposit, and the randomness of a deposit's two leaves.
 //
-// A deposit has no proof or nullifier, so its fee cannot be recognised the way
-// `bundle/fee.ts` recognises a spend's fee slot. Instead the depositor mints a
-// second leaf addressed to the relayer's shielded address, which the relayer
-// finds by trial decryption of the `DepositEscrowed` payload.
+// A deposit has no proof or nullifier, so its fee cannot be recognised the way `bundle/fee.ts`
+// recognises a spend's fee slot. The depositor mints a second leaf addressed to the relayer's
+// shielded address, which the relayer finds by trial decryption of the `DepositEscrowed` payload.
 //
-// The pool cannot compute Poseidon and has no oracle, so it accepts any note.
-// The relayer enforces the fee by declining to flush a deposit whose note does
-// not pay it, so an under-quoted fee strands the payer's escrow until the
-// cancel delay expires. The wallet must compute this amount correctly.
+// The pool cannot compute Poseidon and has no oracle, so it accepts any note. The relayer enforces
+// the fee by declining to flush a deposit whose note does not pay it, so an under-quoted fee
+// strands the payer's escrow until the cancel delay expires.
 
 import type { OutputRecipient } from "../../bundle/common.js";
 import type { DepositArgs } from "../../bundle/deposit.js";
@@ -23,6 +21,7 @@ import type { AssetInfo } from "../assets/info.js";
 import type { WalletContext } from "../context.js";
 import { relayerEstimate } from "../relayer-info.js";
 import type { Money } from "../types/results.js";
+import { assertFeeAccepted } from "./fee.js";
 
 /** What the relayer must be paid, in which asset, and the address to pay it at. */
 export interface DepositFee {
@@ -58,14 +57,13 @@ export async function resolveDepositFees(
         }));
     }
 
-    // The note is minted in the fee asset. If the relayer did not quote that
-    // asset, the deposit would never be flushed and the escrow would be
-    // stranded, so it is refused before anything is signed.
-    return assets.map((asset) => ({
-        recipient: decodeAddress(ctx.J, feeAddress),
-        value: branded<CircuitAmount>(quotedFeeAmount(estimate, asset, "deposit")),
-        asset,
-    }));
+    // The note is minted in the fee asset. A deposit paying in an asset the relayer did not quote
+    // would never be flushed, so it is refused before anything is signed.
+    return assets.map((asset) => {
+        const value = branded<CircuitAmount>(quotedFeeAmount(estimate, asset, "deposit"));
+        assertFeeAccepted(ctx, { kind: "deposit", asset, amount: value });
+        return { recipient: decodeAddress(ctx.J, feeAddress), value, asset };
+    });
 }
 
 /**
@@ -79,11 +77,9 @@ export function depositProtocolFee(asset: AssetInfo, amount: bigint): Money | nu
 }
 
 /**
- * Fresh randomness for a deposit's two leaves, with the relayer's note filled in from `fee`.
- *
- * A deposit mints the depositor's note and the relayer's fee note. Each needs
- * its own blinders; shared ones would let anyone who can open one leaf open the
- * other.
+ * Fresh randomness for a deposit's two leaves (the depositor's note and the relayer's fee note),
+ * with the latter filled in from `fee`. Each needs its own: a shared `rcm` would let anyone who can
+ * open one leaf open the other.
  */
 export function depositSlots(fee: DepositFee): Pick<DepositArgs, "output0" | "fee"> {
     return {

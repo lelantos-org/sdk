@@ -7,7 +7,7 @@
 import type { TypedDataDomain } from "viem";
 import { bigintToHex } from "../../core/hex.js";
 
-/** `EIP712Domain` fields in the order EIP-712 declares them, which fixes the separator's encoding. */
+/** `EIP712Domain` fields in EIP-712's declared order, which fixes the separator's encoding. */
 const DOMAIN_FIELDS = [
     ["name", "string"],
     ["version", "string"],

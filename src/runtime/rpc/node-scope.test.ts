@@ -1,10 +1,6 @@
-// `serveWorkerRpc` must reach the message port under `node:worker_threads`.
-//
-// The client half (`./client.ts`) accepts a Node worker, checked by
-// `./types.test.ts`. The server half resolves its scope at runtime: in a
-// browser worker `globalThis` is the port; under Node messages arrive on
-// `parentPort`. An injected test scope would not exercise that resolution, so
-// this spawns a real worker.
+// `serveWorkerRpc` must reach the message port under `node:worker_threads`,
+// where messages arrive on `parentPort` rather than `globalThis`. An injected
+// test scope would not exercise that resolution, so this spawns a real worker.
 //
 // Runs against `dist/`, where consumers load the worker entry from; skipped
 // when the package has not been built.

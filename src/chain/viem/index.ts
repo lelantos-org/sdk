@@ -1,13 +1,10 @@
 // viem-based `ChainAdapter`: the signing half, over `ViemChainReader`.
 //
-// The class composes the call modules in this directory: reads, token,
-// deposits, permit2. `ViemChainReader` owns the client, the addresses and every
-// read; this subclass adds an `EthSigner` and the members that sign as the
-// user's EOA or spend its gas.
-//
-// Inputs are an `EthSigner` (browser EIP-1193 wallet or Node private key; see
-// `../signer/`) plus a read RPC URL. A caller without a signing key constructs `ViemChainReader`
-// directly and gets a wallet that can spend from the pool but not shield into it.
+// `ViemChainReader` owns the client, the addresses and every read; this
+// subclass adds an `EthSigner` (browser EIP-1193 wallet or Node private key;
+// see `../signer/`) and the members that sign as the user's EOA or spend its
+// gas. A caller without a signing key constructs `ViemChainReader` directly and
+// gets a wallet that can spend from the pool but not shield into it.
 
 import type { EvmAddress, Hex32, TokenAmount } from "../../core/brand.js";
 import type { EthSigner } from "../../keys/signer.js";
@@ -54,7 +51,6 @@ export class ViemChainAdapter extends ViemChainReader implements ChainAdapter {
         return chainCall("payerAddress", () => this.signer.getAddress());
     }
 
-    // ── tokens ───────────────────────────────────────────────────────────
     tokenApprove(
         a: EvmAddress,
         spender: EvmAddress,
@@ -69,7 +65,6 @@ export class ViemChainAdapter extends ViemChainReader implements ChainAdapter {
         return chainCall("wrapNative", () => token.wrapNative(this.ctx, wethAddr, value));
     }
 
-    // ── deposit ──────────────────────────────────────────────────────────
     submitDeposit(args: {
         deposit: DepositRequest;
         permit2: Permit2Sig;
@@ -110,7 +105,6 @@ export class ViemChainAdapter extends ViemChainReader implements ChainAdapter {
         );
     }
 
-    // ── permit2 (signing) ────────────────────────────────────────────────
     signPermit2(args: Permit2SignArgs): Promise<Permit2Sig> {
         return chainCall("signPermit2", () => permit2.signPermit2(this.ctx, args), "sign-permit");
     }

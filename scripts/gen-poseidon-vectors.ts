@@ -1,28 +1,32 @@
 // Emit Poseidon parity vectors shared by the SDK and the Rust backend.
-// Output: tests/vectors/poseidon.json, written to *both* repos.
+// Output: tests/vectors/poseidon.json, written to both repos so the copies
+// cannot differ.
 //
-// Why this file exists: `sdk/wasm/poseidon` vendors the permutation from
-// `backend/crates/crypto/src/poseidon/`, so two copies must stay
-// bit-identical. The backend's own `poseidon/tests.rs` explains the hazard —
-// parity against `light-poseidon` is *relative*, so a constants change under a
-// version bump would move both sides together while every assertion still
-// passed and every commitment and Merkle root silently changed.
+// `sdk/wasm/poseidon` vendors the permutation from
+// `backend/crates/crypto/src/poseidon/`, and the two copies must stay
+// bit-identical. The backend's parity check against `light-poseidon` is
+// relative: a constants change under a version bump would move both sides
+// together and pass while every commitment and Merkle root changed.
 //
-// The two `anchors` are the values circomlibjs publishes. They are asserted
-// here rather than merely emitted, so regenerating cannot quietly move the
-// baseline: if `poseidon-lite` ever stops matching circomlib, generation fails
-// instead of producing a new, self-consistent, wrong file.
-//
-// Unlike `gen-fmd-vectors.ts` this writes both copies. The two `fmd.json`s are
-// kept identical by hand; doing it here is what actually guarantees the
-// property this file exists to provide.
+// The two `anchors` are values circomlibjs publishes. They are asserted here,
+// not only emitted: if `poseidon-lite` stops matching circomlib, generation
+// fails instead of writing a self-consistent but wrong file.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BN254_FR } from "../src/core/field.js";
 import { type Field, Poseidon } from "../src/crypto/index.js";
-import { TAG_FMD_BIT, TAG_IVK, TAG_LEAF, TAG_MERKLE, TAG_NF, TAG_RHO } from "../src/crypto/tags.js";
+import {
+    TAG_CM,
+    TAG_DIGEST,
+    TAG_FMD_BIT,
+    TAG_INNER,
+    TAG_IVK,
+    TAG_MERKLE,
+    TAG_NF,
+    TAG_RHO,
+} from "../src/crypto/tags.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -53,15 +57,17 @@ function makeRng(seed: bigint): () => Field {
 const TAGGED: { label: string; inputs: bigint[] }[] = [
     { label: "TAG_IVK arity 2", inputs: [TAG_IVK, 42n] },
     { label: "TAG_RHO arity 3", inputs: [TAG_RHO, 7n, 3n] },
+    { label: "TAG_CM arity 3", inputs: [TAG_CM, 13n, 14n] },
     { label: "TAG_NF arity 4", inputs: [TAG_NF, 11n, 22n, 33n] },
-    { label: "TAG_LEAF arity 4", inputs: [TAG_LEAF, 1n, 2n, 3n] },
+    { label: "TAG_INNER arity 4", inputs: [TAG_INNER, 1n, 2n, 3n] },
     { label: "TAG_MERKLE arity 5", inputs: [TAG_MERKLE, 4n, 5n, 6n, 7n] },
+    { label: "TAG_DIGEST arity 5", inputs: [TAG_DIGEST, 15n, 16n, 17n, 18n] },
     { label: "TAG_FMD_BIT arity 6", inputs: [TAG_FMD_BIT, 8n, 9n, 10n, 11n, 12n] },
 ];
 
 async function main(): Promise<void> {
-    // Public API deliberately: once `build()` performs wasm init, a constructor
-    // hack here would generate vectors from a backend that never initialised.
+    // Through the public `build()`, so the vectors come from the backend as
+    // callers initialise it.
     const P = await Poseidon.build();
     const hash = (xs: bigint[]) => P.hash(xs).toString();
 
@@ -77,8 +83,8 @@ async function main(): Promise<void> {
     const rng = makeRng(0xf00dcafen);
     const vectors: { label: string; inputs: string[]; digest: string }[] = [];
 
-    // Every supported arity, so trimming the wasm constant table cannot
-    // silently drop one a caller uses.
+    // Every supported arity, so trimming the wasm constant table cannot drop
+    // one a caller uses.
     for (let arity = 1; arity <= 8; arity++) {
         const inputs = Array.from({ length: arity }, () => rng());
         vectors.push({
@@ -88,7 +94,7 @@ async function main(): Promise<void> {
         });
     }
 
-    // Edges: the identity-looking input and the largest canonical element.
+    // Edges: all zeros and the largest canonical element.
     for (const arity of [2, 5]) {
         vectors.push({
             label: `zeros arity ${arity}`,

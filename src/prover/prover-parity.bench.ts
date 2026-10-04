@@ -1,17 +1,17 @@
-// Prover parity + timing bench: SnarkjsProver vs WasmProver, per shape.
+// Prover parity and timing bench: SnarkjsProver vs WasmProver, per shape.
 //
-// This is the only place a proof produced by `wasm/prover` is verified against
-// the companion's verification key; changes to the arkworks stack must keep it
-// passing for every shape. Runs in CI via `npm run test:bench`.
+// The only place a `wasm/prover` proof is verified against the companion's
+// verification key; it must pass for every shape. Runs in CI via
+// `npm run test:bench`.
 //
 // Artifacts and witnesses come from the `@lelantos-org/circuits` devDependency.
-// A hand-made `bench/public/input.<id>.json` takes precedence when present, so
-// device runs stay comparable with `bench/results.json`.
+// A hand-made `bench/public/input.<id>.json` takes precedence, so device runs
+// stay comparable with `bench/results.json`.
 //
-// The debug sink below exposes the `witness` and `groth16` timing records
-// emitted by `WasmProver.prove`. A `just prover-build-trace` build additionally
-// prints `[prover-trace]` lines splitting `groth16` into the QAP witness map and
-// the MSM block.
+// The debug sink prints the `witness` and `groth16` timings of
+// `WasmProver.prove`. A `just prover-build-trace` build also prints
+// `[prover-trace]` lines splitting `groth16` into the QAP witness map and the
+// MSM block.
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -52,13 +52,12 @@ async function pathsFor(shape: CircuitShape): Promise<ProverArtifacts | null> {
 /**
  * Project a witness onto the circuit's declared signals.
  *
- * Packaged vectors also carry challenge-only fields (addresses, clue slots, aux
- * digest): logical public inputs hashed into `z` but not circuit signals. The
- * witness calculator rejects undeclared keys (`Signal recipient_address not
- * found`). `circuitSignals` is the same projection used in `bundle/common.ts`.
+ * Packaged vectors also carry the coefficient digest word and the challenge-only
+ * fields (addresses, clue slots, aux digest): logical public inputs hashed into
+ * `z` but not circuit input signals. The witness calculator rejects undeclared
+ * keys (`Signal recipient_address not found`).
  *
- * A hand-made `bench/public/input.<id>.json` is already signal-only and is
- * passed through unchanged.
+ * A hand-made override is already signal-only and passes through unchanged.
  */
 function toSignals(raw: Record<string, unknown>): Record<string, unknown> {
     if (!("recipient_address" in raw)) return raw;
@@ -73,7 +72,7 @@ function inputFor(shape: CircuitShape): Record<string, unknown> | null {
     if (existsSync(override)) {
         // Logged because an override built for a different circuit fails with
         // a bare `Assert Failed ... in template Transact` that does not name
-        // the file. CI has no override and proves the packaged vector.
+        // the file.
         process.stdout.write(`[bench] ${id}: using override input ${override}\n`);
         return toSignals(JSON.parse(readFileSync(override, "utf8")) as Record<string, unknown>);
     }
@@ -106,9 +105,8 @@ if (CASES.some((c) => c.paths && c.input)) {
     });
 }
 
-// Required for accurate measurement: idle rayon workers spin-wait, so a pool
-// that outlives its run occupies every core and inflates later timings.
-// `shutdown()` terminates all workers. A killed run can still orphan the pool;
+// Idle rayon workers spin-wait, so a pool that outlives its run occupies every
+// core and inflates later timings. A killed run can still orphan the pool;
 // check for stray `node` processes before trusting an unexpected result.
 afterAll(async () => {
     await WasmProver.shutdown();

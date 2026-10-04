@@ -7,6 +7,8 @@
 import { type AssetId, assetId } from "../../core/brand.js";
 import { InvalidArgumentError } from "../../errors/config.js";
 import { isWalletError } from "../../errors/guard.js";
+import { deriveClaimLinkNsk } from "../../keys/claim-link.js";
+import { addressFromSpendingKey, buildSpendingKey } from "../../keys/keys.js";
 import type { WalletApi } from "../api.js";
 import type { WalletContext } from "../context.js";
 import { filterNotes } from "../notes/read-ops.js";
@@ -31,7 +33,15 @@ export interface SpendEnv {
 /** The methods this module implements, as the wallet object exposes them. */
 export type SpendMethods = Pick<
     WalletApi,
-    "quoteFee" | "spendableMax" | "transfer" | "withdraw" | "swap" | "quoteSwap" | "redenominate"
+    | "quoteFee"
+    | "spendableMax"
+    | "transfer"
+    | "paymentProof"
+    | "claimLinkKey"
+    | "withdraw"
+    | "swap"
+    | "quoteSwap"
+    | "redenominate"
 >;
 
 export function spendMethods(env: SpendEnv): SpendMethods {
@@ -105,6 +115,20 @@ export function spendMethods(env: SpendEnv): SpendMethods {
                 await requireProver();
                 const { executeTransfer } = await import("../ops/transfer.js");
                 return executeTransfer(ctx, args, run);
+            }),
+
+        paymentProof: (target) =>
+            gated(state, "paymentProof", async () => {
+                requireObject(target, "paymentProof");
+                const { createPaymentProof } = await import("../ops/payment-proof.js");
+                return createPaymentProof(ctx, target);
+            }),
+
+        claimLinkKey: (index) =>
+            gated(state, "claimLinkKey", () => {
+                const nsk = deriveClaimLinkNsk(ctx.keys.nsk, ctx.cfg.chainId, index);
+                const address = addressFromSpendingKey(ctx.J, buildSpendingKey(ctx.P, ctx.J, nsk));
+                return Object.freeze({ index, nsk, address });
             }),
 
         withdraw: (args) =>

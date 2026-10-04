@@ -1,11 +1,9 @@
 //! Per-phase timing for the `trace` feature. Compiles to nothing without it.
 //!
-//! Groth16 proving splits into two blocks that matter: the QAP witness map and
-//! the MSMs. `create_proof_with_reduction_and_matrices` runs both and reports
-//! neither, so the only way to separate them is to run the witness map once on
-//! its own and subtract it from the whole. A trace build therefore computes the
-//! map **twice** and is slower than a release build — the output is a ratio for
-//! deciding where to optimise, not a wall-clock figure to quote.
+//! The proof call runs the QAP witness map and the MSMs without reporting
+//! either, so the witness map is timed once on its own and subtracted from the
+//! whole. A trace build therefore computes the map twice and is slower than a
+//! release build: read the output as a ratio, not as wall-clock time.
 
 use ark_bn254::Fr;
 use taceo_groth16::ConstraintMatrices;

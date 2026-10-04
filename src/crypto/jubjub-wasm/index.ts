@@ -1,9 +1,7 @@
-// WASM-backed Baby-Jubjub — the sole runtime implementation.
-// Wire conventions: `sdk/wasm/jubjub/src/lib.rs`.
+// WASM-backed Baby-Jubjub. Wire conventions: `sdk/wasm/jubjub/src/lib.rs`.
 
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../../core/bytes.js";
-import { InvalidArgumentError } from "../../errors/config.js";
-import { H_BASE, type Point } from "../jubjub.js";
+import type { Point } from "../jubjub.js";
 import type { Field } from "../poseidon.js";
 import { ensureInit, w } from "./loader.js";
 import { bytesToPoint, pointToBytes } from "./point-codec.js";
@@ -48,23 +46,6 @@ export class Jubjub {
     unpackPoint(buf: Uint8Array): Point | null {
         const out = w().unpack_point(buf);
         return out ? bytesToPoint(out) : null;
-    }
-
-    hashToAssetGen(assetId: Field): Point {
-        if (assetId >= 1n << 64n) {
-            throw new InvalidArgumentError("asset_id must be < 2^64 for HashToAssetGen parity", {
-                argument: "assetId",
-            });
-        }
-        const out = w().hash_to_asset_gen(toLeBytes(assetId, 8));
-        return bytesToPoint(out);
-    }
-
-    valueCommit(value: Field, assetGen: Point, rcv: Field): Point {
-        return this.addPoint(
-            this.mulPointEscalar(assetGen, value),
-            this.mulPointEscalar(H_BASE, rcv),
-        );
     }
 
     tryDecryptNote(ivk: Field, epkPacked: Uint8Array, ciphertext: Uint8Array): Uint8Array | null {

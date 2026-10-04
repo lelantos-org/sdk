@@ -1,14 +1,10 @@
-// On-chain protocol structs for the deposit path.
+// On-chain protocol structs for the deposit path, mirroring `PubInputs.sol`
+// field-for-field.
 //
-// These mirror `PubInputs.sol` field-for-field. They live in `protocol/`
-// because the chain adapter, the relayer codec, and the aux digest all consume
-// them; none of those should depend on the Permit2 signer.
-//
-// The ABI component lists and the functions mapping a struct onto them are
-// colocated. Their two consumers, the `computePiHash` witness and the calldata
-// in `chain/viem/deposits.ts`, must agree field-for-field, since the hash is a
-// Permit2 witness over the struct the calldata carries. A mismatch produces a
-// signature the contract rejects, with no local symptom.
+// `depositTuple` and `auxTuple` feed both the `computePiHash` witness and the
+// calldata in `chain/viem/deposits.ts`. The two must agree field-for-field: the
+// hash is a Permit2 witness over the struct the calldata carries, and a
+// mismatch produces a signature the contract rejects, with no local symptom.
 
 import { bytesToHex } from "../core/hex.js";
 
@@ -22,8 +18,9 @@ export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 /**
  * `PubInputs.DepositRequest` mirror, with wire-side bigints/hex.
  *
- * The depositor's output is not padded to a spend's output shape, so there is
- * no pad-leaf blinder.
+ * A deposit publishes `inner`, the owner half of each note, and never a leaf:
+ * the batch circuit builds the leaf from the escrowed amount as
+ * `Poseidon(TAG_CM, asset · 2^64 + value, inner)`.
  */
 export interface DepositRequest {
     /** Full-width `uint256`, matching `Transact.chainId`. */
@@ -32,21 +29,13 @@ export interface DepositRequest {
     publicIn: bigint;
     payer: string; // 0x address
     recipient: string; // 0x address
-    /** Output commitment. 0x-hex 32 B. */
-    outCm: string;
     /**
-     * Pedersen value commitment cv_dep = value · V^asset + rcv_dep · H.
-     * Anchors (asset_id, value) into the Merkle leaf via
-     * leaf = Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y).
+     * `Poseidon(TAG_INNER, pk, rho, rcm)` of the depositor's note. 0x-hex 32 B.
+     *
+     * One that is not of that form, or whose preimage the recipient never
+     * learns, escrows a deposit nobody can spend.
      */
-    cvDep: [bigint, bigint];
-    /**
-     * The output's `rcv_dep`. Published in the DepositEscrowed event so the
-     * relayer can build the tree_update_batch witness without learning
-     * recipient pk/rho/rcm. A Pedersen blinder is information-theoretically
-     * independent of value/asset/identity, so it leaks nothing useful.
-     */
-    rcv: bigint;
+    inner: string;
     /**
      * Registry id of the asset the relayer's fee note is paid in.
      *
@@ -61,25 +50,25 @@ export interface DepositRequest {
      * The relayer's fee note value, in circuit units of `feeAssetId`.
      *
      * A deposit mints two leaves: the depositor's note and this one. `feeIn`
-     * may be zero; a chain that subsidises deposits still mints the leaf, so
-     * the shape is fixed.
+     * may be zero; the leaf is minted regardless.
      */
     feeIn: bigint;
-    feeCm: string;
-    feeCvDep: [bigint, bigint];
-    feeRcv: bigint;
+    /** `inner` of the relayer's fee note. 0x-hex 32 B. */
+    feeInner: string;
 }
 
 /**
  * Component list of `AuxValidation.Output`. Shared by the deposit witness hash
  * and by `auxDigest` (the transact aux binding) so the two encodings cannot
- * drift apart. MUST match the struct in PubInputs.sol field-for-field.
+ * drift apart. Must match the struct in `PubInputs.sol` field-for-field.
  *
  * @internal
  */
 export const AUX_OUTPUT_COMPONENTS = [
     { name: "clueRx", type: "uint256" },
     { name: "clueRy", type: "uint256" },
+    { name: "clueQx", type: "uint256" },
+    { name: "clueQy", type: "uint256" },
     { name: "ephPubX", type: "uint256" },
     { name: "ephPubY", type: "uint256" },
     { name: "ciphertext", type: "bytes" },
@@ -93,6 +82,9 @@ export const AUX_OUTPUT_COMPONENTS = [
 export interface AuxOutput {
     clueRx: bigint;
     clueRy: bigint;
+    /** Subgroup witness for the clue: `[8]·(clueQx, clueQy) = (clueRx, clueRy)`. */
+    clueQx: bigint;
+    clueQy: bigint;
     ephPubX: bigint;
     ephPubY: bigint;
     /** Raw bytes (2B clueBits prefix || ChaCha20Poly1305 body). */
@@ -160,11 +152,7 @@ export interface PermitSingle {
 
 /**
  * Mirror of `IAllowanceTransfer.PermitBatch`: one signature covering N token
- * allowances.
- *
- * `spender` is shared across entries because it is always the MASP address.
- * `details[i].nonce` is per entry: Permit2 keys nonces by
- * `(owner, token, spender)`, read from `IAllowanceTransfer.allowance(owner, token, spender)`.
+ * allowances, each with its own nonce and a shared `spender`.
  *
  * @internal
  */
@@ -176,11 +164,8 @@ export interface PermitBatch {
     sigDeadline: bigint;
 }
 
-// ─── struct → ABI tuple ──────────────────────────────────────────────────────
-//
-// The `as` casts narrow `string` to viem's `0x${string}`. The values are
-// already branded `EvmAddress` / `Hex32` at their source, so this is a
-// representation change, not an unchecked assertion.
+// Struct to ABI tuple. The `as` casts narrow `string` to viem's `0x${string}`;
+// the values are branded `EvmAddress` / `Hex32` at their source.
 
 /**
  * `DepositRequest` as the tuple `DEPOSIT_REQUEST_COMPONENTS` describes.
@@ -188,26 +173,20 @@ export interface PermitBatch {
  * @internal
  */
 export function depositTuple(deposit: DepositRequest) {
-    // Lowercased: viem rejects a mixed-case address whose checksum does not
-    // match, and the encoded bytes are the same either way.
     return {
         chainId: deposit.chainId,
         publicAssetId: deposit.publicAssetId,
         publicIn: deposit.publicIn,
         payer: abiAddress(deposit.payer),
         recipient: abiAddress(deposit.recipient),
-        outCm: deposit.outCm as `0x${string}`,
-        cvDep: deposit.cvDep,
-        rcv: deposit.rcv,
+        inner: deposit.inner as `0x${string}`,
         feeAssetId: deposit.feeAssetId,
         feeIn: deposit.feeIn,
-        feeCm: deposit.feeCm as `0x${string}`,
-        feeCvDep: deposit.feeCvDep,
-        feeRcv: deposit.feeRcv,
+        feeInner: deposit.feeInner as `0x${string}`,
     };
 }
 
-/** `0x`-hex address with no checksum casing, which viem accepts unconditionally. @internal */
+/** Lowercased: viem rejects a mixed-case address whose checksum does not match. @internal */
 export const abiAddress = (address: string): `0x${string}` =>
     address.toLowerCase() as `0x${string}`;
 
@@ -220,6 +199,8 @@ export function auxTuple(aux: AuxOutput) {
     return {
         clueRx: aux.clueRx,
         clueRy: aux.clueRy,
+        clueQx: aux.clueQx,
+        clueQy: aux.clueQy,
         ephPubX: aux.ephPubX,
         ephPubY: aux.ephPubY,
         ciphertext: bytesToHex(aux.ciphertext) as `0x${string}`,

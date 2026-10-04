@@ -8,8 +8,8 @@ import { rootFromPath } from "./path.js";
 import { Poseidon } from "./poseidon.js";
 
 // Boundary checks on the field/point layer. Validation at the JSON boundary
-// (`services/http/decode`, `core/brand`) does not cover field arithmetic, where invalid
-// values fail silently.
+// (`services/http/decode`, `core/brand`) does not cover field arithmetic, where invalid values
+// fail silently.
 
 describe("Poseidon canonical inputs", () => {
     let P: Poseidon;
@@ -18,8 +18,7 @@ describe("Poseidon canonical inputs", () => {
     });
 
     it("rejects an unreduced input rather than aliasing it", () => {
-        // poseidon-lite reduces mod r internally, so without the check `x` and `x + r` hash
-        // identically and distinct merkle leaves or decoded note records could collide.
+        // poseidon-lite reduces mod r internally, so unchecked `x` and `x + r` hash identically.
         expect(() => P.hash([BN254_FR])).toThrow(/canonical field element/);
         expect(() => P.hash([1n, 2n + BN254_FR])).toThrow(/canonical field element/);
     });
@@ -64,8 +63,8 @@ describe("rootFromPath validation", () => {
     const level = (): bigint[] => [7n, 8n, 9n];
 
     it("rejects an out-of-range slot instead of silently dropping the leaf", () => {
-        // With slot 4 the `k === slot` branch never fires: the leaf is discarded and the level
-        // hashed from siblings alone, yielding a plausible root for a leaf not in the tree.
+        // Unchecked, `splice` would clamp slot 4 to 3 and read -1 as 2, yielding a plausible root
+        // for a position the path does not name.
         expect(() => rootFromPath(P, 1n, [level()], [4])).toThrow(/pathIndices/);
         expect(() => rootFromPath(P, 1n, [level()], [-1])).toThrow(/pathIndices/);
     });

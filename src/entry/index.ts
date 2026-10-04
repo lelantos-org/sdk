@@ -4,9 +4,11 @@
 // else has exactly one other home: `./watch`, `./x402`, `./advanced`, `./prover`, `./protocol`,
 // `./primitives`, `./services`, `./internal` (see the README subpath table).
 //
-// Rule 8 (`scripts/check-layers.mjs`): an entry only forwards names, explicitly, from the modules that
-// declare them. `scripts/check-public-api.mjs` fails when a name is published from two subpaths.
+// Rule 8 (`scripts/check-layers.mjs`): an entry only forwards names, explicitly, from the modules
+// that declare them. `scripts/check-public-api.mjs` fails when a name is published from two
+// subpaths.
 
+export type { PaymentProof } from "../bundle/payment-proof.js";
 export {
     type DeployedNetworkName,
     NETWORKS,
@@ -61,7 +63,9 @@ export {
 } from "../errors/config.js";
 export {
     type ConsolidateHint,
+    FeeAboveLimitError,
     FeeAssetNotQuotedError,
+    type FeeLimitSource,
     type FeeQuoteKind,
     type HeldBucket,
     type HeldNotes,
@@ -118,6 +122,7 @@ export type { CircuitShape } from "../protocol/shape.js";
 export type { WorkerFactory, WorkerLike } from "../runtime/rpc/types.js";
 export { VERSION } from "../version.js";
 export type {
+    ClaimLinkKey,
     ReadOnlyWalletApi,
     SpendableMaxOptions,
     SpendingWalletKeys,
@@ -153,8 +158,10 @@ export type {
     ScannerOption,
 } from "../wallet/connect/options.js";
 export type { AwaitCommitmentsResult } from "../wallet/notes/note-cache.js";
+export type { PaymentProofTarget } from "../wallet/ops/payment-proof.js";
 export type { DenominationChoice, WithdrawPreview } from "../wallet/ops/withdraw-preview.js";
 export type { SpendableMax, WithheldValue } from "../wallet/selection/types.js";
+export type { RelayerFeeCheck } from "../wallet/types/config.js";
 export type {
     AllowanceSetupOptions,
     AllowanceSetupProgress,

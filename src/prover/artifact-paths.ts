@@ -1,8 +1,8 @@
 // Locating prover artifacts: which files a shape needs, and where they are.
 //
 // Resolution only; `artifact-bytes.ts` loads the content. `connect()` resolves
-// eagerly so a misconfigured path throws at connect time, while the ~52 MB
-// download is deferred to the prover build.
+// eagerly so a misconfigured path throws at connect time, while the download is
+// deferred to the prover build.
 //
 // Backend-agnostic: does not import snarkjs.
 
@@ -11,14 +11,15 @@ import { ProverArtifactsMissingError } from "../errors/prover.js";
 import { getLogger } from "../log/logger.js";
 import { type CircuitShape, DEFAULT_SHAPE, shapeId } from "../protocol/shape.js";
 import { detectRuntime, IS_NODE, NODE_FS_PROMISES } from "../runtime/detect.js";
+import { PROVER_ARTIFACT_SHA256 } from "./artifact-digests.js";
 import type { ProverArtifacts, ProverPaths } from "./types.js";
 
 export type { ProverArtifacts } from "./types.js";
 
 /**
- * Companion package, published to GitHub Packages (not public npm), so jsDelivr
- * cannot proxy it and there is no built-in browser CDN default. It is an
- * explicit dependency to keep ~50 MB of proving artifacts out of every install.
+ * Companion package holding the proving artifacts. Published to GitHub Packages
+ * (not public npm), so jsDelivr cannot proxy it and there is no built-in browser
+ * CDN default.
  */
 const COMPANION_PKG = "@lelantos-org/circuits";
 
@@ -36,23 +37,29 @@ export function resolveArtifacts(input: ProverArtifacts): ProverPaths {
     return {
         wasmPath: toAbsoluteUrl(urlToString(input.circuit)),
         zkeyPath: toAbsoluteUrl(urlToString(input.zkey)),
+        ...(input.sha256 ? { sha256: input.sha256 } : {}),
     };
 }
 
 /**
  * Resolve default Groth16 prover artifacts for `shape`.
  *
- * Artifacts are named after the shape (`4x6.wasm` / `4x6_final.zkey`), matching the
- * circuits package. Resolution order:
+ * Artifacts are named after the shape (`4x6.wasm` / `4x6_final.zkey`).
+ * Resolution order:
  *   1. `LELANTOS_PROVER_ARTIFACTS_DIR` env var (Node) — must contain the
  *      pair for the shape in use.
  *   2. Companion `@lelantos-org/circuits` npm package (Node) — via
  *      `import.meta.resolve`.
- *   3. Explicit `opts.cdn` URL (browser). No built-in browser default
- *      because the companion lives on GitHub Packages.
+ *   3. `opts.cdn` URL (any runtime); the only source in a browser.
  *
- * Throws `ProverArtifactsMissingError` listing every path tried. A shape the
+ * Throws `ProverArtifactsMissingError` listing every source tried. A shape the
  * companion has no proving key for fails here rather than at proof time.
+ *
+ * Sources 2 and 3 are expected to hold the published release, so their
+ * artifacts carry its digests (`artifact-digests.ts`) and are refused on a
+ * mismatch. Source 1 is an operator's own directory, typically a local circuits
+ * build with its own keys, and is taken as-is; so is an explicit
+ * `prover.artifacts` unless it names `sha256` itself.
  *
  * @internal
  */
@@ -81,7 +88,7 @@ export async function bundledProverArtifacts(
             tried.push(`env LELANTOS_PROVER_ARTIFACTS_DIR=${envDir} (files not found)`);
         }
         const companion = await tryResolveCompanion(id);
-        if (companion.found) return companion.artifacts;
+        if (companion.found) return pinned(companion.artifacts, id);
         companionCause = companion.cause;
         tried.push(`npm package ${COMPANION_PKG} (subpath ./${id}/${id}_final.zkey)`);
     }
@@ -90,7 +97,7 @@ export async function bundledProverArtifacts(
     // `loadArtifactBytes` treats only non-URLs as filesystem paths.
     if (opts.cdn) {
         const base = opts.cdn.replace(/\/$/, "");
-        return { circuit: `${base}/${id}.wasm`, zkey: `${base}/${id}_final.zkey` };
+        return pinned({ circuit: `${base}/${id}.wasm`, zkey: `${base}/${id}_final.zkey` }, id);
     }
     tried.push(
         runtime === "browser"
@@ -104,10 +111,13 @@ export async function bundledProverArtifacts(
     throw new ProverArtifactsMissingError(tried, id, { cause: companionCause });
 }
 
-/**
- * Outcome of probing the companion package. A discriminated union, so
- * `artifacts` is only readable after checking `found`.
- */
+/** `artifacts` with the published release's digests for shape `id`, when it has any. */
+function pinned(artifacts: ProverArtifacts, id: string): ProverArtifacts {
+    const sha256 = PROVER_ARTIFACT_SHA256[id];
+    return sha256 ? { ...artifacts, sha256 } : artifacts;
+}
+
+/** Outcome of probing the companion package. */
 type CompanionProbe =
     | { readonly found: true; readonly artifacts: ProverArtifacts }
     | { readonly found: false; readonly cause?: unknown };
@@ -125,8 +135,6 @@ async function tryResolveCompanion(id: string): Promise<CompanionProbe> {
         if (!wasm || !zkey) return { found: false };
         return { found: true, artifacts: { circuit: new URL(wasm), zkey: new URL(zkey) } };
     } catch (cause) {
-        // Returned so `ProverArtifactsMissingError` can report why the
-        // companion did not resolve.
         log.debug("companion artifact package did not resolve", { id, cause });
         return { found: false, cause };
     }

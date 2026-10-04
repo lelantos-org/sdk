@@ -2,9 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { testWallet } from "../test-utils/wallet.js";
 
 // Ownership: a wallet disposes only what the SDK built. A caller-supplied `Scanner` / `Prover` may
-// be shared across wallets (webapp: one tab-wide `WorkerProver`), so `dispose()` and a failed build
-// must leave it running. Built resources (a `ProverConfig` prover, a `{ workers }` pool) are the
-// wallet's and are released with it.
+// be shared across wallets, so `dispose()` and a failed build must leave it running. Built
+// resources (a `ProverConfig` prover, a `{ workers }` pool) are released with the wallet.
 
 const built = vi.hoisted(() => ({
     dispose: vi.fn(async () => undefined),
@@ -24,7 +23,7 @@ const WORKER_CONFIG = {
 };
 
 describe("wallet.dispose", () => {
-    // A caller-supplied scanner and prover, and `await using`, are covered in `connect/connect.test.ts`.
+    // A caller-supplied scanner and prover, and `await using`: see `connect/connect.test.ts`.
     it("releases a prover it built from a ProverConfig", async () => {
         built.dispose.mockClear();
         const { wallet } = await testWallet({ prover: WORKER_CONFIG });
@@ -36,8 +35,8 @@ describe("wallet.dispose", () => {
     });
 
     it("works on backends that hold nothing", async () => {
-        // `dispose` is optional on both ports: the in-process scanner and the
-        // snarkjs prover hold only GC-reclaimable resources.
+        // `dispose` is optional on both ports: the in-process scanner and the snarkjs prover hold
+        // only GC-reclaimable resources.
         const { wallet } = await testWallet({ scanner: { scan: async () => [] } });
         await expect(wallet.dispose()).resolves.toBeUndefined();
     });

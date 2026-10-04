@@ -13,9 +13,9 @@ const ARITY = 4;
 /**
  * Recompute the root a `(leaf, path)` pair attests to.
  *
- * The path is validated rather than coerced because it is relayer-supplied. An out-of-range
- * `pathIndices[lvl]` would skip the `k === slot` branch and hash the level from siblings alone,
- * yielding a plausible root for a leaf not in the tree. A short sibling array has the same effect.
+ * The path is relayer-supplied, so it is validated rather than coerced: `splice` would clamp an
+ * out-of-range `pathIndices[lvl]` to a valid slot and yield a plausible root for a position the
+ * path does not name, and a level without exactly three siblings is not a quaternary node.
  */
 export function rootFromPath(
     P: Poseidon,
@@ -63,16 +63,14 @@ export interface PathCheck {
 }
 
 /**
- * Whether the pool would accept a proof against `root`.
- *
- * Shared contract: this module uses it for a scanned path, `TreeStore` before discarding a locally
- * built tree, and `ChainAdapter` supplies it.
+ * Whether the pool would accept a proof against `root`. Supplied by `ChainAdapter`; also used by
+ * `TreeStore` before discarding a locally built tree.
  */
 export type IsKnownRoot = (root: Field) => Promise<boolean>;
 
 /**
- * Check a path against the set of roots the chain accepts. Returns the
- * computed root alongside the verdict so a rejection is diagnosable.
+ * Check a path against the set of roots the chain accepts. Returns the computed root alongside
+ * the verdict so a rejection is diagnosable.
  */
 export async function verifyPath(
     P: Poseidon,

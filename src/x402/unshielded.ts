@@ -1,15 +1,10 @@
 // The `eip155:<chainId>` payment mechanism: standard x402 `exact`.
 //
-// Opt-in, because it unshields. Many x402 servers accept only EIP-3009 on a
-// public chain, so this pays from shielded funds by first unshielding into a
-// throwaway address. The observable link is "a Lelantos withdrawal funded this
-// address", not "the operator's account paid this API".
+// Opt-in, because it unshields: it pays servers that accept only EIP-3009 on a
+// public chain by first unshielding into a throwaway address. The observable
+// link is "a Lelantos withdrawal funded this address", not "the operator's
+// account paid this API".
 //
-// The ephemeral address needs no gas: EIP-3009 is a signed authorization that
-// the server's facilitator submits and pays for.
-//
-// Limits
-// ------
 // Usable only when the server offers a chain the MASP is deployed on and an
 // EIP-3009-capable token (USDC and similar; most ERC-20s are not). No bridging:
 // an offer on a different chain than the pool is refused.
@@ -77,15 +72,14 @@ export interface UnshieldedExactOptions {
     /** Give up waiting after this many polls. Default 30. */
     maxPolls?: number | undefined;
     /**
-     * Fires when a top-up is about to unshield into the payer address.
+     * Fires when a top-up is about to unshield into the payer address. Must not
+     * throw.
      *
-     * The budget caps *payments*, not the withdrawals that fund them: a top-up
-     * moves value to an address the user controls, so counting it would
-     * double-count every payment made from it. Because `topUpMultiple`
-     * withdraws more than one payment costs, and a poll timeout leaves no other
-     * record, this hook makes top-ups observable.
-     *
-     * Must not throw.
+     * The budget caps payments, not the withdrawals that fund them: a top-up
+     * moves value to an address the user controls, and counting it would
+     * double-count every payment made from it. `topUpMultiple` withdraws more
+     * than one payment costs and a poll timeout leaves no other record, so
+     * this hook is how top-ups are observed.
      */
     onTopUp?:
         | ((info: { payer: EvmAddress; asset: AssetId; amount: CircuitAmount }) => void)
@@ -115,9 +109,8 @@ export function unshieldedExact(
     // Per slot, not global: slots are distinct ephemeral addresses, so
     // concurrent payments to different hosts top up in parallel.
     const funding = createKeyedMutex<number>();
-    // Memoised with eviction on rejection: `x402()` builds this mechanism once
-    // for a long-lived `fetch`, so a transient RPC failure must not be cached
-    // for the process lifetime.
+    // Memoised, evicted on rejection: the mechanism outlives one request, so a
+    // transient RPC failure must not be cached.
     const chainId = memoAsync(() => wallet.chain.chainId());
     const read = async (req: PaymentRequirements): Promise<Terms> => {
         const id = await chainId.get();
@@ -153,9 +146,8 @@ export function unshieldedExact(
 
         async quote(req: PaymentRequirements, ctx?: PaymentPayloadContext): Promise<PaymentQuote> {
             const { value, asset } = await read(req);
-            // Asked here, where a refusal is still routable: funding happens in
-            // `createPaymentPayload`, and a refusal from there aborts the
-            // request instead of falling through to the next offer.
+            // Checked here, where a refusal is still routable; see
+            // `assertFundable`.
             const { account } = payerFor(ctx?.host);
             await assertFundable(wallet, branded<EvmAddress>(account.address), asset, value);
             // Base units → circuit units, rounded up, so a budget never
@@ -172,11 +164,11 @@ export function unshieldedExact(
             const { value, asset } = terms;
             const { slot, account } = payerFor(ctx?.host);
 
-            // Serialised per payer slot. `ensureFunded` awaits between reading
-            // the balance and deciding to withdraw; without the lock,
-            // concurrent payments to one host could both unshield for a single
-            // shortfall, or both sign against a balance that covers only one,
-            // making the second settlement revert on chain.
+            // Serialised per payer slot: `ensureFunded` awaits between reading
+            // the balance and withdrawing, so unlocked concurrent payments to
+            // one host could both unshield for a single shortfall, or both
+            // sign against a balance that covers only one and have the second
+            // settlement revert.
             await funding.run(slot.index, () =>
                 ensureFunded(wallet, branded<EvmAddress>(account.address), asset, value, {
                     topUpMultiple,

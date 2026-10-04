@@ -16,9 +16,9 @@ import {
     submitDepositNative,
 } from "./deposits.js";
 
-// A wrong target contract or encoded function fails silently: calldata built
-// against a stale pool ABI is well-formed and reverts on-chain, as does a
-// native deposit aimed at the pool.
+// A wrong target contract or encoded function is not caught before sending:
+// calldata built against a mismatched pool ABI is well-formed and reverts on
+// chain, as does a native deposit aimed at the pool.
 
 const MASP = branded<EvmAddress>("0x0000000000000000000000000000000000000a11");
 const ADAPTER = branded<EvmAddress>("0x00000000000000000000000000000000000ada9e");
@@ -32,9 +32,9 @@ interface Sent {
 }
 
 /**
- * Records the transaction and reports a receipt with no logs, which makes the
- * id extraction throw. The assertions here are about what was *sent*; the
- * `DepositEscrowed` decode is a separate concern.
+ * Records each sent transaction and reports a receipt carrying `logs`. With
+ * none, the id extraction throws after the send, which is all the submission
+ * tests assert on.
  */
 function stubCtx(
     nativeAdapterAddress?: EvmAddress,
@@ -76,20 +76,18 @@ const request = (payer: EvmAddress): DepositRequest => ({
     publicIn: 250n,
     payer,
     recipient: "0x000000000000000000000000000000000000beef",
-    outCm: `0x${"22".repeat(32)}`,
-    cvDep: [23n, 24n],
-    rcv: 27n,
-    // A relayer note in another asset: the field most likely to be dropped.
+    inner: `0x${"22".repeat(32)}`,
+    // A relayer note in another asset than the deposit's.
     feeAssetId: 2n,
     feeIn: 5n,
-    feeCm: `0x${"44".repeat(32)}`,
-    feeCvDep: [25n, 26n],
-    feeRcv: 28n,
+    feeInner: `0x${"44".repeat(32)}`,
 });
 
 const aux: AuxOutput = {
     clueRx: 1n,
     clueRy: 2n,
+    clueQx: 5n,
+    clueQy: 6n,
     ephPubX: 3n,
     ephPubY: 4n,
     ciphertext: new Uint8Array([0, 0, 0xde, 0xad]),
@@ -126,11 +124,10 @@ describe("deposit submission", () => {
         // reverts the two-token pull, a dropped `feeAssetId` the digest.
         const [d, sig] = call.args as readonly unknown[];
         expect(d).toMatchObject({
+            inner: request(MASP).inner,
             feeAssetId: 2n,
             feeIn: 5n,
-            feeCm: request(MASP).feeCm,
-            feeCvDep: [25n, 26n],
-            feeRcv: 28n,
+            feeInner: request(MASP).feeInner,
         });
         expect(sig).toEqual(permit2);
     });
@@ -166,10 +163,8 @@ describe("deposit submission", () => {
         expect(tx.value).toBe(1_000n);
         const call = decodeFunctionData({ abi: NATIVE_ADAPTER_ABI, data: tx.data! });
         expect(call.functionName).toBe("depositNative");
-        // The payer must be the adapter or the call reverts `AdapterNotPayer`:
-        // the adapter wraps the coin, so the pool pulls against its allowance,
-        // not the sender's. viem checksums decoded addresses, so compare
-        // case-insensitively.
+        // The payer must be the adapter or the call reverts `AdapterNotPayer`.
+        // viem checksums decoded addresses, so compare case-insensitively.
         const payer = (call.args as readonly unknown[] as readonly [{ payer: string }])[0].payer;
         expect(payer.toLowerCase()).toBe(ADAPTER.toLowerCase());
     });
@@ -193,16 +188,16 @@ describe("deposit submission", () => {
 describe("deposit cancellation", () => {
     const inputs: CancelDepositInputs = {
         publicIn: 250n,
-        cm: branded<Hex32>(`0x${"22".repeat(32)}`),
-        cvDep: [23n, 24n],
+        inner: branded<Hex32>(`0x${"22".repeat(32)}`),
         publicAssetId: assetId(1n),
         feeBpsAtSubmit: 30,
         payer: branded<EvmAddress>("0x000000000000000000000000000000000000beef"),
         submittedAt: 100,
         feeIn: 5n,
         feeAssetId: assetId(2n),
-        feeCm: branded<Hex32>(`0x${"44".repeat(32)}`),
-        feeCvDep: [25n, 26n],
+        feeInner: branded<Hex32>(`0x${"44".repeat(32)}`),
+        // A plain asset's escrow, whose refund cap the pool emits as zero.
+        pulled: 0n,
     };
 
     /** A `DepositCanceled` log as the pool emits it. */
@@ -238,11 +233,11 @@ describe("deposit cancellation", () => {
         expect(sent).toHaveLength(1);
         const call = decodeFunctionData({ abi: MASP_ABI, data: sent[0]!.data! });
         expect(call.functionName).toBe("cancelDeposit");
-        expect((call.args as readonly unknown[])[8]).toEqual({
+        expect((call.args as readonly unknown[])[2]).toBe(inputs.inner);
+        expect((call.args as readonly unknown[])[7]).toEqual({
             feeIn: 5,
             feeAssetId: 2n,
-            feeCm: inputs.feeCm,
-            feeCvDep: [25n, 26n],
+            feeInner: inputs.feeInner,
         });
         expect(out).toEqual({ txHash: TX, refunded: 2_500n, feeAssetId: 2n, feeRefunded: 50n });
     });
@@ -258,11 +253,47 @@ describe("deposit cancellation", () => {
         expect(sent[0]!.to).toBe(ADAPTER);
         const call = decodeFunctionData({ abi: NATIVE_ADAPTER_ABI, data: sent[0]!.data! });
         expect(call.functionName).toBe("cancelNative");
-        expect(((call.args as readonly unknown[])[7] as { feeAssetId: bigint }).feeAssetId).toBe(
+        expect(((call.args as readonly unknown[])[6] as { feeAssetId: bigint }).feeAssetId).toBe(
             1n,
         );
         expect(out.refunded).toBe(2_550n);
         expect(out.feeRefunded).toBe(0n);
+    });
+
+    // `pulled` closes the digest preimage, so both entry points take it last and
+    // the pool reverts `DigestMismatch` on any value but the event's. Every
+    // argument is static, so it is also the calldata's final word, read here
+    // without the ABI under test.
+    it.each([
+        ["zero for a plain escrow", 0n],
+        ["the amount pulled for a yield escrow", 2_513n],
+    ])("hands the refund cap back last: %s", async (_, pulled) => {
+        const lastWord = (data: `0x${string}`) => BigInt(`0x${data.slice(-64)}`);
+
+        const pool = stubCtx(undefined, [canceledLog(MASP, 9n, 2_500n, 2n, 50n)]);
+        await cancelDeposit(pool.ctx, 9n, { ...inputs, pulled });
+        const poolData = pool.sent[0]!.data!;
+        expect(poolData.slice(0, 10)).toBe("0xc4e85ddc");
+        // id, publicIn, inner, assetId, fbps, payer, submittedAt, feeNote[3], pulled.
+        expect(poolData.length).toBe(2 + 2 * (4 + 32 * 11));
+        expect(lastWord(poolData)).toBe(pulled);
+        const poolArgs = decodeFunctionData({ abi: MASP_ABI, data: poolData })
+            .args as readonly unknown[];
+        expect(poolArgs).toHaveLength(9);
+        expect(poolArgs[8]).toBe(pulled);
+
+        const adapter = stubCtx(ADAPTER, [canceledLog(MASP, 9n, 2_500n, 0n, 0n)]);
+        const { payer: _payer, ...native } = inputs;
+        await cancelDepositNative(adapter.ctx, 9n, { ...native, pulled });
+        const adapterData = adapter.sent[0]!.data!;
+        expect(adapterData.slice(0, 10)).toBe("0xa15198c3");
+        // The same words without `payer`: the adapter supplies its own.
+        expect(adapterData.length).toBe(2 + 2 * (4 + 32 * 10));
+        expect(lastWord(adapterData)).toBe(pulled);
+        const adapterArgs = decodeFunctionData({ abi: NATIVE_ADAPTER_ABI, data: adapterData })
+            .args as readonly unknown[];
+        expect(adapterArgs).toHaveLength(8);
+        expect(adapterArgs[7]).toBe(pulled);
     });
 
     it("refuses a receipt with no DepositCanceled log from the pool", async () => {
@@ -272,24 +303,24 @@ describe("deposit cancellation", () => {
     });
 });
 
-// A mined deposit reports the escrow straight off its receipt, so a caller can cancel it later
-// without a log query.
+// A mined deposit reports the escrow off its receipt, so a caller can cancel it later without a
+// log query.
 describe("deposit receipt", () => {
     const event = MASP_ABI.find(
         (a) => a.type === "event" && a.name === "DepositEscrowed",
     ) as Extract<(typeof MASP_ABI)[number], { type: "event"; name: "DepositEscrowed" }>;
 
-    /** The pool's `DepositEscrowed` for `request(payer)`, as a receipt log at `address`. */
-    const escrowedLog = (address: EvmAddress, id: bigint, payer: EvmAddress) => {
+    /**
+     * The pool's `DepositEscrowed` for `request(payer)`, as a receipt log at `address`. `pulled` is
+     * zero as for a plain asset unless given.
+     */
+    const escrowedLog = (address: EvmAddress, id: bigint, payer: EvmAddress, pulled = 0n) => {
         const d = request(payer);
         const values: Record<string, unknown> = {
             publicAssetId: d.publicAssetId,
             publicIn: d.publicIn,
             feeBpsAtSubmit: 20,
-            cm: d.outCm,
-            cvDepX: d.cvDep[0],
-            cvDepY: d.cvDep[1],
-            rcv: d.rcv,
+            inner: d.inner,
             clueRx: 0n,
             clueRy: 0n,
             ephPubX: 0n,
@@ -297,15 +328,13 @@ describe("deposit receipt", () => {
             ciphertext: "0x",
             feeAssetId: d.feeAssetId,
             feeIn: d.feeIn,
-            feeCm: d.feeCm,
-            feeCvDepX: d.feeCvDep[0],
-            feeCvDepY: d.feeCvDep[1],
-            feeRcv: d.feeRcv,
+            feeInner: d.feeInner,
             feeClueRx: 0n,
             feeClueRy: 0n,
             feeEphPubX: 0n,
             feeEphPubY: 0n,
             feeCiphertext: "0x",
+            pulled,
         };
         const data = event.inputs.filter((i) => !("indexed" in i && i.indexed));
         return {
@@ -342,15 +371,27 @@ describe("deposit receipt", () => {
             publicAssetId: 1n,
             publicIn: 250n,
             feeBpsAtSubmit: 20,
-            cm: request(MASP).outCm,
-            cvDep: [23n, 24n],
+            inner: request(MASP).inner,
             feeIn: 5n,
             feeAssetId: 2n,
-            feeCm: request(MASP).feeCm,
-            feeCvDep: [25n, 26n],
+            feeInner: request(MASP).feeInner,
+            // A plain asset: the pool publishes a zero cap.
+            pulled: 0n,
             submittedAt: 1_000,
         });
         expect(out.escrowed.payer.toLowerCase()).toBe(MASP.toLowerCase());
+    });
+
+    // The event's last field, past both `bytes` members: what a yield escrow's cancel must hand
+    // back, and not derivable from the rest of the payload.
+    it("returns a yield escrow's refund cap as the pool published it", async () => {
+        const { ctx } = stubCtx(undefined, [escrowedLog(MASP, 42n, MASP, 2_513n)]);
+        const out = await submitDepositAuthorized(ctx, {
+            deposit: request(MASP),
+            aux,
+            feeAux: aux,
+        });
+        expect(out.escrowed.pulled).toBe(2_513n);
     });
 
     it("refuses a reverted deposit with its hash", async () => {

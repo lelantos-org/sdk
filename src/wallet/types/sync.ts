@@ -12,8 +12,6 @@ import type { Phase } from "./options.js";
 export type { AwaitCommitmentsResult } from "../notes/note-cache.js";
 export type { WithheldValue };
 
-// --- sync ----------------------------------------------------------------------------------------
-
 /** Progress of one sync, per stream. A throwing listener is logged and swallowed. */
 export type SyncProgress =
     | {
@@ -67,8 +65,6 @@ export interface AwaitCommitmentsOptions {
     throwOnTimeout?: boolean | undefined;
 }
 
-// --- balance -------------------------------------------------------------------------------------
-
 /**
  * One asset's shielded balance, split by what a single spend can reach.
  *
@@ -93,8 +89,6 @@ export interface Balance {
     /** When the notes behind this figure last synced; `undefined` before the first sync. */
     syncedAt: Date | undefined;
 }
-
-// --- state ---------------------------------------------------------------------------------------
 
 /** An operation that has started and not yet settled. */
 export interface OpActivity {

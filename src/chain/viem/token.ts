@@ -8,7 +8,7 @@ import type { TokenMeta, TxLog } from "../types.js";
 import { ERC20_ABI, WETH_DEPOSIT_ABI } from "./abi.js";
 import { addr, type ViemCtx, type ViemReadCtx } from "./ctx.js";
 
-/** Overall cap on a receipt wait. viem polls forever without one. */
+/** Overall cap on a receipt wait. */
 const RECEIPT_TIMEOUT_MS = 300_000;
 
 export async function tokenMeta(ctx: ViemReadCtx, token: EvmAddress): Promise<TokenMeta> {
@@ -144,12 +144,17 @@ export async function sendAndConfirm(
  */
 const MINED_RECEIPT_TIMEOUT_MS = 15_000;
 
-export async function txReceiptLogs(ctx: ViemReadCtx, txHash: Hex32): Promise<readonly TxLog[]> {
-    const receipt = await ctx.publicClient.waitForTransactionReceipt({
+/** The receipt of a transaction already mined, waiting briefly for a lagging read RPC. */
+export function recentReceipt(ctx: ViemReadCtx, txHash: Hex32) {
+    return ctx.publicClient.waitForTransactionReceipt({
         hash: txHash,
         pollingInterval: 1000,
         timeout: MINED_RECEIPT_TIMEOUT_MS,
     });
+}
+
+export async function txReceiptLogs(ctx: ViemReadCtx, txHash: Hex32): Promise<readonly TxLog[]> {
+    const receipt = await recentReceipt(ctx, txHash);
     return receipt.logs.map((l) => ({
         address: addr(l.address),
         topics: l.topics.map((t) => branded<Hex32>(t)),

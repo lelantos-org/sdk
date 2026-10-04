@@ -1,8 +1,7 @@
 // Client-side `Prover` that posts work to a Web Worker running the
 // `@lelantos-org/sdk/workers/prover` entrypoint.
 //
-// Correlation, timeouts and crash handling come from `src/runtime/rpc/`, shared
-// with the scanner pool.
+// Correlation, timeouts and crash handling come from `src/runtime/rpc/`.
 
 import { createWorkerRpc, type WorkerRpc } from "../runtime/rpc/client.js";
 import type { WorkerFactory, WorkerLike } from "../runtime/rpc/types.js";
@@ -11,8 +10,8 @@ import type { ProveResult, Prover, ProverArtifacts, ProverPaths } from "./types.
 import type { ProverMethods, WorkerSetup } from "./worker-protocol.js";
 
 /**
- * Proving can take minutes and the artifact fetch is ~52 MB at `DEFAULT_SHAPE`, hence the long
- * deadlines. Neither call is retried, since a retry doubles an already long wait.
+ * Long deadlines: proving can take minutes and the artifact fetch is tens of MB. Neither call is
+ * retried.
  */
 const PRELOAD_TIMEOUT_MS = 180_000;
 const PROVE_TIMEOUT_MS = 180_000;
@@ -20,7 +19,7 @@ const PROVE_TIMEOUT_MS = 180_000;
 export interface WorkerProverOpts extends WorkerSetup {
     /** Worker running `@lelantos-org/sdk/workers/prover`. */
     worker: WorkerLike;
-    /** Circuit artifacts. Sent to the worker on first `prove()` and cached there. */
+    /** Circuit artifacts. The worker builds its prover from them once and caches it. */
     artifacts: ProverArtifacts;
 }
 
@@ -31,8 +30,7 @@ export class WorkerProver implements Prover {
 
     constructor(opts: WorkerProverOpts) {
         this.paths = resolveArtifacts(opts.artifacts);
-        // The worker has its own module realm and cannot read the caller's
-        // module-level configuration, so these are sent with every request.
+        // Sent with every request; see `WorkerSetup`.
         this.setup = { threads: opts.threads, cacheArtifacts: opts.cacheArtifacts };
         this.rpc = createWorkerRpc<ProverMethods>(opts.worker, {
             name: "prover",
@@ -46,8 +44,8 @@ export class WorkerProver implements Prover {
 
     /**
      * Warm the worker (build `WasmProver`, fetch zkey + wasm, init rayon).
-     * Call before the first deposit/transfer to avoid 5–10s of setup latency
-     * mid-transaction.
+     * Call before the first proof to keep the setup latency out of a
+     * transaction.
      */
     preload(): Promise<void> {
         return this.rpc.call("preload", { paths: this.paths, ...this.setup });

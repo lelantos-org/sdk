@@ -1,5 +1,5 @@
 //! Browser Groth16 prover façade. Reads snarkjs zkey + circom .wtns,
-//! runs ark-groth16 (rayon-parallel when crossOriginIsolated).
+//! runs `taceo-groth16` (rayon-parallel when crossOriginIsolated).
 //!
 //! Public WASM API:
 //!   init()                                  — wasm-pack default
@@ -30,9 +30,9 @@ use crate::zkey::read_zkey;
 #[cfg(feature = "parallel")]
 pub use wasm_bindgen_rayon::init_thread_pool;
 
-// Faster wasm allocator than dlmalloc default. Build always has `+atomics`
-// (see `.cargo/config.toml`) and rayon workers share linear memory, so use the
-// thread-safe `TalcLock` variant. Trades ~10–15% peak memory for speed.
+// `talc` in place of the default dlmalloc, for speed. The build always has
+// `+atomics` (see `.cargo/config.toml`) and rayon workers share linear memory,
+// hence the thread-safe `TalcLock` variant.
 #[cfg(target_family = "wasm")]
 #[global_allocator]
 static TALC: talc::sync::TalcLock<
@@ -46,14 +46,12 @@ pub fn _start() {
     console_error_panic_hook::set_once();
 }
 
-/// How many threads the prover will actually use, as rayon reports it on the
-/// calling thread.
+/// Number of threads rayon reports on the calling thread.
 ///
-/// Not the same question as how many workers `initThreadPool` was given. The
-/// prover's parallelism is sized from this number — both the MSM and the FFT
-/// divide their work by it — so if it reads 1 while the pool has 16 workers,
-/// proving runs serial no matter how the pool was configured. Call it from the
-/// same context that calls `prove`; the answer is context-dependent.
+/// The MSM and the FFT divide their work by this number, not by the worker
+/// count given to `initThreadPool`: if it reads 1, proving runs serially
+/// whatever the pool size. The value depends on the calling context, so call
+/// it from the context that calls `prove`.
 #[wasm_bindgen(js_name = threadCount)]
 pub fn thread_count() -> usize {
     #[cfg(feature = "parallel")]
@@ -89,7 +87,7 @@ impl ProverSession {
             return Err(JsValue::from_str("witness shorter than nPublic+1"));
         }
 
-        // Nothing without the `trace` feature; see the module for the cost.
+        // A no-op without the `trace` feature.
         let trace = ProveTrace::start(&self.matrices, witness.as_slice())?;
 
         let r = Fr::rand(&mut OsRng);

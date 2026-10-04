@@ -3,13 +3,13 @@
 //   HRP     "lelantosivk"  payload version (1 B) || ivk (32 B, little-endian)
 //   HRP     "lelantosfvk"  payload version (1 B) || ivk (32 B) || nk (32 B)
 //
-// The payload carries only the secret scalars; `pk`, `pk_d`, `dk` and `ck`
-// derive from `ivk` and are recomputed on decode. The HRP marks the tier, the
-// version byte a format change that keeps the prefix.
+// The payload carries only the secret scalars; `pk`, `pk_d`, `dk` and `ck` derive from `ivk` and
+// are recomputed on decode. The HRP marks the tier, the version byte a format change that keeps
+// the prefix.
 //
-// Releasing a viewing key is permanent: `ivk` is fixed by `nsk`, so there is no
-// rotation. The holder decrypts every note the account receives, and an FVK
-// also sees which are spent. Neither grants spend authority.
+// Releasing a viewing key is permanent: `ivk` is fixed by `nsk` and cannot be rotated. The holder
+// decrypts every note the account receives, and an FVK also sees which are spent. Neither grants
+// spend authority.
 
 import { bech32m } from "bech32";
 import { branded, type ViewingKeyString } from "../core/brand.js";
@@ -29,7 +29,7 @@ import {
 export const IVK_HRP = "lelantosivk";
 export const FVK_HRP = "lelantosfvk";
 
-/** Payload format version. Bumped for a format change that keeps the HRP. */
+/** Payload format version. */
 const VERSION = 1;
 
 const IVK_PAYLOAD_LEN = 1 + FIELD_BYTES;
@@ -50,8 +50,8 @@ export function encodeFullViewingKey(fvk: FullViewingKey): ViewingKeyString {
     return encode(FVK_HRP, [fvk.ivk, fvk.nk]);
 }
 
-// The tiers differ only in the number of scalars following the version byte;
-// `decode` checks the payload against the length that implies.
+// The tiers differ only in the number of scalars after the version byte; `decode` checks the
+// payload against the length that implies.
 function encode(hrp: string, scalars: readonly Field[]): ViewingKeyString {
     const payload = new Uint8Array(1 + scalars.length * FIELD_BYTES);
     payload[0] = VERSION;
@@ -62,10 +62,9 @@ function encode(hrp: string, scalars: readonly Field[]): ViewingKeyString {
 /**
  * Decode either tier, recomputing the derived key material.
  *
- * Returns a `FullViewingKey` for an `lelantosfvk1…` string, a `ViewingKey`
- * otherwise; narrow with {@link isFullViewingKey}. Failures are
- * {@link InvalidArgumentError}. The key is kept out of the message: it is
- * secret, and error text reaches application logs verbatim.
+ * Returns a `FullViewingKey` for an `lelantosfvk1…` string, a `ViewingKey` otherwise; narrow with
+ * {@link isFullViewingKey}. Failures are {@link InvalidArgumentError}. The key is kept out of the
+ * message: it is secret, and error text reaches application logs verbatim.
  */
 export function decodeViewingKey(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKey {
     return rethrowBech32(() => decode(P, J, key), "invalid viewing key", "viewingKey");
@@ -86,9 +85,8 @@ function decode(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKe
         throw bad(`unsupported payload version ${payload[0]}, expected ${VERSION}`);
     }
 
-    // Non-zero, not merely in range: `ivk = 0` gives an identity `pk_d`, whose
-    // notes are publicly decryptable, and `nk = 0` yields a nullifier
-    // independent of the account.
+    // Non-zero, not merely in range: `ivk = 0` gives an identity `pk_d`, whose notes are publicly
+    // decryptable, and `nk = 0` yields a nullifier independent of the account.
     const ivk = scalar(payload.slice(1, 1 + FIELD_BYTES), "ivk");
     if (prefix === IVK_HRP) return buildViewingKey(P, J, ivk);
     return buildFullViewingKey(P, J, ivk, scalar(payload.slice(1 + FIELD_BYTES), "nk"));

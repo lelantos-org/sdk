@@ -1,8 +1,4 @@
-// Async primitives shared across HTTP, worker RPC, and wasm init.
-//
-// Every timeout in the SDK goes through `withTimeout`, which clears its timer
-// on both outcomes. A bare `Promise.race` leaks the pending timer and keeps
-// the Node event loop alive until it fires.
+// Async primitives shared across HTTP, worker RPC and wasm init.
 
 import { safeCall } from "./callbacks.js";
 
@@ -30,7 +26,8 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<SleepOutcome> {
 
 /**
  * Reject with `mkError()` if `p` has not settled within `ms`. The timer is
- * always cleared, so a fast success leaves nothing pending.
+ * cleared on every outcome; a bare `Promise.race` leaves it pending and keeps
+ * the Node event loop alive until it fires.
  */
 export function withTimeout<T>(
     p: Promise<T>,
@@ -47,9 +44,8 @@ export function withTimeout<T>(
             signal?.removeEventListener("abort", onAbort);
             fn();
         };
-        // A non-Error reason is wrapped: `AbortSignal.reason` is whatever was
-        // passed to `abort()`, often a plain string, which defeats downstream
-        // `instanceof` and `isWalletError` checks.
+        // `AbortSignal.reason` is whatever was passed to `abort()`, often a
+        // string, so a non-Error reason is wrapped.
         const onAbort = () => finish(() => reject(asError(signal?.reason) ?? mkError()));
         const timer = setTimeout(() => finish(() => reject(mkError())), ms);
         signal?.addEventListener("abort", onAbort, { once: true });
@@ -80,10 +76,9 @@ export async function retry<T>(
     policy: RetryPolicy,
     rand: () => number = Math.random,
 ): Promise<T> {
-    // Clamped to the documented range. A jitter above 1 makes `delayMs`
-    // negative, and a negative `retries` would skip the loop and throw
-    // `undefined`, a non-Error that defeats downstream `instanceof` and
-    // `isWalletError` checks.
+    // Clamped to the documented range: a jitter above 1 makes `delayMs`
+    // negative, and a negative `retries` would skip the loop without calling
+    // `fn`.
     const jitter = Math.min(1, Math.max(0, policy.jitter ?? 0.25));
     const retries = Math.max(0, policy.retries);
 
@@ -99,13 +94,12 @@ export async function retry<T>(
             const delayMs = Math.round(base * (1 - jitter + rand() * jitter * 2));
             // Guarded so a throwing hook cannot replace the real error.
             safeCall("onRetry", policy.onRetry, { attempt, delayMs, err });
-            // The caller's own reason, as `fetch` rejects with it: the failure
-            // being backed off from is not why the call ended.
+            // Rejects with the caller's abort reason, as `fetch` does, not with
+            // the failure being backed off from.
             if ((await sleep(delayMs, policy.signal)) === "aborted") throw policy.signal?.reason;
         }
     }
-    // Unreachable while `retries >= 0`, since the loop always returns or
-    // throws. A typed backstop rather than a thrown `undefined`.
+    // Unreachable: with `retries >= 0` the loop always returns or throws.
     throw lastErr instanceof Error ? lastErr : new Error("retry: no attempt was made");
 }
 
@@ -117,8 +111,8 @@ function asError(reason: unknown): Error | undefined {
 }
 
 /**
- * Settle every task, reporting each rejection to `onError`, so one failure (a backend that fails to
- * shut down) does not leave the others unsettled.
+ * Settle every task, reporting each rejection to `onError`, so one failure
+ * does not leave the others unsettled.
  */
 export async function settleAll(
     tasks: readonly unknown[],
@@ -128,8 +122,6 @@ export async function settleAll(
         if (outcome.status === "rejected") onError(outcome.reason);
     }
 }
-
-// --- serialisation -----------------------------------------------------------
 
 /** Runs operations one at a time, in the order they were handed over. */
 export interface Mutex {
@@ -141,14 +133,11 @@ export interface Mutex {
 }
 
 /**
- * A promise-chain mutex.
- *
- * Guards check-then-act across an `await` on shared state (read a balance then
- * top up, read a snapshot then persist it, read a cursor then advance it),
+ * A promise-chain mutex, for check-then-act across an `await` on shared state,
  * where overlapping callers would interleave and the later write would win.
  *
- * A failed operation settles the chain without poisoning it: the next caller
- * runs regardless, and the error still reaches whoever queued the failure.
+ * A failed operation does not poison the chain: the next caller runs
+ * regardless, and the error reaches whoever queued the failure.
  */
 export function createMutex(): Mutex {
     let tail: Promise<unknown> = Promise.resolve();
@@ -167,10 +156,8 @@ interface KeyedMutex<K> {
 }
 
 /**
- * Independent mutexes keyed by `K`.
- *
- * For partitioned rather than global state (e.g. one ephemeral payer per host),
- * so unrelated keys proceed in parallel.
+ * Independent mutexes keyed by `K`, for partitioned state: unrelated keys
+ * proceed in parallel.
  */
 export function createKeyedMutex<K>(): KeyedMutex<K> {
     const byKey = new Map<K, Mutex>();
@@ -186,8 +173,6 @@ export function createKeyedMutex<K>(): KeyedMutex<K> {
     };
 }
 
-// --- cancellation ------------------------------------------------------------
-
 /** A controller chained to a parent signal. See {@link linkAbort}. */
 export interface LinkedAbort {
     /** Aborts when this controller aborts, or when the parent does. */
@@ -197,11 +182,9 @@ export interface LinkedAbort {
     /** Detach from the parent. Call on every exit path. */
     dispose(): void;
     /**
-     * Scope-exit release: detach *and* abort.
-     *
-     * Unlike {@link LinkedAbort.dispose}, which only detaches. Leaving a scope
-     * ends the work, so the speculative tail stops too; `dispose` is for a
-     * caller that wants the controller live after unlinking.
+     * Scope-exit release: detaches and aborts, since leaving the scope ends the
+     * work. {@link LinkedAbort.dispose} only detaches and leaves the controller
+     * live.
      */
     [Symbol.dispose](): void;
 }
@@ -209,13 +192,11 @@ export interface LinkedAbort {
 /**
  * An `AbortController` that also aborts when `parent` does.
  *
- * Not `AbortSignal.any`, because the parent routinely outlives the work: a
- * wallet-lifetime signal handed to hundreds of chunk fetches accumulates a
- * listener per call, which Node warns about past ten. `dispose` makes the
- * detach explicit.
+ * Not `AbortSignal.any`: a parent that outlives the work would accumulate a
+ * listener per call, so the detach is explicit (`dispose`).
  *
- * A parent that has *already* aborted is honoured immediately, since a listener
- * added to it would never fire.
+ * An already-aborted parent is honoured immediately, since a listener added to
+ * it never fires.
  */
 export function linkAbort(parent?: AbortSignal | undefined): LinkedAbort {
     const ctrl = new AbortController();
@@ -237,8 +218,6 @@ export function linkAbort(parent?: AbortSignal | undefined): LinkedAbort {
     };
 }
 
-// --- memoisation -------------------------------------------------------------
-
 /** A lazily-built value, rebuilt on demand. See {@link memoAsync}. */
 export interface AsyncMemo<T> {
     /** Build on first call; every later call joins the same promise. */
@@ -246,10 +225,8 @@ export interface AsyncMemo<T> {
     /** The built value, if it is ready. Never triggers a build. */
     peek(): T | undefined;
     /**
-     * The in-flight or completed build, if one has started. Never starts one.
-     *
-     * For teardown that must not start a build but must wait for one already
-     * under way rather than leaking it.
+     * The in-flight or completed build, if one has started. Never starts one,
+     * so teardown can await a build already under way without triggering one.
      */
     inFlight(): Promise<T> | undefined;
     /** Discard what was built, so the next `get()` builds again. */
@@ -257,11 +234,8 @@ export interface AsyncMemo<T> {
 }
 
 /**
- * Memoise an async build, evicting on rejection.
- *
- * A plain `promise ??= build()` caches the rejection, so one transient failure
- * (an `EMFILE` reading a wasm file, a 502 fetching it, an RPC error) would be
- * replayed to every later caller in the realm with no way to recover.
+ * Memoise an async build, evicting on rejection. A plain `promise ??= build()`
+ * caches the rejection and replays one transient failure to every later caller.
  */
 export function memoAsync<T>(build: () => Promise<T>): AsyncMemo<T> {
     let pending: Promise<T> | undefined;
@@ -323,11 +297,9 @@ export function memoAsyncByKey<K, T>(): KeyedAsyncMemo<K, T> {
 }
 
 /**
- * {@link memoAsync} whose value expires `ttlMs` after it was built.
- *
- * For data a server may change but that is too costly to fetch per call (a
- * relayer's `/chains`). Concurrent callers share one in-flight build; a failed
- * build is not cached. `now` is injectable for tests.
+ * {@link memoAsync} whose value expires `ttlMs` after it was built. Concurrent
+ * callers share one in-flight build; a failed build is not cached. `now` is
+ * injectable for tests.
  */
 export function ttlCache<T>(
     build: () => Promise<T>,

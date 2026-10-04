@@ -1,14 +1,13 @@
 // Deposit submission and cancellation.
 //
-// The three submit paths (witness / native / authorized) each encode their own
-// calldata (viem infers the argument tuple from the ABI, so a struct that
-// drifts from the contract is a compile error), then share the send/receipt/
-// log-extraction tail.
+// The three submit paths (witness, native, authorized) each encode their own
+// calldata, then share the send, receipt and log-extraction tail. viem infers
+// the argument tuple from the ABI, so a struct that drifts from it is a compile
+// error.
 //
-// Two of them go to the pool. The native one goes to `NativeAdapter`: MASP is
-// ERC-20 only, so the adapter wraps `msg.value`, escrows the WETH under its
-// own name, and returns the excess. The escrow is adapter-owned, so the native
-// cancel is also a separate call.
+// The witness and authorized paths go to the pool. The native one goes to
+// `NativeAdapter`, which owns the resulting escrow, so the native cancel is a
+// separate call too; see `NATIVE_ADAPTER_ABI`.
 
 import {
     encodeFunctionData,
@@ -43,7 +42,7 @@ interface SubmitBase {
 }
 
 /**
- * `MASP.deposit(d, sig, aux, feeAux)` — Permit2 witness, one signature per
+ * `MASP.deposit(d, sig, aux, feeAux)`: Permit2 witness, one signature per
  * deposit. The signature is single-token or a two-token batch according to
  * `d.feeAssetId`; `sig.maxFee` is `0n` for the former.
  */
@@ -71,19 +70,18 @@ export function submitDeposit(
 }
 
 /**
- * `NativeAdapter.depositNative(d, aux)` with `msg.value = value`.
+ * `NativeAdapter.depositNative(d, aux, feeAux)` with `msg.value = value`.
  *
  * `deposit.payer` must be the adapter: it wraps the coin and the pool pulls
- * against *its* allowance, so a request naming the sender reverts
- * `AdapterNotPayer`. `deposit.recipient` and `outCm` still bind the note to
+ * against its allowance, so a request naming the sender reverts
+ * `AdapterNotPayer`. `deposit.recipient` and `inner` still bind the note to
  * the depositor, so the adapter learns nothing the pool does not.
  *
  * Overshooting `value` is safe: the adapter unwraps and returns whatever the
- * pool did not pull, so callers need not mirror the fee math.
+ * pool did not pull.
  */
-// `async` so a missing adapter rejects rather than throwing synchronously:
-// every other path here fails through the returned promise, and a caller
-// using `.catch()` would otherwise miss this one.
+// `async` so a missing adapter rejects through the returned promise, like every
+// other failure here, rather than throwing synchronously.
 export async function submitDepositNative(
     ctx: ViemCtx,
     args: SubmitBase & { value: bigint },
@@ -97,7 +95,7 @@ export async function submitDepositNative(
     return sendAndExtractDepositId(ctx, adapter, data, args.onSent, args.value);
 }
 
-/** `MASP.depositAuthorized(d, aux)` — pulls against a signed Permit2 window. */
+/** `MASP.depositAuthorized(d, aux, feeAux)`: pulls against a signed Permit2 window. */
 export function submitDepositAuthorized(ctx: ViemCtx, args: SubmitBase): Promise<DepositSubmitted> {
     const data = encodeFunctionData({
         abi: MASP_ABI,
@@ -116,8 +114,7 @@ async function sendAndExtractDepositId(
 ): Promise<DepositSubmitted> {
     const tx = value === undefined ? { to, data } : { to, data, value };
     const { txHash, receipt } = await sendAndConfirm(ctx, tx, "deposit", onSent, "onSent");
-    // Emitted by the pool on every path, including the adapter's, which
-    // escrows through `depositAuthorized`; the id is the pool's.
+    // Emitted by the pool on every path, the adapter's included.
     const event = poolEvent(ctx, txHash, receipt, "DepositEscrowed", "deposit");
     const escrowed = await depositEscrowedRecord(ctx, event.args, receipt.blockNumber);
     return {
@@ -129,11 +126,10 @@ async function sendAndExtractDepositId(
 }
 
 /**
- * The pool's `eventName` log in a mined receipt, the first `match` accepts. Filtered to the pool's
- * address: nothing else may speak for an escrow.
+ * The first `eventName` log in a mined receipt that the pool itself emitted and `match` accepts.
+ * A log of the same shape from any other address is ignored.
  *
- * @throws {TxMiningError} when absent, carrying the hash: the transaction mined, so the caller
- * needs it to inspect what happened.
+ * @throws {TxMiningError} when absent, carrying the hash of the mined transaction.
  */
 function poolEvent<N extends "DepositEscrowed" | "DepositCanceled">(
     ctx: ViemCtx,
@@ -153,7 +149,7 @@ function poolEvent<N extends "DepositEscrowed" | "DepositCanceled">(
 }
 
 /**
- * `MASP.cancelDeposit` — refunds the digest-bound payer after `cancelDelay`.
+ * `MASP.cancelDeposit`: refunds the digest-bound payer after `cancelDelay`.
  *
  * For an adapter-owned escrow use {@link cancelDepositNative}: the pool would
  * refund the adapter, which holds the only record of who funded it.
@@ -166,30 +162,29 @@ export async function cancelDeposit(
     const data = encodeFunctionData({
         abi: MASP_ABI,
         functionName: "cancelDeposit",
-        // The contract keeps only `keccak(deposit)` per escrow, so the caller
-        // supplies every field and the contract checks them against that
-        // digest. They come off the `DepositEscrowed` log.
+        // The pool stores only a digest per escrow, so the caller resupplies
+        // the preimage, taken from the `DepositEscrowed` log.
         args: [
             id,
             // `uint48`, so viem wants a JS number. Lossless: 2^48 is within
             // the safe-integer range.
             Number(inputs.publicIn),
-            hex(inputs.cm),
-            [inputs.cvDep[0], inputs.cvDep[1]],
+            hex(inputs.inner),
             inputs.publicAssetId,
             inputs.feeBpsAtSubmit,
             hex(inputs.payer),
             inputs.submittedAt,
-            // The relayer's leaf is bound into the same digest, so cancel has
-            // to resupply it too, `feeAssetId` included.
             feeNoteTuple(inputs),
+            // The refund cap closes the preimage. For a yield asset it is the
+            // amount the event published, which cannot be recomputed here.
+            inputs.pulled,
         ],
     });
     return confirmCancel(ctx, id, { to: ctx.maspAddress, data });
 }
 
 /**
- * `NativeAdapter.cancelNative` — cancels an adapter-owned escrow and forwards
+ * `NativeAdapter.cancelNative`: cancels an adapter-owned escrow and forwards
  * the refund as native coin to whoever funded it.
  *
  * Takes no `payer`: the adapter is the payer, and it supplies its own address
@@ -207,43 +202,39 @@ export async function cancelDepositNative(
         args: [
             id,
             Number(inputs.publicIn),
-            hex(inputs.cm),
-            [inputs.cvDep[0], inputs.cvDep[1]],
+            hex(inputs.inner),
             inputs.publicAssetId,
             inputs.feeBpsAtSubmit,
             inputs.submittedAt,
-            // The relayer's leaf is bound into the same digest, so cancel has
-            // to resupply it too, `feeAssetId` included.
             feeNoteTuple(inputs),
+            // Forwarded unchanged to the pool's digest check.
+            inputs.pulled,
         ],
     });
     return confirmCancel(ctx, id, { to: adapter, data });
 }
 
 /**
- * `PubInputs.FeeNote`: the relayer leaf as the escrow digest hashes it.
+ * `PubInputs.FeeNote`: the relayer leaf as the escrow digest hashes it, which a
+ * cancel resupplies with the rest of the preimage.
  *
- * One struct, not flattened fields: a `FeeNote` of static members encodes
- * identically either way, but the selector does not, so a flattened signature
- * calls a function that does not exist.
+ * Passed as one struct: its static members encode the same flattened, but the
+ * selector differs, so a flattened signature calls a function that does not
+ * exist.
  */
 function feeNoteTuple(inputs: Omit<CancelDepositInputs, "payer">) {
     return {
-        // `uint48`, so viem wants a JS number. Lossless: 2^48 is within the
-        // safe-integer range.
+        // `uint48`, a JS number to viem, as `publicIn` is.
         feeIn: Number(inputs.feeIn),
         feeAssetId: inputs.feeAssetId,
-        feeCm: hex(inputs.feeCm),
-        feeCvDep: [inputs.feeCvDep[0], inputs.feeCvDep[1]] as [bigint, bigint],
+        feeInner: hex(inputs.feeInner),
     };
 }
 
 /**
- * Send a cancel and read what it refunded off the pool's `DepositCanceled`
- * log.
- *
- * Matched to this id: on the native path the adapter emits its own events in
- * the same receipt, and only the pool's carries the per-token split.
+ * Send a cancel and read what it refunded off the pool's `DepositCanceled` log
+ * for `id`. On the native path the adapter emits its own events in the same
+ * receipt; only the pool's carries the per-token split.
  */
 async function confirmCancel(
     ctx: ViemCtx,

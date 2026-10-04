@@ -1,7 +1,5 @@
-// Web-Crypto-backed CSPRNG helpers. Uses rejection sampling for uniform
-// field elements and non-zero subgroup scalars.
-//
-// `requireWebCrypto` is the single availability guard for the whole SDK.
+// Web-Crypto-backed CSPRNG helpers. Field elements and subgroup scalars are
+// rejection-sampled.
 
 import { EnvironmentError, InvalidArgumentError } from "../errors/config.js";
 import { fromBeBytes, fromLeBytes } from "./bytes.js";
@@ -36,9 +34,8 @@ export function randomBytes(n: number): Uint8Array {
  * Uniform Fr (BN254 scalar field), non-zero.
  *
  * The mask keeps the draw in `[0, 2^254)`, which must stay >= `BN254_FR` or the
- * rejection loop would sample a truncated range instead of the whole field.
- * `MASK_BOUNDS` in `random.test.ts` pins that. It is otherwise free: it only
- * lifts the acceptance rate to ~76%.
+ * rejection loop would sample a truncated range; `MASK_BOUNDS` in
+ * `random.test.ts` pins that. The mask only raises the acceptance rate.
  */
 export function randomFr(): Field {
     for (;;) {
@@ -77,24 +74,21 @@ const SPAN32 = 2 ** 32;
  *
  * Rejection-sampled rather than folding with `%` or scaling a float: both
  * spread a fixed number of outcomes over `n` buckets, which are equal only when
- * `n` divides that number. The resulting bias is small but would skew slot
- * permutations, whose purpose is to remove ordering bias.
+ * `n` divides that number.
  *
- * `bytes` is injectable so a test can force a permutation; it must return
- * exactly `k` bytes, like {@link randomBytes}.
+ * `bytes` is injectable for tests; it must return exactly `k` bytes, like
+ * {@link randomBytes}.
  */
 export function randomBelow(n: number, bytes: (k: number) => Uint8Array = randomBytes): number {
-    // The upper bound is `SPAN32`, not `Number.MAX_SAFE_INTEGER`: a draw is
-    // four bytes, so a larger `n` would make `SPAN32 % n === SPAN32`, leaving
-    // `limit === 0` and a loop that never accepts a draw.
+    // A draw is four bytes: `n > SPAN32` would make `SPAN32 % n === SPAN32`,
+    // leaving `limit === 0` and a loop that never accepts a draw.
     if (!Number.isInteger(n) || n < 1 || n > SPAN32) {
         throw new InvalidArgumentError(`randomBelow: n must be an integer in [1, 2^32], got ${n}`, {
             argument: "n",
         });
     }
     // Largest multiple of `n` inside a 32-bit draw. Values at or above it fall
-    // in the short final bucket and are redrawn. Always four bytes, so the
-    // rejection rate is at most n/2^32.
+    // in the short final bucket and are redrawn.
     const limit = SPAN32 - (SPAN32 % n);
     for (;;) {
         const draw = bytes(4);
@@ -111,10 +105,8 @@ export function randomBelow(n: number, bytes: (k: number) => Uint8Array = random
 }
 
 /**
- * A uniformly random permutation of `items`, as a new array.
- *
- * Downward Fisher–Yates: every one of the `n!` orderings is equally likely,
- * provided `pick` is unbiased (hence the {@link randomBelow} default).
+ * A uniformly random permutation of `items`, as a new array (downward
+ * Fisher–Yates).
  *
  * `pick(k)` must return a uniform integer in `[0, k)`; tests inject one to pin
  * a specific permutation.
@@ -129,24 +121,18 @@ export function shuffled<T>(items: readonly T[], pick: (n: number) => number = r
 }
 
 /**
- * A local note id: 32 hex chars, 128 bits of randomness.
+ * A local note id: 32 hex chars, 128 bits of randomness. Never leaves the
+ * wallet.
  *
  * The id keys the nullifier memo, the spent-set passed to `markSpent`, and the
- * `only` filter in selection, so a collision retires an unrelated note as spent
- * until the next rescan. 16 bytes makes collisions negligible; 4 bytes would
- * collide with ~1% probability at 10k notes and ~69% at 100k, counts that
- * denomination decomposition and change notes reach. Never leaves the wallet.
+ * `only` filter in selection, so a collision would retire an unrelated note as
+ * spent until the next rescan.
  */
 export function noteId(): string {
     return randomHex(16);
 }
 
-/**
- * `n` random bytes as bare lowercase hex (`2n` characters, no `0x`).
- *
- * The one way the SDK mints random identifiers: note ids, idempotency keys and
- * EIP-3009 nonces (prefixed by the caller).
- */
+/** `n` random bytes as bare lowercase hex (`2n` characters, no `0x`). */
 export function randomHex(n: number): string {
     return bytesToBareHex(randomBytes(n));
 }

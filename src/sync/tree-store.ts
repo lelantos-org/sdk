@@ -1,18 +1,19 @@
 // Local Merkle tree store: syncs commitment chunks from the server and computes Merkle paths
 // without revealing which note is being spent.
 //
-// Leaves arrive pre-hashed as `Poseidon(TAG_LEAF, cm, cv_dep_x, cv_dep_y)`, so `Poseidon` is used
-// only for internal nodes. `verifyRoot` checks the server-provided leaves against the chain root.
+// A leaf is a note commitment, `cm = Poseidon(TAG_CM, asset·2^64 + value, inner)`, and arrives as
+// the feed's `leafHash`, so `Poseidon` is used only for internal nodes. The pool publishes a spend
+// output's `cm` but only the `inner` of a deposit, whose leaf the feed computes as the batch
+// circuit does. `verifyRoot` checks the served leaves against the mirrored chain root.
 //
 // Paging lives in `./chunk-feed.js`; this file keeps the leaves in order.
 //
-// Persistence: pass a `TreePersistence` to `TreeStore.withPersistence`; `load` runs once at
-// startup, `save` after each successful `sync()` that adds leaves.
+// Persistence: `TreeStore.withPersistence` runs `load` once at startup and `save` after each
+// successful `sync()` that holds unsaved leaves.
 //
-// Concurrency: `sync`, `reset`, `syncVerified` and `syncVerifiedSnapshot` share one lock. A reset
-// racing a paging sync would otherwise hand the sync an empty tree mid-page (a spurious
-// `WireFormatError` for a non-contiguous chunk), and a spend could read a root and paths from two
-// different trees.
+// Concurrency: `sync`, `reset`, `syncVerified` and `syncVerifiedSnapshot` share one lock.
+// Otherwise a reset racing a paging sync would hand the sync an empty tree mid-page (a spurious
+// `WireFormatError`), and a spend could read a root and paths from two different trees.
 
 import { createMutex } from "../core/async.js";
 import type { Field, Poseidon } from "../crypto/index.js";
@@ -41,10 +42,8 @@ export interface TreeStoreState {
     leaves: bigint[];
     syncedCount: number;
     /**
-     * Memoized internal Merkle nodes.
-     *
-     * Optional: a state without them loads but incurs a full ~350K-hash rebuild on the first
-     * `root()`/`getPath()` after restore.
+     * Memoized internal Merkle nodes. Optional: a state without them loads, but the first
+     * `root()`/`getPath()` after restore rebuilds every node.
      */
     nodes?: MerkleNode[] | undefined;
 }
@@ -89,10 +88,8 @@ export interface TreePersistence {
     load(): Promise<TreeStoreState | null>;
     save(state: TreeStoreState): Promise<void>;
     /**
-     * Discard every record written for this tree.
-     *
-     * Required because {@link TreeStore.reset} depends on it: otherwise `load()` would restore the
-     * discarded tree on the next start and the rebuild would repeat on every spend.
+     * Discard every record written for this tree. {@link TreeStore.reset} depends on it: otherwise
+     * `load()` would restore the discarded tree on the next start and the rebuild would repeat.
      */
     clear(): Promise<void>;
 }
@@ -114,16 +111,13 @@ export interface CommitmentFeed {
  *
  * `mirrorRoot` comes from the commitment server, which mirrors the chain. A lagging mirror or one
  * built at the wrong depth can report a root the chain never held, so agreement with it is
- * sufficient but not necessary for `spendable`.
- *
- * The leaf counts indicate how the trees disagree, which determines the repair; see
- * {@link TreeStore.reset}.
+ * sufficient but not necessary for `spendable`. The leaf counts indicate how the trees disagree,
+ * which determines the repair; see {@link TreeStore.reset}.
  */
 export interface RootCheck {
     /**
-     * Whether the pool would accept a proof against the local tree.
-     *
-     * True when the roots agree, or when they differ but the chain accepts the local root.
+     * Whether the pool would accept a proof against the local tree: the roots agree, or they
+     * differ but the chain accepts the local root.
      */
     spendable: boolean;
     localRoot: Field;
@@ -244,12 +238,10 @@ export class TreeStore {
         );
 
         // Saved only after the sync succeeds, and under the lock, so saves land in order and a
-        // failed save can never replace the error of a failed sync. A mid-sync failure keeps the
-        // leaves already folded in memory; the next successful sync persists them, which is why
-        // this compares against what was last saved rather than against `startCount`.
-        //
-        // Gated on the cursor, not `chunksFetched`: a steady-state poll re-fetches the tail chunk
-        // without adding leaves, and serialising a 1M-leaf tree then is wasted work.
+        // failed save cannot replace the error of a failed sync. A mid-sync failure keeps its
+        // leaves in memory and the next successful sync persists them, hence the comparison
+        // against `savedCount` rather than `startCount`. A steady-state poll re-fetches the tail
+        // chunk without adding leaves and saves nothing.
         if (this.syncedCount !== this.savedCount) await this.persist();
 
         return {
@@ -263,9 +255,8 @@ export class TreeStore {
     /** Write the current tree to persistence, if configured. Caller holds the lock. */
     private async persist(): Promise<void> {
         if (!this.persistence) return;
-        // Build the internal nodes before snapshotting. The node cache fills lazily, so saving
-        // without this would persist an empty cache; it also moves the hashing off the first
-        // spend and into the sync.
+        // The node cache fills lazily, so the internal nodes are built before snapshotting;
+        // otherwise an empty cache would be persisted.
         this.tree.root();
         try {
             await this.persistence.save(this.saveState());
@@ -288,10 +279,9 @@ export class TreeStore {
     }
 
     /**
-     * Check the locally built root against the mirrored chain root.
-     *
-     * This check makes trusting the server's `leafHash` sound: a wrong leaf produces a wrong root,
-     * which surfaces here rather than as a rejected transaction.
+     * Check the locally built root against the mirrored chain root. This makes trusting the
+     * server's `leafHash` sound: a wrong leaf produces a wrong root, which surfaces here rather
+     * than as a rejected transaction.
      *
      * Reports observations only; {@link syncVerified} acts on them.
      */
@@ -308,20 +298,15 @@ export class TreeStore {
     }
 
     /**
-     * Sync, then repair until the local tree matches the chain.
+     * Sync, then repair until the local tree matches the chain. Passes, in increasing cost:
      *
-     * Passes, in increasing cost:
-     *
-     *   1. Sync and check; sufficient in the ordinary case.
-     *   2. If the mirror has more leaves, the local tree lags and another sync appends the rest.
-     *      Otherwise re-read the tree state, since an equal count with a differing root also
-     *      results from `/v1/tree-state` and the chunk feed being read at slightly different
-     *      times.
-     *   3. If `isKnownRoot` is supplied, ask the pool directly, which is authoritative. If it
-     *      accepts the local root, the mirror is at fault and the tree is spendable.
+     *   1. Sync and check.
+     *   2. If the mirror has more leaves, sync again to append the rest. Otherwise re-read the
+     *      tree state: an equal count with a differing root also results from `/v1/tree-state`
+     *      and the chunk feed being read at different times.
+     *   3. If `isKnownRoot` is supplied, ask the pool, which is authoritative. If it accepts the
+     *      local root, the mirror is at fault and the tree is spendable.
      *   4. Rebuild from leaf 0, since syncing cannot repair a diverged tree; see {@link reset}.
-     *
-     * Only pass 4 is expensive, and it runs only after the others fail.
      */
     async syncVerified(opts: TreeVerifyOpts = {}): Promise<RootCheck> {
         return this.lock.run(() => this.syncVerifiedUnlocked(opts));
@@ -329,10 +314,10 @@ export class TreeStore {
 
     /**
      * {@link syncVerified}, then `read` against the verified tree, with no sync or reset in
-     * between.
+     * between. `read` is skipped when the tree is not spendable.
      *
-     * For a spend, which needs its Merkle root and every input's path taken from one tree: read
-     * separately, a concurrent sync or reset could change the root between them.
+     * A spend needs its Merkle root and every input's path from one tree; read separately, a
+     * concurrent sync or reset could change the root between them.
      */
     async syncVerifiedSnapshot<T>(
         opts: TreeVerifyOpts,
@@ -376,13 +361,11 @@ export class TreeStore {
     /**
      * Discard the local tree and its persisted state so the next `sync()` rebuilds from leaf 0.
      *
-     * For trees that syncing cannot repair. `sync()` only appends from `chunkOf(syncedCount)`, so a
+     * For trees that syncing cannot repair: `sync()` only appends from `chunkOf(syncedCount)`, so a
      * prefix that diverged from the chain (server re-index, pool redeployed under the same chain
      * id, partially written restore) stays wrong, as does a local tree with more leaves than the
-     * chain.
-     *
-     * Expensive: every leaf is re-fetched and re-hashed. Use only after an ordinary resync fails,
-     * as {@link syncVerified} does.
+     * chain. Every leaf is re-fetched and re-hashed, so use it only after an ordinary resync
+     * fails, as {@link syncVerified} does.
      */
     async reset(): Promise<void> {
         return this.lock.run(() => this.resetUnlocked());
@@ -397,10 +380,8 @@ export class TreeStore {
 }
 
 /**
- * Ask the pool whether it accepts `root`, treating any failure as "no".
- *
- * A missing adapter or a failed read leaves the mirror's result in place, and the caller reports a
- * typed error that is more informative than the RPC failure.
+ * Ask the pool whether it accepts `root`. A missing adapter or a failed read counts as "no",
+ * which leaves the mirror's result in place.
  */
 async function vouchedFor(ask: IsKnownRoot | undefined, root: Field): Promise<boolean> {
     if (!ask) return false;
@@ -414,7 +395,7 @@ async function vouchedFor(ask: IsKnownRoot | undefined, root: Field): Promise<bo
     }
 }
 
-/** Consistent mismatch fields for log lines and error contexts. */
+/** Mismatch fields for log lines. */
 function counts(check: RootCheck): Record<string, string | number> {
     return {
         localRoot: check.localRoot.toString(),

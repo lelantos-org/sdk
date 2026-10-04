@@ -1,44 +1,30 @@
 // The relayer's fee, as an output note.
 //
-// A public on-chain payment (e.g. an ERC-20 transfer) would link the payer to
-// the relayed transaction. The fee is instead an output note addressed to the
-// relayer's shielded address, carried in the spend it pays for. The relayer
-// holds only the incoming viewing key for that address: it can recognise the
-// note and read its value, but cannot spend it and learns nothing about the
-// other outputs.
+// A public on-chain payment would link the payer to the relayed transaction, so the fee is an
+// output note addressed to the relayer's shielded address, carried in the spend it pays for.
+// The relayer holds only the incoming viewing key for that address: it can recognise the note
+// and read its value, but cannot spend it and learns nothing about the other outputs.
 //
-// Three constraints apply:
+// Constraints:
 //
-//   * **A fee consumes an output slot.** Arity is fixed by the circuit
-//     (`nOut`), so the fee replaces a change slot rather than extending the
-//     transaction.
-//   * **The fee comes out of change.** `buildSpend` enforces
-//     `sumIn === publicOut + sumOut` and the fee note is part of `sumOut`.
-//     Adding one without deducting its value from change fails that check;
-//     deducting it from the *recipient's* note passes the check and
-//     short-pays the recipient. So:
-//
-//         const changeValue = selection.sum - sendValue - feeValue;
-//         const change = splitChange(pk, asset, changeValue, nOut - 2);
-//
-//     The three arrays are positional and `buildSpend` checks only that their
-//     lengths match, so the fee's entry must land at the same index in all
-//     three. The wallet paths describe each slot as a single `OutputSlotSpec`
-//     (`wallet/tx/outputs.ts`) and unzip at the `buildSpend` boundary so that
-//     index cannot drift.
-//
-//     The fee must not be at a fixed index. Slot order is the only remaining
-//     distinguisher between outputs (every other per-slot public signal is a
-//     commitment or a blinded point), so a fixed position would reveal which
-//     commitment is the relayer's. The wallet shuffles slots; a caller using
-//     `buildSpend` directly should shuffle too. The relayer trial-decrypts
-//     every output slot to find its payment.
-//   * **The fee's asset need not be the spend's.** The circuit conserves value
-//     per asset rather than in aggregate (`PerAssetValueBalance`), so one proof
-//     may carry the asset being moved alongside a second asset paying the
-//     relayer. That costs two extra slots (an input note of the fee asset and
-//     an output for its change), so the shape must be wide enough. The relayer
-//     must also accept the asset: `/chains` publishes the list, and
+//   * A fee consumes an output slot. Arity is fixed by the circuit (`nOut`), so the fee takes
+//     a change slot.
+//   * The fee comes out of change. `buildSpend` enforces per-asset balance and the fee note
+//     counts as an output: adding one without deducting its value from change fails that
+//     check, and deducting it from the recipient's note passes it and short-pays the recipient.
+//   * The fee's entry must sit at the same index in `outputs`, `outputRecipients` and
+//     `outputRandomness`; `buildSpend` checks only that their lengths match. The wallet
+//     describes each slot as one `OutputSlotSpec` (`wallet/tx/outputs.ts`) and unzips at the
+//     `buildSpend` boundary.
+//   * The fee must not sit at a fixed index. Slot order is the only distinguisher between
+//     outputs (every other per-slot public signal is a commitment or a blinded point), so a
+//     fixed position would reveal which commitment is the relayer's. The wallet shuffles
+//     slots and a direct `buildSpend` caller should too; the relayer trial-decrypts every
+//     output slot to find its payment.
+//   * The fee's asset need not be the spend's. The circuit conserves value per asset
+//     (`PerAssetValueBalance`), so one proof may carry a second asset paying the relayer, at
+//     the cost of two extra slots: an input note of the fee asset and an output for its
+//     change. The relayer must also accept the asset: `/chains` publishes the list, and
 //     `feeOutputFromEstimate` throws `FeeAssetNotQuotedError` on one it did not quote.
 
 import { assetId } from "../core/brand.js";
@@ -57,21 +43,18 @@ export interface FeeOutputArgs {
     J: Jubjub;
     /** The relayer's bech32m address, from `/chains` or `/v1/spend/estimate`. */
     relayerAddress: string;
-    /**
-     * MASP asset id of the fee note. May differ from the asset the spend moves;
-     * see the file header.
-     */
+    /** MASP asset id of the fee note. May differ from the asset the spend moves. */
     asset: Field;
     /**
-     * Note value in **circuit** units: `RelayerFeeQuote.circuitAmount`, which the
-     * relayer rounds up from its base-unit quote.
+     * Note value in circuit units: `RelayerFeeQuote.circuitAmount`, which the relayer rounds
+     * up from its base-unit quote.
      */
     circuitAmount: Field;
 }
 
 /**
- * One output slot's worth of fee: the note, its recipient, and its randomness,
- * in the three parallel arrays `buildSpend` takes.
+ * The fee's output slot: its note, recipient and randomness, one entry for each of the three
+ * parallel arrays `buildSpend` takes.
  *
  * @internal
  */
@@ -84,16 +67,16 @@ export interface FeeOutput {
 /**
  * Build the fee slot for a spend, from an address and an amount.
  *
- * Prefer {@link feeOutputFromEstimate}, which reads both from a relayer's
- * estimate. Use this when the amount comes from elsewhere, such as a cached
- * quote, a test, or a relayer reached over another transport.
+ * Prefer {@link feeOutputFromEstimate}, which reads both from a relayer's estimate. Use this
+ * when the amount comes from elsewhere, such as a cached quote, a test, or a relayer reached
+ * over another transport.
  *
- * `rho` is set only to satisfy the `Note` shape: `buildSpend` overwrites every
- * output's `rho` with `Poseidon(TAG_RHO, nf0, index)`, which binds the note to
- * this spend and prevents a fee note from being replayed into another.
+ * `rho` is set only to satisfy the `Note` shape: `buildSpend` overwrites every output's `rho`
+ * with `Poseidon(TAG_RHO, nf0, index)`, which binds the note to this spend and prevents a fee
+ * note from being replayed into another.
  *
- * Throws on a zero value: a zero-value output is treated as a self-pad and
- * discarded by every scanner, so it would pay nothing.
+ * Throws on a non-positive value: a zero-value output is treated as a self-pad and discarded
+ * by every scanner, so it would pay nothing.
  */
 export function feeOutput({ J, relayerAddress, asset, circuitAmount }: FeeOutputArgs): FeeOutput {
     if (circuitAmount <= 0n) {
@@ -128,11 +111,9 @@ export interface FeeOutputFromEstimateArgs {
 }
 
 /**
- * The error for an asset the relayer quoted no payable amount for.
- *
- * Lists only payable assets in `accepted`, since the caller's remedy is a
- * different fee asset and an asset quoted without a `circuitAmount` (or with no
- * registered id) is not payable.
+ * The error for an asset the relayer quoted no payable amount for. `accepted` lists only
+ * payable assets, since the caller's remedy is a different fee asset: one quoted without a
+ * positive `circuitAmount` or a registered id is left out.
  *
  * @internal
  */
@@ -148,16 +129,13 @@ function feeAssetNotQuoted(
 }
 
 /**
- * The fee slot for a spend, read from a relayer's estimate.
+ * The fee slot for a spend, read from a relayer's estimate: the address from
+ * `shieldedFeeAddress` and the amount from the `fees[]` entry whose `assetId` is `asset`.
  *
- * Preferred over {@link feeOutput}: it takes the address and the amount from
- * their respective fields and selects the quote from `fees[]` by `assetId`.
- *
- * Returns `null` when the relayer does not charge on this chain
- * (`shieldedFeeAddress` absent), in which case the spend needs no fee slot.
- * Throws `FeeAssetNotQuotedError` when it charges but cannot take this asset:
- * such a spend cannot be relayed, and omitting the fee would only surface as a
- * 402 from the submit call.
+ * Returns `null` when the relayer does not charge on this chain (`shieldedFeeAddress`
+ * absent), in which case the spend needs no fee slot. Throws `FeeAssetNotQuotedError` when it
+ * charges but cannot take this asset: such a spend cannot be relayed, and omitting the fee
+ * would only surface as a 402 from the submit call.
  */
 export function feeOutputFromEstimate({
     J,
@@ -173,17 +151,14 @@ export function feeOutputFromEstimate({
 }
 
 /**
- * The fee `estimate` quotes for paying in `asset`, in circuit units.
- *
- * The one lookup of an asset's entry in a relayer quote, shared by spends and
- * deposits. Throws `FeeAssetNotQuotedError` when the relayer quoted no payable
+ * The fee `estimate` quotes for paying in `asset`, in circuit units; the lookup shared by
+ * spends and deposits. Throws `FeeAssetNotQuotedError` when the relayer quoted no payable
  * amount for it: a spend or deposit paying in that asset would be refused.
  *
- * A quote of zero is not payable. Callers reach this only when the relayer
- * charges, and a zero-value fee note is not a payment: a deposit's zero-value fee
- * leaf carries no fee asset, so the relayer prices its flush in the deposit
- * asset instead and never flushes it, and a spend's is refused at submit. A
- * relayer that rounds a sub-unit cost down quotes exactly this.
+ * A quote of zero (a sub-unit cost rounded down) is not payable. Callers reach this only when
+ * the relayer charges, and a zero-value fee note is not a payment: a spend carrying one is
+ * refused at submit, and a deposit's zero-value fee leaf carries no fee asset, so the relayer
+ * prices its flush in the deposit asset and never flushes it.
  *
  * @internal
  */
@@ -200,7 +175,7 @@ export function quotedFeeAmount(
     return BigInt(quote.circuitAmount);
 }
 
-/** Whether a quoted circuit amount is one a fee note can actually pay: present and above zero. */
+/** Whether a quoted circuit amount is payable: present and above zero. */
 function payable(circuitAmount: string | undefined): circuitAmount is string {
     return circuitAmount !== undefined && BigInt(circuitAmount) > 0n;
 }

@@ -37,7 +37,11 @@ async function getProver(
         // must be applied here as well.
         if (setup.cacheArtifacts === false) configureArtifactCache(false);
     }
-    return wp.WasmProver.build({ circuit: paths.wasmPath, zkey: paths.zkeyPath });
+    return wp.WasmProver.build({
+        circuit: paths.wasmPath,
+        zkey: paths.zkeyPath,
+        ...(paths.sha256 ? { sha256: paths.sha256 } : {}),
+    });
 }
 
 serveWorkerRpc<ProverMethods>(
@@ -47,8 +51,7 @@ serveWorkerRpc<ProverMethods>(
         },
 
         async prove({ paths, input, ...setup }) {
-            // Validated before `getProver`, which fetches and parses ~52 MB of
-            // artifacts.
+            // Validated before `getProver`, which fetches and parses the artifacts.
             if (!input) {
                 throw new InvalidArgumentError("prove request missing input", {
                     argument: "input",

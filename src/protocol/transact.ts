@@ -1,18 +1,14 @@
-// Relayer wire contract: request payloads.
-//
-// Every relayer service speaking the protocol MUST match these shapes. They live
-// in `protocol/` rather than beside the HTTP client so the client and the codec
-// can both depend on them without depending on each other.
+// Relayer wire contract: request payloads. Every relayer service speaking the protocol must match
+// these shapes.
 
-import type { Field, Point } from "../crypto/index.js";
+import type { Field } from "../crypto/index.js";
 import type { OutputAux } from "../notes/aux.js";
 import type { DepositRequest } from "./deposit-request.js";
 
 /**
  * Spend op the relayer routes on-chain; maps 1:1 to the MASP entry point.
  *
- * Not `@internal`, unlike the payload types below: `RelayerClient.estimateSpend`
- * takes one, and the relayer estimate kind (`EstimateKind`) is widened from it.
+ * Not `@internal`: `RelayerClient.estimateSpend` takes one, and `EstimateKind` is widened from it.
  */
 export type SpendKind = "transfer" | "withdraw" | "withdrawNative";
 
@@ -22,13 +18,7 @@ export interface SubmitTransactPayload {
     chainId: bigint;
     /** On-chain entry point the relayer should call. */
     kind: SpendKind;
-    /**
-     * Snarkjs-shaped Groth16 proof for the transact circuit.
-     *
-     * The field name pins the 2×2 shape and is defined by the relayer; a wider
-     * circuit requires renaming it on both sides together. The arities are
-     * shape-generic.
-     */
+    /** Snarkjs-shaped Groth16 proof for the transact circuit. */
     proof: {
         piA: string[];
         piB: string[][];
@@ -37,9 +27,9 @@ export interface SubmitTransactPayload {
         curve?: string;
     };
     /**
-     * The base logical PIs. The relayer derives the three clue slots per
-     * output from `aux`, so those are absent here: 20 base + 6 derived at
-     * 2×2, 27 + 9 at 3×3.
+     * The `PubInputs.Transact` struct words. The relayer derives the three
+     * clue words per output and the aux digest from `aux`, so those are
+     * absent here: 19 struct words + 18 clue words + 1 at 4×6.
      */
     pubInputs: TransactPubInputs;
     /** Off-circuit FMD + ciphertext payload, one per output slot. */
@@ -47,18 +37,14 @@ export interface SubmitTransactPayload {
 }
 
 /**
- * Atomic shielded-swap payload. Carries the leg-1 transact SNARK
- * (same shape as a `withdraw` whose recipient is the SwapWrapper) plus
- * the leg-2 escrow blob the wrapper forwards to `submitDepositAuthorized`
- * in the same tx. Relayer adds the matching tree_update_batch proof and
- * submits to `SwapWrapper.swap`.
+ * Atomic shielded-swap payload: the leg-1 transact SNARK (same shape as a `withdraw` whose
+ * recipient is the SwapWrapper) plus the leg-2 escrow blob the wrapper forwards to
+ * `submitDepositAuthorized` in the same tx. The relayer adds the matching tree_update_batch proof
+ * and submits to `SwapWrapper.swap`.
  */
 export interface SubmitSwapPayload {
     chainId: bigint;
-    /**
-     * Same layout as `SubmitTransactPayload`; the relayer applies the same
-     * shape validators to the leg-1 SNARK.
-     */
+    /** Same layout as `SubmitTransactPayload`; the relayer applies the same shape validators. */
     proof: SubmitTransactPayload["proof"];
     pubInputs: TransactPubInputs;
     aux: OutputAux[];
@@ -80,8 +66,8 @@ export interface SwapBlob {
      */
     route: string;
     /**
-     * Slim deposit request for the B note. `payer` MUST equal the
-     * `swap_wrapper_address` configured on the relayer.
+     * Slim deposit request for the B note. `payer` must equal the `swap_wrapper_address`
+     * configured on the relayer.
      */
     depositD: DepositRequest;
     /**
@@ -90,17 +76,15 @@ export interface SwapBlob {
      */
     auxD: OutputAux;
     /**
-     * FMD + ciphertext for the B-side deposit's fee leaf. Every deposit mints
-     * two leaves, and both need an aux payload. The swap pays the relayer on
-     * its withdraw leg, so this one carries a zero-value note, but it is still a
-     * real leaf and part of the escrow digest preimage.
+     * FMD + ciphertext for the B-side deposit's fee leaf. Every deposit mints two leaves, and
+     * both need an aux payload. The swap pays the relayer on its withdraw leg, so this one
+     * carries a zero-value note, but it is still a leaf and part of the escrow digest preimage.
      */
     feeAuxD: OutputAux;
     /**
-     * Slim deposit request for the refund note: the A note, in `tokenIn`
-     * and addressed to the spender, that the wrapper escrows the unshield
-     * back into when the venue leg fails (a venue revert, output below
-     * `minOut`, a passed deadline). `payer` is the wrapper, as for `depositD`.
+     * Slim deposit request for the refund note: the A note, in `tokenIn` and addressed to the
+     * spender, that the wrapper escrows the unshield back into when the venue leg fails (a venue
+     * revert, output below `minOut`, a passed deadline). `payer` is the wrapper, as for `depositD`.
      */
     refundD: DepositRequest;
     /** FMD + ciphertext for the refund note, as `auxD` is for the B note. */
@@ -112,10 +96,7 @@ export interface SwapBlob {
     tokenOut: string;
     /** Token base-units (`pi.publicOut * scale`). Wrapper re-asserts. */
     amountIn: bigint;
-    /**
-     * Slippage floor on the venue's output. Wrapper enforces
-     * `actualOut >= minOut`.
-     */
+    /** Slippage floor on the venue's output. Wrapper enforces `actualOut >= minOut`. */
     minOut: bigint;
     /**
      * Hard expiry, unix seconds. When `block.timestamp > deadline` the wrapper
@@ -125,24 +106,32 @@ export interface SwapBlob {
      */
     deadline: bigint;
     /**
-     * 0x-hex address. Where a cancelled output escrow refunds
-     * (`SwapArgs.refundTo`). Never zero and never the wrapper.
+     * 0x-hex address a cancelled output escrow refunds to (`SwapArgs.refundTo`). Never zero and
+     * never the wrapper.
      */
     refundTo: string;
 }
 
-/** @internal */
+/**
+ * `PubInputs.Transact` mirror, in struct order.
+ *
+ * @internal
+ */
 export interface TransactPubInputs {
     merkleRoot: Field;
     /** One per input slot: `nIn` entries. */
     nullifier: Field[];
-    /** One per output slot: `nOut` entries. */
+    /** One per output slot: `nOut` entries. Each is the tree leaf. */
     outCm: Field[];
+    /** Zero unless `publicOut != 0`; the pool reverts `MustNotNameAsset` otherwise. */
     publicAssetId: bigint;
-    publicIn: bigint;
     publicOut: bigint;
-    inCv: Point[];
-    outCv: Point[];
+    /**
+     * The circuit's digest public signal: the Poseidon commitment to the
+     * coefficients above. The pool hashes it into the challenge and hands it
+     * to the verifier unmodified, so any other value fails the proof.
+     */
+    digest: Field;
     recipient: string; // 0x-hex address
     chainId: bigint;
     payer: string; // 0x-hex address
@@ -153,9 +142,4 @@ export interface TransactPubInputs {
      * only by `SwapWrapper.swap`. Zero for every non-swap spend.
      */
     intentHash: Field;
-    /**
-     * Per-output Pedersen value commitment that anchors (asset, value) into
-     * the Merkle leaf. Forwarded into the spend's tree_update_batch tpi.
-     */
-    outCvDep: Point[];
 }

@@ -11,9 +11,8 @@ import {
 } from "./fees.js";
 import { RAY } from "./units.js";
 
-// `Fees.unitFee` on chain. A yield asset charges in normalized units, where a
-// floored fee is zero below `BPS_DENOMINATOR / feeBps` units, and a quote one
-// unit short is a Permit2 pull the pool refuses.
+// `Fees.unitFee` on chain: a floored fee is zero below `BPS_DENOMINATOR / feeBps` units, and a
+// quote one unit short is a Permit2 pull the pool refuses.
 describe("unitFee", () => {
     it("agrees with the floored fee when the division is exact", () => {
         expect(unitFee(1_000_000n, 20n)).toBe(2_000n);
@@ -41,13 +40,11 @@ describe("unitFee", () => {
     });
 });
 
-// `publicOut` is the GROSS: `MASP._unshieldLeg` skims the fee out of what
-// leaves the pool rather than charging it on top. These pin both branches
-// against that contract behaviour; the wrong branch misreports what the
-// recipient gets.
+// `publicOut` is the gross: `MASP._unshieldLeg` skims the fee out of what leaves the pool. Both
+// branches are pinned against that contract behaviour.
 describe("withdrawNet", () => {
     const D = 1_000_000_000n; // a USDC denomination, scale 1
-    const BPS = 20n; // 0.2%, the deployed rate on every asset
+    const BPS = 20n; // 0.2%
 
     it("skims the fee out of the gross, never adding it on top", () => {
         // 1000 USDC out of the pool delivers 998.
@@ -73,8 +70,8 @@ describe("withdrawNet", () => {
     });
 
     it("charges a yield asset's fee in normalized units, before conversion", () => {
-        // The plain branch converts then skims; the yield branch skims then
-        // converts. At a unity index and these values they agree...
+        // The plain branch converts then skims; the yield branch skims then converts. At a unity
+        // index and these values they agree.
         expect(withdrawNet({ publicOut: D, feeBps: BPS, scale: 1n, yieldEnabled: true }).net).toBe(
             998_000_000n,
         );
@@ -84,22 +81,20 @@ describe("withdrawNet", () => {
     });
 
     it("rounds a yield asset's unit fee up, as `Fees.unitFee` does", () => {
-        // 1 unit at 20 bps is 0.002 units of fee: the pool still charges one,
-        // so the recipient gets nothing rather than the whole unit back.
+        // 1 unit at 20 bps is 0.002 units of fee: rounded up, the pool charges the whole unit.
         expect(withdrawNet({ publicOut: 1n, feeBps: BPS, scale: 1n, yieldEnabled: true })).toEqual({
             net: 0n,
             fee: 1n,
         });
-        // The plain branch floors on the converted amount, so it keeps it.
+        // The plain branch floors on the converted amount and charges nothing.
         const plain = withdrawNet({ publicOut: 1n, feeBps: BPS, scale: 1n, yieldEnabled: false });
         expect(plain).toEqual({ net: 1n, fee: 0n });
     });
 
     it("and the two branches are NOT interchangeable once rounding bites", () => {
-        // ...but they round at different points, so the SDK must mirror the
-        // contract's branch rather than pick one.
+        // The branches round at different points, so the contract's branch must be mirrored.
         const odd = 1_000_000_003n;
-        const idx = (RAY * 10n) / 3n; // 3.333… — deliberately inexact
+        const idx = (RAY * 10n) / 3n; // 3.333…, inexact
         const plain = withdrawNet({
             publicOut: odd,
             feeBps: BPS,
@@ -120,8 +115,7 @@ describe("withdrawNet", () => {
 
 describe("withdrawNet fee accounting", () => {
     it("net and fee always sum to the gross, on both branches", () => {
-        // A UI showing net and fee separately must not leave a rounding
-        // remainder unaccounted for.
+        // A caller showing net and fee separately must not lose a rounding remainder.
         for (const yieldEnabled of [false, true]) {
             for (const index of [RAY, (RAY * 105n) / 100n, (RAY * 10n) / 3n]) {
                 const { net, fee } = withdrawNet({
@@ -138,13 +132,12 @@ describe("withdrawNet fee accounting", () => {
     });
 });
 
-// Mirror image of `withdrawNet`: a shield is charged ON TOP of the principal,
-// and its yield branch takes the fee in units before converting once. These pin
-// both against what `MASP.deposit` pulls; under-quoting makes Permit2 refuse the
-// pull and the deposit revert.
+// A shield is charged on top of the principal, and its yield branch takes the fee in units before
+// converting once. Both are pinned against what `MASP.deposit` pulls: under-quoting makes Permit2
+// refuse the pull.
 describe("depositTotal", () => {
     const N = 1_000_000n; // circuit units
-    const BPS = 20n; // 0.2%, the deployed rate
+    const BPS = 20n; // 0.2%
 
     it("charges the fee on top of the principal, not out of it", () => {
         const total = depositTotal({ publicIn: N, feeIn: 0n, depositBps: BPS, scale: 1n });
@@ -157,8 +150,8 @@ describe("depositTotal", () => {
         expect(withFee).toBe(N + 500n);
     });
 
-    // The pool takes the fee in units and converts the total once, so the
-    // result is not `plainTotal * index` — it rounds at a different point.
+    // The total is converted once, so the result is not `plainTotal * index`: it rounds at a
+    // different point.
     it("takes a yield asset's fee in units and converts the total once", () => {
         // gross/supply = 1.1: the venue has earned 10%.
         const rate = { gross: 1_100_000n, supply: 1_000_000n };
@@ -189,8 +182,7 @@ describe("depositTotal", () => {
         expect(total).toBe(8n);
     });
 
-    // `YieldOps._deposit` sizes the escrow with `Fees.unitFee`, so a quote that
-    // floors is short by a unit and the Permit2 pull reverts.
+    // `YieldOps._deposit` sizes the escrow with `Fees.unitFee`, so a floored quote is a unit short.
     it("rounds a yield asset's unit fee up before converting", () => {
         const rate = { gross: 1_000_000n, supply: 1_000_000n }; // unity: isolate the fee
         const total = depositTotal({
@@ -219,8 +211,7 @@ describe("depositTotal", () => {
         expect(yielded).toBe(depositTotal({ publicIn: N, feeIn: 0n, depositBps: BPS, scale: 10n }));
     });
 
-    // `scale` is not a conservative fallback: it under-quotes by exactly what
-    // the venue has earned, which is the amount that makes the pull revert.
+    // `scale` is not a safe fallback: it under-quotes by what the venue has earned.
     it("refuses to quote a yield asset with no reported rate", () => {
         expect(() =>
             depositTotal({
@@ -234,10 +225,9 @@ describe("depositTotal", () => {
     });
 });
 
-// Per-token split, as `MASP._quoteShield` prices it: a relayer note in another
-// asset leaves the principal's quote entirely and is pulled at `feeIn *
-// feeScale`; one in the deposit asset is part of a single pull whose total the
-// split must still add up to.
+// Per-token split, as `MASP._quoteShield` prices it: a relayer note in another asset leaves the
+// principal's quote and is pulled at `feeIn * feeScale`; one in the deposit asset is part of a
+// single pull whose total the split must add up to.
 describe("depositTotals", () => {
     const N = 1_000_000n;
     const BPS = 20n;
@@ -290,8 +280,8 @@ describe("depositTotals", () => {
         expect(p.relayer).toBe(5_000n);
         expect(p.principal + p.relayer).toBe(depositTotal(plain));
 
-        // On a yield asset the pool converts principal, fee and note once, so
-        // the note's share is whatever it adds to that rounding.
+        // On a yield asset the pool converts principal, fee and note once, so the note's share is
+        // whatever it adds to that rounding.
         const rate = { gross: 1_000_003n, supply: 1_000_000n };
         const yielded = {
             publicIn: 7n,
@@ -326,9 +316,7 @@ describe("depositTotals", () => {
     });
 });
 
-// Overshooting costs the payer nothing (Permit2 transfers only what the pool
-// asks for, an allowance is a cap, and `NativeAdapter` refunds unused
-// `msg.value`), while undershooting reverts the deposit.
+// Overshooting costs the payer nothing; undershooting reverts the deposit.
 describe("depositCeiling", () => {
     it("signs a plain asset's cost exactly", () => {
         expect(depositCeiling(tokenAmount(1_000_000n), false)).toBe(1_000_000n);

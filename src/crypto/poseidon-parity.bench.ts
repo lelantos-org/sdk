@@ -1,10 +1,6 @@
-// Poseidon parity + timing: wasm vs poseidon-lite, at the Merkle arity.
-//
-// Modelled on `src/prover/prover-parity.bench.ts`. The only place `wasm/poseidon` digests are
-// compared against the JS backend at scale. Fails if `Poseidon.build()` fell back to JS, which
-// would otherwise make parity tests pass without exercising wasm.
-//
-// Wired into CI via `npm run test:bench`.
+// Poseidon parity + timing: wasm vs poseidon-lite, at the Merkle arity. Fails if
+// `Poseidon.build()` fell back to JS, which would otherwise make parity pass without exercising
+// wasm. Run by `npm run test:bench`.
 
 import { poseidon5 } from "poseidon-lite/poseidon5";
 import { describe, expect, it } from "vitest";
@@ -24,7 +20,6 @@ function timeUs(fn: (i: number) => unknown, n: number): number {
 describe("poseidon5 wasm vs js", () => {
     it("wasm backend is actually live", async () => {
         const P = await Poseidon.build();
-        // `build()` falls back to JS when wasm cannot load; this bench requires the wasm backend.
         expect(P.backend).toBe("wasm");
     });
 

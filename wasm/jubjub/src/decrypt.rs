@@ -1,16 +1,14 @@
-//! Fused trial-decrypt path. Inlines the per-note pipeline:
-//!   decompress epk → subgroup check → ECDH (epk · ivk) → blake2b KDF
+//! Trial decryption as one wasm-bindgen entry. Per note:
+//!   decompress epk → clear cofactor → ECDH (epk · ivk) → blake2b KDF
 //!   → ChaCha20-Poly1305 decrypt
-//! into one wasm-bindgen entry. Cuts four FFI hops to one and replaces
-//! pure-JS @noble blake2b + chacha with RustCrypto's wasm32 impls.
 //!
 //! Wire format must match `sdk/src/notes/encrypt.ts` byte-for-byte:
 //!   key   = blake2b("lelantos.note.kdf.v1"  || epk_packed || shared_packed, 32B)
 //!   nonce = blake2b("lelantos.note.nonce.v1" || epk_packed, 12B)
 //!   ct    = ChaCha20-Poly1305(key, nonce, plaintext)
 //!
-//! Per-note nonce derived from epk gives defense-in-depth against any future
-//! code path that reuses an AEAD key with different ephemeral data.
+//! The nonce is derived from epk as defense in depth against a code path
+//! that reuses an AEAD key with different ephemeral data.
 
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
@@ -37,15 +35,14 @@ pub fn try_decrypt_note(
         return Err(JsValue::from_str("epk must be 32 bytes"));
     }
 
-    // Cofactor cleared, not checked. A sender may pick `epk = T + [t]B8` with
-    // `T` in the 8-torsion; under a plain `[ivk]epk` that gives
+    // The cofactor is cleared. A sender may pick `epk = T + [t]B8` with `T` in
+    // the 8-torsion; under a plain `[ivk]epk` that gives
     // `shared = [ivk]T + [t]pk_d`, whose second term follows from the published
-    // address and whose first has only eight values — eight crafted notes, one
-    // of which decrypts, would reveal `ivk mod 8`.
+    // address and whose first has only eight values, so eight crafted notes,
+    // one of which decrypts, would reveal `ivk mod 8`.
     //
-    // `decode_cleared_point` and `cofactor_scalar_from_le` are a pair: together
-    // they compute `[ivk]q` for the prime-order part of `epk`, which is
-    // `[ivk]epk` for an honest point and carries no torsion term otherwise.
+    // `decode_cleared_point` and `cofactor_scalar_from_le` together compute
+    // `[ivk]q` for the prime-order part `q` of `epk`; see their docs.
     let mut epk_arr = [0u8; FIELD_BYTES];
     epk_arr.copy_from_slice(epk_packed);
     let cleared = match decode_cleared_point(&epk_arr) {

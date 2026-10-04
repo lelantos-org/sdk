@@ -47,9 +47,9 @@ export function viemChainOptions(
 /**
  * Build the chain layer `connect()` was asked for.
  *
- * viem and the signers load dynamically, so a caller supplying `chain` never loads the viem client
- * stack (~230 KB) and others load it on demand. Validation runs before the import so a
- * misconfigured call fails without fetching anything.
+ * viem and the signers load dynamically, so a caller supplying `chain` or `reader` never loads the
+ * viem client stack. Validation runs before the imports, so a misconfigured call fails without
+ * fetching anything.
  */
 export async function defaultChainAdapter(
     inputs: ChainAdapterInputs,

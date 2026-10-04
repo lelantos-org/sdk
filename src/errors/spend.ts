@@ -3,8 +3,8 @@
 import { WalletError, type WalletErrorOptions } from "./base.js";
 
 /**
- * Why the relayer refused a submission, parsed from its response in one place
- * (`services/relayer/reject-reason.ts`).
+ * Why the relayer refused a submission, parsed from its response by
+ * `services/relayer/reject-reason.ts`.
  *
  *   * `nullifier-spent`: a note this spend consumes is already spent on chain.
  *     The wallet resyncs its spent set before throwing.

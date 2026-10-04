@@ -1,9 +1,9 @@
 // Swap note sizing: pure arithmetic over the pool's fee and scale.
 //
-// Kept apart from the swap operation (`wallet/ops/swap.ts`) so a caller displaying a quote can
-// import `sizeBNote` without pulling the swap executor's graph (viem, the bundle builders, the spend
-// steps); `bundle-budget.mjs` checks the eager entries stay clear of the spend path. Must import
-// nothing beyond `core/`, `errors/` and sibling `protocol/` arithmetic.
+// Separate from the swap operation (`wallet/ops/swap.ts`) so a caller displaying a quote can
+// import `sizeBNote` without the swap executor's graph; `bundle-budget.mjs` checks the eager
+// entries stay clear of the spend path. Must import nothing beyond `core/`, `errors/` and sibling
+// `protocol/` arithmetic.
 
 import { BPS_DENOMINATOR, depositTotal } from "./fees.js";
 import type { YieldRate } from "./units.js";
@@ -19,33 +19,26 @@ export interface YieldPricing {
 }
 
 /**
- * Smallest B-note value whose on-chain Permit2 pull covers `minOut`.
+ * Smallest B-note value whose on-chain Permit2 pull covers `minOut`: the exact amount a swap
+ * credits, which `executeSwap` encodes as the deposit leg's `publicIn`.
  *
- * The wrapper enforces a window, `minOut ≤ pulled ≤ actualOut` (`MaspPullBelowMinOut`,
- * `MaspPullExceedsActualOut`). The closed form `minOut * BPS / (scale * (BPS + feeBps))` lands
- * below `minOut` whenever the division is inexact, which reverts.
+ * The wrapper enforces `minOut ≤ pulled ≤ actualOut` (`MaspPullBelowMinOut`,
+ * `MaspPullExceedsActualOut`). `pulled` is principal plus the pool's fee plus the flush fee note,
+ * and the pool floors its fee, so the closed form `minOut * BPS / (scale * (BPS + feeBps))` lands
+ * below `minOut` whenever the division is inexact, which reverts. The function starts from that
+ * estimate and walks to the smallest `v` that covers `minOut`. Minimality keeps the result under
+ * `actualOut`; the wrapper forwards anything above the pull to the treasury.
  *
- * `pulled` is principal plus the pool's fee plus the flush fee note, and the pool floors its fee,
- * so the pull advances in steps no closed form always hits. The function starts from the
- * floor-div estimate and walks to the smallest `v` that covers `minOut`. Minimality keeps the
- * result under `actualOut`; any overshoot is wrapper-side dust forwarded to the treasury.
- *
- * `relayerFee` is in circuit units of the *out* asset and is paid from the same pull, so a
- * non-zero fee reduces the B-note rather than charging the user separately.
- *
- * Exported because it is the exact amount a swap credits, needed by any caller displaying a
- * quote. `executeSwap` encodes this value as the deposit leg's `publicIn`; it is exact, not a
- * floor, since the wrapper pulls only what the B-note needs and forwards any better-than-quoted
- * fill to the treasury. The closed form above gives a wrong display value and a reverting
- * transaction.
+ * `relayerFee` is in circuit units of the out asset and is paid from the same pull, so a non-zero
+ * fee reduces the B-note rather than charging the user separately.
  */
 export function sizeBNote(
     minOut: bigint,
     scaleOut: bigint,
-    /** The *out* asset's `depositBps` — leg 2 mints the B-note as a deposit. */
+    /** The out asset's `depositBps`: leg 2 mints the B-note as a deposit. */
     feeBps: bigint,
     relayerFee: bigint = 0n,
-    /** The *out* asset's yield pricing: a yield B-note's pull is priced in units at the rate. */
+    /** The out asset's yield pricing: a yield B-note's pull is priced in units at the rate. */
     yieldPricing: YieldPricing = {},
 ): bigint {
     const pullFor = depositPull(scaleOut, feeBps, relayerFee, yieldPricing);
@@ -70,10 +63,10 @@ export function sizeBNote(
 export function sizeRefundNote(
     received: bigint,
     scaleIn: bigint,
-    /** The *in* asset's `depositBps` — the refund is minted as a deposit. */
+    /** The in asset's `depositBps`: the refund is minted as a deposit. */
     feeBps: bigint,
     relayerFee: bigint = 0n,
-    /** The *in* asset's yield pricing: a yield refund note is priced in units at the rate. */
+    /** The in asset's yield pricing: a yield refund note is priced in units at the rate. */
     yieldPricing: YieldPricing = {},
 ): bigint {
     const pullFor = depositPull(scaleIn, feeBps, relayerFee, yieldPricing);
@@ -105,9 +98,8 @@ function depositPull(scale: bigint, depositBps: bigint, relayerFee: bigint, y: Y
 
 /**
  * Units whose pull is about `tokens`, ignoring fee flooring: the walks' starting point. A yield
- * asset converts at `gross / supply` tokens per unit (`scale` and the index are folded into the
- * ratio, as `toTokenUnitsAtRate`), so the walk is a step or two rather than proportional to the
- * index.
+ * asset converts at `gross / supply` tokens per unit, as `toTokenUnitsAtRate`, which keeps the
+ * walk short at any index.
  */
 function estimateUnits(tokens: bigint, scale: bigint, feeBps: bigint, y: YieldPricing): bigint {
     const rate = pricedRate(y);
@@ -121,7 +113,7 @@ function toTokensDown(units: bigint, scale: bigint, y: YieldPricing): bigint {
     return rate ? (units * rate.gross) / rate.supply : units * scale;
 }
 
-/** The rate a yield asset converts at, when it is usable (`toTokenUnitsAtRate` falls back on `supply == 0`). */
+/** A yield asset's rate, when usable (`toTokenUnitsAtRate` falls back on `supply == 0`). */
 function pricedRate(y: YieldPricing): YieldRate | undefined {
     return y.yieldEnabled && y.rate && y.rate.supply > 0n && y.rate.gross > 0n ? y.rate : undefined;
 }

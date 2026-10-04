@@ -64,9 +64,7 @@ describe("BudgetLedger limits", () => {
     it("keeps assets in separate pots", () => {
         const l = new BudgetLedger({ total: "5" });
         l.record(whole(5n, WETH), WETH.id);
-        // WETH is exhausted...
         expect(() => l.assertWithinLimits(whole(1n, WETH), WETH)).toThrow(/over the budget/);
-        // ...but USDC has its own ceiling.
         expect(() => l.assertWithinLimits(whole(5n, USDC), USDC)).not.toThrow();
     });
 

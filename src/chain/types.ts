@@ -1,24 +1,21 @@
-// Data shapes the chain adapter exchanges with the rest of the SDK. Declared
-// apart from the port in `./port.ts`.
+// Data shapes the chain adapter exchanges with the rest of the SDK. The port
+// itself is in `./port.ts`.
 
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
 import type { YieldRate } from "../protocol/units.js";
 
 export interface AssetEntry {
     token: EvmAddress;
-    /** circuit-units → ERC20-base-units multiplier. */
+    /** Multiplier from circuit units to ERC-20 base units. */
     scale: bigint;
     /**
-     * Owner-flipped flag. Disabled assets block new deposits; existing
-     * notes / escrows remain spendable.
+     * Set by the pool owner. A disabled asset blocks new deposits; existing
+     * notes and escrows remain spendable.
      */
     disabled: boolean;
     /**
-     * Protocol fee on the shield leg, in basis points.
-     *
-     * Per-asset, and independent of {@link AssetEntry.withdrawBps}: a pool can
-     * subsidise deposits while still pricing exits. There is no pool-wide rate,
-     * so both are read with the entry.
+     * Protocol fee on the shield leg, in basis points. Per-asset, and
+     * independent of {@link AssetEntry.withdrawBps}.
      */
     depositBps: bigint;
     /** Protocol fee on the unshield leg, in basis points. */
@@ -38,7 +35,7 @@ export interface AssetEntry {
      * The pool's own `{ gross, supply }` ratio, for sizing a payment.
      *
      * Present only for a yield asset on an adapter that reads it. {@link index}
-     * is floored on chain, so converting a *charge* through it can land below
+     * is floored on chain, so converting a charge through it can land below
      * what the contract takes, and a Permit2 `maxTotal` signed off that figure
      * is refused; the pool itself divides by this pair. Absent on a plain asset,
      * where `scale` alone is exact.
@@ -70,7 +67,7 @@ export interface Permit2SignArgs {
     /** Unix-seconds expiry. */
     deadline: bigint;
     /**
-     * `keccak256(abi.encode(DepositRequest, aux))`. Binds the sig to a
+     * `keccak256(abi.encode(DepositRequest, aux, feeAux))`. Binds the sig to a
      * specific deposit.
      */
     piHash: Hex32;
@@ -79,20 +76,17 @@ export interface Permit2SignArgs {
 }
 
 /**
- * `MASP.escrowed(id)` view — the digest and nothing else. `payer`,
- * `submittedAt`, `publicAssetId` and `feeBpsAtSubmit` are folded into the
- * digest and must be reconstructed from the `DepositEscrowed` log, which is
- * also what `cancelDeposit` takes back as arguments.
+ * `MASP.escrowed(id)` view: the digest only. The fields folded into it are
+ * reconstructed from the `DepositEscrowed` log.
  */
 export interface EscrowedDepositView {
     digest: Hex32;
 }
 
 /**
- * Preimage fields for `cancelDeposit`. The escrow row keeps only
- * `keccak(request)`, so every field is passed back in and checked against that
- * digest — including `publicAssetId`, `feeBpsAtSubmit`, `payer` and
- * `submittedAt`. Cache them: `escrowed()` returns none of them.
+ * Preimage fields for `cancelDeposit`. The escrow row keeps only a digest, so
+ * every field is passed back in and checked against it. Cache them:
+ * `escrowed()` returns none of them.
  *
  * All but `submittedAt` come from the `DepositEscrowed` log. `submittedAt` is
  * the EVM's `block.number`, which the log does not carry on Arbitrum, so
@@ -100,25 +94,26 @@ export interface EscrowedDepositView {
  */
 export interface CancelDepositInputs {
     publicIn: bigint;
-    cm: Hex32;
-    cvDep: [bigint, bigint];
+    /** The depositor note's `inner`, as the request escrowed it. */
+    inner: Hex32;
     publicAssetId: AssetId;
     feeBpsAtSubmit: number;
     payer: EvmAddress;
     submittedAt: number;
-    /**
-     * The relayer's fee leaf, also part of the escrow digest. Comes off the
-     * same `DepositEscrowed` log as everything else here.
-     */
+    /** The relayer's fee leaf value. */
     feeIn: bigint;
     /**
      * The fee leaf's asset, as the request named it: `0` for a zero-value
-     * note. Digest-bound, and decides whether the relayer's share refunds with
-     * the principal or separately in its own token.
+     * note. Decides whether the relayer's share refunds with the principal or
+     * separately in its own token.
      */
     feeAssetId: AssetId;
-    feeCm: Hex32;
-    feeCvDep: [bigint, bigint];
+    feeInner: Hex32;
+    /**
+     * The escrow's refund cap, {@link DepositEscrowedRecord.pulled}. Any value
+     * but the event's reverts `DigestMismatch`.
+     */
+    pulled: bigint;
 }
 
 /**
@@ -154,20 +149,28 @@ export interface DepositEscrowedRecord {
     publicAssetId: AssetId;
     publicIn: bigint;
     feeBpsAtSubmit: number;
-    cm: Hex32;
-    cvDep: [bigint, bigint];
-    rcv: bigint;
+    /**
+     * The depositor note's `inner`. The leaf is not in the event: it is
+     * `Poseidon(TAG_CM, publicAssetId · 2^64 + publicIn, inner)`.
+     */
+    inner: Hex32;
     /** The relayer's fee leaf value, in circuit units of `feeAssetId`. */
     feeIn: bigint;
     /** The fee leaf's asset; `0` exactly when `feeIn` is zero. */
     feeAssetId: AssetId;
-    feeCm: Hex32;
-    feeCvDep: [bigint, bigint];
+    /** The fee note's `inner`; its leaf is built from `feeAssetId` and `feeIn` likewise. */
+    feeInner: Hex32;
+    /**
+     * The escrow's refund cap: for a yield asset the underlying the pool pulled
+     * at submit, in the deposit asset's base units, which is the most a cancel
+     * returns. Exactly `0n` for a plain asset.
+     */
+    pulled: bigint;
     /**
      * Solidity's `block.number` at escrow time: the value folded into the
      * on-chain digest.
      *
-     * NOT always the block number of the `DepositEscrowed` log. On Arbitrum the
+     * Not always the block number of the `DepositEscrowed` log. On Arbitrum the
      * EVM reports the L1 height while the log carries the L2 height, so this is
      * resolved via the block's `l1BlockNumber` (see `viem/evm-block.ts`).
      */
@@ -175,10 +178,8 @@ export interface DepositEscrowedRecord {
 }
 
 /**
- * A mined deposit: its hash, the pool's id, the block and the escrow payload, all read off the
- * receipt.
- *
- * `escrowed` is what `cancelDeposit` resupplies, so a caller can cancel without a log query.
+ * A mined deposit, read off its receipt. `escrowed` is what `cancelDeposit`
+ * resupplies, so a caller can cancel without a log query.
  */
 export interface DepositSubmitted {
     txHash: Hex32;
@@ -188,6 +189,18 @@ export interface DepositSubmitted {
     blockNumber: number;
     /** The `DepositEscrowed` payload, `submittedAt` resolved to the EVM's `block.number`. */
     escrowed: DepositEscrowedRecord;
+}
+
+/**
+ * One output as the pool published it in a `NotePayload` log: what anyone can
+ * read about it from the chain.
+ */
+export interface PublishedNote {
+    cm: Hex32;
+    /** The output's ECDH ephemeral public key. */
+    ephPub: [bigint, bigint];
+    /** Wire ciphertext: 2B clueBits prefix, then the ChaCha body. */
+    ciphertext: Uint8Array;
 }
 
 /**

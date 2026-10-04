@@ -92,8 +92,8 @@ describe("index-aware conversions", () => {
     });
 
     it("rounds down out of the pool and up into it, so dust favours holders", () => {
-        // 3 * 1 * (RAY/3 * 1) is deliberately inexact.
-        const idx = RAY / 3n; // 0.333… — a third
+        // 10 * (RAY / 3) / RAY is inexact.
+        const idx = RAY / 3n; // 0.333…
         const n = circuitAmount(10n);
         const down = toTokenUnits(n, 1n, { index: idx });
         const up = toTokenUnits(n, 1n, { index: idx, round: "up" });
@@ -128,9 +128,8 @@ describe("index-aware conversions", () => {
     });
 });
 
-// `gross / supply` rather than the reported index, because that index is
-// floored on chain: sizing a charge through it can land below what the pool
-// takes, and the Permit2 pull is then refused.
+// `gross / supply`, not the reported index: that index is floored on chain, so sizing a charge
+// through it can land below what the pool takes, and the Permit2 pull is then refused.
 describe("toTokenUnitsAtRate", () => {
     const N = circuitAmount(1_000_000n);
 
@@ -145,8 +144,7 @@ describe("toTokenUnitsAtRate", () => {
         );
     });
 
-    // Up by default: this is the figure a payer is charged, and rounding it
-    // down under-signs the ceiling.
+    // Up by default: a payer is charged this figure, and rounding down under-signs the ceiling.
     it("rounds up by default and down on request", () => {
         const rate = { gross: 1_000_003n, supply: 1_000_000n };
         const n = circuitAmount(7n);
@@ -158,9 +156,8 @@ describe("toTokenUnitsAtRate", () => {
         expect(toTokenUnitsAtRate(N, 1n, { gross: 900_000n, supply: 1_000_000n })).toBe(900_000n);
     });
 
-    // A total loss is not an empty pool. The contract's only fallback is
-    // `supply == 0`, so units backed by nothing are worth nothing; treating
-    // this as "no rate yet" would price them at face value.
+    // A total loss is not an empty pool: the contract's only fallback is `supply == 0`, so units
+    // backed by nothing are worth nothing, not face value.
     it("prices units with no backing left at zero, not at scale", () => {
         expect(toTokenUnitsAtRate(N, 10n, { gross: 0n, supply: 1_000_000n })).toBe(0n);
     });
@@ -168,7 +165,7 @@ describe("toTokenUnitsAtRate", () => {
 
 describe("toCircuitUnits round: up", () => {
     const scale = 10n ** 10n;
-    // A deliberately awkward index, so most unit counts have no exact decimal.
+    // An index at which most unit counts have no exact decimal.
     const index = (RAY * 1_007_024_198_360_401_419n) / 1_000_000_000_000_000_000n;
 
     it("recovers the unit count a floored conversion came from", () => {
@@ -180,7 +177,6 @@ describe("toCircuitUnits round: up", () => {
     });
 
     it("floors would lose a unit on the same input", () => {
-        // Pins why `up` is required: flooring loses a unit on this input.
         const base = toTokenUnits(circuitAmount(999n), scale, { index });
         expect(toCircuitUnits(base, scale, { index, round: "down" })).toBe(998n);
         expect(toCircuitUnits(base, scale, { index, round: "up" })).toBe(999n);

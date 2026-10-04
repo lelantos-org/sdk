@@ -20,9 +20,9 @@
 import type { EvmAddress, Hex32 } from "../core/brand.js";
 import type { TxLog } from "./types.js";
 
-/** `keccak256("NotePayload(bytes32,uint256,uint256,uint256,uint256,bytes,uint256,uint256)")`. */
+/** `keccak256("NotePayload(bytes32,uint256,uint256,uint256,uint256,bytes)")`. */
 export const NOTE_PAYLOAD_TOPIC =
-    "0x08829d53b88cc31ed8597c58d2cc3202054ab57e9ab21b258aec2ae0974aa8d7" as Hex32;
+    "0x9c97c070d97621a8523b62e1c3d43be0cc098cde21767e1bd2da497cda692772" as Hex32;
 /** `keccak256("RootAdvanced(uint64,uint64,bytes32,bytes32)")`. */
 export const ROOT_ADVANCED_TOPIC =
     "0x616c77b191d495f23f0e9878ac4c2eec8291e5d6aecc4a1ea1866dcdf3a4495a" as Hex32;
@@ -104,4 +104,20 @@ export function locateOperation(
     }
 
     return { index: rootIndex, count, logRange: [start, last] };
+}
+
+/**
+ * Whether `logs` show `pool` inserting `commitment` into its tree: a
+ * `NotePayload` carrying it, from the pool, after a `RootAdvanced`.
+ *
+ * This is the pool's own word, read from a receipt, where a note feed is an
+ * indexer's. A deposit's `DepositEscrowed` does not count: an escrow is not in
+ * the tree until flushed and can still be cancelled.
+ */
+export function commitmentPublished(
+    logs: readonly TxLog[],
+    pool: EvmAddress | string,
+    commitment: string,
+): boolean {
+    return locateOperation(logs, pool, [commitment]) !== undefined;
 }

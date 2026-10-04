@@ -1,26 +1,17 @@
-// Per-module loader boilerplate, shared by the single-export wasm modules.
+// Loader boilerplate shared by the single-export wasm modules (`jubjub`,
+// `poseidon`): a `configure*` entry point and a module singleton whose accessor
+// throws before init, on top of `createWasmLoader`. `prover` calls
+// `createWasmLoader` directly because it needs a `postInit` rayon hook.
 //
-// `wasm/loader.ts` owns the hard part — the Node/browser/injected branch and
-// the init-once memo. What is left around it is identical for every consumer:
-// a subpath import, the Node `file://` hop, a `configure*` entry point, and a
-// module singleton whose accessor throws before init. `jubjub` and `poseidon`
-// differ only in two strings, an import thunk, and their module interface, so
-// they share this.
-//
-// `prover` does not: it needs a `postInit` rayon hook and its own thread-count
-// configuration, so it calls `createWasmLoader` directly.
-//
-// Bundler contract, inherited by every caller:
+// Bundler contract for callers:
 //
 //   - `importModule` stays in the caller so the `#wasm/<name>` specifier is a
-//     literal at the `import()` call site. Bundlers only follow a dynamic
-//     import they can read statically; behind a variable the specifier survives
-//     into the output as a bare `#wasm/...`, which no browser can resolve, and
-//     the wasm-pack glue never gets its `new URL(...)` rewritten to the emitted
-//     asset. See `wasm/loader.ts`'s `defaultImport` contract.
-//   - `new URL(..., import.meta.url)` likewise stays in the caller. It resolves
-//     against the importing module's own URL, so moving it here would silently
-//     rebase every path onto this file.
+//     literal at the `import()` call site. Bundlers follow only a dynamic
+//     import they can read statically; behind a variable the bare specifier
+//     survives into the output, where no browser can resolve it, and the
+//     wasm-pack glue's `new URL(...)` is not rewritten to the emitted asset.
+//   - `new URL(..., import.meta.url)` stays in the caller: it resolves against
+//     the importing module's own URL.
 
 import { EnvironmentError } from "../../errors/config.js";
 import { createWasmLoader, type WasmLoaderOverride, type WasmModuleBase } from "./loader.js";
@@ -34,12 +25,12 @@ interface ModuleLoaderConfig<M extends WasmModuleBase> {
     /**
      * Imports the wasm-pack JS module via its package subpath (`#wasm/<name>`,
      * declared in package.json `imports`). Must call `import()` with a literal
-     * specifier — see the bundler contract above.
+     * specifier; see the bundler contract above.
      */
     importModule: () => Promise<M>;
-    /** `pkg/<name>.js`, resolved against the *caller's* `import.meta.url`. */
+    /** `pkg/<name>.js`, resolved against the caller's `import.meta.url`. */
     pkgJsUrl: URL;
-    /** `pkg/<name>_bg.wasm`, resolved against the *caller's* `import.meta.url`. */
+    /** `pkg/<name>_bg.wasm`, resolved against the caller's `import.meta.url`. */
     pkgWasmUrl: URL;
 }
 
@@ -69,8 +60,8 @@ export function createModuleLoader<M extends WasmModuleBase>(
 
     return {
         configure(override: WasmLoaderOverride<M>): void {
-            // Dropped alongside the memo: an override installed after a
-            // successful load must not leave the previous module readable.
+            // An override installed after a successful load must not leave
+            // the previous module readable.
             mod = null;
             loader.configure(override);
         },

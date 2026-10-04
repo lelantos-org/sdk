@@ -1,7 +1,7 @@
 // Shielding: `quoteDeposit` and `deposit`. Both run `planDeposit` and `readPullStates`, so a quote
 // states exactly the pulls, fees and strategy the deposit would sign over.
 
-import { buildDeposit } from "../../bundle/deposit.js";
+import { type BuiltDeposit, buildDeposit } from "../../bundle/deposit.js";
 import {
     type ChainAdapter,
     supportsAllowanceBatch,
@@ -103,7 +103,7 @@ async function planDeposit(
     args: DepositOptions,
     op: "deposit" | "quoteDeposit",
 ): Promise<DepositPlan> {
-    // Before any I/O: a bad argument should not cost chain reads to report.
+    // Arguments are checked before any I/O.
     precheckAmount(args.amount, "amount", op);
     const deadline = checkDeadlineArg(args.deadline);
     if (args.native !== undefined && typeof args.native !== "boolean") {
@@ -209,14 +209,12 @@ function assertDepositFeeAsset(asset: AssetInfo, feeAsset: AssetInfo, native: bo
     );
 }
 
-// --- account state and strategy ------------------------------------------------------------------
-
 /**
  * Whether a token's Permit2 state lets the pool pull `pull` on the allowance path: the window
  * covers the signed ceiling and outlives the buffer, and the ERC-20 approval covers the pull.
  *
- * The single predicate `deposit` chooses its strategy by and `DepositQuote.pulls[].allowance.covers`
- * reports.
+ * `deposit` chooses its strategy by this predicate and `DepositQuote.pulls[].allowance.covers`
+ * reports it.
  */
 function allowanceCovers(
     state: { erc20: bigint; window: { amount: bigint; expiration: number } },
@@ -335,8 +333,6 @@ function strategyFor(
     return "witness";
 }
 
-// --- quote ---------------------------------------------------------------------------------------
-
 /** `wallet.quoteDeposit`: what `deposit(args)` would pull, charge and do right now. */
 export async function quoteDeposit(
     ctx: WalletContext,
@@ -375,8 +371,6 @@ export async function quoteDeposit(
         quotedAt: unixNow(),
     });
 }
-
-// --- execute -------------------------------------------------------------------------------------
 
 /** `wallet.deposit`: escrow `amount` of `asset` for the relayer to flush into the tree. */
 export async function executeDeposit(
@@ -454,8 +448,7 @@ export async function executeDeposit(
     }
     run.phase("confirmed", submitted.txHash);
 
-    const commitment = fieldToBytes32(built.cm);
-    const escrow = escrowOf(submitted, commitment, plan, cancelDelay, chain);
+    const escrow = escrowOf(submitted, built, plan, cancelDelay, chain);
     // The amount is omitted from the log.
     log.info("deposit escrowed", {
         strategy,
@@ -490,13 +483,17 @@ export async function executeDeposit(
 /** The escrow as plain data, its cancel inputs straight from the pool's log. */
 function escrowOf(
     submitted: DepositSubmitted,
-    commitment: Hex32,
+    built: BuiltDeposit,
     plan: DepositPlan,
     cancelDelay: number,
     chain: ChainAdapter,
 ): DepositEscrow {
     const e = submitted.escrowed;
-    if (e.cm.toLowerCase() !== commitment.toLowerCase() || e.id !== submitted.depositId) {
+    // The event carries `inner`, not the leaf: matched against the request's.
+    if (
+        e.inner.toLowerCase() !== built.deposit.inner.toLowerCase() ||
+        e.id !== submitted.depositId
+    ) {
         throw new WireFormatError(
             "$.escrowed",
             "the chain adapter reported a DepositEscrowed payload for another deposit",
@@ -507,7 +504,7 @@ function escrowOf(
         depositId: e.id,
         native: plan.native || isNativeEscrowPayer(chain, e.payer),
         asset: plan.asset.id,
-        commitment,
+        commitment: fieldToBytes32(built.cm),
         cancelInputs: cancelInputsOf(e),
         cancellableAtBlock: e.submittedAt + cancelDelay,
     });

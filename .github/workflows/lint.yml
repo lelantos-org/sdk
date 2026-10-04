@@ -1,9 +1,8 @@
 name: Lint
 
-# Split out of `ci.yml`: every check here reads `src/` off the disk and nothing
-# else — no `dist/`, no WASM `pkg/`, no Rust toolchain. Keeping them in their
-# own workflow means a misplaced `node:` import or a stray `Math.random` fails
-# in well under a minute instead of behind a WASM build.
+# Every check here reads the source tree only: no `dist/`, no WASM `pkg/`, no
+# Rust toolchain. A separate workflow, so a misplaced `node:` import or a stray
+# `Math.random` fails without waiting for a WASM build.
 
 on:
   push:

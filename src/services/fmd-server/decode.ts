@@ -1,15 +1,11 @@
-// Raw JSON → domain values, one decoder per response.
+// Raw JSON → domain values, one decoder per response. Every response is
+// validated through `services/http/decode` and returned as `Field`/`Uint8Array`;
+// a malformed one raises a `WireFormatError` naming the offending JSON path.
 //
-// Wire encoding stops here. Every response is validated through `services/http/decode`
-// and returned as `Field`/`Uint8Array`, so a malformed response raises a
-// `WireFormatError` naming the offending JSON path instead of a `TypeError`
-// surfacing later inside a store.
-//
-// The backend is inconsistent about the `0x` prefix: tree state, nullifiers and
-// chunk leaf hashes carry it; note/match commitments, ciphertexts and packed
-// points do not. All are hex, so all go through `hexInt`/`hexBytes` and none
-// through `bigintFrom`, which also accepts decimal: a bare-hex value with only
-// decimal digits would silently decode as the wrong number.
+// The `0x` prefix varies: tree state, nullifiers and chunk leaf hashes carry
+// it; note/match commitments, ciphertexts and packed points do not. All are
+// hex, so all go through `hexInt`/`hexBytes` and none through `bigintFrom`,
+// which would decode an all-digit bare-hex value as decimal.
 
 import { bool, hexBytes, hexBytesN, hexInt, int, mapArr, obj } from "../http/decode.js";
 import type {
@@ -35,9 +31,8 @@ export function note(raw: unknown, idField: "id" | "noteId", path: string): FmdN
         leafIndex: int(d.leafIndex, `${path}.leafIndex`),
         cm: hexInt(d.commitmentHex, `${path}.commitmentHex`),
         ciphertext: hexBytes(d.ciphertextHex, `${path}.ciphertextHex`),
-        // Width-checked because `epk` reaches `decryptNote` untouched: a wrong
-        // length would otherwise surface as a decryption failure with no link
-        // back to the response.
+        // Width-checked: `epk` reaches `decryptNote` untouched, where a wrong
+        // length would surface as a decryption failure with no link to the response.
         epk: hexBytesN(d.ephPubPackedHex, `${path}.ephPubPackedHex`, PACKED_POINT_BYTES),
     };
 }

@@ -1,8 +1,5 @@
-// Privacy invariants of the shared HTTP layer.
-//
-// Pins two properties that are invisible in normal use: what the SDK attaches
-// to a request without being asked, and what it copies into an error the
-// caller will log.
+// Privacy invariants of the shared HTTP layer: what the SDK attaches to a
+// request unasked, and what it copies into an error the caller will log.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount } from "../../core/brand.js";
@@ -25,8 +22,6 @@ describe("request defaults", () => {
         await createHttpClient("FMD_TIMEOUT", "FMD_FAILED").fetch("https://fmd.test/v1/notes");
 
         const init = mock.mock.calls[0]![1] as RequestInit;
-        // Browser defaults put the page origin in `Referer` and attach
-        // same-origin cookies. Neither is read by any Lelantos service.
         expect(init.referrerPolicy).toBe("no-referrer");
         expect(init.credentials).toBe("omit");
         expect(init.cache).toBe("no-store");
@@ -96,7 +91,7 @@ describe("InsufficientCoverError", () => {
         const serialised = JSON.stringify({ ...err, message: err.message }, (_k, v) =>
             typeof v === "bigint" ? v.toString() : v,
         );
-        for (const secret of ["rho", "rcm", "rcvDep", "cm", "leafIndex"]) {
+        for (const secret of ["rho", "rcm", "cm", "leafIndex"]) {
             expect(serialised).not.toContain(secret);
         }
         // Amounts and ids remain readable as fields, but not in the message.

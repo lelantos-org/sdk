@@ -1,14 +1,13 @@
 set shell := ["bash", "-ceuo", "pipefail"]
 
 # WASM crates consumed by @lelantos-org/sdk. Each crate's wasm-pack output lands
-# in its own `pkg/` (gitignored). SDK imports the generated JS/.d.ts via
-# relative paths from `sdk/src/**`.
+# in its own `pkg/` (gitignored), which the SDK loads from `sdk/src/**`.
 #
-# Release builds need `wasm-opt` (binaryen) on PATH — both crates set their
-# optimiser flags in `Cargo.toml` under `package.metadata.wasm-pack`. wasm-pack
-# falls back to downloading a pinned binaryen when it cannot find one, which is
-# slow and fails outright on some networks, so install it up front:
-# `brew install binaryen` / `apt-get install binaryen`. `build-dev` skips it.
+# Release builds need `wasm-opt` (binaryen) on PATH: every crate sets optimiser
+# flags in `Cargo.toml` under `package.metadata.wasm-pack`. Without it wasm-pack
+# downloads a pinned binaryen, which is slow and fails on some networks, so
+# install it first: `brew install binaryen` / `apt-get install binaryen`.
+# `build-dev` skips it.
 
 PROVER := "prover"
 JUBJUB := "jubjub"
@@ -42,11 +41,11 @@ jubjub-build: (wasm-build JUBJUB "release")
 
 jubjub-build-dev: (wasm-build JUBJUB "dev")
 
-# Poseidon is single-threaded, so it is built WITHOUT `+atomics` — overriding
-# the workspace `.cargo/config.toml`, whose shared-memory flags are what make
-# `jubjub`/`prover` require cross-origin isolation. RUSTFLAGS in the
-# environment replaces the config value rather than appending to it, so this
-# recipe carries the features the crate does still want.
+# Poseidon is single-threaded, so it is built without `+atomics`, overriding
+# the workspace `.cargo/config.toml`, whose shared-memory flags make
+# `jubjub`/`prover` require cross-origin isolation. RUSTFLAGS in the environment
+# replaces the config value, so this recipe restates the features the crate
+# needs.
 [private]
 poseidon-wasm-build profile:
     ( command -v wasm-pack >/dev/null || cargo install wasm-pack )
@@ -61,9 +60,8 @@ poseidon-build-dev: (poseidon-wasm-build "dev")
 # Vendored-source drift check.
 #
 # `poseidon/src/poseidon/` is a byte-for-byte copy of the backend's
-# implementation, so a plain `diff` catches an edit to either side. The shared
-# `tests/vectors/poseidon.json` catches semantic drift across repos; this
-# catches it here, immediately, and names the file.
+# implementation, so `diff` catches an edit to either side and names the file.
+# The shared `tests/vectors/poseidon.json` catches semantic drift across repos.
 #
 # Skipped when the backend is not checked out alongside.
 drift:
@@ -106,7 +104,7 @@ clean:
 size: build
     @ls -lh {{PROVER}}/pkg/*_bg.wasm {{JUBJUB}}/pkg/*_bg.wasm {{POSEIDON}}/pkg/*_bg.wasm | awk '{print $5, $9}'
 
-# Run wasm benchmarks via Node. Builds first if pkg/ stale.
+# Run wasm benchmarks via Node. Builds first if pkg/ is missing.
 # Set PROVER_DIR=/path/to/2x2 to also bench prover (zkey + wtns).
 bench:
     @[ -f {{JUBJUB}}/pkg/jubjub_wasm.js ] || just jubjub-build
@@ -114,7 +112,7 @@ bench:
     cd .. && node scripts/bench-wasm.mjs
 
 # Audit the workspace lockfile against the RustSec advisory database.
-# Reasoned exceptions live in `.cargo/audit.toml`.
+# Exceptions live in `.cargo/audit.toml`.
 audit:
     ( command -v cargo-audit >/dev/null || cargo install cargo-audit )
     cargo audit

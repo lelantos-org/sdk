@@ -1,7 +1,6 @@
-// Little-endian field <-> bytes, as properties.
-//
-// Both directions are asserted: field->bytes->field for codecs,
-// bytes->field->bytes so a wire value survives a store and re-emit.
+// Little-endian field <-> bytes, as properties, in both directions:
+// field->bytes->field for codecs, bytes->field->bytes so a wire value survives
+// a store and re-emit.
 
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";

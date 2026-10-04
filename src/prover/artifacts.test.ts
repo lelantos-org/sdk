@@ -6,11 +6,12 @@ import {
     releaseArtifactBytes,
 } from "./artifact-bytes.js";
 import { cacheApiArtifactCache, clearArtifactCache } from "./artifact-cache.js";
-import { resolveArtifacts } from "./artifact-paths.js";
+import { PROVER_ARTIFACT_SHA256, sha256Hex } from "./artifact-digests.js";
+import { bundledProverArtifacts, resolveArtifacts } from "./artifact-paths.js";
 
-// The zkey is tens of MB at the 4x6 shape. These tests pin the persistence
-// properties (a hit never touches the network; no storage failure fails a
-// proof) and cover `loadArtifactBytes` retry and status classification.
+// Pins the persistence properties (a hit never touches the network; no storage
+// failure fails a proof) and covers `loadArtifactBytes` retry, status
+// classification, cancellation and digest pinning.
 
 const ZKEY = "https://cdn.test/3x3_final.zkey";
 const BYTES = new Uint8Array([1, 2, 3, 4]);
@@ -120,7 +121,6 @@ describe("loadArtifactBytes persistence", () => {
 
         await loadArtifactBytes(ZKEY, { onProgress: (p) => seen.push(p) });
 
-        // A cache hit must still complete a progress consumer.
         expect(seen).toEqual([{ loaded: 4, total: 4, url: ZKEY }]);
     });
 
@@ -197,11 +197,6 @@ describe("releaseArtifactBytes", () => {
     });
 
     it("releases a page-relative path, which memoises under its absolute URL", async () => {
-        // `WasmProver.build` accepts caller-supplied paths that bypass
-        // `resolveArtifacts`, so a relative path must release the entry memoised
-        // under its absolute URL. Other tests use absolute URLs and cannot
-        // exercise this.
-        //
         // With persistence off only the memo can serve a second load, so the
         // fetch count shows whether the release took effect.
         configureArtifactCache(false);
@@ -429,5 +424,112 @@ describe("loadArtifactBytes network handling", () => {
 
         expect(out).toEqual(new Uint8Array([1, 2]));
         expect(out.buffer.byteLength).toBe(2);
+    });
+});
+
+// A substituted proving key can make its proofs leak the witness, so pinned
+// bytes are checked wherever they came from, and never returned on a mismatch.
+describe("loadArtifactBytes digest pinning", () => {
+    const OTHER = new Uint8Array([9, 9, 9, 9]);
+
+    it("returns and persists bytes that match the pinned digest", async () => {
+        const { entries } = fakeCaches();
+        respondWith(BYTES);
+
+        const out = await loadArtifactBytes(ZKEY, { sha256: await sha256Hex(BYTES) });
+
+        expect(out).toEqual(BYTES);
+        expect(entries.has(ZKEY)).toBe(true);
+    });
+
+    it("accepts an upper-case digest", async () => {
+        fakeCaches();
+        respondWith(BYTES);
+        const sha256 = (await sha256Hex(BYTES)).toUpperCase();
+
+        await expect(loadArtifactBytes(ZKEY, { sha256 })).resolves.toEqual(BYTES);
+    });
+
+    it("refuses a download that does not match, without retrying or persisting it", async () => {
+        const { entries } = fakeCaches();
+        const fetchMock = respondWith(OTHER);
+
+        await expect(
+            loadArtifactBytes(ZKEY, { sha256: await sha256Hex(BYTES) }),
+        ).rejects.toMatchObject({
+            code: "PROVER_ARTIFACTS_FAILED",
+            retryable: false,
+            source: ZKEY,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(entries.has(ZKEY)).toBe(false);
+    });
+
+    it("treats a cached entry that does not match as a miss and replaces it", async () => {
+        const { entries } = fakeCaches();
+        seed(entries, ZKEY, OTHER);
+        const fetchMock = respondWith(BYTES);
+
+        const out = await loadArtifactBytes(ZKEY, { sha256: await sha256Hex(BYTES) });
+
+        expect(out).toEqual(BYTES);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(new Uint8Array(entries.get(ZKEY)!)).toEqual(BYTES);
+    });
+
+    it("checks bytes an unpinned caller already memoised", async () => {
+        fakeCaches();
+        respondWith(OTHER);
+        await expect(loadArtifactBytes(ZKEY)).resolves.toEqual(OTHER);
+
+        await expect(
+            loadArtifactBytes(ZKEY, { sha256: await sha256Hex(BYTES) }),
+        ).rejects.toMatchObject({ code: "PROVER_ARTIFACTS_FAILED", retryable: false });
+    });
+
+    it("hashes once per realm, not once per load", async () => {
+        fakeCaches();
+        respondWith(BYTES);
+        const sha256 = await sha256Hex(BYTES);
+        const digest = vi.spyOn(globalThis.crypto.subtle, "digest");
+
+        await loadArtifactBytes(ZKEY, { sha256 });
+        await loadArtifactBytes(ZKEY, { sha256 });
+
+        expect(digest).toHaveBeenCalledTimes(1);
+        digest.mockRestore();
+    });
+});
+
+describe("pinned release digests", () => {
+    it("pins the artifacts a CDN is expected to serve", async () => {
+        const artifacts = await bundledProverArtifacts({
+            runtime: "browser",
+            cdn: "https://cdn.test/circuits/",
+        });
+
+        expect(artifacts).toEqual({
+            circuit: "https://cdn.test/circuits/4x6.wasm",
+            zkey: "https://cdn.test/circuits/4x6_final.zkey",
+            sha256: PROVER_ARTIFACT_SHA256["4x6"],
+        });
+        expect(resolveArtifacts(artifacts).sha256).toBe(PROVER_ARTIFACT_SHA256["4x6"]);
+    });
+
+    it("leaves explicit artifacts unpinned unless they name digests", () => {
+        expect(resolveArtifacts({ circuit: "/a.wasm", zkey: "/a.zkey" }).sha256).toBeUndefined();
+    });
+
+    // Every circuits release has its own keys. Bumping the peer dependency
+    // without these digests would refuse every artifact the SDK locates itself.
+    it("matches the installed `@lelantos-org/circuits`", async () => {
+        const { readFile } = await import("node:fs/promises");
+        const artifacts = await bundledProverArtifacts({ runtime: "node" });
+        const read = async (url: unknown) => new Uint8Array(await readFile(url as URL));
+
+        expect({
+            circuit: await sha256Hex(await read(artifacts.circuit)),
+            zkey: await sha256Hex(await read(artifacts.zkey)),
+        }).toEqual(PROVER_ARTIFACT_SHA256["4x6"]);
     });
 });

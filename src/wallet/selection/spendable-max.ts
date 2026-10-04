@@ -10,13 +10,12 @@ import type { SelectOpts, SpendableMax } from "./types.js";
 /**
  * The largest amount of `asset` one spend can cover.
  *
- * The sum of the largest `maxInputs` selectable notes, less `reserve` (a fee
- * taken from this same asset). A UI "max" derived from the balance would ignore
- * the rules in `partitionSpendable` and fail with `InsufficientCoverError`.
+ * The sum of the largest `maxInputs` selectable notes, less `opts.fee` (a fee
+ * taken from this same asset). A "max" derived from the balance ignores the
+ * rules in `partitionSpendable` and can be refused by the selector.
  *
- * Taking the largest notes makes this a true ceiling: the selector looks for
- * the smallest cover clearing the target, so at the ceiling this set is the
- * only cover.
+ * A true ceiling: the selector looks for the smallest cover clearing the
+ * target, and at this amount the largest notes are the only cover.
  *
  * @internal
  */
@@ -35,8 +34,7 @@ export function spendableMax(
     });
 
     const desc = candidates.map((note) => BigInt(note.value)).sort((a, b) => cmpBigint(b, a));
-    // Uses `fee`, as `selectNotes` does when raising its threshold for a
-    // same-asset fee.
+    // `selectNotes` raises its threshold by the same `fee`.
     const net = sum(desc.slice(0, n)) - (opts.fee ?? 0n);
 
     return {

@@ -1,4 +1,4 @@
-// The 112-byte note plaintext codec.
+// The 80-byte note plaintext codec.
 //
 // Width is load-bearing: `decodeNotePayload` rejects any other length and the
 // AEAD framing assumes this one. The round-trip is property-tested to catch
@@ -23,7 +23,6 @@ const notePayload: fc.Arbitrary<NotePayload> = fc.record({
     value: u64,
     rho: field,
     rcm: field,
-    rcvDep: field,
 });
 
 describe("note plaintext codec", () => {
@@ -49,15 +48,13 @@ describe("note plaintext codec", () => {
             value: 0x1112131415161718n,
             rho: (0x21n << 200n) | 0x22n,
             rcm: (1n << 250n) + 0x33n,
-            rcvDep: 0x44n,
         };
         const hex = Buffer.from(encodeNotePayload(p)).toString("hex");
         expect(hex).toBe(
             "0807060504030201" +
                 "1817161514131211" +
                 `22${"00".repeat(24)}21${"00".repeat(6)}` +
-                `33${"00".repeat(30)}04` +
-                `44${"00".repeat(31)}`,
+                `33${"00".repeat(30)}04`,
         );
         expect(decodeNotePayload(encodeNotePayload(p))).toEqual(p);
     });

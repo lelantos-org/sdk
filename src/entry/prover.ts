@@ -15,10 +15,17 @@ export {
     cacheApiArtifactCache,
     clearArtifactCache,
 } from "../prover/artifact-cache.js";
+export { PROVER_ARTIFACT_SHA256 } from "../prover/artifact-digests.js";
 export { bundledProverArtifacts, resolveArtifacts } from "../prover/artifact-paths.js";
 export { type PreloadOpts, preloadWasm } from "../prover/preload.js";
 export { SnarkjsProver } from "../prover/snarkjs.js";
-export type { Groth16Proof, ProveResult, Prover, ProverArtifacts } from "../prover/types.js";
+export type {
+    ArtifactDigests,
+    Groth16Proof,
+    ProveResult,
+    Prover,
+    ProverArtifacts,
+} from "../prover/types.js";
 export { WasmProver } from "../prover/wasm-prover.js";
 export {
     type BrowserWorkerProverOpts,

@@ -4,8 +4,7 @@ import { BABYJUB_SUBGROUP_ORDER, BN254_FR, REDUCE_SPARE_BITS, reduceWideToField 
 const bytes = (n: number, fill = 0xff): Uint8Array => new Uint8Array(n).fill(fill);
 
 describe("reduceWideToField", () => {
-    // The guard is the function's purpose: folding a bare 32-byte hash into
-    // BN254 Fr leaves 2 spare bits and skews the low residues by ~6:5.
+    // A bare 32-byte hash has 2 spare bits over BN254 Fr.
     it("refuses a draw that is too narrow to reduce without bias", () => {
         expect(() => reduceWideToField(bytes(32), BN254_FR, "nsk")).toThrow(/spare bits/);
         expect(() => reduceWideToField(bytes(32), BABYJUB_SUBGROUP_ORDER, "nsk")).toThrow(
@@ -28,8 +27,7 @@ describe("reduceWideToField", () => {
 
     it("lands in [1, modulus) and is big-endian", () => {
         const v = reduceWideToField(bytes(40, 0x00), BN254_FR, "nsk");
-        // All-zero input reduces to 0, which is remapped to 1 rather than left
-        // as an identity ECDH key.
+        // All-zero input reduces to 0, which is remapped to 1.
         expect(v).toBe(1n);
 
         const one = new Uint8Array(40);

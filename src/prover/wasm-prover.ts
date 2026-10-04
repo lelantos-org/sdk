@@ -1,6 +1,6 @@
-// WASM-backed Groth16 prover. Drop-in for `SnarkjsProver`.
-// Witness calc via `circom_runtime`; proof via rust ark-groth16 at
-// `sdk/wasm/prover/`, with rayon multi-threading on COI pages.
+// WASM-backed Groth16 prover, a drop-in for `SnarkjsProver`. Witness calculation via
+// `circom_runtime`; proof via Rust ark-groth16 at `sdk/wasm/prover/`, with rayon multi-threading
+// on cross-origin-isolated pages.
 //
 // `circom_runtime` (a transitive dependency of the optional `snarkjs` peer) is imported lazily on
 // the first build, so the `./prover` entry, which exports this class, resolves without it. The
@@ -42,14 +42,13 @@ const _buildCache = memoAsyncByKey<string, WasmProver>();
 /**
  * Build the circom witness calculator.
  *
- * `memorySize: 1` is required. By default `circom_runtime` allocates a
- * **2 GiB** `WebAssembly.Memory` (32767 pages) and on failure halves and
- * retries, logging a warning each round; on memory-constrained devices this
- * can get the tab killed.
+ * `memorySize: 1` is required. By default `circom_runtime` allocates a 2 GiB
+ * `WebAssembly.Memory` (32767 pages), halving and retrying on failure, which
+ * can get the tab killed on memory-constrained devices.
  *
  * That memory is passed as `env.memory`, which only circom 1 modules import.
- * Both shipped circuits are circom 2: each exports its own `memory` and
- * `getVersion` (the circom 2 marker) and neither imports `env.memory`.
+ * The shipped circuits are circom 2: each exports its own `memory` and
+ * `getVersion` (the circom 2 marker) and does not import `env.memory`.
  */
 async function buildWitnessCalculator(circuitWasm: Uint8Array): Promise<WitnessCalculator> {
     const { WitnessCalculatorBuilder } = await circomRuntime.get();
@@ -73,12 +72,12 @@ export class WasmProver implements Prover {
     ) {}
 
     /**
-     * Build (or return the in-flight build for) a prover over `artifacts`.
+     * Build a prover over `artifacts`, or return the cached or in-flight one.
      *
      * `opts` reaches the artifact fetch, so a caller can observe or abort the
-     * ~48 MB zkey download. It applies only to the call that starts the
-     * build: a second caller for the same artifacts joins the existing promise and
-     * sees neither its progress nor its `signal`.
+     * zkey download. It applies only to the call that starts the build: a
+     * later caller for the same artifacts joins the existing promise, and
+     * neither its progress callback nor its `signal` takes effect.
      */
     static async build(
         artifacts: ProverArtifacts,
@@ -87,23 +86,29 @@ export class WasmProver implements Prover {
         assertUsable();
         // Canonicalised before use as a key, so different spellings of one
         // artifact pair (relative, root-relative, absolute) share one session
-        // rather than each parsing a ~48 MB proving key into wasm memory.
+        // rather than each parsing the proving key into wasm memory.
         const canonical = resolveArtifacts(artifacts);
-        const key = `${canonical.zkeyPath}\0${canonical.wasmPath}`;
+        // The digests are part of the key: a session built from unpinned bytes
+        // must not be handed to a caller that pinned them.
+        const { sha256 } = canonical;
+        const key = [canonical.zkeyPath, canonical.wasmPath, sha256?.zkey, sha256?.circuit].join(
+            "\0",
+        );
         return _buildCache.get(key, () => WasmProver._doBuild(canonical, opts));
     }
 
     private static async _doBuild(paths: ProverPaths, opts: LoadArtifactOpts): Promise<WasmProver> {
         const [Session, zkeyBytes, wc] = await Promise.all([
             loadProver(),
-            loadArtifactBytes(paths.zkeyPath, opts),
-            // The witness calculator (~4 MB) arrives well before the zkey
-            // (~48 MB), so it is compiled on arrival. Its progress is suppressed
-            // because two downloads on one callback would report non-monotonic
-            // progress.
-            loadArtifactBytes(paths.wasmPath, { ...opts, onProgress: undefined }).then(
-                buildWitnessCalculator,
-            ),
+            loadArtifactBytes(paths.zkeyPath, { ...opts, sha256: paths.sha256?.zkey }),
+            // The witness calculator is much smaller than the zkey and is
+            // compiled on arrival. Its progress is suppressed because two
+            // downloads on one callback would report non-monotonic progress.
+            loadArtifactBytes(paths.wasmPath, {
+                ...opts,
+                onProgress: undefined,
+                sha256: paths.sha256?.circuit,
+            }).then(buildWitnessCalculator),
         ]);
         const session = new Session(zkeyBytes);
         // The key is in wasm linear memory and `wc` holds a compiled module, so
@@ -131,15 +136,13 @@ export class WasmProver implements Prover {
      * Not required for process exit (the workers are unref'd); provides a
      * deterministic teardown point for long-lived hosts and test suites.
      *
-     * **Irreversible once a thread pool has started.** rayon's global pool is
+     * Irreversible once a thread pool has started. rayon's global pool is
      * initialised once per wasm module instance, and a re-import returns the
      * same instance with the terminated pool still registered. A second
-     * `initThreadPool` throws (`unwrap_throw` on `PoolBuilder::build`), yet the
-     * module still dispatches into the terminated pool, so `session.prove`
-     * would block indefinitely.
-     *
-     * Subsequent `build()` or `preload()` calls therefore throw. Proving again
-     * requires a fresh realm (a worker or child process).
+     * `initThreadPool` throws, yet the module still dispatches into the
+     * terminated pool, so `session.prove` would block indefinitely. Later
+     * `build()` and `preload()` calls therefore throw; proving again requires
+     * a fresh realm (a worker or child process).
      *
      * If no pool was started (single-threaded configuration), the module memo
      * is dropped and the next `build()` works normally.

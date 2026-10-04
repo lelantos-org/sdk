@@ -1,8 +1,5 @@
-// WASM module loading for Baby-Jubjub.
-//
-// Isolates bundler handling from the curve arithmetic. The boilerplate is
-// `runtime/wasm/module-loader.ts`, shared with `../poseidon-wasm/loader.ts`; the
-// Node/browser/injected branch under it is `runtime/wasm/loader.ts`.
+// WASM module loading for Baby-Jubjub, kept apart from the curve arithmetic. Built on the factory
+// in `runtime/wasm/module-loader.ts`, shared with `../poseidon-wasm/loader.ts`.
 
 import type { WasmLoaderOverride, WasmModuleBase } from "../../runtime/wasm/loader.js";
 import { createModuleLoader } from "../../runtime/wasm/module-loader.js";
@@ -10,7 +7,6 @@ import { createModuleLoader } from "../../runtime/wasm/module-loader.js";
 export interface JubWasmMod extends WasmModuleBase {
     add_point(a: Uint8Array, b: Uint8Array): Uint8Array;
     base8(): Uint8Array;
-    hash_to_asset_gen(asset_id_le: Uint8Array): Uint8Array;
     in_subgroup(p: Uint8Array): boolean;
     mul_point_escalar(p: Uint8Array, scalar_le: Uint8Array): Uint8Array;
     pack_point(p: Uint8Array): Uint8Array;
@@ -24,15 +20,15 @@ export interface JubWasmMod extends WasmModuleBase {
 }
 
 /**
- * Override for bundlers that rewrite `new URL(..., import.meta.url)` to a
- * runtime-invalid location. Call before `Jubjub.build()`.
+ * Override for bundlers that rewrite `new URL(..., import.meta.url)` to a runtime-invalid
+ * location.
  *
  * @internal
  */
 export type JubjubWasmLoader = WasmLoaderOverride<JubWasmMod>;
 
-// The import thunk and both URLs stay here, not in the shared factory: they
-// resolve against *this* file. See the bundler contract in `runtime/wasm/module-loader.ts`.
+// The import thunk and both URLs resolve against this file, so they cannot move into the shared
+// factory. See the bundler contract in `runtime/wasm/module-loader.ts`.
 const loader = createModuleLoader<JubWasmMod>({
     owner: "Jubjub",
     importModule: () => import("#wasm/jubjub"),

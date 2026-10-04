@@ -7,7 +7,7 @@
  * Grouped by what the caller does about it:
  *
  *   * configuration and arguments: fix the call or the wiring;
- *   * funds: wait, top up, consolidate, or pick another fee asset;
+ *   * funds: wait, top up, consolidate, pick another fee asset, or raise the fee limit;
  *   * submission: the relayer's answer, or the absence of one;
  *   * transport, chain, prover, worker: infrastructure, often `retryable`;
  *   * `INTERNAL`: an SDK bug; report it.
@@ -25,6 +25,7 @@ export const WALLET_ERROR_CODES = [
     "NOTES_HELD",
     "INSUFFICIENT_COVER",
     "FEE_ASSET_NOT_QUOTED",
+    "FEE_ABOVE_LIMIT",
     // submission
     "DEADLINE_PASSED",
     "QUOTE_STALE",

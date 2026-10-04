@@ -1,12 +1,10 @@
 // Persistent storage for the proving artifacts.
 //
-// The default shape's zkey is ~48 MB. The in-memory memo in
-// `./artifact-bytes.ts` is per JS realm and the prover worker has its own realm, so
-// without persistence the download repeats on every page load and worker spawn.
-//
-// The Cache API is origin-scoped (a worker read hits the entry the window
-// wrote) and available in both Window and Worker contexts, unlike
-// `localStorage` and (portably) OPFS.
+// The in-memory memo in `./artifact-bytes.ts` is per JS realm and the prover
+// worker has its own realm, so without persistence the tens-of-MB download
+// repeats on every page load and worker spawn. The Cache API is origin-scoped
+// (a worker read hits the entry the window wrote) and available in both Window
+// and Worker contexts.
 //
 // Nothing here may throw: a storage failure must degrade to a network fetch,
 // never to a failed proof.
@@ -21,11 +19,7 @@ const log = getLogger("lelantos:prover:cache");
  *
  * Implement this to store artifacts outside the Cache API (IndexedDB, OPFS, an
  * Electron userData directory) and install it with `configureArtifactCache`.
- *
- * Unlike the wallet-tier ports (`NoteStore`, `TreePersistence`), whose data
- * loss is a correctness problem, **neither method may throw**: a storage
- * failure must degrade to a network fetch. The port is keyed (one entry per
- * artifact URL), hence `get`/`put` rather than `load`/`save`.
+ * Neither method may throw: a storage failure must degrade to a network fetch.
  */
 export interface ArtifactCache {
     /** Cached bytes for `url`, or `null` on a miss. Must not throw. */
@@ -48,10 +42,9 @@ function available(): boolean {
  * Cache API implementation of {@link ArtifactCache}, or `null` where the
  * Cache API is absent (Node, non-secure contexts, some embedded webviews).
  *
- * Entries are keyed by the exact artifact URL, so **the URL is the version**.
- * Proving keys are immutable per circuits release; serve a new release under a
- * new path (or call {@link clearArtifactCache}). Entries are never revalidated,
- * to avoid a round-trip on every load.
+ * Entries are keyed by the exact artifact URL and never revalidated, so the URL
+ * is the version: serve each circuits release under its own path, or call
+ * {@link clearArtifactCache}.
  */
 export function cacheApiArtifactCache(): ArtifactCache | null {
     if (!available()) return null;
@@ -97,11 +90,11 @@ export function cacheApiArtifactCache(): ArtifactCache | null {
 }
 
 /**
- * Drop every cached artifact. Use after publishing new proving keys under
- * unchanged URLs, or to reclaim the ~52 MB the artifacts occupy.
+ * Drop every cached artifact. Use after publishing different proving keys under
+ * unchanged URLs, or to reclaim the storage the artifacts occupy.
  *
- * Resolves to `false` when there was nothing to delete or the Cache API is
- * unavailable.
+ * Resolves to `false` when there was nothing to delete, the Cache API is
+ * unavailable, or the delete failed.
  */
 export async function clearArtifactCache(): Promise<boolean> {
     if (!available()) return false;

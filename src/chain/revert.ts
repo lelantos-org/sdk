@@ -1,9 +1,9 @@
-// Classify a failed contract read: did the contract answer "no", or did the read fail?
+// Classifies a failed contract read: the contract's own refusal, or a failure of the read.
 //
 // A revert (or a call that returned no data) is the contract's own answer, so a probe for an
 // optional selector may read it as "unsupported". Anything else (a timeout, a 429, a dropped
 // connection, a malformed response) says nothing about the contract, and treating it as "no"
-// would cache a wrong answer: an asset read as plain when it yields, for the life of the wallet.
+// would cache a wrong answer: an asset read as plain when it yields.
 //
 // Matched by error name along the `cause` chain, not `instanceof`, so this module needs no viem
 // import and still recognises errors from a second viem copy in the bundle.
@@ -40,9 +40,8 @@ const TRANSPORT_NAMES = new Set([
  * Whether `err` is the contract itself refusing the call (a revert or empty return data), as
  * opposed to the read failing.
  *
- * Checks error names along the `cause` chain first. Only when no viem-typed error is present does
- * it fall back to the message, for adapters that surface a node's `execution reverted` text as a
- * plain `Error`.
+ * Falls back to the message only when the `cause` chain holds no viem-typed error, for adapters
+ * that surface a node's `execution reverted` text as a plain `Error`.
  */
 export function isContractRevert(err: unknown): boolean {
     let sawTyped = false;

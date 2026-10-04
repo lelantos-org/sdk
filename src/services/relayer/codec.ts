@@ -1,12 +1,9 @@
 // Wire-format serializers for the relayer HTTP protocol.
 //
-// Outbound bigint encoding is not uniform. The relayer's Rust DTOs declare a
-// `DepositRequest`'s `chainId`, `publicAssetId` and `publicIn` as `u64`, and
-// serde's `u64` deserializer rejects strings, so those three go out as JSON
-// numbers while every field element and U256 beside them goes out as a decimal
-// string. The choice is explicit at every call site through `u64Num` and
-// `decStr` rather than a bare `Number(...)` or `.toString()`; `codec.test.ts`
-// pins both encodings with golden fixtures.
+// Outbound bigint encoding is not uniform. Fields the relayer's Rust DTOs
+// declare as `u64` go out as JSON numbers through `u64Num`, since serde's `u64`
+// deserializer rejects strings; field elements and U256 values go out as
+// decimal strings through `decStr`. `codec.test.ts` pins both encodings.
 
 import { bytesToHex } from "../../core/hex.js";
 import type { Point } from "../../crypto/index.js";
@@ -23,9 +20,8 @@ import type {
 /**
  * Encode as a JSON number, for a field whose Rust DTO is `u64`.
  *
- * @throws {WireFormatError} above `Number.MAX_SAFE_INTEGER`. `Number(bigint)`
- * truncates silently, and `publicAssetId` is an uncapped u64, so an asset id
- * past 2^53 would corrupt the wire with no indication.
+ * @throws {WireFormatError} if negative or above `Number.MAX_SAFE_INTEGER`,
+ * where `Number(bigint)` would truncate silently.
  */
 function u64Num(v: bigint, path: string): number {
     if (v < 0n || v > BigInt(Number.MAX_SAFE_INTEGER)) {
@@ -76,7 +72,6 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         refundFeeAuxD: serializeAux(s.refundFeeAuxD),
         tokenIn: s.tokenIn,
         tokenOut: s.tokenOut,
-        // Decimal strings so U256 values >2^53 round-trip safely.
         amountIn: decStr(s.amountIn),
         minOut: decStr(s.minOut),
         deadline: decStr(s.deadline),
@@ -86,24 +81,17 @@ function serializeSwapBlob(s: SwapBlob): unknown {
 
 function serializeSwapDeposit(d: DepositRequest, path: string): unknown {
     return {
-        // Rust DTO declares these as u64 (serde rejects strings); JS
-        // Number is safe up to 2^53.
         chainId: u64Num(d.chainId, `${path}.chainId`),
         publicAssetId: u64Num(d.publicAssetId, `${path}.publicAssetId`),
         publicIn: u64Num(d.publicIn, `${path}.publicIn`),
         payer: d.payer,
         recipient: d.recipient,
-        outCm: d.outCm,
-        cvDep: [decStr(d.cvDep[0]), decStr(d.cvDep[1])],
-        rcv: decStr(d.rcv),
-        // A swap deposit mints a fee leaf too, paying whoever flushes it. Its
-        // asset is a `u64` like `feeIn`: the escrowed asset, or 0 for a
-        // zero-value leaf.
+        inner: d.inner,
+        // Fee leaf, paying whoever flushes the deposit. `feeAssetId` is the
+        // escrowed asset, or 0 for a zero-value leaf.
         feeAssetId: u64Num(d.feeAssetId, `${path}.feeAssetId`),
         feeIn: u64Num(d.feeIn, `${path}.feeIn`),
-        feeCm: d.feeCm,
-        feeCvDep: [decStr(d.feeCvDep[0]), decStr(d.feeCvDep[1])],
-        feeRcv: decStr(d.feeRcv),
+        feeInner: d.feeInner,
     };
 }
 
@@ -117,22 +105,20 @@ function serializePubInputs(pi: TransactPubInputs): unknown {
         nullifier: pi.nullifier.map(decStr),
         outCm: pi.outCm.map(decStr),
         publicAssetId: u64Num(pi.publicAssetId, "$.pubInputs.publicAssetId"),
-        publicIn: u64Num(pi.publicIn, "$.pubInputs.publicIn"),
         publicOut: u64Num(pi.publicOut, "$.pubInputs.publicOut"),
-        inCv: pi.inCv.map(pointToObj),
-        outCv: pi.outCv.map(pointToObj),
+        digest: decStr(pi.digest),
         recipient: pi.recipient,
         chainId: u64Num(pi.chainId, "$.pubInputs.chainId"),
         payer: pi.payer,
         relayer: pi.relayer,
         intentHash: decStr(pi.intentHash),
-        outCvDep: pi.outCvDep.map(pointToObj),
     };
 }
 
 function serializeAux(a: OutputAux): unknown {
     return {
         clueR: pointToObj(a.clueR),
+        clueQ: pointToObj(a.clueQ),
         ephPub: pointToObj(a.ephPub),
         ciphertext: bytesToHex(a.ciphertext),
     };

@@ -19,10 +19,8 @@ import { X402PaymentError } from "../errors/x402.js";
 
 /**
  * "This wallet cannot pay this offer": recoverable; the caller tries the next
- * offer. `scope` names the mechanism for the message prefix.
- *
- * Returns the error rather than throwing, so call sites read as
- * `throw unsupported(...)`.
+ * offer. `scope` names the mechanism for the message prefix. The error is
+ * returned, not thrown: call sites write `throw unsupported(...)`.
  */
 export function unsupported(
     scope: string,
@@ -49,11 +47,9 @@ export function parseCaip2(network: string): Caip2 {
 }
 
 /**
- * Require an offer to be on `namespace:<this wallet's chain>`.
- *
- * The message distinguishes the two halves: a wrong namespace means the offer
- * targets a different mechanism; a wrong reference means the right mechanism
- * on another chain (no bridging).
+ * Require an offer to be on `namespace:<this wallet's chain>`. A wrong
+ * namespace means the offer targets a different mechanism; a wrong reference
+ * means the right mechanism on another chain (no bridging).
  */
 export function requireNetwork(
     scope: string,
@@ -94,12 +90,7 @@ export function requireAmount(scope: string, value: string, field: string): Circ
     return branded<CircuitAmount>(requirePositiveInteger(scope, value, field));
 }
 
-/**
- * A server-quoted MASP asset id.
- *
- * Range failures are `unsupported-requirements`, so a bad offer falls through
- * to the next `accepts[]` entry instead of aborting the request.
- */
+/** A server-quoted MASP asset id. An out-of-range id is `unsupported-requirements` too. */
 export function requireAssetId(scope: string, value: string, field: string): AssetId {
     const raw = requirePositiveInteger(scope, value, field);
     try {

@@ -1,18 +1,14 @@
 // Shared worker RPC: transport types.
 //
-// One `WorkerLike` for the whole SDK.
-//
-// Members use method syntax rather than property-with-arrow: method
-// parameters stay bivariant under `strictFunctionTypes`, which lets one
-// interface accept both a DOM `Worker` (transfer list `Transferable[]`) and a
-// `node:worker_threads` Worker (`TransferListItem[]`) without an `any`.
+// `WorkerLike` members use method syntax: method parameters stay bivariant
+// under `strictFunctionTypes`, so one interface accepts both a DOM `Worker`
+// (transfer list `Transferable[]`) and a `node:worker_threads` Worker
+// (`TransferListItem[]`) without an `any`.
 //
 // The handler slots are nullable properties, not methods, so they take
-// `(ev: any)`. A narrower parameter is contravariant and a DOM `Worker` would
-// no longer satisfy the interface: `onmessage: ((ev: MessageEvent) => any) |
-// null` is not assignable to `((ev: { data: unknown }) => void) | null`,
-// because `{ data: unknown }` is not assignable to `MessageEvent`.
-// `types.test.ts` checks both directions.
+// `(ev: any)`. A narrower parameter is contravariant: a DOM `Worker`'s
+// `onmessage: ((ev: MessageEvent) => any) | null` is not assignable to
+// `((ev: { data: unknown }) => void) | null`. `types.test.ts` pins both.
 
 import type { LogLevel } from "../../log/logger.js";
 
@@ -41,9 +37,9 @@ export interface WorkerLike {
  * call site: bundlers emit a worker chunk only for that literal form and cannot
  * see a URL passed through a helper (Vite inlines a small worker entry as a
  * `data:` URL under `build.assetsInlineLimit`, whose relative imports then fail
- * at runtime). A factory also supports other bundler forms
- * (`import W from "…?worker"`, then `() => new W()`) and lets
- * `WorkerPoolScanner` respawn a dead worker.
+ * at runtime). Other bundler forms work too (`import W from "…?worker"`, then
+ * `() => new W()`), and `WorkerPoolScanner` uses the factory to respawn a dead
+ * worker.
  *
  * ```ts
  * () => new Worker(new URL("@lelantos-org/sdk/workers/scanner", import.meta.url), {
@@ -67,7 +63,7 @@ export interface RpcRequest {
     params: unknown;
 }
 
-/** Serialised remote error. One `cause` level is preserved, depth-capped. */
+/** Serialised remote error. The `cause` chain is preserved up to a depth cap. */
 export interface WireError {
     name: string;
     message: string;

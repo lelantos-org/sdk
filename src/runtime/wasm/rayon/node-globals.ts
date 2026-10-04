@@ -2,16 +2,14 @@
 // under Node.
 //
 // `workerHelpers.js` touches `self.addEventListener` at module top level, so
-// the stubs must exist before the pkg module is imported. They must also not
-// outlive it: "am I in a worker?" is conventionally spelled
+// the stubs must exist before the pkg module is imported. They must not
+// outlive it: the conventional worker-context check is
 //
 //     typeof self !== "undefined" && typeof postMessage === "function"
 //
 // so leaving `self`/`postMessage` on `globalThis` makes every library in the
-// process treat a Node main thread as a Web Worker.
-//
-// Therefore: install only what is missing, record exactly that, and restore it
-// once the pkg module has finished loading.
+// process treat a Node main thread as a Web Worker. Only missing keys are
+// installed, and exactly those are removed once the pkg module has loaded.
 
 const STUBBED = ["addEventListener", "removeEventListener", "postMessage"] as const;
 
@@ -21,8 +19,8 @@ interface InstalledGlobals {
 }
 
 /**
- * Install the stubs, returning a handle that removes precisely the keys this
- * call added — anything the host already defined is left untouched.
+ * Install the stubs, returning a handle that removes only the keys this call
+ * added; anything the host already defined is left untouched.
  */
 export function installWorkerGlobals(): InstalledGlobals {
     const g = globalThis as Record<string, unknown>;

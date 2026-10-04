@@ -11,8 +11,7 @@ describe("deriveEphemeralKey", () => {
     });
 
     it("golden vector — a change here strands funds at old addresses", () => {
-        // Pins the derivation (domain tag and byte layout). Any change makes
-        // existing funded ephemeral addresses unreachable.
+        // Pins the domain tag and byte layout.
         expect(deriveEphemeralKey(1n, 0)).toBe(
             "0x2095110998e29c5ea5116f6d44471639e36d8c3576cb5760b71bccba57af675b",
         );
@@ -53,8 +52,7 @@ describe("deriveEphemeralKey", () => {
 
 describe("hostPayerIndex", () => {
     it("gives each host its own payer address", () => {
-        // A shared slot gives every server the same publicly funded `from`
-        // address, letting servers link payments to one wallet.
+        // A shared slot would let servers link payments by comparing `from`.
         const addr = (host: string) =>
             privateKeyToAccount(deriveEphemeralKey(NSK, hostPayerIndex(host))).address;
 

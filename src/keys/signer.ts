@@ -1,18 +1,15 @@
-// Signer ports. Interfaces only — implementations live in `chain/signer/`.
+// Signer ports: interfaces only; implementations live in `chain/signer/`.
 //
-// Lives in `keys/` (tier 2), its lowest consumer, so `keys/` and `protocol/` can name an
-// `EthSigner` without depending on the chain adapter that provides one and, via
-// `crypto/eip712.js`, without viem appearing in this module's emitted declarations.
+// Declared in `keys/` so `keys/` and `protocol/` can name an `EthSigner` without depending on the
+// chain adapter, and typed through `crypto/eip712.js` so viem stays out of the emitted
+// declarations.
 
 import type { EvmAddress, Hex32 } from "../core/brand.js";
 import type { TypedDataDomain, TypedDataParameter } from "../crypto/eip712.js";
 
 /** Minimal signer the SDK needs from any wallet. */
 export interface EthSigner {
-    /**
-     * Chain id pinned at construction so EIP-712 builders don't re-query
-     * the RPC.
-     */
+    /** Chain id pinned at construction, so EIP-712 builders do not query the RPC. */
     readonly chainId: bigint;
     getAddress(): Promise<EvmAddress>;
     /** Sign EIP-712 typed-data. Returns 0x-prefixed 65-byte hex. */

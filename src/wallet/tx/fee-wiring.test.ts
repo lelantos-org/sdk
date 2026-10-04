@@ -15,20 +15,20 @@ import { executeWithdraw } from "../ops/withdraw.js";
 
 // Paying the relayer in an asset the spend is not otherwise moving.
 //
-// The circuit conserves value per asset, so the proof may carry both. These
-// assert the fee note is in the chosen asset, its change is alongside, and each
-// asset conserves independently. A wrong shape yields a witness that fails in
-// circom or a fee note the relayer refuses with a 402.
+// The circuit conserves value per asset, so the proof may carry both. These assert the fee note is
+// in the chosen asset, its change is alongside, and each asset conserves independently. A wrong
+// shape yields a witness that fails in circom or a fee note the relayer refuses with a 402.
 
 const ASSET_A = 1n;
 const ASSET_B = 2n;
 
-async function makeCtx(notes: StoredNote[], est?: EstimateResponse) {
+async function makeCtx(notes: StoredNote[], est?: EstimateResponse, cfg?: Record<string, unknown>) {
     const made = await makeTestCtx({
         notes,
         shape: TRANSACT_4X6,
         chain: {},
         ...(est ? { estimate: est } : {}),
+        ...(cfg ? { cfg } : {}),
     });
     const submitted = {
         get payload() {
@@ -52,15 +52,16 @@ function netByAsset(w: Record<string, unknown>): Map<bigint, bigint> {
     for (const [j, a] of (w.out_asset as string[]).entries()) {
         bump(BigInt(a), -BigInt((w.out_value as string[])[j]!));
     }
-    bump(BigInt(w.public_asset_id as string), -BigInt(w.public_out as string));
+    // The transparent bucket. Empty on a transfer, which names asset 0.
+    const publicOut = BigInt(w.public_out as string);
+    if (publicOut !== 0n) bump(BigInt(w.public_asset_id as string), -publicOut);
+    else expect(w.public_asset_id).toBe("0");
     return net;
 }
 
 /**
- * The slot a party's note landed in, and its plaintext, by trial decryption.
- *
- * Mirrors how a relayer finds its payment: every slot is tried, and one that
- * fails to decrypt belongs to another key. Asserts exactly one match.
+ * The slot a party's note landed in, and its plaintext, by trial decryption of every slot, as a
+ * relayer finds its payment. Asserts exactly one match.
  */
 function noteFor(payload: SubmitTransactPayload, J: WalletContext["J"], ivk: bigint) {
     const hits = payload.aux.flatMap((a, slot) => {
@@ -69,8 +70,8 @@ function noteFor(payload: SubmitTransactPayload, J: WalletContext["J"], ivk: big
             ivk,
             note: {
                 epk: J.packPoint(a.ephPub),
-                // The wire ciphertext carries a 2B clueBits prefix that the
-                // ChaCha body does not include.
+                // The wire ciphertext carries a 2B clueBits prefix that is not part of the ChaCha
+                // body.
                 ciphertext: stripClueBitsPrefix(a.ciphertext).body,
             },
         });
@@ -102,8 +103,8 @@ describe("cross-asset relayer fee", () => {
         const w = witness.last!;
         // Asset B appears on both sides: the fee note out, its own note in.
         expect((w.out_asset as string[]).map(BigInt)).toContain(ASSET_B);
-        // Every asset conserves independently, as the circuit requires. Keys are
-        // asserted so the loop cannot pass vacuously over an empty map.
+        // Every asset conserves independently. Keys are asserted so the loop cannot pass vacuously
+        // over an empty map.
         const net = netByAsset(w);
         expect([...net.keys()].sort()).toEqual([ASSET_A, ASSET_B]);
         for (const [asset, v] of net) expect([asset, v]).toEqual([asset, 0n]);
@@ -205,10 +206,8 @@ describe("cross-asset relayer fee", () => {
         expect(markedSpent).toEqual([["01", "02"]]);
     });
 
-    /// The relayer must be able to find and read the note that pays it.
-    ///
-    /// A fee note carrying another slot's randomness still balances and proves
-    /// but cannot be decrypted by the relayer.
+    /// A fee note carrying another slot's randomness still balances and proves but cannot be
+    /// decrypted by the relayer.
     it("leaves the fee note readable by the relayer, and not counted as ours", async () => {
         const relayer = await identity();
         const notes = [
@@ -235,10 +234,8 @@ describe("cross-asset relayer fee", () => {
     });
 });
 
-// Slot order is the only per-output signal that is not a commitment or a
-// blinded point, so a fixed layout would reveal which commitment is the
-// relayer's and which the payee's. These check that the wallet shuffles and that
-// the receipt still names the payee's note.
+// A fixed slot layout would reveal which commitment is the relayer's and which the payee's. These
+// check that the wallet shuffles and that the receipt still names the payee's note.
 
 describe("output slot order", () => {
     it("puts the fee at no fixed slot, and still names the payee's", async () => {
@@ -266,8 +263,8 @@ describe("output slot order", () => {
             });
 
             feeSlots.add(noteFor(submitted.payload!, ctx.J, relayer.ivk).slot);
-            // The receipt names the payee's note wherever it landed, and it is
-            // not booked as the sender's income.
+            // The receipt names the payee's note wherever it landed, and it is not booked as the
+            // sender's income.
             const paid = noteFor(submitted.payload!, ctx.J, payee.ivk);
             expect(res.recipientCommitment).toBe(res.commitments[paid.slot]);
             expect(res.ownCommitments).not.toContain(res.recipientCommitment);
@@ -277,8 +274,7 @@ describe("output slot order", () => {
     });
 
     it("refuses a zero-value transfer rather than padding the payee's slot", async () => {
-        // Scanners discard zero-value outputs, so the receipt would have no
-        // payee note to name.
+        // Scanners discard zero-value outputs, so the receipt would have no payee note to name.
         const { ctx } = await makeCtx([storedNote("01", 100n, { asset: ASSET_A })]);
         const { address: recipient } = await makeCtx([]);
 
@@ -289,5 +285,107 @@ describe("output slot order", () => {
                 asset: ASSET_A,
             }),
         ).rejects.toThrow(/amount must be positive/);
+    });
+});
+
+// The quote is the relayer's own figure and the wallet pays it as stated. A limit must refuse
+// before the proof: afterwards the fee note is already bound.
+describe("relayer fee limits", () => {
+    const transfer = async (
+        ctx: WalletContext,
+        extra: { maxFee?: ReturnType<typeof circuitAmount>; feeAsset?: bigint } = {},
+    ) => {
+        const { address: recipient } = await makeCtx([]);
+        return executeTransfer(ctx, {
+            recipient,
+            amount: circuitAmount(30n),
+            asset: ASSET_A,
+            ...extra,
+        });
+    };
+
+    it("refuses a quote above `maxFee` before proving or submitting", async () => {
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
+        const { ctx, witness, submitted } = await makeCtx(
+            notes,
+            estimateOf(await freshAddress(), { "1": 7n }),
+        );
+
+        await expect(transfer(ctx, { maxFee: circuitAmount(6n) })).rejects.toMatchObject({
+            code: "FEE_ABOVE_LIMIT",
+            source: "maxFee",
+            kind: "transfer",
+            asset: 1n,
+            quoted: 7n,
+            limit: 6n,
+            retryable: true,
+        });
+        expect(witness.last).toBeUndefined();
+        expect(submitted.payload).toBeUndefined();
+    });
+
+    it("pays a quote at exactly `maxFee`", async () => {
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
+        const { ctx } = await makeCtx(notes, estimateOf(await freshAddress(), { "1": 7n }));
+
+        const res = await transfer(ctx, { maxFee: circuitAmount(7n) });
+        expect(res.change).toBe(63n);
+    });
+
+    it("reads `maxFee` in the fee asset, not the asset being moved", async () => {
+        const notes = [
+            storedNote("01", 100n, { asset: ASSET_A }),
+            storedNote("02", 30n, { asset: ASSET_B }),
+        ];
+        const { ctx } = await makeCtx(notes, estimateOf(await freshAddress(), { "2": 7n }));
+
+        await expect(
+            transfer(ctx, { feeAsset: ASSET_B, maxFee: circuitAmount(6n) }),
+        ).rejects.toMatchObject({ code: "FEE_ABOVE_LIMIT", asset: 2n, quoted: 7n, limit: 6n });
+    });
+
+    it("ignores `maxFee` when the relayer charges nothing", async () => {
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
+        const { ctx } = await makeCtx(notes, estimateOf(undefined, { "1": 7n }));
+
+        const res = await transfer(ctx, { maxFee: circuitAmount(1n) });
+        expect(res.change).toBe(70n);
+    });
+
+    it("asks `acceptRelayerFee` about the quote and refuses on `false`", async () => {
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
+        const seen: unknown[] = [];
+        const { ctx, witness } = await makeCtx(
+            notes,
+            estimateOf(await freshAddress(), { "1": 7n }),
+            {
+                acceptRelayerFee: (quote: { amount: bigint }) => {
+                    seen.push(quote);
+                    return quote.amount <= 5n;
+                },
+            },
+        );
+
+        const refused = await transfer(ctx).catch((e) => e);
+        expect(refused).toMatchObject({
+            code: "FEE_ABOVE_LIMIT",
+            source: "acceptRelayerFee",
+            kind: "transfer",
+            asset: 1n,
+            quoted: 7n,
+        });
+        expect(refused.limit).toBeUndefined();
+        expect(seen).toEqual([{ kind: "transfer", asset: 1n, amount: 7n }]);
+        expect(witness.last).toBeUndefined();
+    });
+
+    it("pays a quote `acceptRelayerFee` accepts", async () => {
+        const notes = [storedNote("01", 100n, { asset: ASSET_A })];
+        const { ctx } = await makeCtx(notes, estimateOf(await freshAddress(), { "1": 7n }), {
+            acceptRelayerFee: () => true,
+        });
+
+        const res = await transfer(ctx);
+        expect(res.change).toBe(63n);
     });
 });

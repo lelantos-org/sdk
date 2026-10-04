@@ -10,11 +10,8 @@ export type NetworkErrorCode = NetworkTimeoutCode | NetworkFailureCode;
  * HTTP failure after retries, or deadline expired. `cause` carries the
  * underlying network error.
  *
- * Generic in its code so {@link AnyWalletError} can list one variant per code:
- * a union-typed `code` is not assignable to `{ code: "RELAYER_TIMEOUT" }`, so
- * the `Extract` behind {@link WalletErrorOf} would discard the class and every
- * network code would narrow to `never`. The parameter defaults to the full
- * union, so `NetworkError` still names the class in an annotation.
+ * Generic in its code so {@link AnyWalletError} can list one variant per code. The parameter
+ * defaults to the full union, so `NetworkError` still names the class in an annotation.
  */
 export class NetworkError<C extends NetworkErrorCode = NetworkErrorCode> extends WalletError<C> {
     readonly url: string;

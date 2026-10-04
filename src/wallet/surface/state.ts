@@ -2,8 +2,7 @@
 // once per microtask.
 //
 // `state()` returns the same object until something changes, so it can back React's
-// `useSyncExternalStore(wallet.subscribe, wallet.state)` directly: a stable snapshot between
-// changes, a new identity after one.
+// `useSyncExternalStore(wallet.subscribe, wallet.state)` directly.
 
 import { type AssetId, branded, type CircuitAmount } from "../../core/brand.js";
 import type { WalletError } from "../../errors/base.js";
@@ -46,7 +45,7 @@ export class WalletStateStore {
         return this.snapshot;
     }
 
-    /** Idempotent unsubscribe; not called on subscribe. */
+    /** Returns an idempotent unsubscribe. The listener is not called on subscribe. */
     subscribe(listener: StateListener): () => void {
         if (this.isDisposed) return () => undefined;
         const entry: StateListener = (s) => listener(s);
@@ -65,8 +64,6 @@ export class WalletStateStore {
         return this.syncedAt;
     }
 
-    // --- facts ---------------------------------------------------------------------------------
-
     syncStarted(): void {
         this.syncing++;
         if (this.syncing === 1) this.changed();
@@ -82,7 +79,7 @@ export class WalletStateStore {
 
     syncFailed(err: unknown): void {
         this.syncing = Math.max(0, this.syncing - 1);
-        // An abort by the caller is not a sync failure worth surfacing.
+        // Only a `WalletError` is recorded; a caller's abort reason is not one.
         if (isWalletError(err)) this.lastError = err as WalletError;
         this.changed();
     }
@@ -112,8 +109,6 @@ export class WalletStateStore {
         this.listeners.clear();
         this.notes.onChange(undefined);
     }
-
-    // --- emission ------------------------------------------------------------------------------
 
     private changed(): void {
         this.dirty = true;

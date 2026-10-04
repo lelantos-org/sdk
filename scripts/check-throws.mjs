@@ -1,17 +1,16 @@
 #!/usr/bin/env node
-// Bare-error gate.
+// Fail if shipped code under `src/` raises a bare built-in error.
 //
-// Every failure that leaves the SDK should be a `WalletError`, so a caller can branch on `err.code`
-// instead of matching message text. This walks the TypeScript AST of every shipped module under
-// `src/` and fails on any place that still raises a bare built-in error:
+// Every failure that leaves the SDK is a `WalletError`, so a caller can branch on `err.code`
+// instead of matching message text. This walks the TypeScript AST of every shipped module and
+// fails on:
 //
 //   throw new Error(...)            throw new RangeError(...)
 //   throw new TypeError(...)        Promise.reject(new Error(...))
 //
-// The replacement is a typed error: `InvalidArgumentError` for a caller's input, `WireFormatError`
-// for a server's response, `EnvironmentError` for a missing platform capability, and
-// `assertInvariant` (→ `InternalError`) for a state the SDK itself guarantees. See
-// `src/errors/base.ts`.
+// Throw a typed error instead: `InvalidArgumentError` for a caller's input, `WireFormatError` for a
+// server's response, `EnvironmentError` for a missing platform capability, and `assertInvariant`
+// (→ `InternalError`) for a state the SDK itself guarantees. See `src/errors/base.ts`.
 
 import { readFileSync } from "node:fs";
 import { loadTs, shippedSources } from "./lib/package.mjs";

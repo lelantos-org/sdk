@@ -1,11 +1,5 @@
-// Sync orchestration: what to pull, in what order, and what to reconcile afterwards.
-//
-// `sync/notes-sync.ts` is the note-scanning engine (paging, trial decryption, cursor). This layer
-// combines that scan with the tree and nullifier mirrors, marks local notes the chain considers
-// spent, and serialises it all under the wallet's sync lock.
-//
-// Depends on `SyncContext`, the read half of `WalletContext`, so a watch wallet runs the same code
-// and a test can supply an object literal without wasm, a chain adapter or a note store.
+// Sync orchestration: combines the note scan (`sync/notes-sync.ts`) with the tree and nullifier
+// mirrors, then marks local notes the chain considers spent.
 
 import type { Mutex } from "../../core/async.js";
 import { safeCall } from "../../core/callbacks.js";
@@ -62,9 +56,9 @@ export interface SyncContext {
  * Built from `nk`, so a full-viewing-key holder can construct one:
  * `nf = Poseidon(TAG_NF, nk, rho, cm)` requires no spend authority.
  *
- * In memory only. The notes file carries no `nsk`, so a leaked or backed-up file links its holder
- * to the user's on-chain commitments but not to their spends. Nullifiers are the on-chain spend
- * identifiers, so persisting them would expose that link.
+ * In memory only. Nullifiers are the on-chain spend identifiers, and the notes file carries no
+ * `nsk`: a leaked or backed-up file links its holder to their commitments but not to their
+ * spends, which persisting nullifiers would expose.
  *
  * Keyed by `id` rather than note object because `cache.refresh()` may rehydrate new objects,
  * while ids are persisted and stable.
@@ -87,7 +81,7 @@ export class NullifierMemo {
         return nf;
     }
 
-    /** Entries currently held. The memo is bounded by the unspent-note count. */
+    /** Entries currently held. */
     get size(): number {
         return this.byId.size;
     }
@@ -100,8 +94,8 @@ export class NullifierMemo {
     /**
      * Drop every entry outside `keep`, plus everything in `drop`.
      *
-     * Called at the end of a reconcile pass with `keep` as the unspent notes and `drop` as those
-     * this pass retired. Keeps the memo bounded, since only unspent notes are looked up again.
+     * Each reconcile pass calls it with `keep` as the unspent notes and `drop` as those the pass
+     * found spent, which bounds the memo by the unspent-note count.
      */
     retain(keep: ReadonlySet<string>, drop: ReadonlySet<string>): void {
         for (const id of this.byId.keys()) {
@@ -111,7 +105,7 @@ export class NullifierMemo {
 }
 
 /**
- * Pull encrypted notes, trial-decrypt with `ivk + dk`, and persist hits.
+ * Pull encrypted notes, trial-decrypt with `ivk`, and persist hits.
  *
  * Scan only, without tree sync or reconciliation; see {@link syncScoped} for a whole sync.
  */
@@ -174,7 +168,6 @@ export async function syncScoped(
                   ...(emit ? { onProgress: (p) => emit({ stream: "tree", ...p }) } : {}),
               })
             : undefined,
-        // An incoming-tier key cannot recompute nullifiers, so the spent set is of no use to it.
         ctx.nullifiers
             ? ctx.cfg.nullifierStore.sync({
                   ...withSignal,
@@ -199,7 +192,7 @@ export async function syncScoped(
  * Purely local, since querying the server per nullifier would reveal the caller's notes. A stale
  * mirror only under-reports spends; it never marks a live note spent.
  *
- * A no-op without a {@link NullifierMemo}, since without `nk` there are no nullifiers to check.
+ * A no-op without a {@link NullifierMemo}.
  */
 export async function reconcileSpentOnChain(ctx: SyncContext): Promise<void> {
     const memo = ctx.nullifiers;
@@ -213,8 +206,7 @@ export async function reconcileSpentOnChain(ctx: SyncContext): Promise<void> {
     memo.retain(new Set(candidates.map((n) => n.id)), spentIds);
 
     // Release a reservation when the note is found spent, or when it has outlived
-    // `SPEND_RESERVATION_MS` without its nullifier appearing (the spend did not land), which
-    // returns the balance without a rescan.
+    // `SPEND_RESERVATION_MS` without its nullifier appearing (the spend did not land).
     const now = Date.now();
     await ctx.notes.reconcile({
         spent: (n) => spentIds.has(n.id),

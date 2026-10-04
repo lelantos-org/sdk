@@ -1,14 +1,12 @@
 // Uniswap Permit2 witness signing for MASP deposits.
 //
-// Flow: build DepositRequest + AuxValidation.Output[2], hash via abi.encode +
-// keccak (matches MASP.deposit), wrap piHash in the EIP-712 `MASPDeposit`
-// witness, and sign the outer Permit2 typed data: `PermitWitnessTransferFrom`
-// when the relayer note is in the deposit's asset, and
-// `PermitBatchWitnessTransferFrom` over `[deposit token, fee token]` when it is
-// not.
+// Flow: build DepositRequest + AuxValidation.Output[2], hash via abi.encode + keccak (matches
+// MASP.deposit), wrap piHash in the EIP-712 `MASPDeposit` witness, and sign the outer Permit2
+// typed data: `PermitWitnessTransferFrom` when the relayer note is in the deposit's asset, and
+// `PermitBatchWitnessTransferFrom` over `[deposit token, fee token]` when it is not.
 //
-// Witness type-string MUST match MASP.DEPOSIT_WITNESS_TYPE_STRING. Both
-// primary types share it: Permit2 prefixes its own stub.
+// The witness type string must match MASP.DEPOSIT_WITNESS_TYPE_STRING. Both primary types share
+// it: Permit2 prefixes its own stub.
 
 import type { TypedDataParameter } from "viem";
 import { InvalidArgumentError } from "../errors/config.js";
@@ -17,9 +15,9 @@ import type { Permit2Sig } from "../protocol/deposit-request.js";
 import { permit2Domain, signPermit } from "./common.js";
 
 /**
- * EIP-712 type table for Permit2's witness transfer with the `MASPDeposit` witness: the single-token
- * form, or its two-token batch counterpart, which differ only in whether `permitted` is an array.
- * Permit2 prefixes its own stub to MASP's witness type string, so the other members are identical.
+ * EIP-712 type table for Permit2's witness transfer with the `MASPDeposit` witness: the
+ * single-token form or its two-token batch counterpart, which differ only in whether `permitted`
+ * is an array.
  *
  * For the batch, Permit2 hashes `permitted` as `keccak256(abi.encodePacked(perEntryHashes))`
  * (`PermitHash.hashWithWitness(PermitBatchTransferFrom, ...)`), which is the EIP-712 encoding of a
@@ -57,15 +55,14 @@ export interface SignPermit2Args {
     /** ERC-20 being pulled into escrow. */
     token: string;
     /**
-     * Caller's ceiling on `token`'s pull, in its base units: `inAmt + fee`,
-     * plus the relayer note when it is paid in the deposit's asset.
+     * Caller's ceiling on `token`'s pull, in its base units: `inAmt + fee`, plus the relayer note
+     * when it is paid in the deposit's asset.
      */
     maxTotal: bigint;
     /**
-     * The relayer note's token, when it is paid in another asset. With
-     * {@link maxFee} this signs `PermitBatchWitnessTransferFrom` over
-     * `[token: maxTotal, feeToken: maxFee]`, in that order; without, the
-     * single-token `PermitWitnessTransferFrom`.
+     * The relayer note's token, when it is paid in another asset. With {@link maxFee} this signs
+     * `PermitBatchWitnessTransferFrom` over `[token: maxTotal, feeToken: maxFee]`, in that order;
+     * without, the single-token `PermitWitnessTransferFrom`.
      */
     feeToken?: string | undefined;
     /** Ceiling on `feeToken`'s pull, in its base units. Set with {@link feeToken}. */
@@ -75,20 +72,16 @@ export interface SignPermit2Args {
     deadline: bigint;
     /** `keccak256(abi.encode(DepositRequest, aux, feeAux))`. */
     piHash: string;
-    /**
-     * Optional override for the Permit2 contract address (non-standard
-     * deployments). Defaults to the canonical deterministic CREATE2 address.
-     */
+    /** Optional Permit2 contract override; defaults to canonical CREATE2. */
     permit2Address?: string;
 }
 
 /**
  * Sign the Permit2 witness transfer `MASP.deposit` verifies.
  *
- * Single-token unless `feeToken` and `maxFee` are both given, in which case the
- * signature is the batch form the pool checks for a relayer note paid in another
- * asset. Which one to sign follows `isSameFeeAsset`: signing the wrong form
- * reverts on chain as `InvalidSigner`.
+ * Single-token unless `feeToken` and `maxFee` are both given, in which case the signature is the
+ * batch form the pool checks for a relayer note paid in another asset. Which one to sign follows
+ * `isSameFeeAsset`: signing the wrong form reverts on chain as `InvalidSigner`.
  *
  * @throws {InvalidArgumentError} when only one of `feeToken` and `maxFee` is set.
  */

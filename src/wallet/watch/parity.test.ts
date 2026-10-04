@@ -1,7 +1,7 @@
 // Parity: a watch wallet must see exactly what the spending wallet sees.
 //
-// Uses real encrypted notes and the real `LocalScanner`; a stubbed scanner
-// ignores the key it is given.
+// Uses real encrypted notes and the real `LocalScanner`; a stubbed scanner ignores the key it is
+// given.
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -47,9 +47,9 @@ describe("watch wallet parity", () => {
         sk = buildSpendingKey(P, J, NSK);
 
         const notes: NotePayload[] = [
-            { asset: 1n, value: 500n, rho: 111n, rcm: 222n, rcvDep: 333n },
-            { asset: 1n, value: 250n, rho: 444n, rcm: 555n, rcvDep: 666n },
-            { asset: 2n, value: 700n, rho: 777n, rcm: 888n, rcvDep: 999n },
+            { asset: 1n, value: 500n, rho: 111n, rcm: 222n },
+            { asset: 1n, value: 250n, rho: 444n, rcm: 555n },
+            { asset: 2n, value: 700n, rho: 777n, rcm: 888n },
         ];
         feed = notes.map((n, i) => input(n, i));
         // The first note has been spent on chain.
@@ -119,8 +119,8 @@ describe("watch wallet parity", () => {
         });
     }
 
-    // Keyed on `cm`, not `id`: ids are minted per store, so two wallets scanning
-    // the same feed agree on every note and on none of the ids.
+    // Keyed on `cm`, not `id`: ids are minted per store, so two wallets scanning the same feed
+    // agree on every note and on none of the ids.
     const shape = async (w: { notes: () => Promise<WalletNote[]> }) =>
         (await w.notes())
             .map((n) => ({ cm: n.cm, asset: n.asset, value: n.value, spent: n.spent }))
@@ -145,7 +145,7 @@ describe("watch wallet parity", () => {
         expect(await shape(watch)).toEqual(await shape(spend));
         expect(balance(watch, 1n)).toBe(balance(spend, 1n));
         expect(balance(watch, 2n)).toBe(balance(spend, 2n));
-        // The spent note is actually settled, not merely absent.
+        // The spent note is marked spent, not dropped.
         expect(await watch.notes({ spent: true })).toHaveLength(1);
         // A watch wallet keeps no tree, and a full key mirrors the spent set.
         expect(report.tree).toBeUndefined();

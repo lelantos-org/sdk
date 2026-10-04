@@ -13,14 +13,14 @@ import type { CoinSelector, SelectionResult, SelectOpts } from "./types.js";
  * Pick up to `maxInputs` unspent notes for `asset` summing to ≥ `target + fee`
  * via SFRT.
  *
- * Rationale: largest-first leaves a value-ordering fingerprint (Tramèr USENIX'24);
- * randomized tiebreak restores indistinguishability (Chen & Bonneau FC'25);
- * smallest-cover drains dust so wallet note count shrinks over time.
- *
  * For each cover size 1..`maxInputs` the smallest qualifying sum is found, the
- * smallest of those wins, and ties break toward fewer notes. The chosen size
- * is then shuffled within its bucket, so the selection is not a deterministic
+ * smallest of those wins, and ties break toward fewer notes. The pick is then
+ * uniform over that size's bucket, so the selection is not a deterministic
  * function of the wallet's contents.
+ *
+ * Largest-first leaves a value-ordering fingerprint (Tramèr USENIX'24), which
+ * the randomized tiebreak removes (Chen & Bonneau FC'25); smallest-cover
+ * drains dust.
  *
  * @internal
  */
@@ -43,8 +43,7 @@ export function selectNotes(
     const asc = [...candidates].sort((a, b) => cmpBigint(BigInt(a.value), BigInt(b.value)));
     const values = asc.map((n) => BigInt(n.value));
 
-    // Smallest qualifying sum at each size; ties break toward fewer notes,
-    // so a strict `<` keeps the earliest (smallest) size that achieves it.
+    // Strict `<` keeps the smallest size on a tied sum.
     let bestSize = 0;
     let bestSum: bigint | null = null;
     for (let size = 1; size <= Math.min(maxInputs, values.length); size++) {
@@ -57,8 +56,7 @@ export function selectNotes(
 
     if (bestSum !== null) {
         const tied = coverBucket(values, threshold, bestSum, bucketPct, bestSize);
-        // `coverBucket` always contains the cover that produced `bestSum`, so
-        // `pick` is never called with a bound of zero.
+        // Never empty: the cover that produced `bestSum` is in its own bucket.
         const chosen = tied[pick(tied.length)]!;
         const notes = chosen.map((i) => asc[i]!);
         return {
@@ -70,8 +68,8 @@ export function selectNotes(
 
     const total = candidates.reduce((s, n) => s + BigInt(n.value), 0n);
     if (total >= threshold && candidates.length >= 2) {
-        // Merge as many of the smallest notes as the circuit can consume, so a
-        // wider shape needs fewer consolidation rounds to reach a cover.
+        // Merge as many of the smallest notes as the circuit takes, to reach
+        // a cover in the fewest consolidation rounds.
         const consolidate = asc.slice(0, Math.min(maxInputs, asc.length));
         return {
             plan: "consolidate-first",

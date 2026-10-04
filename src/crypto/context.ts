@@ -1,7 +1,5 @@
-// Lazily-built, process-wide `Poseidon` + `Jubjub` pair.
-//
-// Both are stateless and their construction is idempotent and cached, so a single shared
-// instance is safe. This keeps backend construction out of public signatures.
+// Lazily-built, process-wide `Poseidon` + `Jubjub` pair. Both are stateless, so one shared
+// instance is safe.
 //
 // Callers that need explicit instances (worker bundles, benchmarks comparing backends) pass them
 // through the explicit overloads, which bypass this module.
@@ -22,23 +20,19 @@ const context = memoAsync<CryptoContext>(async () => {
 });
 
 /**
- * The shared context, built on first use.
+ * The shared context, built on first use; nothing is built at import time. Concurrent callers
+ * await the same promise, so the WASM module is instantiated once.
  *
- * Concurrent callers await the same promise, so the WASM module is instantiated once. Nothing is
- * built at import time.
- *
- * A failed build is not cached (see `memoAsync` in `core/async.ts`), so a call that races ahead of
- * `configureJubjubWasm`, or a transient import failure, does not disable the wallet for the
- * lifetime of the process.
+ * A failed build is not cached (see `memoAsync` in `core/async.ts`), so the next call retries
+ * after a transient import failure or a call that raced ahead of `configureJubjubWasm`.
  */
 export function cryptoContext(): Promise<CryptoContext> {
     return context.get();
 }
 
 /**
- * The shared context if already built, otherwise `undefined`.
- *
- * For callers that must not trigger a wasm load, such as a synchronous fast path.
+ * The shared context if already built, otherwise `undefined`. For callers that must not trigger
+ * a wasm load, such as a synchronous fast path.
  */
 export function cryptoContextIfReady(): CryptoContext | undefined {
     return context.peek();

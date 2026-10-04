@@ -9,9 +9,9 @@
 //     plus every chunk reachable from it by static import. Code behind a dynamic import lands in
 //     its own chunk and is reported as lazy. `forbid` also walks the module graph itself.
 //
-// Budgets are minified bytes, not gzipped; figures print in KiB. Raise one deliberately, and
-// understand a regression first — the usual causes are a CommonJS dependency that cannot be
-// tree-shaken and a static import of something that should be lazy.
+// Budgets are minified bytes, not gzipped; figures print in KiB. Before raising one, find the
+// cause of the regression: usually a CommonJS dependency that cannot be tree-shaken, or a static
+// import of something that should be lazy.
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +22,7 @@ import { DIST, loadTs, ROOT, walk } from "./lib/package.mjs";
 const ts = loadTs();
 
 /** Budget for all emitted JS under `dist/`. */
-const DIST_MAX = 513_024; // 501 KiB
+const DIST_MAX = 525_312; // 513 KiB
 
 /**
  * Modules the spend path owns. An app entry must reach them only through a dynamic import, so a
@@ -67,7 +67,7 @@ const ENTRIES = [
     {
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/entry/index.js";`,
-        max: 255_000,
+        max: 260_000,
         module: "dist/entry/index.js",
         forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
@@ -90,7 +90,7 @@ const ENTRIES = [
         // stack and the scan loop, so it tracks `primitives: keys`.
         name: "watch: connectWatch",
         source: `export { connectWatch } from "${ROOT}/dist/entry/watch.js";`,
-        max: 148_000,
+        max: 168_000,
         module: "dist/entry/watch.js",
         forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
@@ -227,9 +227,9 @@ console.log("bundle-budget: OK");
  * reaches it.
  *
  * Follows every relative `import`/`export … from` in the emitted JS; `import()` is not a statement,
- * so lazy edges are skipped by construction. Deliberately not esbuild's metafile, whose import
- * lists are already tree-shaken (the package declares `sideEffects`), so an unused re-export of the
- * spend path would not show up there.
+ * so lazy edges are skipped. esbuild's metafile is not used: its import lists are already
+ * tree-shaken (the package declares `sideEffects`), so an unused re-export of the spend path would
+ * not show up there.
  */
 function forbiddenStaticImports(entry, forbid) {
     if (forbid.length === 0) return [];

@@ -2,13 +2,12 @@
 // which assets may pay its relayer.
 //
 // Pure, over plain registry fields, so a UI sizing balances and allowances
-// applies the same rules `deposit` signs over instead of re-deriving
-// them. Two questions, answered by two different keys:
+// applies the rules `deposit` signs over:
 //
 //   * Whether the relayer note rides in the principal's pull is decided by
-//     **asset id** (`isSameFeeAsset`): a plain id and a yield id over one ERC-20
+//     asset id (`isSameFeeAsset`): a plain id and a yield id over one ERC-20
 //     price and book differently, and are still two pulls.
-//   * What a balance or an allowance must cover is decided by **token**: Permit2
+//   * What a balance or an allowance must cover is decided by token: Permit2
 //     keys an allowance by `(owner, token, spender)`, and two pulls of one ERC-20
 //     draw on one balance, so they are summed.
 

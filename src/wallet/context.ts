@@ -53,7 +53,8 @@ export interface WalletContext {
      *
      * Bound by the wallet shell, because a merge is a transfer and an operation may not import
      * another (`scripts/check-layers.mjs` rule 7). `parent` is the spend that needs the merge: the
-     * nested self-spend runs under its `opId`, and its errors carry `op: "<parent op>:consolidate"`.
+     * nested self-spend runs under its `opId`, and its errors carry
+     * `op: "<parent op>:consolidate"`.
      */
     autoConsolidate(
         asset: AssetId,

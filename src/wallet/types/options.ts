@@ -1,6 +1,6 @@
 // Operation options, progress phases and note-query filters.
 //
-// Every operation names its asset (`asset`, or `assetIn`/`assetOut`); there is no default asset.
+// Every operation names its asset (`asset`, or `assetIn`/`assetOut`).
 
 import type {
     AssetIdLike,
@@ -21,8 +21,6 @@ export interface NotesFilter {
     /** Omit to include both spent and unspent. */
     spent?: boolean | undefined;
 }
-
-// --- phases --------------------------------------------------------------------------------------
 
 /**
  * Progress of one operation, in order. Each operation emits the subset its kind has; see
@@ -73,8 +71,6 @@ export interface OpRun<P extends Phase = Phase> {
     phase(phase: P, txHash?: Hex32 | undefined): void;
 }
 
-// --- shared --------------------------------------------------------------------------------------
-
 export interface OpOptions<P extends Phase = Phase> {
     /**
      * Checked between every step; the operation then rejects with `signal.reason` as-is. An abort
@@ -87,7 +83,7 @@ export interface OpOptions<P extends Phase = Phase> {
     /**
      * Unix seconds.
      * - deposit: the Permit2 signature and escrow deadline (default now + 1 h);
-     * - swap: bound into the intent; the wrapper refunds after it (default a short window);
+     * - swap: bound into the intent; the wrapper refunds after it (default now + 15 min);
      * - transfer / withdraw: a client-side cut-off checked before submitting (`DEADLINE_PASSED`).
      */
     deadline?: bigint | undefined;
@@ -110,13 +106,18 @@ export interface SpendOptions<P extends Phase = SpendPhase> extends OpOptions<P>
      * note and change slot, and must be quoted by the relayer (`FEE_ASSET_NOT_QUOTED`).
      */
     feeAsset?: AssetRef | undefined;
+    /**
+     * The most the relayer may be paid for this spend, in the fee asset. A dearer quote rejects
+     * with `FEE_ABOVE_LIMIT` before proving. Default: no limit beyond
+     * `WalletConfig.acceptRelayerFee`. A consolidation `autoConsolidate` runs first pays its own
+     * fee, which only `acceptRelayerFee` bounds.
+     */
+    maxFee?: Amount | undefined;
     /** Same rules `spendableMax` takes, so a predicted maximum and the spend agree. */
     selection?: SelectionOptions | undefined;
     /** On `INSUFFICIENT_COVER`, merge notes with a self-spend and retry once. Default `false`. */
     autoConsolidate?: boolean | undefined;
 }
-
-// --- deposit -------------------------------------------------------------------------------------
 
 export interface DepositOptions extends OpOptions<DepositPhase> {
     asset: AssetRef;
@@ -185,8 +186,6 @@ export interface AllowanceSetupOptions {
     /** Fires `wallet` before each prompt, then `confirming` with the transaction hash. */
     onProgress?: ((progress: AllowanceSetupProgress) => void) | undefined;
 }
-
-// --- spends --------------------------------------------------------------------------------------
 
 export interface TransferOptions extends SpendOptions {
     asset: AssetRef;

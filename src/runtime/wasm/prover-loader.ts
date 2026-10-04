@@ -63,17 +63,17 @@ const proverLoader = createWasmLoader<ProverModule>({
         }
         const opts = { threadCount: proverThreadCount, label: "WasmProver" };
         await initThreadPool(mod, opts, ctx.isNode ? ctx.nodePkgUrl : null);
-        // Logs the thread count the prover uses, which may be lower than the
-        // requested pool size.
+        // The count the prover uses may be lower than the requested pool size.
         const effective = mod.threadCount?.();
         if (effective !== undefined) log.info("prover thread count", { effective });
     },
 });
 
 /**
- * Browser bundlers rewrite the relative-path fallback to a path missing at
- * runtime. Inject a loader that resolves the wasm-pack module and binary via
- * the bundler's asset-URL pipeline before `WasmProver.build()`.
+ * Install a loader that resolves the wasm-pack module and binary through the
+ * bundler's asset-URL pipeline. Needed where a browser bundler rewrites the
+ * relative-path fallback to a path missing at runtime. Call before
+ * `WasmProver.build()`.
  */
 export function configureProverWasm(loader: ProverWasmLoader): void {
     proverLoader.configure(loader);

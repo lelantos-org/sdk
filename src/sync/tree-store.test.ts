@@ -1,8 +1,9 @@
 // `TreeStore` appends chunk leaves in arrival order, so a misaligned chunk corrupts every later
 // leaf. These tests cover the alignment check and the persistence behaviour sync depends on.
 
+import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
-import type { Field, Poseidon } from "../crypto/index.js";
+import { commitWithInner, type Field, Poseidon } from "../crypto/index.js";
 import type { CommitmentChunkOut, FmdClient } from "../services/fmd-server/index.js";
 import { CHUNK_SIZE } from "./chunk-feed.js";
 import { type TreePersistence, TreeStore, type TreeStoreState } from "./tree-store.js";
@@ -350,7 +351,6 @@ describe("TreeStore.syncVerified", () => {
 
         expect(check.localRoot).toBe(root14);
         expect(check.localLeaves).toBe(14);
-        // Appending suffices, so the tree is not cleared.
         expect(persistence.cleared).toBe(0);
     });
 
@@ -414,7 +414,6 @@ describe("TreeStore.syncVerified", () => {
         const check = await store.syncVerified({ isKnownRoot: async () => true });
 
         expect(check.spendable).toBe(true);
-        // The chain read avoids the rebuild.
         expect(persistence.cleared).toBe(0);
     });
 
@@ -481,5 +480,51 @@ describe("TreeStore depth", () => {
         const store = new TreeStore(stubP, clientOf([chunk(0, 0, 4)]));
         await store.sync();
         expect(store.getPath(0).pathIndices).toHaveLength(10);
+    });
+});
+
+// The pool publishes a spend output's `cm` and only the `inner` of a deposit, so the feed computes
+// a deposit's leaf as the batch circuit does. The circuit's own vectors fix that rule and the root
+// it leads to.
+describe("TreeStore against the batch circuit's vectors", () => {
+    interface BatchVector {
+        name: string;
+        intermediates: {
+            startIndex: number;
+            newRoot: string;
+            leaves: { cms: string; leafAsset: string; leafPublicIn: string; isDeposit: number }[];
+        };
+    }
+    const batch = createRequire(import.meta.url)(
+        "@lelantos-org/circuits/vectors/tree-update-batch-8.json",
+    ) as { circuit: { shape: { depth: number } }; vectors: BatchVector[] };
+    // A batch that starts mid-tree carries a frontier, not the leaves before it.
+    const fromEmpty = batch.vectors.filter((v) => v.intermediates.startIndex === 0);
+
+    it("covers a deposit leaf and a spend leaf", () => {
+        const kinds = fromEmpty.flatMap((v) => v.intermediates.leaves.map((l) => l.isDeposit));
+        expect(new Set(kinds)).toEqual(new Set([0, 1]));
+    });
+
+    it.each(
+        fromEmpty.map((v) => [v.name, v] as const),
+    )("%s: the feed's leaves reproduce the circuit's new root", async (_name, v) => {
+        const P = await Poseidon.build();
+        const entries = v.intermediates.leaves.map((l, leafIndex) => ({
+            leafIndex,
+            leafHash:
+                l.isDeposit === 1
+                    ? commitWithInner(P, BigInt(l.leafAsset), BigInt(l.leafPublicIn), BigInt(l.cms))
+                    : BigInt(l.cms),
+        }));
+        const store = new TreeStore(
+            P,
+            clientOf([{ chunkId: 0, entries, isComplete: false }]),
+            batch.circuit.shape.depth,
+        );
+
+        await store.sync();
+
+        expect(store.root()).toBe(BigInt(v.intermediates.newRoot));
     });
 });

@@ -79,9 +79,8 @@ describe("bech32m address", () => {
     });
 
     it("rejects an identity clue key", () => {
-        // An identity `ck` expands to flag-key points with public discrete
-        // logs, making every clue bit predictable. `unpackPoint` rejects it
-        // first; the explicit identity check in `decodeAddress` is a backstop.
+        // An identity `ck` makes every clue bit predictable. `unpackPoint` rejects it first; the
+        // explicit identity check in `decodeAddress` is a backstop.
         const sk = buildSpendingKey(P, J, 9n);
         const payload = new Uint8Array(3 * FIELD_BYTES);
         payload.set(J.packPoint(sk.pk_d), 0);

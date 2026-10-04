@@ -4,7 +4,7 @@ import { RAY } from "../../protocol/units.js";
 import { makeAssetInfo, requireTokenMeta } from "../assets/index.js";
 import { denominationChoices, previewWithdraw } from "./withdraw-preview.js";
 
-const BPS = 20n; // 0.2%, the deployed rate
+const BPS = 20n; // 0.2%
 
 // Built through the factory so the ladder is derived as in production.
 const USDC = requireTokenMeta(
@@ -48,7 +48,6 @@ const withRate = (asset: typeof USDC, withdrawBps: bigint) =>
 
 describe("previewWithdraw", () => {
     it("separates the gross published on chain from what the recipient gets", () => {
-        // `amount` is the gross; the recipient receives less.
         const p = previewWithdraw({ amount: "1000", asset: USDC });
         expect(p.publicOut).toBe(1_000_000_000n);
         expect(p.net).toBe(998_000_000n);
@@ -155,8 +154,8 @@ describe("denominationChoices", () => {
                 index: (RAY * 105n) / 100n,
             }),
         );
-        expect(grown[0]?.value).toBe(100_000n); // unchanged
-        expect(grown[0]?.label).toBe("0.105"); // reflects the index
+        expect(grown[0]?.value).toBe(100_000n);
+        expect(grown[0]?.label).toBe("0.105");
     });
 });
 
@@ -184,7 +183,6 @@ describe("opting out of the ladder", () => {
     });
 
     it("still reports the gross/net split, which is unrelated to the ladder", () => {
-        // Opting out affects preferred amounts, not fee reporting.
         const p = previewWithdraw({ amount: "1000", asset: OPTED_OUT });
         expect(p.publicOut).toBe(1_000_000_000n);
         expect(p.net).toBe(998_000_000n);

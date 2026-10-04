@@ -1,10 +1,6 @@
-// The spend path is loaded on demand.
-//
-// `wallet.ts` loads `deposit`/`transfer`/`withdraw`/`swap` via `await import(...)`, so a
-// read-only caller never downloads the prover or viem. A wrong specifier fails at the first spend
-// rather than at build time, so this test checks each module resolves.
-//
-// `bundle-budget.mjs` verifies the modules stay lazily loaded.
+// `wallet.ts` loads the spend modules via `await import(...)`, so a read-only caller never
+// downloads the prover or viem. A wrong specifier fails at the first spend rather than at build
+// time, so this test checks each module resolves; `bundle-budget.mjs` checks they stay lazy.
 
 import { describe, expect, it } from "vitest";
 

@@ -1,5 +1,5 @@
-// `quoteSwap` → `swap`: the quote's figures are the ones execution encodes,
-// including on a yield asset, and a quote execution would not reproduce is refused before proving.
+// `quoteSwap` → `swap`: the quote's figures are the ones execution encodes, including on a yield
+// asset, and a quote execution would not reproduce is refused before proving.
 
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
@@ -234,7 +234,7 @@ describe("quoteSwap then swap", () => {
             slippageBps: 50,
             gross: circuitAmount(50n),
         });
-        // A forged index makes the figures self-consistent only with a snapshot the pool never had.
+        // A raised net is not what the quote's own snapshot produces.
         const forged = { ...quote, net: { ...quote.net, baseUnits: quote.net.baseUnits + 5n } };
         await expect(
             executeSwap(ctx, { quote: forged as SwapQuote, refundAddress: REFUND }),

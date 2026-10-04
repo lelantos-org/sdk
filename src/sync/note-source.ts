@@ -13,10 +13,8 @@ export interface ListNotesOpts {
  *
  * `nextAfter` drives paging within a single sync and advances past every row just returned.
  * `resumeAfter` is the cursor safe to persist for a later session; on the `matches` feed it lags
- * while a backfill is still inserting older rows. Persisting `nextAfter` there would skip rows
- * the backfill has not inserted yet.
- *
- * On a strictly append-only feed (the full note firehose) both cursors are equal.
+ * while a backfill is still inserting older rows, which persisting `nextAfter` would skip. On a
+ * strictly append-only feed (the full note firehose) both cursors are equal.
  */
 export interface NotePage {
     inputs: ScanInput[];
@@ -33,8 +31,6 @@ export interface NotePage {
 export interface NoteSource {
     listNotes(opts?: ListNotesOpts): Promise<NotePage>;
 }
-
-// ─── internal helpers ────────────────────────────────────────────────────────
 
 function toScanInput(n: FmdNoteOut): ScanInput {
     return {
@@ -56,8 +52,6 @@ function maxId(rows: FmdNoteOut[], after: number): number {
     for (const r of rows) if (r.id > hi) hi = r.id;
     return hi;
 }
-
-// ─── implementations ─────────────────────────────────────────────────────────
 
 /** Default `NoteSource` against fmd-webserver; pulls the full note firehose. */
 export class FmdNoteSource implements NoteSource {

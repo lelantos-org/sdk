@@ -1,8 +1,5 @@
 // Re-denomination: reshape off-ladder notes into ladder amounts by self-transfer, so a later
 // withdrawal can spend a denomination exactly.
-//
-// An algorithm over a narrow `RedenominateHost`, not wallet state, so it tests without a
-// wasm-backed wallet.
 
 import {
     InsufficientBalanceError,
@@ -19,11 +16,9 @@ import type { TransferResult, WalletNote } from "../types/results.js";
 const log = getLogger("lelantos:wallet");
 
 /**
- * Denominations tried per round before the batch is abandoned.
- *
- * The relayer's fee comes out of the same cover, so the largest reachable denomination often
- * leaves nothing for the fee; three steps cover the ladder's 2×/2.5× ratios while bounding
- * attempts against unreachable targets.
+ * Denominations tried per round, largest first, before the batch is abandoned. The relayer's fee
+ * comes out of the same cover, so the largest reachable denomination often leaves nothing for
+ * it; three steps cover the ladder's 2×/2.5× ratios.
  */
 const LADDER_RETRY_STEPS = 3;
 
@@ -49,7 +44,7 @@ export interface RedenominateHost extends SelfTransferHost {
  *
  * Returns the number of successful rounds. Each round self-transfers up to `maxInputs` off-ladder
  * notes into the largest denomination they can reach. A round that places nothing ends the loop
- * without throwing, since a partially reshaped note set is still an improvement.
+ * without throwing.
  */
 export async function redenominate(
     host: RedenominateHost,
@@ -66,10 +61,8 @@ export async function redenominate(
 }
 
 /**
- * One re-denomination round: reshape up to `maxInputs` off-ladder notes.
- *
- * Returns `true` when a transfer landed and another round may help; `false` when no off-ladder
- * notes remain or none can be placed.
+ * One round: reshape up to `maxInputs` off-ladder notes. Returns `true` when a transfer landed
+ * and another round may help, `false` when no off-ladder notes remain or none can be placed.
  */
 async function round(host: RedenominateHost, asset: bigint, ladder: Ladder): Promise<boolean> {
     const offLadder = host
@@ -83,17 +76,14 @@ async function round(host: RedenominateHost, asset: bigint, ladder: Ladder): Pro
 
     // The payee note of a self-transfer is also owned, so it should be a denomination, as the
     // change is; `splitChange` handles the remainder.
-    //
-    // Targets are tried largest first with fallbacks: the relayer's fee comes out of the same
-    // cover, so the largest denomination `total` can reach usually leaves no room for it.
     for (const target of descendingAtMost(total, ladder, LADDER_RETRY_STEPS)) {
         let result: TransferResult;
         try {
             result = await selfTransfer(host, { asset, amount: target, only });
         } catch (err) {
-            // Only "this target does not fit these notes" steps down. Anything else (the relayer
-            // refusing, a network or prover failure) would fail every smaller target the same way,
-            // and swallowing it would report a round that never ran as a finished reshape.
+            // Only a cover failure steps down. Anything else (the relayer refusing, a network or
+            // prover failure) would fail every smaller target the same way, and swallowing it
+            // would report a round that never ran as a finished reshape.
             if (!doesNotFit(err)) throw err;
             log.debug("redenominate: target did not fit, stepping down", {
                 asset: asset.toString(),

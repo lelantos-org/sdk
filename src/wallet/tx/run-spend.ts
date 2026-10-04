@@ -2,7 +2,7 @@
 // they hand it.
 //
 //   spec.plan      validate arguments, resolve assets and amounts          → phase "preparing"
-//   fee            resolve the relayer's fee (and its asset)
+//   fee            resolve the relayer's fee (and its asset); refuse one above the caller's limit
 //   cover          select and lease notes, consolidating if allowed        (→ "consolidating")
 //   witness        sync and verify the tree, read root and paths atomically
 //   outputs        spec.outputs (payee) + change + fee slots, shuffled
@@ -25,6 +25,8 @@ import { randomHex } from "../../core/random.js";
 import { InsufficientCoverError } from "../../errors/funds.js";
 import { TreeOutOfSyncError } from "../../errors/network.js";
 import { type DecodedAddress, decodeAddress } from "../../keys/address.js";
+import { defaultDiversifier } from "../../keys/diversifier.js";
+import { deriveOutgoingKey } from "../../notes/outgoing.js";
 import type { RelayerSubmitResponse } from "../../protocol/responses.js";
 import type { SpendKind } from "../../protocol/transact.js";
 import type { EstimateKind } from "../../services/relayer/submitter.js";
@@ -37,7 +39,13 @@ import type { OpRun, SelectionOptions, SpendOptions, SpendPhase } from "../types
 import type { Money } from "../types/results.js";
 import { ensureCover, selectionRules, withSelection } from "./cover.js";
 import { assertBeforeDeadline, checkDeadlineArg } from "./deadline.js";
-import { feeSlots, type ResolvedFee, relayerMoney, resolveSpendFee } from "./fee.js";
+import {
+    assertWithinMaxFee,
+    feeSlots,
+    type ResolvedFee,
+    relayerMoney,
+    resolveSpendFee,
+} from "./fee.js";
 import { buildInputSlots } from "./inputs.js";
 import { changeSlots, finalizeSlots, type OutputSlotSpec } from "./outputs.js";
 import { type OutputCommitments, outputCommitments } from "./result-builder.js";
@@ -140,6 +148,7 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
     const plan = await spec.plan(ctx);
     assertBeforeDeadline(deadline);
     const { feeAsset, fee } = await resolveSpendFee(ctx, plan.feeKind, plan.asset, opts.feeAsset);
+    assertWithinMaxFee(opts.maxFee, plan.feeKind, feeAsset, fee);
     signal?.throwIfAborted();
 
     const cover = await coverAndWitness(ctx, plan, fee, { rules: selection, opts, run });
@@ -157,8 +166,8 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
         const change = branded<CircuitAmount>(picked.sum - covered);
         const { pk } = ctx.keys;
         const extra = spec.outputs?.(ctx, plan) ?? [];
-        // Roles are carried on the slots, not positions, because `finalizeSlots` shuffles them;
-        // see `outputs.ts`. Change is split onto the ladder so it can be withdrawn later.
+        // Roles are carried on the slots, not positions, because `finalizeSlots` shuffles them.
+        // Change is split onto the ladder so it can be withdrawn later.
         const slots = finalizeSlots([
             ...extra,
             ...changeSlots({
@@ -192,6 +201,9 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
             merkleRoot,
             ...(binding.publicOut !== undefined ? { publicOut: binding.publicOut } : {}),
             ...slots.args,
+            // Every output's ephemeral derives from the seed, so `paymentProof` can recompute it
+            // for any output of this spend.
+            outgoingKey: deriveOutgoingKey(ctx.keys.nsk),
         });
         // Last moment to back out: once handed to the relayer, the spend cannot be recalled.
         signal?.throwIfAborted();
@@ -272,8 +284,6 @@ async function coverAndWitness(
                 // see `cover.ts`.
                 selectOpts: async () => {
                     const tipBlock = await ctx.cfg.chain.blockNumber?.();
-                    // The circuit's arity is the ceiling; a caller may lower it but not raise it
-                    // past what the proof can consume.
                     return withSelection(rules, maxInputs, tipBlock);
                 },
                 autoConsolidate: opts.autoConsolidate,
@@ -333,13 +343,11 @@ async function coverAndWitness(
 /**
  * Sync the tree and confirm it is one the pool would accept a proof against.
  *
- * The wallet trusts the server's `leafHash` rather than deriving leaves from primary data, so a
- * wrong or lagging value yields a wrong root with no local symptom. Proving against it costs a full
- * Groth16 run and then fails `isKnownRoot` at the relayer.
+ * Leaves come from the server's `leafHash`, not from primary data, so a wrong or lagging value
+ * yields a wrong root with no local symptom; a proof against it fails `isKnownRoot` at the relayer.
  *
- * `TreeStore.syncVerifiedSnapshot` handles reconciliation, repairs and when to query the chain; it
- * receives the adapter's `isKnownRoot` because it has no other access to the pool. The spend path
- * only refuses.
+ * `TreeStore.syncVerifiedSnapshot` handles reconciliation, repairs and when to query the chain,
+ * through the adapter's `isKnownRoot`. The spend path only refuses.
  */
 async function witnessAgainstVerifiedRoot(
     ctx: WalletContext,
@@ -358,6 +366,8 @@ async function witnessAgainstVerifiedRoot(
                 {
                     pk: ctx.keys.pk,
                     nsk: ctx.keys.nsk,
+                    // `keys.pk` is the default address's, and every stored note is under it.
+                    d: defaultDiversifier(ctx.keys.ivk),
                     treeStore,
                     nIn: ctx.cfg.shape.nIn,
                     expectedRoot: merkleRoot,

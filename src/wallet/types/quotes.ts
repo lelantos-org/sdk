@@ -8,8 +8,6 @@ import type { DepositStrategy } from "../../errors/chain.js";
 import type { AssetInfo } from "../assets/info.js";
 import type { FeeBreakdown, Money } from "./results.js";
 
-// --- relayer fee ---------------------------------------------------------------------------------
-
 /** Which operation a relayer fee is quoted for. */
 export type FeeKind = "transfer" | "withdraw" | "swap" | "deposit";
 
@@ -24,8 +22,8 @@ export interface FeeOption {
      */
     baseUnits: TokenAmount;
     /**
-     * Spends: this wallet's unspent shielded balance of the asset. `undefined` for `kind: "deposit"`,
-     * whose fee is funded from the public wallet (see `DepositQuote.pulls`).
+     * Spends: this wallet's unspent shielded balance of the asset. `undefined` for
+     * `kind: "deposit"`, whose fee is funded from the public wallet (see `DepositQuote.pulls`).
      */
     balance: CircuitAmount | undefined;
     /**
@@ -44,8 +42,6 @@ export interface FeeQuote {
     /** Accepted assets that resolve in the registry, lowest id first. */
     options: FeeOption[];
 }
-
-// --- deposit -------------------------------------------------------------------------------------
 
 /** The Permit2 AllowanceTransfer state for one token, as a deposit's strategy choice reads it. */
 export interface TokenAllowanceState {
@@ -80,13 +76,11 @@ export interface DepositPull {
 }
 
 /**
- * What `deposit(args)` would pull, charge and do right now.
+ * What `deposit(args)` would pull, charge and do right now, including the per-token figures a
+ * deposit form sizes balances and Permit2 setup against.
  *
- * Covers the per-token figures a deposit form sizes balances and Permit2 setup against, so a UI
- * does not recombine `depositTotals` and `depositPulls` itself.
- *
- * Rejects as `deposit` would before signing: `FEE_ASSET_NOT_QUOTED`, `INVALID_ARGUMENT` for a refused
- * fee asset or a bad amount, `UNSUPPORTED_OPERATION` for `native` without an adapter.
+ * Rejects as `deposit` would before signing: `FEE_ASSET_NOT_QUOTED`, `INVALID_ARGUMENT` for a
+ * refused fee asset or a bad amount, `UNSUPPORTED_OPERATION` for `native` without an adapter.
  */
 export interface DepositQuote {
     readonly kind: "depositQuote";
@@ -106,7 +100,7 @@ export interface DepositQuote {
     separateFee: boolean;
     /** The fee draws on the deposited token's balance and allowance (`pulls.length === 1`). */
     feeSharesToken: boolean;
-    /** The path `deposit` would take now: `native`, `allowance` (every pull covered) or `witness`. */
+    /** `deposit`'s path right now: `native`, `allowance` (every pull covered) or `witness`. */
     strategy: DepositStrategy;
     /**
      * Not native, the adapter supports AllowanceTransfer, and some pull's allowance does not cover
@@ -118,8 +112,6 @@ export interface DepositQuote {
     /** Unix seconds. Yield figures drift with the pool's rate; re-quote rather than cache long. */
     quotedAt: number;
 }
-
-// --- swap ----------------------------------------------------------------------------------------
 
 /** A swap's charges. The two protocol fees fall on different legs and assets. */
 export interface SwapFees extends FeeBreakdown {
@@ -150,7 +142,7 @@ export interface SwapQuote {
     side: "gross" | "net";
     /** `publicOut` leaving the pool in `assetIn`. */
     gross: Money;
-    /** What reaches the venue: `gross − fees.protocol`. `net.baseUnits` is the venue's `amountIn`. */
+    /** Sent to the venue: `gross − fees.protocol`. `net.baseUnits` is the venue's `amountIn`. */
     net: Money;
     /** Whether `gross` is a denomination of `assetIn` (it is published on-chain). */
     onLadder: boolean;

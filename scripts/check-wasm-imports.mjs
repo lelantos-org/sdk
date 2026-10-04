@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 // Fail if a `#wasm/*` subpath is not imported with a literal specifier.
 //
-// Bundlers only follow a dynamic import whose specifier they can read
-// statically. Route one through a variable — `import(cfg.subpath)` — and the
-// bare `#wasm/...` survives into the browser bundle, where nothing resolves it:
-// the module load throws, the wasm-pack glue never gets its `new URL(...)`
-// rewritten to the emitted asset, and every caller silently degrades to its JS
-// fallback. That is invisible at build time and costs ~2.5x at runtime, so it
-// is pinned here rather than left to review.
+// Bundlers follow a dynamic import only when its specifier is a literal. Passed through a variable
+// (`import(cfg.subpath)`), the bare `#wasm/...` survives into the browser bundle, where nothing
+// resolves it: the module load throws, the wasm-pack glue's `new URL(...)` is never rewritten to
+// the emitted asset, and every caller silently falls back to JS with no build-time error.
 //
-// Each subpath declared in package.json `imports` must appear at least once
-// under src/ as a literal `import("#wasm/<name>")`.
+// Each subpath declared in package.json `imports` must appear at least once under src/ as a
+// literal `import("#wasm/<name>")`.
 
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
@@ -26,9 +23,8 @@ function scan(file) {
     const lines = readFileSync(file, "utf8").split("\n");
     for (let i = 0; i < lines.length; i++) {
         for (const sub of subpaths) {
-            // The specifier must be a literal *inside the `import()` call* — the
-            // same string sitting in a `const` above would pass a bare substring
-            // match while still reaching `import()` as a variable.
+            // The literal must sit inside the `import()` call: the same string in a `const`
+            // would pass a substring match yet reach `import()` as a variable.
             const literal = new RegExp(`\\bimport\\(\\s*["']${sub}["']\\s*\\)`);
             if (literal.test(lines[i]) && !found.has(sub)) {
                 found.set(sub, `${relative(ROOT, file)}:${i + 1}`);

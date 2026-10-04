@@ -75,8 +75,8 @@ describe("minAmount", () => {
 });
 
 describe("token-metadata narrowing", () => {
-    // Human-unit conversion is defined only against `AssetInfoWithMeta`; these
-    // guards narrow to it at runtime.
+    // `parseAmount` / `formatAmount` need `decimals`; these guards narrow to the
+    // variant that carries it.
     it("narrows an asset that carries decimals", () => {
         const asset: AssetInfo = WETH;
         expect(hasTokenMeta(asset)).toBe(true);

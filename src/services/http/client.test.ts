@@ -311,7 +311,6 @@ describe("createHttpClient retry history", () => {
         expect(count("/v1/spend/estimate")).toBe(2);
         expect(count("/v1/swap/estimate")).toBe(2);
         expect(count("/v1/deposit/estimate")).toBe(2);
-        // Submits stay on the non-idempotent policy: see "never resends a submit answered %i".
     });
 
     it("still retries a read on 500", async () => {

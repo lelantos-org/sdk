@@ -1,8 +1,8 @@
 // Prover selection: WASM by default, snarkjs on wasm-load failure, behind a lazy handle.
 //
-// `LazyProver` defers everything (artifact resolution, the ~29 MB zkey fetch and parse, the
-// thread-pool spin-up) until the first proof or an explicit warm-up, so building a wallet does no
-// artifact I/O and an app that only reads balances never downloads the prover.
+// `LazyProver` defers artifact resolution, the zkey fetch and parse, and the thread-pool start
+// until the first proof or an explicit warm-up, so building a wallet does no artifact I/O and an
+// app that only reads balances never downloads the prover.
 
 import { type AsyncMemo, memoAsync } from "../../core/async.js";
 import { getLogger } from "../../log/logger.js";
@@ -23,12 +23,11 @@ async function wasmProverWithFallback(
     opts: { force?: boolean | undefined } = {},
 ): Promise<Prover> {
     const { SnarkjsProver } = await import("../../prover/snarkjs.js");
-    // Without cross-origin isolation the wasm prover runs single-threaded, which benchmarks ~2x
-    // slower than snarkjs (snarkjs parallelizes internally). Prefer snarkjs there unless wasm was
-    // forced explicitly.
+    // Without cross-origin isolation the wasm prover runs single-threaded and is slower than
+    // snarkjs, which parallelizes internally; snarkjs is used there unless wasm was forced.
     if (!opts.force && detectRuntime() === "browser" && !isCrossOriginIsolated()) {
-        // Logged because this downgrade is otherwise silent: a page served without COOP/COEP takes
-        // this path on every load.
+        // The downgrade is otherwise silent: a page served without COOP/COEP takes this path on
+        // every load.
         log.warn("cross-origin isolation off; proving falls back to snarkjs", {
             fix: "serve with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp",
         });
@@ -38,8 +37,6 @@ async function wasmProverWithFallback(
         const { WasmProver } = await import("../../prover/wasm-prover.js");
         return await WasmProver.build(artifacts);
     } catch (err) {
-        // Via the SDK logger rather than `console`, so apps can route or suppress the only
-        // diagnostic for this downgrade.
         log.warn("WASM prover unavailable; falling back to snarkjs", { err });
         return new SnarkjsProver(artifacts);
     }
@@ -50,8 +47,7 @@ async function wasmProverWithFallback(
  * `warm()`.
  *
  * The build is memoised with eviction, so a transient artifact download failure is retried on the
- * next call rather than disabling the prover for the wallet's lifetime. This matches
- * `loadArtifactBytes` and `WasmProver.build`, which also evict on failure.
+ * next call rather than disabling the prover for the wallet's lifetime.
  */
 class LazyProver implements Prover {
     private readonly built: AsyncMemo<Prover>;

@@ -1,8 +1,8 @@
-// `@lelantos-org/sdk/services`: HTTP clients for the relayer (including the deposit stream), the FMD
-// server and the swap quoter, and the shared HTTP client they are built on.
+// `@lelantos-org/sdk/services`: HTTP clients for the relayer (including the deposit stream), the
+// FMD server and the swap quoter, and the shared HTTP client they are built on.
 //
-// The FMD subscription methods have no in-SDK caller: they are how a consumer obtains the `token` that
-// `WalletConfig.syncStrategy = { kind: "matches" }` requires.
+// The FMD subscription methods have no in-SDK caller: they are how a consumer obtains the `token`
+// that `WalletConfig.syncStrategy = { kind: "matches" }` requires.
 
 export { FmdClient } from "../services/fmd-server/client.js";
 export {

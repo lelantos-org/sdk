@@ -160,13 +160,10 @@ describe("MerkleTree", () => {
     });
 
     describe("node cache", () => {
-        // The cache key packs (level, index) into one number. A stride too small for the tree
-        // aliases one level's key onto another's and corrupts the root.
-        //
-        // Asserted on the key arithmetic rather than through a real tree, since aliasing at depth
-        // 10 needs >4^10 leaves. The invariant: the stride must exceed every index reachable at any
-        // level, otherwise `level * stride + index` for one level lands inside the next level's
-        // range.
+        // The cache key packs (level, index) into one number. Unless the stride exceeds every index
+        // reachable at any level, `level * stride + index` lands inside the next level's range and
+        // corrupts the root. Asserted on the key arithmetic rather than through a real tree, since
+        // aliasing at depth 10 needs >4^10 leaves.
         it("stride exceeds the widest reachable index at every level", () => {
             for (const depth of [4, 10, 12, 20, 25]) {
                 const stride = cacheKeyStride(depth);

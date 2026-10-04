@@ -1,10 +1,7 @@
-// Wallet sync: page from `NoteSource`, trial-decrypt with ivk, persist to `NoteStore`.
+// Wallet sync: page from `NoteSource`, trial-decrypt with ivk, persist through `NoteSink`.
 //
-// The feed is larger than one page, so sync pages until exhausted. The cursor resumes across
-// sessions, so a caught-up wallet fetches no rows.
-//
-// The cursor is a source row id, persisted on `NotesFile.cursor`. Two distinct cursors are used;
-// `NotePage` explains why they differ.
+// Pages until the feed is exhausted. The resume cursor is a source row id persisted on
+// `NotesFile.cursor`, so a caught-up wallet fetches no rows; `NotePage` explains the two cursors.
 
 import type { Field, Jubjub } from "../crypto/index.js";
 import { getLogger } from "../log/logger.js";
@@ -15,20 +12,15 @@ import type { Scanner } from "./scanner.js";
 
 const log = getLogger("lelantos:wallet:sync");
 
-/**
- * Upper bound on pages per sync. Reachable only by a feed that returns pages indefinitely; the
- * cursor-stall check catches a repeated cursor, and this bounds any other non-terminating feed.
- */
+/** Upper bound on pages per sync, for a non-terminating feed the cursor-stall check misses. */
 const MAX_PAGES = 10_000;
 
 /** Pages between checkpoint saves, so a mid-sync failure resumes near where it stopped. */
 const CHECKPOINT_PAGES = 50;
 
 /**
- * Why paging stopped.
- *
- * `exhausted` means caught up. `cursorStalled` and `pageCap` indicate a misbehaving feed, and
- * `aborted` a cancelled sync; all are reported so callers can distinguish them from caught up.
+ * Why paging stopped: `exhausted` means caught up, `cursorStalled` and `pageCap` a misbehaving
+ * feed, `aborted` a cancelled sync.
  */
 export type SyncStop = "exhausted" | "cursorStalled" | "pageCap" | "aborted";
 
@@ -37,7 +29,7 @@ export interface SyncResult {
     hits: number;
     added: number;
     skipped: number;
-    /** Pages requested. 1 on a caught-up poll that came back short. */
+    /** Pages requested; 1 on a caught-up poll. */
     pages: number;
     /** Persisted resume cursor after this sync. */
     cursor: number;
@@ -47,9 +39,8 @@ export interface SyncResult {
 /**
  * Destination for sync results, implemented by `NoteCache`.
  *
- * Not a `NoteStore`: a store returns a fresh `NotesFile` on every `load()`, so a sync would mutate
- * a second copy of the wallet's state and the later save would overwrite the other's changes. The
- * sink exposes the live file, so exactly one `NotesFile` exists per wallet.
+ * Exposes the live `NotesFile` rather than a `NoteStore`, whose `load()` returns a fresh copy:
+ * syncing into a second copy would let one save overwrite the other's changes.
  */
 export interface NoteSink {
     /** The live notes file. Read for the resume cursor; never replaced. */
@@ -73,16 +64,13 @@ export interface SyncOpts {
     limit?: number | undefined;
     onProgress?: ((p: NotesSyncProgress) => void) | undefined;
     /**
-     * Stops paging at the next page boundary.
-     *
-     * Progress scanned before the abort is checkpointed, so the next sync resumes from there. A
-     * sync can otherwise page through up to `MAX_PAGES × limit` notes (ten million at the
-     * defaults).
+     * Stops paging at the next page boundary. Progress scanned before the abort is checkpointed,
+     * so the next sync resumes from there.
      */
     signal?: AbortSignal | undefined;
 }
 
-/** Progress of one notes-feed sync pass. The wallet surface reports it as `SyncProgress` `{ stream: "notes" }`. */
+/** One notes-feed sync pass; the wallet reports it as `SyncProgress` `{ stream: "notes" }`. */
 export interface NotesSyncProgress {
     phase: "fetching" | "scanning" | "persisting" | "done";
     fetched: number;
@@ -100,7 +88,7 @@ export async function syncWallet(deps: SyncDeps, opts: SyncOpts = {}): Promise<S
     const tally = { fetched: 0, hits: 0, added: 0, skipped: 0, pages: 0 };
     /** Pages consumed since the last checkpoint. */
     let sinceSave = 0;
-    /** Set when a page produced notes, forcing a checkpoint at the end of that page. */
+    /** Set when a page added notes, forcing a checkpoint at its end, since later pages may fail. */
     let foundNotes = false;
     let stoppedBy: SyncStop = "exhausted";
 
@@ -133,7 +121,6 @@ export async function syncWallet(deps: SyncDeps, opts: SyncOpts = {}): Promise<S
                 const { added, skipped } = deps.sink.addHits(pageHits);
                 tally.added += added.length;
                 tally.skipped += skipped;
-                // Checkpoint immediately after a page with new notes, since later pages may fail.
                 if (added.length > 0) foundNotes = true;
             }
 
@@ -166,12 +153,9 @@ export async function syncWallet(deps: SyncDeps, opts: SyncOpts = {}): Promise<S
 /**
  * Whether to stop after a page, and why. `null` means continue.
  *
- * Only an empty page means the feed is exhausted. Servers cap `limit`, so a short page may still
- * be followed by more rows; callers rely on `stoppedBy === "exhausted"` meaning fully synced. This
- * costs one extra empty request per sync.
- *
- * `cursorStalled` guards termination: a non-empty page that does not advance the cursor means the
- * server ignores `after`, and paging would never end.
+ * Only an empty page means exhausted: servers cap `limit`, so a short page may be followed by more
+ * rows, and callers rely on `"exhausted"` meaning fully synced. A non-empty page that does not
+ * advance the cursor means the server ignores `after`, and paging would never end.
  */
 function stopReason(pageLength: number, advanced: boolean, pages: number): SyncStop | null {
     if (pageLength === 0) return "exhausted";

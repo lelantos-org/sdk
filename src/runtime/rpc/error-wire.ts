@@ -35,10 +35,9 @@ export function toWireError(err: unknown, depth = 0): WireError {
         out.code = err.code;
         const context = err.context && cloneSafe(err.context);
         if (context) out.context = context;
-        // Own enumerable fields beyond the `Error` shape, such as
-        // `InsufficientCoverError.consolidate`. `isWalletError(e, code)` is
-        // duck-typed on `code`, so without these the narrowed type's extra
-        // fields would read back `undefined`.
+        // `isWalletError(e, code)` is duck-typed on `code`, so without the
+        // subclass's own fields the narrowed type's extras would read back
+        // `undefined`.
         const fields = cloneSafe(err, WIRE_OWN_KEYS);
         if (fields) out.fields = fields;
     }
@@ -61,9 +60,8 @@ export function fromWireError(w: WireError): Error {
 }
 
 /**
- * Wrap a remote failure in a local error whose own stack is the CALL SITE,
- * with the reconstructed remote error (carrying the worker's stack) as
- * `cause`. Both halves of the trace stay visible.
+ * Build a local error whose stack is the call site (`opts.site`), with the
+ * reconstructed remote error, carrying the worker's stack, as `cause`.
  */
 export function rpcError(
     code: "WORKER_TIMEOUT" | "WORKER_CRASHED" | "WORKER_FAILED",

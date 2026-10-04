@@ -1,5 +1,3 @@
-// Browser-wallet signer backed by an EIP-1193 provider.
-
 import type { TypedDataDomain, TypedDataParameter } from "viem";
 import { branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { asUserRejection } from "../../errors/chain.js";
@@ -7,8 +5,8 @@ import type { Eip1193ProviderLike, EthSigner } from "../../keys/signer.js";
 import { domainTypes, serialisableDomain, stringifyBigInts } from "./typed-data.js";
 
 /**
- * Wraps a raw EIP-1193 provider as `EthSigner` (browser wallets). All
- * signing and broadcast go through `provider.request` so prompts land in
+ * Wraps a raw EIP-1193 provider (a browser wallet) as `EthSigner`. All
+ * signing and broadcast go through `provider.request`, so prompts land in
  * the wallet the user connected with.
  */
 export class Eip1193Signer implements EthSigner {

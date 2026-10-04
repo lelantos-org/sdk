@@ -25,7 +25,7 @@ import { quoteSwap } from "./quote-swap.js";
 import { executeSwap } from "./swap.js";
 import { executeWithdraw } from "./withdraw.js";
 
-// The relayer's `/chains` list names assets; it does not get to say what they are. Every operation
+// The relayer's `/chains` list names assets but is not trusted to describe them. Every operation
 // that signs, pulls or sizes an amount reads token, scale, fees and yield state from the pool, and
 // refuses a list that contradicts it before anything is signed or proven.
 

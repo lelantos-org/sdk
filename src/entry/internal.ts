@@ -1,15 +1,18 @@
-// `@lelantos-org/sdk/internal`: UNSTABLE. No semver guarantee.
+// `@lelantos-org/sdk/internal`: unstable, no semver guarantee.
 //
 // Circuit internals, the stored-note codec, wallet plumbing (`walletInternals`), sync engine pieces
 // and test hooks. These change with the circuit, the stored-note encoding or the wallet's internal
 // structure, including in patch releases. Pin `@lelantos-org/circuits` when relying on them.
 
 export {
+    coeffDigest,
     coeffs,
+    type DigestInput,
     type FlattenInput,
     fiatShamirZ,
     flatten,
     hornerEval,
+    transactDigest,
 } from "../circuit/compression.js";
 export {
     type BuildOpts,
@@ -22,7 +25,6 @@ export {
     toCircomInput,
 } from "../circuit/input.js";
 export {
-    type DummyBlinders,
     dummyInputAt,
     type SpendableCachedNote,
     toSpentNoteFromPath,

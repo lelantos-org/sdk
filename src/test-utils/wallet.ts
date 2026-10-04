@@ -15,11 +15,16 @@ import type { ScanHit, ScanInput } from "../sync/scan.js";
 import type { Scanner } from "../sync/scanner.js";
 import type { RootCheck } from "../sync/tree-store.js";
 import { createWallet } from "../wallet/create.js";
-import { InMemoryNoteStore, type NoteStore, type StoredNote } from "../wallet/notes/note-store.js";
+import {
+    InMemoryNoteStore,
+    NOTES_FILE_VERSION,
+    type NoteStore,
+    type StoredNote,
+} from "../wallet/notes/note-store.js";
 import { walletInternals } from "../wallet/surface/internals.js";
 import type { WalletConfig } from "../wallet/types/config.js";
 
-/** Spendability fields the selector reads. All optional. */
+/** Spendability fields the selector reads. */
 export interface StoredNoteOpts {
     asset?: bigint;
     spent?: boolean;
@@ -40,7 +45,6 @@ export function storedNote(id: string, value = 100n, opts: StoredNoteOpts = {}):
         value: value.toString(),
         rho: randomFr().toString(),
         rcm: randomFr().toString(),
-        rcvDep: randomJubjubScalar().toString(),
         cm: `0x${id.padStart(64, "0")}`,
         leafIndex: Number.parseInt(id, 16) || 0,
         spent: opts.spent ?? false,
@@ -57,7 +61,6 @@ export function incomingHit(over: Partial<ScanHit> = {}): ScanHit {
         value: 500n,
         rho: randomFr(),
         rcm: randomFr(),
-        rcvDep: randomJubjubScalar(),
         cm: BigInt(`0x${"be".repeat(16)}`),
         leafIndex: 7,
         blockNumber: 42,
@@ -146,7 +149,7 @@ export interface TestWalletOpts {
  */
 export async function testWallet(opts: TestWalletOpts = {}) {
     const noteStore = opts.noteStore ?? new InMemoryNoteStore();
-    await noteStore.save({ version: 1, notes: opts.notes ?? [] });
+    await noteStore.save({ version: NOTES_FILE_VERSION, notes: opts.notes ?? [] });
 
     const spent = opts.spent ?? new Set<bigint>();
     const nullifierStore =
@@ -220,10 +223,7 @@ export function unreconciled(localLeaves = 4, mirrorLeaves = 4): RootCheck {
     };
 }
 
-/**
- * The `TreeStore` surface a spend uses: reconcile, then read paths from a depth-4 tree. Shared by
- * both spend suites.
- */
+/** The `TreeStore` surface a spend uses: reconcile, then read paths from a tree of `depth`. */
 export function stubTreeStore(depth = 4) {
     const syncVerified = vi.fn(async (_opts?: unknown): Promise<RootCheck> => reconciled());
     return {

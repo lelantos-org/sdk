@@ -1,6 +1,6 @@
-// `connect()`: one validation pass before anything is built, a lazy prover, the
-// key derived last, everything built disposed on failure, HTTP options reaching every service
-// client, and a frozen wallet object with bech32m keys and static capabilities.
+// `connect()`: one validation pass before anything is built, a lazy prover, the key derived last,
+// everything built disposed on failure, HTTP options reaching every service client, and a frozen
+// wallet object with bech32m keys and static capabilities.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS, type NetworkPreset } from "../../chain/networks.js";

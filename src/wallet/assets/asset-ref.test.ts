@@ -35,6 +35,12 @@ describe("classifyRef", () => {
     it("rejects an empty ref", () => {
         expect(() => classifyRef("  ")).toThrow(InvalidArgumentError);
     });
+
+    /// Id 0 is the pool's "no asset": a transfer's `publicAssetId`, a zero-value fee note's asset.
+    it("rejects id 0, which names no asset", () => {
+        expect(() => classifyRef(0n)).toThrow(/no asset/);
+        expect(() => classifyRef("0")).toThrow(InvalidArgumentError);
+    });
 });
 
 describe("matchRef", () => {

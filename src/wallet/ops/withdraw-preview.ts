@@ -1,9 +1,8 @@
 // What a withdrawal will publish, cost and deliver, computed before proving.
 //
-//   1. `WithdrawOptions.gross` is the GROSS. The contract deducts the protocol fee from what
-//      leaves the pool, so the recipient receives less than the amount passed in.
-//   2. The gross is published on-chain, so the gross (not the net) must be a ladder denomination
-//      for the withdrawal to blend with others.
+// `WithdrawOptions.gross` is what leaves the pool: the contract deducts the protocol fee from it,
+// so the recipient receives less. The gross is the figure published on-chain, so it, not the net,
+// must be a ladder denomination for the withdrawal to blend with others.
 
 import { branded, type CircuitAmount, circuitAmount, type TokenAmount } from "../../core/brand.js";
 import type { Ladder } from "../../protocol/denominations.js";
@@ -22,9 +21,7 @@ import {
 export interface WithdrawPreviewArgs {
     /** The gross leaving the pool; the value passed as `WithdrawOptions.gross`. */
     amount: Amount;
-    /**
-     * Carries its own `withdrawBps`, so the preview is pure and needs no network round trip.
-     */
+    /** Carries its own `withdrawBps`, so the preview needs no network round trip. */
     asset: AssetInfo;
 }
 

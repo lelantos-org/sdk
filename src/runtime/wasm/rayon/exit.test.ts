@@ -7,17 +7,14 @@ import { describe, expect, it } from "vitest";
 const run = promisify(execFile);
 
 // Rayon workers park in `Atomics.wait` inside wasm and each hold a live
-// MessagePort, so without `unref()` any Node process that touches the WASM
-// prover never exits on its own.
+// MessagePort, so without `unref()` a Node process that loads the WASM prover
+// never exits on its own.
 //
-// The assertion is that the event loop drains, which cannot be observed from
-// inside the process under test — vitest's own loop is not it — so this runs
-// in a child process.
-//
-// It also runs against `dist/`, because the behaviour depends on real
-// `node:worker_threads` semantics: a MessagePort re-refs when a "message"
-// listener is attached, which is why `unref()` must come after `on()`. A fake
-// worker would not catch a change there.
+// Whether the event loop drains cannot be observed from inside vitest's own
+// process, so each case runs in a child process. It runs against `dist/`
+// because the behaviour depends on real `node:worker_threads` semantics: a
+// MessagePort re-refs when a "message" listener is attached, so `unref()` must
+// come after `on()`.
 
 const DIST = fileURLToPath(new URL("../../../../dist/prover/wasm-prover.js", import.meta.url));
 const built = existsSync(DIST);
@@ -35,23 +32,19 @@ describe.skipIf(!built)("rayon pool does not pin the Node event loop", () => {
             encoding: "utf8",
         });
         // execFile rejects on timeout or non-zero exit, so reaching here is
-        // the assertion. Keep a generous bound; the pool starts in ~50ms.
+        // the assertion.
         expect(Date.now() - started).toBeLessThan(45_000);
         expect(stdout).toBe("");
     }, 60_000);
 
     it("refuses to rebuild after a shutdown instead of hanging", async () => {
         // rayon's global pool is initialised once per wasm module instance,
-        // and the module cannot be replaced: a re-import returns the same
-        // instance from the runtime's module registry, with the same linear
-        // memory and the same now-dead pool registered in it. A second
+        // and a re-import returns the same instance, with the same linear
+        // memory and the dead pool still registered in it. A second
         // `initThreadPool` throws and falls back to single-threaded, but the
-        // fallback does not help — the module still dispatches into the dead
-        // pool, so `prove` blocks on a latch nothing will ever signal.
-        //
-        // Without the guard, prove → shutdown → prove hangs indefinitely. A
-        // throw is the available outcome; proving again requires a fresh
-        // realm.
+        // module still dispatches into the dead pool, so `prove` would block
+        // on a latch that is never signalled. The guard throws instead;
+        // proving again requires a fresh realm.
         const script = `
             const { WasmProver } = await import(${JSON.stringify(DIST)});
             const { rayonWorkerCount } = await import(

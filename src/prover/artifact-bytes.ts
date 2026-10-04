@@ -1,6 +1,6 @@
-// Loading and caching prover artifact bytes.
+// Loading and caching prover artifact bytes: fetch with retry and progress, an
+// in-realm memo, the persistence port and the digest check for pinned artifacts.
 //
-// Fetch with retry and progress, an in-realm memo, and the persistence port.
 // Paths come from `artifact-paths.ts`; this module knows nothing about shapes
 // or the companion package. Backend-agnostic: does not import snarkjs.
 
@@ -11,19 +11,25 @@ import { ProverArtifactsFailedError } from "../errors/prover.js";
 import { getLogger } from "../log/logger.js";
 import { IS_NODE, NODE_FS_PROMISES } from "../runtime/detect.js";
 import { type ArtifactCache, cacheApiArtifactCache } from "./artifact-cache.js";
+import { sha256Hex } from "./artifact-digests.js";
 
 const log = getLogger("lelantos:prover:artifacts");
 
 /**
- * Per-attempt download deadline. The 4x6 zkey is tens of MB (2^17 FFT domain).
- *
- * 120 s covers the default shape down to roughly 3 Mbps; slower links fail
- * rather than hang. Override via `LoadArtifactOpts.timeoutMs`.
+ * Per-attempt download deadline. The zkey is tens of MB; 120 s covers the
+ * default shape down to roughly 2 Mbps, and slower links fail rather than hang.
+ * Override via `LoadArtifactOpts.timeoutMs`.
  */
 const ARTIFACT_TIMEOUT_MS = 120_000;
 const ARTIFACT_RETRIES = 2;
 
 const _cache = memoAsyncByKey<string, Uint8Array>();
+
+/**
+ * `url\0digest` pairs already checked in this realm, so a backend that re-reads
+ * the bytes on every proof (`SnarkjsProver`) hashes each artifact once.
+ */
+const _verified = new Set<string>();
 
 /**
  * `undefined` = not yet resolved, `null` = no persistence. Resolved lazily so
@@ -36,43 +42,44 @@ let _persistent: ArtifactCache | null | undefined;
  * Install (or disable) persistence for downloaded artifacts.
  *
  * Defaults to the Cache API where available, so a reload or the prover worker
- * (a separate JS realm with its own in-memory memo) skips the download. Pass
- * `false` to opt out, or an {@link ArtifactCache} to store the bytes elsewhere.
+ * skips the download. Pass `false` to opt out, or an {@link ArtifactCache} to
+ * store the bytes elsewhere.
  *
- * State is module-local, and **a Web Worker is a separate module realm**. An
- * `ArtifactCache` is a live object and cannot cross `postMessage`; call this
- * inside the worker to override it there. To opt out in a worker, pass
- * `cacheArtifacts: false` to `WorkerProver`, which forwards it like `threads`.
+ * The setting is per module realm, and a Web Worker is a separate realm. An
+ * `ArtifactCache` cannot cross `postMessage`: call this inside the worker to
+ * install one there, or pass `cacheArtifacts: false` to `WorkerProver` to opt
+ * out.
  */
 export function configureArtifactCache(cache: ArtifactCache | false): void {
     _persistent = cache === false ? null : cache;
 }
 
 function persistentCache(): ArtifactCache | null {
-    // Not `??=`: `null` means "explicitly disabled" and must persist, but
-    // `??=` would re-probe on `null`.
+    // Not `??=`: `null` means explicitly disabled, and `??=` would re-probe it.
     if (_persistent === undefined) _persistent = cacheApiArtifactCache();
     return _persistent;
 }
 
 /**
- * Drop the memoised bytes for `path`, freeing them once nothing else holds a
- * reference. The persistent cache is untouched, so a later load is a cache
- * hit rather than a download.
+ * Drop the memoised bytes for `paths`. The persistent cache is untouched, so a
+ * later load is a cache hit rather than a download.
  *
  * For callers that copy the bytes elsewhere and will not request them again:
- * the wasm prover parses the ~48 MB zkey into linear memory, so keeping the
+ * the wasm prover parses the zkey into linear memory, so keeping the
  * `Uint8Array` would hold the key twice for the realm's lifetime.
- *
- * Not a general policy: `SnarkjsProver` re-reads the bytes on every proof.
+ * `SnarkjsProver` re-reads the bytes on every proof and does not release them.
  *
  * @internal
  */
 export function releaseArtifactBytes(...paths: string[]): void {
-    // Canonicalised because `loadArtifactBytes` memoises on the absolute URL;
-    // a page-relative path (accepted by `WasmProver.build`) would otherwise
-    // match no entry.
-    for (const p of paths) _cache.delete(toAbsoluteUrl(p));
+    // `loadArtifactBytes` memoises on the absolute URL, so a page-relative
+    // path would otherwise match no entry.
+    for (const p of paths) {
+        const key = toAbsoluteUrl(p);
+        _cache.delete(key);
+        // The next load is new bytes, from disk, cache or network: check them again.
+        for (const seen of _verified) if (seen.startsWith(`${key}\0`)) _verified.delete(seen);
+    }
 }
 
 /**
@@ -83,41 +90,69 @@ export function releaseArtifactBytes(...paths: string[]): void {
  */
 export function __resetArtifactCacheForTest(): void {
     _cache.clear();
+    _verified.clear();
     _persistent = undefined;
 }
 
 /** Options for {@link loadArtifactBytes}. */
 export interface LoadArtifactOpts {
     /**
-     * Download progress for the zkey.
-     *
-     * Results are cached by URL, so only the first caller for a given path
-     * receives progress; concurrent callers await the same promise and see
-     * none. A persistent-cache hit reports a single terminal event.
+     * Download progress. Loads are memoised by URL, so only the first caller
+     * for a path receives it; concurrent callers await the same promise and
+     * see none. A persistent-cache hit reports a single terminal event.
      */
     onProgress?: ((p: { loaded: number; total?: number; url: string }) => void) | undefined;
     signal?: AbortSignal | undefined;
     /** Per-attempt deadline. Default 120s. */
     timeoutMs?: number | undefined;
+    /**
+     * Expected SHA-256 of the bytes, lowercase hex. Bytes that hash to anything
+     * else are never returned: the load rejects `PROVER_ARTIFACTS_FAILED`.
+     */
+    sha256?: string | undefined;
 }
 
 /**
  * Load artifact bytes from a filesystem path, `file://` href, or `http(s)://`
  * URL. Results are memoised for the life of the realm; a failed load is
- * evicted so callers can retry.
+ * evicted so callers can retry. http(s) loads also consult the persistent
+ * cache (see {@link configureArtifactCache}).
  *
- * http(s) loads also consult the persistent cache — see
- * {@link configureArtifactCache}.
- *
- * The path is absolutised first so the memo key and the `isHttpUrl`
- * persistence check agree across spellings. This happens here, not only in
- * `resolveArtifacts`, because a caller can pass a path straight to
- * `loadArtifactBytes`; a relative path would otherwise lose persistence and
- * re-download on every load.
+ * The path is absolutised first, so the memo key and the `isHttpUrl`
+ * persistence check agree across spellings; a relative path would otherwise
+ * lose persistence and download again in every realm.
  */
-export function loadArtifactBytes(path: string, opts: LoadArtifactOpts = {}): Promise<Uint8Array> {
+export async function loadArtifactBytes(
+    path: string,
+    opts: LoadArtifactOpts = {},
+): Promise<Uint8Array> {
     const key = toAbsoluteUrl(path);
-    return _cache.get(key, () => load(key, opts));
+    const bytes = await _cache.get(key, () => load(key, opts));
+    if (opts.sha256 === undefined) return bytes;
+
+    // Checked on the way out of the memo rather than only inside `load`: the
+    // entry may have been put there by a caller that named no digest.
+    if (await matchesDigest(key, bytes, opts.sha256.toLowerCase())) return bytes;
+    _cache.delete(key);
+    throw digestMismatch(key);
+}
+
+/** Whether `bytes` hash to `expected`; a match is remembered for `key`. */
+async function matchesDigest(key: string, bytes: Uint8Array, expected: string): Promise<boolean> {
+    const seen = `${key}\0${expected}`;
+    if (_verified.has(seen)) return true;
+    if ((await sha256Hex(bytes)) !== expected) return false;
+    _verified.add(seen);
+    return true;
+}
+
+/** Not retryable: the source serves other bytes than the pinned release, and will again. */
+function digestMismatch(path: string): ProverArtifactsFailedError {
+    return new ProverArtifactsFailedError(
+        path,
+        "artifact does not match its pinned SHA-256; refusing to load it",
+        { retryable: false },
+    );
 }
 
 async function load(path: string, opts: LoadArtifactOpts): Promise<Uint8Array> {
@@ -127,11 +162,17 @@ async function load(path: string, opts: LoadArtifactOpts): Promise<Uint8Array> {
         return new Uint8Array(await readFile(target));
     }
 
-    // Only http(s) is persistable; a local path is already cheap to re-read.
+    // Only http(s) is persistable.
     const persistent = isHttpUrl(path) ? persistentCache() : null;
+    const expected = opts.sha256?.toLowerCase();
     if (persistent) {
         const hit = await persistent.get(path);
-        if (hit) {
+        // A cached entry is no more trusted than the network: anything able to
+        // write the origin's storage can replace it. A stale or tampered entry
+        // is treated as a miss and overwritten by the download below.
+        if (hit && expected !== undefined && !(await matchesDigest(path, hit, expected))) {
+            log.warn("cached artifact does not match its pinned digest; refetching", { path });
+        } else if (hit) {
             log.info("artifact cache hit", { path, bytes: hit.length });
             // Terminal progress event so consumers complete on a hit.
             opts.onProgress?.({ loaded: hit.length, total: hit.length, url: path });
@@ -146,6 +187,11 @@ async function load(path: string, opts: LoadArtifactOpts): Promise<Uint8Array> {
         onRetry: ({ attempt, delayMs, err }) =>
             log.warn("retrying artifact download", { path, attempt: attempt + 1, delayMs, err }),
     });
+
+    // Before the write, so bytes that fail their digest are never persisted.
+    if (expected !== undefined && !(await matchesDigest(path, bytes, expected))) {
+        throw digestMismatch(path);
+    }
 
     // Awaited so a worker terminated right after its first proof does not lose
     // the write. `put` swallows its own failures, so this cannot fail the load.
@@ -199,7 +245,7 @@ async function fetchArtifact(
     }
 }
 
-/** Non-retryable: the caller asked to stop, so another attempt is not wanted. */
+/** Non-retryable: the caller asked to stop. */
 function abortedError(path: string, signal: AbortSignal, attempt: number): Error {
     return new ProverArtifactsFailedError(path, "download aborted by caller", {
         cause: signal.reason,
@@ -209,13 +255,12 @@ function abortedError(path: string, signal: AbortSignal, attempt: number): Error
 }
 
 /**
- * Stream the body so a large zkey can report progress. `res.body` is absent
- * under some fetch polyfills and test mocks, hence the guard at the call site.
+ * Stream the body, reporting progress per chunk. `res.body` is absent under
+ * some fetch polyfills and test mocks, hence the guard at the call site.
  *
- * Writes into one growable buffer sized from `content-length`, so a correct
- * length means zero reallocations and a single copy of the ~48 MB body
- * (collecting chunks and concatenating would hold two). Doubling on overflow
- * bounds the cost of a wrong or absent `content-length`.
+ * Writes into one buffer sized from `content-length`, so a correct length
+ * means no reallocation and a single copy of the body. The buffer doubles on
+ * overflow, bounding the cost of a wrong or absent `content-length`.
  */
 async function readWithProgress(
     res: Response,

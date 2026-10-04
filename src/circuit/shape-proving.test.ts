@@ -1,14 +1,12 @@
-// End-to-end shape check: prove a shipped golden witness with the matching
-// proving key and verify it against the matching verification key.
+// End-to-end shape check: prove each shape's golden witnesses with its proving key and verify
+// them against its verification key.
 //
-// `vectors.test.ts` pins the SDK's `flatten` to each vector's `y`. This test
-// pins the vectors to the compiled circuit: the `y` a real proof emits as its
-// public signal must match. Both are needed, since a coefficient layout the SDK
-// and vectors agree on is still wrong if the circuit orders its slots
-// differently.
+// `vectors.test.ts` pins the SDK's `coeffs`, `coeffDigest` and `flatten` to each vector's `y`,
+// `digest` and `z`. This test pins the vectors to the compiled circuit: the public signals a
+// real proof emits, `[y, digest, z]`, must match. A coefficient layout the SDK and vectors agree
+// on is still wrong if the circuit orders its slots differently.
 //
-// Skipped when a shape's artifacts are absent: the wasm and zkey come from the
-// companion package, and an SDK-only checkout has neither.
+// Skipped when a shape's artifacts are absent: the wasm and zkey come from the companion package.
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -21,16 +19,15 @@ import { circuitSignals, type TransactWitnessBundle } from "./input.js";
 interface Vector {
     name: string;
     witness: TransactWitnessBundle;
-    compression?: { y?: string };
+    compression: { y: string; digest: string; z: string };
 }
 
 /**
- * Resolve a companion-package subpath to a filesystem path, or `null` when the
- * package is absent or does not export it.
+ * Resolve a companion-package subpath to a filesystem path, or `null` when the package is absent
+ * or does not export it.
  *
- * `import.meta.resolve` is typed as optional here for the same reason
- * `prover/artifact-paths.ts` casts it: the DOM lib does not declare it, and it is
- * only guaranteed synchronous from Node 20.6.
+ * `import.meta.resolve` is cast as optional: the DOM lib does not declare it, and it is
+ * synchronous only from Node 20.6.
  */
 function resolvePackageFile(spec: string): string | null {
     try {
@@ -52,9 +49,8 @@ function vkeyFor(id: string): unknown | null {
 }
 
 /**
- * The shape's golden vectors. Unlike the artifacts these are required
- * (`vectors.test.ts` fails without them), so an unresolvable spec throws
- * instead of skipping.
+ * The shape's golden vectors. Unlike the artifacts these are required (`vectors.test.ts` fails
+ * without them), so an unresolvable spec throws instead of skipping.
  */
 function vectorsFor(id: string): Vector[] {
     const spec = `@lelantos-org/circuits/vectors/transact-${id}.json`;
@@ -67,8 +63,8 @@ function vectorsFor(id: string): Vector[] {
 async function pathsFor(shape: CircuitShape) {
     try {
         const paths = resolveArtifacts(await bundledProverArtifacts({ runtime: "node", shape }));
-        // `resolveArtifacts` yields `file://` hrefs for the companion package,
-        // which `existsSync` does not accept; convert before probing.
+        // `resolveArtifacts` yields `file://` hrefs for the companion package, which
+        // `existsSync` does not accept.
         const onDisk = (p: string) => existsSync(p.startsWith("file:") ? fileURLToPath(p) : p);
         return onDisk(paths.wasmPath) && onDisk(paths.zkeyPath) ? paths : null;
     } catch {
@@ -84,27 +80,36 @@ for (const shape of TRANSACT_SHAPES) {
         const vkey = vkeyFor(id);
 
         it.skipIf(!paths || !vkey)(
-            "proves a golden witness and emits the vector's compressed y",
+            "proves the golden witnesses and emits each vector's [y, digest, z]",
             async () => {
                 if (!paths || !vkey) return;
-                const vector = vectorsFor(id)[0];
-                if (!vector) throw new Error(`no vectors for ${id}`);
+                const vectors = vectorsFor(id);
+                if (vectors.length === 0) throw new Error(`no vectors for ${id}`);
 
-                // The vector's witness also carries the challenge-only fields
-                // (addresses, clues, aux digest), which the circuit does not
-                // declare and the witness calculator rejects. Projected as in the
-                // SDK prove path.
-                const signals = { ...circuitSignals(vector.witness) };
-                const { proof, publicSignals } = await prove(signals, paths);
-                expect(await verify(vkey as object, publicSignals, proof)).toBe(true);
+                for (const vector of vectors) {
+                    // The vector's witness also carries the digest word and the
+                    // challenge-only fields (addresses, clues, aux digest), which the
+                    // witness calculator rejects.
+                    const signals = { ...circuitSignals(vector.witness) };
+                    const { proof, publicSignals } = await prove(signals, paths);
+                    expect(await verify(vkey as object, publicSignals, proof), vector.name).toBe(
+                        true,
+                    );
 
-                // Slot 0 of the public signals is the PolyEval-compressed `y`
-                // that `PubInputs.compress` reproduces on chain.
-                if (vector.compression?.y) {
-                    expect(publicSignals[0]).toBe(vector.compression.y);
+                    // The verifier's `_pubSignals`, in `PubInputs.compress` order. `digest`
+                    // is computed by the circuit, so this checks `transactDigest` against
+                    // `CoeffDigest`.
+                    const { y, digest, z } = vector.compression;
+                    expect(publicSignals, vector.name).toEqual([y, digest, z]);
+                    expect(vector.witness.digest, vector.name).toBe(digest);
+                    expect(vector.witness.z, vector.name).toBe(z);
+
+                    // A proof does not verify against another digest word.
+                    const forged = [y, (BigInt(digest) ^ 1n).toString(), z];
+                    expect(await verify(vkey as object, forged, proof), vector.name).toBe(false);
                 }
             },
-            120_000,
+            300_000,
         );
     });
 }

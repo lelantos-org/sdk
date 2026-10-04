@@ -16,24 +16,19 @@ import type { RelayerRejectReason } from "../../errors/spend.js";
 const PREFIXES: ReadonlyArray<
     readonly [status: number, prefix: string, reason: RelayerRejectReason]
 > = [
-    // 409
     [409, "nullifier already spent: ", "nullifier-spent"],
     [409, "nullifier in flight: ", "nullifier-in-flight"],
     [409, "idempotency key reused: ", "idempotency-key-reused"],
     [409, "stale estimate: ", "stale-estimate"],
-    // 402
     [402, "no shielded fee output addressed to ", "fee-missing"],
     [402, "shielded fee in asset ", "fee-too-low"],
-    // 400
     [400, "rejected by contract: ", "contract-rejected"],
     [400, "bad request: ", "bad-request"],
-    // 404
     [404, "unknown chain: ", "unknown-chain"],
-    // 502; "submit outcome unknown…" is not a refusal, see `isSubmitOutcomeUnknown`.
+    // 502 also carries "submit outcome unknown…", which is not a refusal; see
+    // `isSubmitOutcomeUnknown`.
     [502, "submit reverted", "reverted"],
-    // 503
     [503, "relayer unavailable for this chain", "unavailable"],
-    // 500
     [500, "internal error", "internal"],
 ];
 
@@ -72,7 +67,7 @@ export function isSubmitOutcomeUnknown(
     status: number | undefined,
     body: string | undefined,
 ): boolean {
-    // Substring, not prefix: matched this way since before reasons were parsed,
-    // and a proxy that wraps the text must still read as "may have landed".
+    // Substring, not prefix: a proxy that wraps the text must still read as
+    // "may have landed".
     return status === 502 && (body ?? "").includes("outcome unknown");
 }

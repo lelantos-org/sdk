@@ -1,16 +1,15 @@
 // ZIP-32-lite hierarchical key derivation for Baby-Jubjub.
 //
 // Path: m / 32' / LELANTOS_COIN_TYPE' / account' (hardened-only).
-// PRF: blake2b keyed with the parent chain code. Domain byte 0x11 is reserved for hardened
-// sk-derivation; 0x12 is reserved for future non-hardened ivk-derivation.
+// PRF: blake2b keyed with the parent chain code, or with `MASTER_PERSONAL` at the root, whose
+// version ("v1") separates trees of different versions. Domain byte 0x11 marks hardened
+// sk-derivation; 0x12 is reserved for non-hardened ivk-derivation.
 //
 // `nsk` is drawn from 40 bytes, leaving 66 spare bits over BN254 Fr (see `reduceWideToField`).
 // Drawing 32 bytes, 2 bits wider than Fr, would skew the low residues by about 6:5.
 //
 // The 40-byte `nsk` and 32-byte chain code need 72 bytes and blake2b caps output at 64, so each
-// PRF block is two keyed calls under the same key, separated by a leading domain byte. The
-// personalisation string carries the version ("v1"), so trees from different versions cannot be
-// confused.
+// PRF block is two keyed calls under the same key, separated by a leading domain byte.
 
 import { blake2b } from "@noble/hashes/blake2";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -26,12 +25,7 @@ const MAX_INDEX = HARDENED_BIT;
 
 const MASTER_PERSONAL = new TextEncoder().encode("Lelantos_ZIP32_v1_Master");
 
-/**
- * PRF draw widths.
- *
- * `NSK_BYTES` is 40 so the reduction into BN254 Fr keeps 66 spare bits. `reduceWideToField`
- * throws if it is narrowed enough to introduce bias.
- */
+/** PRF draw widths. `reduceWideToField` throws if `NSK_BYTES` is narrowed enough to add bias. */
 const NSK_BYTES = 40;
 const CHAIN_CODE_BYTES = 32;
 
@@ -62,11 +56,7 @@ export interface ExtendedSpendingKey {
     childIndex: number;
 }
 
-/**
- * One PRF block: `nsk` and the next chain code, keyed by `key` over `data`.
- *
- * Two calls because blake2b output is capped at 64 bytes and the two halves need 72.
- */
+/** One PRF block: `nsk` and the next chain code, keyed by `key` over `data`. */
 function prf(key: Uint8Array, data: Uint8Array): { nsk: Field; chainCode: Uint8Array } {
     const tagged = (tag: number, dkLen: number): Uint8Array => {
         const buf = new Uint8Array(1 + data.length);

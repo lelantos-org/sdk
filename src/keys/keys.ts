@@ -2,29 +2,26 @@
 //
 //   nsk  (root, never leaves owner)
 //    ├─ ivk  = Poseidon(TAG_IVK, nsk)
-//    │    ├─ pk    = Poseidon(TAG_PK, ivk)        — scalar, binds note commitment
+//    │    ├─ d0    = defaultDiversifier(ivk)      — diversifier of the account's address
+//    │    ├─ pk    = Poseidon(TAG_PK, ivk, d0)    — scalar, binds note commitment
 //    │    ├─ pk_d  = (ivk mod q) · Base8          — Baby-Jubjub key, used for ECDH
 //    │    └─ dk    = Poseidon(TAG_DK, ivk)        — FMD root detection secret
 //    │         └─ ck = (dk mod q) · Base8         — FMD clue key, public
 //    └─ nk   = Poseidon(TAG_NK, nsk)              — nullifier-deriving key (FVK)
 //
-// `dk` carries the detection capability and is released only to a delegate the
-// owner chooses. The address publishes `ck`; senders expand it into flag-key
-// points via `fmdExpandFlagKey`, which is one-way. The separate `TAG_DK` step
-// keeps `ck` distinct from `pk_d`, so the clue stream is unlinked from the
-// ECDH key.
+// `dk` carries the detection capability and is released only to a delegate the owner chooses. The
+// address publishes `ck`, which senders expand into flag-key points (`fmdExpandFlagKey`). The
+// `TAG_DK` step keeps `ck` distinct from `pk_d`, so the clue stream is unlinked from the ECDH key.
 //
-// Two viewing-key flavors:
-//   IncomingViewingKey {ivk, pk_d, dk, ck} — detect + decrypt incoming notes.
-//   FullViewingKey     {ivk, pk_d, dk, ck, nk} — adds spent-note visibility:
-//     holder can recompute nf = Poseidon(TAG_NF, nk, rho, cm) for any decrypted
-//     note's rho and match against the on-chain nullifier set, learning
-//     which notes the owner has spent. Cannot derive nsk from nk (Poseidon
-//     one-way) so spend authority is NOT granted.
+// Viewing keys:
+//   ViewingKey     {ivk, pk_d, dk, ck}     — detects and decrypts incoming notes.
+//   FullViewingKey {ivk, pk_d, dk, ck, nk} — also recomputes nf = Poseidon(TAG_NF, nk, rho, cm)
+//     for a decrypted note and matches it against the on-chain nullifier set, learning which
+//     notes are spent. `nk` does not yield `nsk`, so it grants no spend authority.
 
 import type { ShieldedAddress } from "../core/brand.js";
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
-import { deriveDk, deriveIvk, deriveNk, derivePkFromIvk } from "../crypto/derive.js";
+import { deriveDk, deriveIvk, deriveNk } from "../crypto/derive.js";
 import type { Point } from "../crypto/jubjub.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { type Field, Poseidon } from "../crypto/poseidon.js";
@@ -36,13 +33,14 @@ import {
     fmdExpandDetectionKey,
 } from "../fmd/keys.js";
 import { encodeAddress } from "./address.js";
+import { deriveDefaultPk } from "./diversified.js";
 import { mnemonicToAccountKey } from "./hd.js";
 
 /**
  * Incoming viewing key: detects and decrypts this account's incoming notes.
  *
- * Grants neither spend authority nor spend visibility. The latter requires
- * `nk`, which derives from `nsk` rather than `ivk`. See {@link FullViewingKey}.
+ * Grants neither spend authority nor spend visibility; the latter requires the `nk` of a
+ * {@link FullViewingKey}, which derives from `nsk`, not `ivk`.
  */
 export interface ViewingKey {
     ivk: Field;
@@ -55,8 +53,8 @@ export interface ViewingKey {
 }
 
 /**
- * Adds `nk`, with which the holder recomputes nullifiers and so determines
- * which of the account's notes are spent on chain. Grants no spend authority.
+ * Adds `nk`, with which the holder recomputes nullifiers and so determines which of the account's
+ * notes are spent on chain. Grants no spend authority.
  */
 export interface FullViewingKey extends ViewingKey {
     nk: Field;
@@ -66,27 +64,28 @@ export interface FullViewingKey extends ViewingKey {
 export interface SpendingKey extends FullViewingKey {
     /** Root secret. Never leaves the owner. */
     nsk: Field;
-    /** Scalar binding the note commitment, `Poseidon(TAG_PK, ivk)`. */
+    /**
+     * Scalar binding the note commitment: `Poseidon(TAG_PK, ivk, d0)`, with `d0` the account's
+     * default diversifier, itself a function of `ivk`.
+     */
     pk: Field;
 }
 
 export function buildSpendingKey(P: Poseidon, J: Jubjub, nsk: Field): SpendingKey {
     const ivk = deriveIvk(P, nsk);
-    // `pk_d`, `dk` and `ck` come from `buildViewingKey`: one derivation for
-    // both key kinds, so an account cannot end up with two addresses.
+    // `pk_d`, `dk` and `ck` come from `buildViewingKey`, so a spending key and its viewing key
+    // always resolve to one address.
     return {
         ...buildViewingKey(P, J, ivk),
         nsk,
         nk: deriveNk(P, nsk),
-        pk: derivePkFromIvk(P, ivk),
+        pk: deriveDefaultPk(P, ivk),
     };
 }
 
 /**
- * Build an incoming viewing key from `ivk`.
- *
- * `pk_d`, `dk` and `ck` are functions of `ivk` and are derived here, so a
- * serialized viewing key need carry only the scalar.
+ * Build an incoming viewing key from `ivk`. `pk_d`, `dk` and `ck` are derived from it, so a
+ * serialized viewing key carries only the scalar.
  */
 export function buildViewingKey(P: Poseidon, J: Jubjub, ivk: Field): ViewingKey {
     const dk = deriveDk(P, ivk);
@@ -104,21 +103,18 @@ export function buildFullViewingKey(P: Poseidon, J: Jubjub, ivk: Field, nk: Fiel
 }
 
 /**
- * The address a viewing key watches.
- *
- * An address is `pk_d || pk || ck`, each derivable from `ivk`, so a holder can
- * name the account it views and a caller can check a key against a stated
- * address.
+ * The address a viewing key watches: `pk_d || pk || ck`, each a function of `ivk`. Lets a caller
+ * check a key against a stated address.
  */
 export function addressFromViewingKey(P: Poseidon, J: Jubjub, vk: ViewingKey): ShieldedAddress {
-    return encodeAddress(J, vk.pk_d, derivePkFromIvk(P, vk.ivk), vk.ck);
+    return encodeAddress(J, vk.pk_d, deriveDefaultPk(P, vk.ivk), vk.ck);
 }
 
 /**
  * Narrow a spending key to the incoming-viewing capability.
  *
- * Copies the fields: a `SpendingKey` is assignable to `ViewingKey`, so a cast
- * compiles but leaves `nsk` on the object at runtime.
+ * Copies the fields: a `SpendingKey` is assignable to `ViewingKey`, so a cast compiles but leaves
+ * `nsk` on the object at runtime.
  */
 export function viewingKeyFromSpending(sk: SpendingKey): ViewingKey {
     return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, ck: sk.ck };
@@ -135,14 +131,14 @@ export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddr
 }
 
 /**
- * The γ FMD detection scalars for a viewing key, as `POST /v1/subscriptions`
- * expects them via `detectionKeyToHex`.
+ * The γ FMD detection scalars for a viewing key, as `POST /v1/subscriptions` expects them via
+ * `detectionKeyToHex`.
  *
- * Releasing these releases the root detection secret permanently: `h_i` is
- * public, so any single `x_i` yields `dk = x_i - h_i`.
+ * Releasing these releases the root detection secret permanently: `h_i` is public, so any single
+ * `x_i` yields `dk = x_i - h_i`.
  *
- * `gamma` is capped at `FMD_DEFAULT_GAMMA`, not `GAMMA_MAX`: a longer key tests
- * clue bits senders never set and discards the wallet's own notes.
+ * `gamma` is capped at `FMD_DEFAULT_GAMMA`, not `GAMMA_MAX`: a longer key tests clue bits senders
+ * never set and discards the wallet's own notes.
  */
 export function detectionKeyFor(
     J: Jubjub,
@@ -161,8 +157,8 @@ export interface DerivedWalletKeys {
 }
 
 /**
- * Derive `SpendingKey` + bech32m address from root scalar `nsk`. Pass
- * pre-built `P` / `J` (e.g. from `preloadWasm`) or omit to build defaults.
+ * Derive `SpendingKey` + bech32m address from root scalar `nsk`. Pass pre-built `P` / `J` (e.g.
+ * from `preloadWasm`) or omit to build defaults.
  */
 export async function deriveKeysFromNsk(
     nsk: Field,
@@ -186,10 +182,7 @@ export interface DeriveFromMnemonicOpts {
     J?: Jubjub | undefined;
 }
 
-/**
- * Mnemonic → `{ keys, address, nsk }`. Wraps `mnemonicToAccountKey` +
- * `deriveKeysFromNsk`.
- */
+/** Mnemonic → `{ keys, address, nsk }`. Wraps `mnemonicToAccountKey` + `deriveKeysFromNsk`. */
 export async function deriveKeysFromMnemonic(
     opts: DeriveFromMnemonicOpts,
 ): Promise<DerivedWalletKeys & { nsk: Field }> {

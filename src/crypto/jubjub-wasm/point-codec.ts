@@ -1,7 +1,5 @@
-// Point <-> byte marshalling across the wasm boundary.
-//
-// Wire convention: a point is two little-endian 32-byte field elements,
-// x then y. Mirrors `sdk/wasm/jubjub/src/lib.rs`.
+// Point <-> byte marshalling across the wasm boundary. A point is two little-endian 32-byte field
+// elements, x then y. Mirrors `sdk/wasm/jubjub/src/lib.rs`.
 
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../../core/bytes.js";
 import type { Point } from "../jubjub.js";

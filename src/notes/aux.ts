@@ -2,6 +2,7 @@
 // and ChaCha20-Poly1305 ciphertext (prefixed with 2B big-endian clueBits).
 // Both real and pad slots go through `buildOutputAux`.
 
+import { BABYJUB_INV8 } from "../core/field.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
 import { assertInvariant } from "../errors/base.js";
@@ -19,6 +20,11 @@ import { encryptNote } from "./encrypt.js";
 /** @internal */
 export interface OutputAux {
     clueR: Point;
+    /**
+     * Subgroup witness for `clueR`: `[8]·clueQ = clueR`. The pool doubles it
+     * three times and rejects the payload unless it lands on `clueR`.
+     */
+    clueQ: Point;
     ephPub: Point;
     /** Wire bytes: 2B clueBits prefix || ChaCha20-Poly1305(body). */
     ciphertext: Uint8Array;
@@ -28,8 +34,8 @@ export interface OutputAux {
 export interface OutputAuxWithWitness {
     aux: OutputAux;
     /**
-     * Plain public inputs for the clue: client-computed off-circuit,
-     * PolyEval-bound to the proof. Relayer cannot alter without invalidating.
+     * Public inputs for the clue, computed off-circuit and PolyEval-bound to the proof: a
+     * relayer cannot alter them without invalidating it.
      */
     witness: {
         clueBits: Field;
@@ -47,6 +53,15 @@ export interface OutputAuxWithWitness {
  */
 export const ON_CURVE_IDENTITY: Point = [0n, 1n];
 
+/**
+ * The witness `Q = [8^-1]R` for a clue point in the prime-order subgroup.
+ *
+ * @internal
+ */
+export function clueSubgroupWitness(J: Jubjub, clueR: Point): Point {
+    return J.mulPointEscalar(clueR, BABYJUB_INV8);
+}
+
 /** @internal */
 export interface BuildAuxArgs {
     J: Jubjub;
@@ -54,9 +69,9 @@ export interface BuildAuxArgs {
     recipientFlagKey: FmdFlagKey;
     recipientPkD: Point;
     note: NotePayload;
-    /** ECDH ephemeral secret, fresh per output. MUST be uniform in Z_q*. */
+    /** ECDH ephemeral secret, fresh per output. Must be uniform in Z_q*. */
     esk: Field;
-    /** FMD blinding scalar, fresh per output. MUST be uniform in Z_q*. */
+    /** FMD blinding scalar, fresh per output. Must be uniform in Z_q*. */
     fmdR: Field;
 }
 
@@ -81,12 +96,11 @@ export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
     const prefix = clueBitsToPrefix(clue.bits, clue.gamma);
     const ciphertext = withClueBitsPrefix(prefix, enc.ciphertext);
 
-    // Same packing the wire prefix above is derived from. The contract
-    // recomputes this slot from that prefix, so a mismatch fails verification.
+    // Must use the packing of the wire prefix above; see `packClueBits`.
     const clueBitsField = packClueBits(clue.bits, clue.gamma);
 
     return {
-        aux: { clueR: clueRPoint, ephPub, ciphertext },
+        aux: { clueR: clueRPoint, clueQ: clueSubgroupWitness(J, clueRPoint), ephPub, ciphertext },
         witness: {
             clueBits: clueBitsField,
             clueRx: clueRPoint[0],

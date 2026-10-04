@@ -5,10 +5,9 @@
 // addresses are derived from `nsk`: unlinkable to the operator's account and
 // recoverable from the same seed on any machine.
 //
-// Derivation mirrors `hexPrivateKeyToNsk` in `../keys/key-source.ts` (a
-// domain-tagged keccak), so it works from any `KeySource` (mnemonic, EIP-712
-// signature, raw nsk). These keys are exactly as sensitive as the shielded
-// wallet: whoever holds nsk holds them.
+// The derivation is a domain-tagged keccak over `nsk`, so it works from any
+// `KeySource`. These keys are as sensitive as the shielded wallet: whoever
+// holds `nsk` holds them.
 
 import { toLeBytes } from "../core/bytes.js";
 import { type Field, SECP256K1_N } from "../core/field.js";
@@ -17,9 +16,9 @@ import { keccak256 } from "../crypto/keccak.js";
 import { InvalidArgumentError } from "../errors/config.js";
 
 /**
- * ASCII bytes of `"lelantos.x402.eph\0"`. Changing this invalidates every
- * address derived from this path, making any ERC-20 held there unreachable
- * through the SDK. Do not change without a migration.
+ * ASCII bytes of `"lelantos.x402.eph\0"`. Changing this changes every derived
+ * address, making any ERC-20 held at the current ones unreachable through the
+ * SDK; do not change without a migration.
  */
 const EPH_DOMAIN_TAG_HEX = "6c656c616e746f732e783430322e65706800";
 
@@ -31,10 +30,10 @@ const MAX_INDEX = 0x80000000;
  *
  * A single shared slot would give every server the same publicly funded payer
  * address, letting servers link payments to one wallet by comparing `from`.
- * Per-host slots are mutually unlinkable (see `deriveEphemeralKey`).
+ * Per-host slots are mutually unlinkable.
  *
- * Deterministic, so a top-up for one host survives a restart. Collisions
- * between hosts are ~2^-31 and merge only the two payers involved.
+ * Deterministic, so a top-up for one host survives a restart. A collision
+ * between two hosts has probability 2^-31 and merges only those two payers.
  */
 export function hostPayerIndex(host: string): number {
     const digest = hexToBytes(keccak256(new TextEncoder().encode(host.toLowerCase())));
@@ -46,9 +45,7 @@ export function hostPayerIndex(host: string): number {
 
 /**
  * `keccak256(domainTag ‖ nsk_le ‖ u32le(index))` reduced into `[1, n-1]`.
- *
- * Deterministic: the same wallet and index always yield the same key, so a
- * top-up sent to `index` is still spendable after a restart.
+ * Deterministic in the wallet and index.
  *
  * @param nsk Nullifier spending key — `walletInternals(wallet).keys.nsk`.
  * @param index Payer slot. Distinct indices are unlinkable to each other.

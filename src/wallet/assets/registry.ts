@@ -1,13 +1,11 @@
 // The wallet's view of which assets exist and how a caller may name them.
 //
 // Built from the relayer's `/chains` response (`ChainInfo.tokens`), which lists
-// every registered asset with its address, scale, symbol and decimals.
+// every registered asset with its address, scale, symbol and decimals. An id
+// the list does not carry is read from the chain registry (`chain.fetchAsset`),
+// so a wallet with no relayer or token list still resolves ids.
 //
-// The registry is a cache, not a source of truth. An unknown id is resolved
-// from the chain registry (`chain.fetchAsset`), so a wallet configured against a
-// bare RPC, with no relayer or token list, can still resolve ids.
-//
-// Trust split. The relayer's list is used for NAME RESOLUTION and DISPLAY only:
+// The relayer's list is trusted for name resolution and display only:
 // turning a symbol or token address into an id, and supplying `symbol` /
 // `decimals` when the token does not report them. `resolve` and `list` return
 // its entries as-is, so their value-bearing fields are advisory. Anything that
@@ -43,11 +41,7 @@ export function isUnknownAsset(err: unknown): boolean {
 /** Where a registry's token list comes from. */
 export interface AssetRegistrySource {
     chain: ChainReader;
-    /**
-     * Whether assets resolve with a withdrawal ladder. Defaults to `true`;
-     * `false` opts out entirely. Applied here so nothing downstream of
-     * `AssetInfo` has to know the policy.
-     */
+    /** Whether assets resolve with a withdrawal ladder. Default `true`; `false` opts out. */
     denominations?: DenominationPolicy | undefined;
     /**
      * Replaces the protocol fee rates the pool reports, for every asset. See
@@ -55,9 +49,9 @@ export interface AssetRegistrySource {
      */
     feeBps?: FeeOverride | undefined;
     /**
-     * The relayer's registered-asset list, if one is reachable. Called at most
-     * once and cached. A failure is not fatal: symbols and token addresses
-     * become unresolvable, while ids still resolve.
+     * The relayer's registered-asset list, if one is reachable. Cached once it
+     * loads; a failed call is retried on the next lookup. Until it loads,
+     * symbols and token addresses are unresolvable, while ids still resolve.
      */
     tokens?: (() => Promise<readonly ChainToken[]>) | undefined;
 }
@@ -79,14 +73,10 @@ function feesFromChainToken(t: ChainToken, feeBps: FeeOverride | undefined): Fee
 }
 
 /**
- * `ChainToken` (wire) → everything but the fee rates.
- *
- * Separated from the rates because the relayer may omit them, while the symbol
- * and decimals it carries cannot be re-derived from the pool; a missing rate is
- * filled in around this value instead of rebuilding the entry.
+ * `ChainToken` (wire) → everything but the fee rates, which the relayer may
+ * omit and `fetchTokens` then reads from the pool.
  */
 function fromChainToken(t: ChainToken, denominations: DenominationPolicy): UnpricedAsset {
-    // Parsed once so `scale` and the ladder derived from it use the same value.
     const scale = BigInt(t.scale);
     const info: UnpricedAsset = {
         id: assetId(BigInt(t.assetId)),
@@ -96,8 +86,8 @@ function fromChainToken(t: ChainToken, denominations: DenominationPolicy): Unpri
         // resolves and the chain rejects it at `deposit`.
         disabled: false,
         // No `yieldState` means a plain asset, or a yielding one the relayer has
-        // not priced yet. `RAY` is the identity for every conversion; for the
-        // latter, human amounts read low until the relayer provides the field.
+        // not priced. `RAY` is the identity for every conversion; for the latter,
+        // human amounts read low until the relayer provides the field.
         index: t.yieldState === undefined ? RAY : BigInt(t.yieldState.index),
         yieldEnabled: t.yieldState !== undefined,
         ladder: resolveLadder({ scale, decimals: t.decimals }, denominations),
@@ -116,12 +106,11 @@ function fromChainToken(t: ChainToken, denominations: DenominationPolicy): Unpri
 }
 
 /**
- * How long a chain-verified entry from {@link AssetRegistry.resolveVerified} is reused.
+ * How long a chain-verified entry from {@link AssetRegistry.resolveVerified} is reused, in ms.
  *
- * Short because the yield `index` and `rate` move with every block and `disabled` can flip; long
- * enough that one operation resolving the same asset several times (a deposit and its fee asset,
- * a spend and its `feeAsset`, a UI re-rendering) reads the pool once. Concurrent resolutions of
- * one id share a single read.
+ * Bounded because the yield `index` and `rate` move with every block and `disabled` can flip; one
+ * operation resolving the same asset several times reads the pool once. Concurrent resolutions
+ * of one id share a single read.
  */
 export const VERIFIED_ASSET_TTL_MS = 5_000;
 
@@ -133,7 +122,7 @@ export class AssetRegistry {
     private readonly byId = new Map<bigint, AssetInfo>();
     /** The relayer's own claims per id, never overwritten by a chain read. */
     private readonly listedById = new Map<bigint, ListedAsset>();
-    /** Chain-verified entries, see `VERIFIED_ASSET_TTL_MS` (5 s). */
+    /** Chain-verified entries, reused for `VERIFIED_ASSET_TTL_MS`. */
     private readonly verified = new Map<bigint, { at: number; info: Promise<AssetInfo> }>();
     /** Resolves once; a failed load is retried on the next call. */
     private listed: Promise<void> | undefined;
@@ -145,10 +134,9 @@ export class AssetRegistry {
     /**
      * Everything the registry knows, lowest id first.
      *
-     * For display. Entries come from the relayer's list and are not checked
-     * against the chain: `token`, `scale`, fee rates, yield state and `ladder`
-     * are advisory. Pass an entry's `id` to {@link resolveVerified} before
-     * using any of them to move value.
+     * Display only. Entries from the relayer's list are not checked against the
+     * chain; pass an entry's `id` to {@link resolveVerified} before using its
+     * `token`, `scale`, fee rates, yield state or `ladder` to move value.
      */
     async list(): Promise<AssetInfo[]> {
         await this.load();
@@ -158,9 +146,9 @@ export class AssetRegistry {
     /**
      * The asset `ref` names, as the token list describes it.
      *
-     * An id not in the token list is read from the chain, so a wallet with no
-     * relayer still resolves ids. Symbols and addresses cannot be enumerated
-     * from the chain, so an unmatched one fails with the known assets listed.
+     * An id not in the token list is read from the chain and cached. Symbols
+     * and addresses cannot be enumerated from the chain, so an unmatched one
+     * fails with the known assets listed.
      *
      * Name resolution and display only: a listed entry is the relayer's claim,
      * so every field but `id`, `symbol` and `decimals` is advisory. Operations
@@ -195,13 +183,13 @@ export class AssetRegistry {
      * the token itself when it reports them, else from the list; `ladder` is
      * derived from the chain `scale` and those `decimals`.
      *
-     * Reused for `VERIFIED_ASSET_TTL_MS` (5 s).
+     * Reused for `VERIFIED_ASSET_TTL_MS`.
      *
      * @throws {WireFormatError} when the relayer's list contradicts the chain
      * for this id (token address, `scale` or `decimals`), or names by address or
      * symbol an id whose on-chain token is a different one. Neither source is
      * preferred: a relayer that misstates the asset could have a caller sign a
-     * pull of the wrong token or amount, so nothing is signed.
+     * pull of the wrong token or amount.
      */
     async resolveVerified(ref: AssetRef): Promise<AssetInfo> {
         const { id } = await this.resolve(ref);
@@ -223,7 +211,6 @@ export class AssetRegistry {
 
     /**
      * Re-read `ref` from the chain registry, replacing the cached entry.
-     *
      * Verified as {@link resolveVerified} is, bypassing its cache.
      */
     async refresh(ref: AssetRef): Promise<AssetInfo> {
@@ -294,8 +281,8 @@ export class AssetRegistry {
 
     private load(): Promise<void> {
         this.listed ??= this.fetchTokens().catch((e) => {
-            // Retried on the next call so a transient relayer outage does not
-            // leave the registry permanently empty.
+            // Cleared so the next call retries: a transient relayer outage must
+            // not leave the registry permanently empty.
             this.listed = undefined;
             throw e;
         });
@@ -308,15 +295,14 @@ export class AssetRegistry {
         const listed = await this.src.tokens();
         const denominations = this.src.denominations ?? true;
 
-        // Two passes: decode the wire entries, then read missing fee rates from
-        // the pool concurrently, only for the assets that need them, to avoid one
-        // serial RPC per asset at startup.
-        //
-        // Pool rates are merged into the wire entry instead of replacing it:
-        // `symbol` and `decimals` come only from the relayer, and dropping them
-        // would make the asset unresolvable by name.
+        // Two passes: decode the wire entries, then read the missing fee rates
+        // from the pool concurrently. Pool rates are merged into the wire entry:
+        // its `symbol` and `decimals` are not in the pool's entry, and without
+        // them the asset is unresolvable by name.
         const pending: Array<{ base: UnpricedAsset; fees: Promise<FeeRates | undefined> }> = [];
         for (const t of listed) {
+            // Id 0 means "no asset": the pool registers nothing under it.
+            if (t.assetId === 0) continue;
             const base = fromChainToken(t, denominations);
             this.listedById.set(base.id, {
                 id: base.id,

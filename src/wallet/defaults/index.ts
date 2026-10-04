@@ -1,7 +1,5 @@
-// Defaulting rules for every omitted pluggable.
-//
-// `resolveConfig` is their single source, so the wallet reads the resolved
-// config directly without re-checking it.
+// Defaulting rules for every omitted pluggable. `resolveConfig` is their single source, so the
+// wallet reads the resolved config without re-checking it.
 
 import type { Jubjub, Poseidon } from "../../crypto/index.js";
 import { DEFAULT_SHAPE } from "../../protocol/shape.js";

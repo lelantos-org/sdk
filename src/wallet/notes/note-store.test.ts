@@ -9,7 +9,6 @@ function hit(cm: bigint, blockNumber: number): ScanHit {
         value: 100n,
         rho: 2n,
         rcm: 3n,
-        rcvDep: 4n,
         cm,
         leafIndex: Number(cm),
         blockNumber,
@@ -48,7 +47,7 @@ describe("NoteCache.open", () => {
     it("rejects a file on another schema version", async () => {
         const { NoteCache } = await import("./note-cache.js");
         const saved: NotesFile[] = [];
-        const stale = { version: 2, notes: [storedNote("aabbccdd")] };
+        const stale = { version: NOTES_FILE_VERSION - 1, notes: [storedNote("aabbccdd")] };
 
         await expect(NoteCache.open(storeOf(stale, saved))).rejects.toMatchObject({
             code: "WALLET_CONFIG",

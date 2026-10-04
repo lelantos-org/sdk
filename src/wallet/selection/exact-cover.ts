@@ -14,20 +14,17 @@ import type { DirectSelection, SelectOpts } from "./types.js";
 const log = getLogger("lelantos:wallet:selection");
 
 /**
- * Exact covers collected before the search stops.
- *
- * Caps found covers so a wallet with many identical notes does not enumerate
- * every equivalent subset.
+ * Exact covers collected before the search stops, so a wallet with many
+ * identical notes does not enumerate every equivalent subset.
  */
 const MAX_EXACT_COVERS = 64;
 
 /**
- * Nodes the exact-cover search may visit before abandoning the attempt.
+ * Nodes the search may visit per cover size before giving up.
  *
- * Separate from {@link MAX_EXACT_COVERS} because the expensive case finds
- * nothing: an unreachable target never increments the found counter, and
- * `C(n, 4)` over a few hundred notes is too slow for a spend path. Exhausting
- * the budget is not an error; the caller falls back to SFRT.
+ * {@link MAX_EXACT_COVERS} does not bound the expensive case: an unreachable
+ * target collects no covers and would walk every `C(n, size)`. Exhausting the
+ * budget is not an error; the caller falls back to SFRT.
  */
 const MAX_EXACT_NODES = 20_000;
 
@@ -60,7 +57,6 @@ function exactSubsets(values: readonly bigint[], target: bigint, size: number): 
             if (covers.length >= MAX_EXACT_COVERS || budget <= 0) return;
             budget--;
             const value = values[i] as bigint;
-            // Ascending, so once one value overshoots so does every later one.
             if (value > left) return;
             chosen.push(i);
             walk(i + 1, depth - 1, left - value);
@@ -73,14 +69,12 @@ function exactSubsets(values: readonly bigint[], target: bigint, size: number): 
 }
 
 /**
- * A cover summing to exactly `target`, or `undefined` when none was found.
+ * A cover summing to exactly `target` (zero change), or `undefined` when none
+ * was found.
  *
- * Exact means zero change. Change can land off the withdrawal ladder and need
- * re-splitting before withdrawal, so a spend with none avoids that.
- *
- * Smallest cover size first, then a uniform pick among covers of that size.
- * Always taking the same exact cover would make selection deterministic given
- * a public note set, which SFRT's tiebreak is designed to prevent.
+ * Smallest cover size first, then a uniform pick among covers of that size:
+ * always taking the same cover would make selection deterministic, which
+ * SFRT's tiebreak exists to prevent.
  */
 export function exactCover(
     all: readonly StoredNote[],
@@ -107,8 +101,7 @@ export function exactCover(
             };
         }
         if (exhausted) {
-            // Wider sizes search a strictly larger space and would exhaust too,
-            // so fall back to SFRT immediately.
+            // Wider sizes search a strictly larger space and would exhaust too.
             log.debug("exact-cover search hit its node budget; falling back", {
                 asset: asset.toString(),
                 target: target.toString(),

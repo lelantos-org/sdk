@@ -1,20 +1,17 @@
-// The SDK has two EIP-712 paths, and they must agree.
+// The SDK's two EIP-712 paths must agree.
 //
 // `PrivateKeySigner` hands the structured `{domain, types, primaryType,
-// message}` to viem, which hashes it. `Eip1193Signer` cannot: a raw provider
-// wants JSON for `eth_signTypedData_v4`, with an explicit `EIP712Domain` entry
-// and every integer as a hex string. The helpers in `typed-data.ts` do that
-// conversion by hand, outside viem's coverage.
+// message}` to viem, which hashes it. `Eip1193Signer` sends JSON for
+// `eth_signTypedData_v4`, with an explicit `EIP712Domain` entry and every
+// integer as a hex string, built by the helpers in `typed-data.ts`.
 //
-// A divergence is silent. The same wallet would derive a different `nsk`
+// A divergence is silent: the same wallet would derive a different `nsk`
 // depending on which signer built the payload, and a Permit2 witness signed
-// through a browser wallet would recover to the wrong address on chain, so the
-// deposit reverts after a proof has been generated.
+// through a browser wallet would recover to the wrong address on chain,
+// reverting the deposit.
 //
 // These tests hash both ways and require the same digest. The wire payload is
-// round-tripped through `JSON.parse(JSON.stringify(...))` first, as that is
-// what reaches the provider, and read back the way a wallet reads it: hex
-// strings widen to integers for integer-typed fields.
+// first round-tripped through JSON, as that is what reaches the provider.
 
 import { hashTypedData, type TypedDataDomain, type TypedDataParameter } from "viem";
 import { describe, expect, it } from "vitest";
@@ -78,13 +75,11 @@ function parseAsWallet(value: any, typeName: string, types: Types): unknown {
 }
 
 /**
- * Hash the wire payload the way a wallet would, so it can be compared to
- * viem's.
+ * Hash the wire payload the way a wallet would.
  *
- * The domain separator is built from the *declared* `EIP712Domain` entries,
- * not from the keys the domain object carries. Providers do the same, so a
- * declaration out of step with the values produces a hash mismatch rather than
- * a silent no-op.
+ * As providers do, the domain separator is built from the declared
+ * `EIP712Domain` entries, not from the keys the domain object carries, so a
+ * declaration out of step with the values produces a hash mismatch.
  */
 function hashWire(payload: any, primaryType: string): string {
     const { EIP712Domain: declared, ...types } = payload.types;

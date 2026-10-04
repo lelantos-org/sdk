@@ -1,7 +1,7 @@
 // Operation results and note views.
 //
-// Results are plain frozen data. Every value-bearing figure is a `Money`, so a receipt names its
-// asset and both integer spaces instead of leaving the caller to convert with the right index.
+// Results are plain frozen data. Every value-bearing figure is a `Money`, which names its asset and
+// carries both integer spaces.
 
 import type { OperationLocation } from "../../chain/operation.js";
 import type { CancelDepositInputs } from "../../chain/types.js";
@@ -18,15 +18,12 @@ import type { AssetInfo } from "../assets/info.js";
 
 export type { DepositStrategy, OperationLocation };
 
-/**
- * Plaintext payload of a recovered note, for custom proofs with the low-level builders.
- */
+/** Plaintext payload of a recovered note, for custom proofs with the low-level builders. */
 export interface WalletNotePayload {
     asset: AssetId;
     value: CircuitAmount;
     rho: bigint;
     rcm: bigint;
-    rcvDep: bigint;
 }
 
 /** Note view returned by `wallet.notes()`. */
@@ -102,7 +99,10 @@ export interface DepositEscrow {
     /** Owned by `NativeAdapter`; `cancelDeposit` routes through it. */
     native: boolean;
     asset: AssetId;
-    /** The new note's commitment: what `awaitDeposit` waits for. Equals `cancelInputs.cm`. */
+    /**
+     * The new note's commitment, which is its tree leaf: what `awaitDeposit` waits for. The pool
+     * publishes only the note's `inner` (`cancelInputs.inner`), so this value is in no event.
+     */
     commitment: Hex32;
     /** The `DepositEscrowed` payload the pool re-derives the escrow digest from. */
     cancelInputs: CancelDepositInputs;

@@ -1,9 +1,8 @@
 // `@lelantos-org/sdk/x402`: x402 agent payments.
 //
-// x402 is the HTTP-402 standard for machine payments (x402 Foundation /
-// Linux Foundation): a server answers 402 with payment requirements, the client
-// attaches a signed payment, and the server serves the resource. This module
-// lets a Lelantos wallet act as the payer.
+// x402 is the HTTP-402 standard for machine payments: a server answers 402 with
+// payment requirements, the client attaches a signed payment, and the server
+// serves the resource. This module lets a Lelantos wallet act as the payer.
 //
 //   import { connect } from "@lelantos-org/sdk";
 //   import { x402 }    from "@lelantos-org/sdk/x402";
@@ -27,9 +26,8 @@
 //   client.register(`eip155:${chainId}`,      unshieldedExact(wallet));
 
 export { type Budget, BudgetLedger, type BudgetReservation } from "../x402/budget.js";
-// The `exact` EVM payload, for a payer that already holds the token and so needs
-// none of the unshielding `unshieldedExact` does: it signs from a plain viem
-// account, not from a wallet.
+// The `exact` EVM payload for a payer that already holds the token: it signs
+// from a plain viem account, with none of the unshielding `unshieldedExact` does.
 export {
     requireEip712Domain,
     signTransferAuthorization,

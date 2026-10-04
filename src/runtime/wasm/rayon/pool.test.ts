@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initThreadPool as initPool, type RayonModule } from "./pool.js";
 
-// `initThreadPool` spawns all N workers before awaiting N readies, so a single
-// worker that fails to boot leaves the promise unsettled until the timeout —
-// and the N-1 that did boot parked in `Atomics.wait`, each holding a stack in
-// the prover's shared wasm memory, which can never shrink.
+// `initThreadPool` degrades to single-threaded rather than throwing. On a
+// failed init it also terminates the workers that did boot; see
+// `terminateRayonWorkers`.
 
 describe("thread pool init", () => {
-    // rayon needs SharedArrayBuffer, which the browser path gates on
-    // COOP+COEP. Without the stub every case would exit as "not-isolated"
-    // before reaching the behaviour under test.
+    // The browser path gates rayon on COOP+COEP. Without the stub every case
+    // would exit as "not-isolated" before reaching the behaviour under test.
     beforeEach(() => vi.stubGlobal("crossOriginIsolated", true));
     afterEach(() => vi.unstubAllGlobals());
 
@@ -27,7 +25,6 @@ describe("thread pool init", () => {
     });
 
     it("degrades to single-threaded rather than throwing when init rejects", async () => {
-        // Failure path: workers that booted must not be left stranded.
         const initThreadPool = vi.fn(async () => {
             throw new Error("PoolBuilder::build failed");
         });

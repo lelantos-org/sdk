@@ -14,17 +14,14 @@ const pubInputs: TransactPubInputs = {
     merkleRoot: 1n,
     nullifier: [2n],
     outCm: [3n],
-    publicAssetId: 1n,
-    publicIn: 0n,
+    publicAssetId: 0n,
     publicOut: 0n,
-    inCv: [[4n, 5n]],
-    outCv: [[6n, 7n]],
+    digest: 4n,
     recipient: "0x0000000000000000000000000000000000000001",
     chainId: 31337n,
     payer: "0x0000000000000000000000000000000000000002",
     relayer: "0x0000000000000000000000000000000000000003",
     intentHash: 0n,
-    outCvDep: [[8n, 9n]],
 };
 
 const payload: SubmitTransactPayload = {

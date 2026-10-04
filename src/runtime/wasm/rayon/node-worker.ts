@@ -2,20 +2,16 @@
 // wasm-bindgen-rayon's `startWorkers` (which does
 // `new Worker(url, { type: "module" })`) works under Node.
 //
-// Each Node worker first runs the static ESM bootstrap in this directory,
-// which then dynamic-imports the real workerHelpers URL.
+// Each Node worker runs the static ESM bootstrap in this directory, which
+// imports the pkg module.
 //
-// LIFECYCLE
+// Lifecycle: rayon workers park in `Atomics.wait` inside wasm and never return,
+// so each holds a live MessagePort that would keep the Node event loop alive.
 //
-// rayon workers park in `Atomics.wait` inside wasm and never return, so each
-// one holds a live MessagePort. Left as-is they keep the Node event loop alive
-// and the process never exits. Two mechanisms prevent that:
-//
-//   * every spawned worker is `unref()`d, so an idle pool does not by itself
-//     keep the loop alive. Safe because a proof runs as a BLOCKING synchronous
-//     wasm call on the main thread — the loop cannot spin down mid-proof — and
-//     between proofs the workers are genuinely idle.
-//   * `shutdownRayonWorkers()` terminates them for callers who want
+//   - Every spawned worker is `unref()`d, so an idle pool does not keep the
+//     loop alive. A proof is a blocking synchronous wasm call on the main
+//     thread, so the loop cannot spin down mid-proof.
+//   - `shutdownRayonWorkers()` terminates them for callers that need
 //     deterministic teardown (long-lived servers, test suites).
 
 import { getLogger } from "../../../log/logger.js";
@@ -38,11 +34,9 @@ interface NodeWorkerLike {
  *
  * `node:worker_threads` defaults `execArgv` to the parent's, and a parent
  * running in eval mode (`node --input-type=module -e ...`) passes
- * `--input-type`, which kills every worker with ERR_INPUT_TYPE_NOT_ALLOWED and
- * drops the pool to single-threaded.
- *
- * Only flags meaningless for a file entry point are dropped; everything else
- * (`--max-old-space-size`, `--enable-source-maps`, ...) is inherited.
+ * `--input-type`, which fails every worker with ERR_INPUT_TYPE_NOT_ALLOWED.
+ * Everything else (`--max-old-space-size`, `--enable-source-maps`, ...) is
+ * inherited.
  */
 const INCOMPATIBLE_EXEC_ARGV = ["--input-type", "--eval", "-e", "--print", "-p"];
 
@@ -56,12 +50,10 @@ function workerExecArgv(): string[] {
 const spawned = new Set<NodeWorkerLike>();
 
 /**
- * Which pkg URL the installed global `Worker` is bound to.
- *
- * Keyed by URL rather than a bare installed flag: a second wasm module — or
- * the same one re-configured via `configureProverWasm` — would otherwise keep
- * spawning workers pointed at the first module's pkg, surfacing as a 10s init
- * timeout and a drop to single-threaded.
+ * The pkg URL the installed global `Worker` is bound to. Tracked by URL so
+ * that a second wasm module, or the same one re-configured via
+ * `configureProverWasm`, does not keep spawning workers pointed at the first
+ * module's pkg.
  */
 let installedFor: string | null = null;
 
@@ -136,10 +128,8 @@ export async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> 
 
         terminate(): void {
             spawned.delete(this.w);
-            // `void` marks the value ignored but attaches no rejection
-            // handler, so a worker that was already gone surfaced as an
-            // unhandled rejection. `shutdownRayonWorkers` catches the same
-            // call; this path should too.
+            // Caught rather than `void`ed: terminating a worker that is
+            // already gone must not surface as an unhandled rejection.
             this.w.terminate()?.catch(() => {});
         }
     }
@@ -153,7 +143,7 @@ export async function installNodeRayonWorker(nodePkgUrl: string): Promise<void> 
 /**
  * Terminate every rayon worker and restore the previous `globalThis.Worker`.
  *
- * Not required for a process to exit — the workers are unref'd — but gives
+ * Not required for a process to exit, since the workers are unref'd; it gives
  * long-lived hosts and test suites a deterministic teardown point.
  */
 export async function shutdownRayonWorkers(): Promise<void> {
@@ -170,15 +160,13 @@ export async function shutdownRayonWorkers(): Promise<void> {
 }
 
 /**
- * Terminate every spawned worker but leave the `globalThis.Worker` shim in
- * place. Returns how many were terminated.
+ * Terminate every spawned worker, leaving the `globalThis.Worker` shim in
+ * place for a later retry. Returns how many were terminated.
  *
- * Split out for the failed-init path: `initThreadPool` spawns all N workers
- * before awaiting N readies, so if one fails to boot the promise never settles
- * and the timeout fires — leaving the N-1 that *did* boot parked in
- * `Atomics.wait`, each holding a stack in the prover's shared wasm memory,
- * which can never shrink. Degrading to single-threaded has to take them with
- * it, but must not uninstall the shim a later retry would need.
+ * Used on a failed init: `initThreadPool` spawns all N workers before awaiting
+ * N readies, so if one fails to boot the promise never settles and the timeout
+ * fires with the others parked in `Atomics.wait`, each holding a stack in the
+ * prover's shared wasm memory, which never shrinks.
  */
 export async function terminateRayonWorkers(): Promise<number> {
     const workers = [...spawned];

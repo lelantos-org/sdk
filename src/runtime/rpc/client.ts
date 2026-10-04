@@ -116,8 +116,6 @@ export function createWorkerRpc<M extends MethodMap>(
         );
     };
 
-    // A structured-clone failure on the response rejects every in-flight call
-    // rather than dropping the message and hanging the caller.
     const onMessageError = (ev: unknown): void => {
         // Marked dead like `onError`: the undeserialisable response's id is
         // unrecoverable, so every in-flight call fails and a transport that can
@@ -152,8 +150,8 @@ export function createWorkerRpc<M extends MethodMap>(
             params: M[K]["params"],
             callOpts: CallOptions = {},
         ): Promise<M[K]["result"]> {
-            // Captured before the await so the thrown error's stack points
-            // at the caller, not at the transport's promise constructor.
+            // Captured synchronously so the thrown error's stack points at
+            // the caller rather than the transport.
             const site = new Error(`worker rpc ${method}`);
 
             if (!alive) {
@@ -167,9 +165,8 @@ export function createWorkerRpc<M extends MethodMap>(
             }
 
             // `addEventListener("abort", …)` never fires on an already-aborted
-            // signal. Without this check the request would stay pending until
-            // its method timeout, or indefinitely, since `timeouts` is
-            // per-method and optional.
+            // signal, so without this check the request would stay pending
+            // until its timeout, or indefinitely where the method has none.
             const abortReason = () =>
                 callOpts.signal?.reason ?? new Error(`${name}: ${method} aborted`);
             if (callOpts.signal?.aborted) return Promise.reject(abortReason());

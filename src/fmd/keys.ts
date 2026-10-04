@@ -13,15 +13,13 @@
 //   x_i = dk_root + h_i  (mod q)        recipient; requires dk_root
 //   X_i = ck + B · h_i                  sender; computable from ck alone
 //
-// X_i = (dk_root + h_i)·B = x_i·B, and recovering x_i from ck is a discrete
-// log on Baby-Jubjub, so publishing `ck` grants the ability to flag for a
-// recipient, not to detect for them. Follows Penumbra's S-FMD
-// ClueKey/DetectionKey split (additive derivation, `decaf377-fmd::hkd`) over
-// Baby-Jubjub + Poseidon.
+// X_i = (dk_root + h_i)·B = x_i·B, and recovering x_i from ck is a discrete log on Baby-Jubjub,
+// so publishing `ck` allows flagging for a recipient, not detecting for them. Follows Penumbra's
+// S-FMD ClueKey/DetectionKey split (additive derivation, `decaf377-fmd::hkd`).
 //
-// `h_i` is public, so a delegate holding any single `x_i` recovers
-// dk_root = x_i - h_i and every other x_i. Detection delegation is
-// all-or-nothing, non-revocable, and cannot be precision-bounded.
+// `h_i` is public, so a delegate holding any single `x_i` recovers dk_root = x_i - h_i and every
+// other x_i. Detection delegation is all-or-nothing, non-revocable, and cannot be
+// precision-bounded.
 
 // Leaf imports, not the barrel, to keep the worker bundle minimal.
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
@@ -33,14 +31,13 @@ import { InvalidArgumentError } from "../errors/config.js";
 /**
  * γ every sender emits, the default detection γ, and the ceiling on any detection γ.
  *
- * Circuit-pinned: `out_clue_bits` is a public input constrained by
- * `ClueCheck`, so raising it is a `@lelantos-org/circuits` change.
+ * Circuit-pinned: `out_clue_bits` is a public input constrained by `ClueCheck`, so raising it is
+ * a `@lelantos-org/circuits` change.
  *
- * A clue packs `c_1..c_γ` into a 16-bit prefix with the unused bits zero
- * (`clueBitsToPrefix`), while `fmdTest` requires `bit_i ⊕ c_i = 1` for every
- * `i` in the detection key. A longer detection key tests trailing bits against
- * zero padding, each passing only when the recipient's shared bit is 1, so a
- * genuine note survives with probability `2^-(γ_detect - γ_sender)`.
+ * A clue packs `c_1..c_γ` into a 16-bit prefix with the unused bits zero (`clueBitsToPrefix`),
+ * while `fmdTest` requires `bit_i ⊕ c_i = 1` for every `i` in the detection key. A longer
+ * detection key tests its trailing bits against zero padding, so a genuine note survives with
+ * probability `2^-(γ_detect - γ_sender)`.
  */
 export const FMD_DEFAULT_GAMMA = 5;
 
@@ -84,8 +81,7 @@ export function fmdGenDetectionKey(
     randomScalar: () => Field,
     gamma = FMD_DEFAULT_GAMMA,
 ): FmdDetectionKey {
-    // Rejects `gamma <= 0` with a typed error; `gamma = 0` would produce an
-    // empty key that `fmdTest` accepts against any zero-γ clue.
+    // `gamma = 0` would produce an empty key, which `fmdTest` accepts against any zero-γ clue.
     assertDetectionGamma(gamma);
     const x = Array.from({ length: gamma }, () => {
         const xi = randomScalar() % BABYJUB_SUBGROUP_ORDER;
@@ -103,12 +99,11 @@ export function fmdClueKeyFromRoot(J: Jubjub, dkRoot: Field): Point {
     return J.mulPointEscalar(J.base8, dkRoot % BABYJUB_SUBGROUP_ORDER);
 }
 
-// h_i = Poseidon(TAG_FMD_EXPAND, ck.x, ck.y, i) mod q. `ck` is bound into the
-// hash so that no two receivers share an expansion.
+// h_i = Poseidon(TAG_FMD_EXPAND, ck.x, ck.y, i) mod q. `ck` is bound into the hash so that no two
+// receivers share an expansion.
 //
-// Reducing a Poseidon output (uniform in [0, r), r ~ 2^254.86) mod q ~ 2^251.03
-// is non-uniform by a factor 8/7 at the low end. h_i is an additive blinder on
-// a secret rather than a secret itself, so rejection sampling is unnecessary.
+// The reduction mod q is not exactly uniform. h_i is a public additive offset on a secret rather
+// than a secret itself, so rejection sampling is unnecessary.
 function expandScalar(P: Poseidon, ck: Point, i: number): Field {
     return P.hash([TAG_FMD_EXPAND, ck[0], ck[1], BigInt(i)]) % BABYJUB_SUBGROUP_ORDER;
 }
@@ -131,14 +126,12 @@ export function fmdExpandFlagKey(
 }
 
 /**
- * Expand the root secret into the γ detection scalars,
- * `x_i = dk_root + h_i (mod q)`, the discrete logs of `fmdExpandFlagKey`'s
- * output. Receiver side.
+ * Expand the root secret into the γ detection scalars, `x_i = dk_root + h_i (mod q)`, the
+ * discrete logs of `fmdExpandFlagKey`'s output. Receiver side.
  *
- * Must not apply `fmdGenDetectionKey`'s zero-scalar fixup: remapping a zero
- * `x_i` here and not in the flag key would desynchronise the two halves. A zero
- * `x_i` (probability ~2^-251) yields a constant clue bit on both sides, which
- * keeps them consistent.
+ * Must not apply `fmdGenDetectionKey`'s zero-scalar fixup: remapping a zero `x_i` here and not in
+ * the flag key would desynchronise the two halves. A zero `x_i` yields a constant clue bit on
+ * both sides, which keeps them consistent.
  */
 export function fmdExpandDetectionKey(
     J: Jubjub,
@@ -146,10 +139,8 @@ export function fmdExpandDetectionKey(
     dkRoot: Field,
     gamma = FMD_DEFAULT_GAMMA,
 ): FmdDetectionKey {
-    // No γ guard: this raw primitive is pinned against the Rust indexer by
-    // cross-language vectors at several γ. `FMD_DEFAULT_GAMMA` is enforced at
-    // the policy boundary (`detectionKeyFor`, `detectionKey`,
-    // `FmdClient.createSubscription`).
+    // No γ guard: the cross-language vectors pin this primitive against the Rust indexer at
+    // several γ. Callers enforce the ceiling with `assertDetectionGamma`.
     const root = dkRoot % BABYJUB_SUBGROUP_ORDER;
     const ck = fmdClueKeyFromRoot(J, root);
     return {

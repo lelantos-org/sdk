@@ -108,7 +108,6 @@ describe("AssetRegistry", () => {
         expect(c.fetchAsset).not.toHaveBeenCalled();
     });
 
-    /// Without a relayer, ids resolve from the chain registry.
     it("falls back to the chain for an id the list does not carry", async () => {
         const c = chain({
             "9": { token: "0xCCcc000000000000000000000000000000000000", scale: 1n },
@@ -119,7 +118,6 @@ describe("AssetRegistry", () => {
         expect(c.fetchAsset).toHaveBeenCalledWith(9n);
     });
 
-    /// Without a list a symbol cannot be resolved; the error states the cause.
     it("explains that a symbol needs an asset list", async () => {
         const r = new AssetRegistry({ chain: chain() });
         await expect(r.resolve("WETH")).rejects.toThrow(/no asset list is available/);
@@ -201,7 +199,7 @@ describe("AssetRegistry", () => {
         const c = {
             fetchAsset: vi.fn(async () => {
                 // The reader folds the yield probe into `fetchAsset`; a transport failure there
-                // now propagates instead of reading as "no yield".
+                // propagates instead of reading as "no yield".
                 if (calls++ === 0) throw new TypeError("fetch failed");
                 return {
                     token: "0xCCcc000000000000000000000000000000000000",
@@ -237,9 +235,9 @@ describe("AssetRegistry", () => {
     });
 });
 
-// The relayer publishes `gross` and `supply` alongside the index because the on-chain index is
-// floored: a charge sized from it can fall short of what the contract takes, causing the Permit2
-// pull to be refused. The registry must carry the pair, not only the index.
+// The on-chain index is floored: a charge sized from it can fall short of what the contract takes,
+// and the Permit2 pull is then refused. The registry must carry the relayer's `gross` and `supply`
+// pair, not only the index.
 describe("AssetRegistry yield state", () => {
     const YIELDING: ChainToken[] = [
         {
@@ -363,7 +361,6 @@ describe("AssetRegistry.resolveVerified", () => {
         });
     });
 
-    /// The list maps the name to an id whose on-chain token is another asset.
     it("refuses a symbol or address the list redirects to another asset", async () => {
         const redirect: ChainToken[] = [{ ...USDC_T, token: WETH_T.token, assetId: 1 }];
         const c = Object.assign(honest(), {

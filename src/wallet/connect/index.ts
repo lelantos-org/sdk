@@ -1,10 +1,9 @@
 // `connect()`, the high-level entrypoint. For full control over every pluggable, use
 // `createWallet(KeySource, WalletConfig)`.
 //
-// Order: validate the whole config → resolve the preset → build the chain layer →
-// the prover handle (no I/O) → wasm and the scanner → stores and notes → derive the key last, the
-// only step that may prompt → on any failure dispose everything `connect` built (never a
-// caller-supplied prover or scanner).
+// Order: validate the whole config → resolve the preset → build the chain layer → the prover handle
+// (no I/O) → wasm and the scanner → stores and notes → derive the key last, the only step that may
+// prompt. On any failure, everything `connect` built is disposed.
 
 import type { NetworkPreset } from "../../chain/networks.js";
 import { settleAll } from "../../core/async.js";
@@ -51,8 +50,8 @@ const CHAIN_KEYS = ["chain", "reader", "readOnly", "signer", "provider", "privat
  * succeeded.
  *
  * On failure, `connect` disposes what it built (a worker-pool scanner, a `ProverConfig` prover)
- * and leaves a caller-supplied `Prover` / `Scanner` running; `wallet.dispose()` follows the same
- * rule. See {@link ProverOption} and {@link ScannerOption}.
+ * and leaves a caller-supplied `Prover` / `Scanner` running, as does `wallet.dispose()`. See
+ * {@link ProverOption} and {@link ScannerOption}.
  */
 export function connect(options: ConnectOptions): Promise<WalletApi> {
     return boundary("connect", () => connectUnchecked(options));
@@ -189,8 +188,6 @@ async function connectUnchecked(options: ConnectOptions): Promise<WalletApi> {
     const { preset, rpcUrl, runtime } = plan;
     if (opts.wasm) await configureWalletWasm(opts.wasm);
 
-    // Only what `connect` built is disposed on failure; a caller-supplied `Prover` / `Scanner`
-    // stays with the caller (`owned: false`).
     let prover: ProverHandle | undefined;
     let scanner: BuiltScanner | undefined;
     try {
@@ -233,11 +230,12 @@ async function connectUnchecked(options: ConnectOptions): Promise<WalletApi> {
             ...(opts.storage?.tree ? { treePersistence: opts.storage.tree } : {}),
             ...(opts.storage?.nullifiers ? { nullifierPersistence: opts.storage.nullifiers } : {}),
             ...(opts.denominations !== undefined ? { denominations: opts.denominations } : {}),
+            ...(opts.acceptRelayerFee ? { acceptRelayerFee: opts.acceptRelayerFee } : {}),
             ...(opts.syncStrategy ? { syncStrategy: opts.syncStrategy } : {}),
             scanner: scanner.scanner,
         };
 
-        // `assembleWallet` owns disposal from here: it releases what the SDK built itself.
+        // `assembleWallet` owns disposal from here.
         const built = { prover, scanner };
         prover = undefined;
         scanner = undefined;

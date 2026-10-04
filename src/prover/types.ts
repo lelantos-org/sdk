@@ -6,12 +6,27 @@
 
 import type { Url } from "../core/url.js";
 
+/** Expected SHA-256 of an artifact pair, lowercase hex without `0x`. */
+export interface ArtifactDigests {
+    /** Digest of `<shape>.wasm`. */
+    circuit: string;
+    /** Digest of `<shape>_final.zkey`. */
+    zkey: string;
+}
+
 /** Snarkjs Groth16 artifacts: WASM witness calculator + final zkey. */
 export interface ProverArtifacts {
     /** `<circuit>.wasm` — circom-generated witness calculator. */
     circuit: Url;
     /** `<circuit>_final.zkey` — phase-2 contribution output. */
     zkey: Url;
+    /**
+     * Expected SHA-256 of each file. When set, bytes that hash to anything else
+     * are refused (`PROVER_ARTIFACTS_FAILED`) before they are parsed, whether
+     * they came from the network, disk or a cache. `PROVER_ARTIFACT_SHA256`
+     * holds the digests of the published release.
+     */
+    sha256?: ArtifactDigests | undefined;
 }
 
 /**
@@ -21,8 +36,10 @@ export interface ProverArtifacts {
  * @internal
  */
 export interface ProverPaths {
-    wasmPath: string; // e.g. "circuits/build/4x6.wasm"
-    zkeyPath: string; // e.g. "circuits/build/4x6_final.zkey"
+    wasmPath: string; // `<shape>.wasm`
+    zkeyPath: string; // `<shape>_final.zkey`
+    /** Expected digests, when the artifacts are pinned. */
+    sha256?: ArtifactDigests | undefined;
 }
 
 /** @internal */
@@ -47,8 +64,8 @@ export interface Prover {
     /**
      * Release held resources (worker threads, wasm heaps).
      *
-     * Optional: in-process backends hold nothing the GC does not reclaim.
-     * `WorkerProver` owns a worker and requires this call.
+     * Optional: a backend with nothing to release omits it. `WorkerProver`
+     * owns a worker and requires this call.
      */
     dispose?(): Promise<void> | void;
 }

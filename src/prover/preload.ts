@@ -1,4 +1,4 @@
-// Eager WASM warmup. Idempotent: modules cache themselves after the first build.
+// Eager WASM warmup.
 
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { loadWasmProver } from "./load-wasm-prover.js";
@@ -7,7 +7,7 @@ import type { ProverArtifacts } from "./types.js";
 export interface PreloadOpts {
     /**
      * Warm the prover wasm too. Default true. Set false for read-only wallets
-     * (balances, scanning) to skip the ~370KB prover download. Pass
+     * (balances, scanning) to skip its download. Pass
      * `ProverArtifacts` to also fetch and parse them (full build, cached).
      */
     prover?: boolean | ProverArtifacts;

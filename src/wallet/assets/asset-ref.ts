@@ -6,13 +6,13 @@
 // Resolution is syntactic, not a search across every field:
 //
 //   0x…    an ERC-20 address (case-insensitive; EIP-55 is not required)
-//   digits a decimal MASP asset id
+//   digits a decimal MASP asset id, never 0: id 0 means "no asset" and the pool registers nothing
+//          under it
 //   else   a token symbol (case-insensitive)
 //
-// A symbol may be all digits and an address is a valid hex integer, so a
-// resolver that tries each field in turn would depend on registry contents.
-// Syntactic rules give the same classification for any registry; an unmatched
-// ref is an error, never a different asset.
+// A symbol may be all digits and an address is a valid hex integer, so trying
+// each field in turn would make the result depend on registry contents. An
+// unmatched ref is an error, never a different asset.
 
 import { type AssetId, type AssetIdLike, assetId } from "../../core/brand.js";
 import { assertNever } from "../../errors/base.js";
@@ -41,9 +41,11 @@ const HEX_PREFIX = /^0x/i;
  *
  * A `0x` string that is not 20 bytes is rejected as a malformed address instead
  * of falling through to a symbol lookup, which would report a misleading error.
+ *
+ * @throws {InvalidArgumentError} for an empty ref, a malformed address, or id 0.
  */
 export function classifyRef(ref: AssetRef): RefKind {
-    if (typeof ref === "bigint") return { kind: "id", id: assetId(ref) };
+    if (typeof ref === "bigint") return { kind: "id", id: registeredId(ref) };
 
     const text = ref.trim();
     if (text === "") {
@@ -59,8 +61,19 @@ export function classifyRef(ref: AssetRef): RefKind {
         }
         return { kind: "token", token: text.toLowerCase() };
     }
-    if (DECIMAL.test(text)) return { kind: "id", id: assetId(BigInt(text)) };
+    if (DECIMAL.test(text)) return { kind: "id", id: registeredId(BigInt(text)) };
     return { kind: "symbol", symbol: text.toLowerCase() };
+}
+
+/** An id an asset can be registered under: a non-zero `uint64`. */
+function registeredId(value: bigint): AssetId {
+    const id = assetId(value);
+    if (id === 0n) {
+        throw new InvalidArgumentError('asset id 0 means "no asset" and names none', {
+            argument: "asset",
+        });
+    }
+    return id;
 }
 
 /**

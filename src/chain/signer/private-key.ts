@@ -1,5 +1,3 @@
-// Local-account signer for Node (tests, scripts, relayer).
-
 import {
     createWalletClient,
     type Hex,

@@ -28,9 +28,9 @@ const UINT48_MAX = 2 ** 48 - 1;
  * Grant the pool a Permit2 window for every token `args.assets` names.
  *
  * Per token whose ERC-20 → Permit2 approval is below `cap`, one approval (sequential: wallets
- * serialise prompts, and parallel sends race the nonce); then one `PermitBatch` signature over every
- * token, with nonces read after the approvals, and one `permit` transaction. `onProgress` fires
- * `wallet` before each prompt and `confirming` with the transaction hash.
+ * serialise prompts, and parallel sends race the nonce); then one `PermitBatch` signature over
+ * every token, with nonces read after the approvals, and one `permit` transaction. `onProgress`
+ * fires `wallet` before each prompt and `confirming` with the transaction hash.
  */
 export async function setupDepositAllowance(
     ctx: WalletContext,

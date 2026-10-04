@@ -1,10 +1,6 @@
-// The JS fallback path.
-//
-// Isolated in its own file because `configurePoseidonWasm` installs a process-wide loader override
-// and resets the module memo; a failing loader would degrade every other suite in the same realm.
-//
-// Losing the wasm backend makes hashing 2.5x slower with no other symptom, so the fallback must
-// both hash correctly and log a warning.
+// The JS fallback path. In its own file because `configurePoseidonWasm` installs a process-wide
+// loader override and resets the module memo; a failing loader would degrade every other suite in
+// the same realm.
 
 import { poseidon5 } from "poseidon-lite/poseidon5";
 import { afterEach, describe, expect, it } from "vitest";

@@ -112,9 +112,8 @@ describe("WorkerPoolScanner dispatch", () => {
     });
 
     it("does not leave an init rejection unobserved when no scan follows", async () => {
-        // `ready` is awaited only inside `runChunk`, so a pool that is never
-        // scanned, or is disposed first, must not trip Node's
-        // `unhandledRejection`.
+        // `ready` is awaited only inside `runChunk`, so a pool that is never scanned, or is
+        // disposed first, must not trip Node's `unhandledRejection`.
         const unhandled: unknown[] = [];
         const onUnhandled = (err: unknown) => unhandled.push(err);
         process.on("unhandledRejection", onUnhandled);

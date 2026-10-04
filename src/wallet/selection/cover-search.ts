@@ -1,23 +1,23 @@
 // Bounded combinatorial search over an ascending value list.
 //
-// Both walks prune on that ordering (a branch that cannot beat the incumbent
-// ends the loop, not just the iteration) and both are capped, so a large wallet
-// gets a non-minimal answer instead of a stalled spend.
+// Both walks prune on that ordering and both are capped, so a large wallet gets
+// a non-minimal answer instead of a stalled spend.
 
 import { getLogger } from "../../log/logger.js";
 
 const log = getLogger("lelantos:wallet:selection");
 
-/** Enumerated combinations are capped so a large wallet cannot stall a spend. */
+/** Per-walk cap: nodes visited by `smallestCover`, combinations kept by `coverBucket`. */
 const MAX_COMBINATIONS = 50_000;
 
 /**
  * Smallest sum ≥ `threshold` reachable with exactly `size` of `values`, or
- * `null` if no such combination exists.
+ * `null` if no such combination exists. When the walk hits the cap the result
+ * is a valid, possibly non-minimal, cover.
  *
  * `values` is ascending, so once a branch's best case (the running sum plus
- * `size` copies of the current value) cannot beat the incumbent, no later index
- * can either and the loop breaks.
+ * the current value for each remaining slot) cannot beat the incumbent, no
+ * later index can either and the loop breaks.
  */
 export function smallestCover(
     values: readonly bigint[],
@@ -27,18 +27,13 @@ export function smallestCover(
     if (size > values.length) return null;
 
     // Seeded with the sum of the `size` largest values, the maximum for this
-    // size. If it falls short, no combination qualifies and the walk is
-    // skipped; otherwise it is a valid cover that gives the prune an incumbent
-    // from the first branch. Without the seed, a wallet whose largest notes
-    // cannot reach `threshold` (the `consolidate-first` case) would enumerate
-    // every C(n, size) before returning null.
+    // size. If it falls short no combination qualifies (the `consolidate-first`
+    // case) and the walk is skipped instead of enumerating every C(n, size);
+    // otherwise it is a valid cover that gives the prune an incumbent.
     let best = 0n;
     for (let i = values.length - size; i < values.length; i++) best += values[i]!;
     if (best < threshold) return null;
 
-    // Branch-and-bound has no polynomial guarantee, so the cap applies here
-    // too. Stopping early returns the incumbent, which is always a valid,
-    // possibly non-minimal, cover.
     let visited = 0;
     let truncated = false;
 
@@ -54,8 +49,6 @@ export function smallestCover(
             }
             const v = values[i]!;
             const floor = sum + v * BigInt(remaining);
-            // Ascending values: if this branch's best case cannot beat the
-            // incumbent, no later index can either.
             if (floor >= best) break;
             walk(i + 1, remaining - 1, sum + v);
             if (truncated) return;
@@ -94,8 +87,7 @@ export function coverBucket(
         }
         for (let i = start; i + remaining <= values.length; i++) {
             const v = values[i]!;
-            // Ascending values: once the branch's floor is past `hi`, so is
-            // every later index.
+            // Ascending: once a branch's floor passes `hi`, so does every later index.
             if (sum + v * BigInt(remaining) > hi) break;
             pick.push(i);
             walk(i + 1, remaining - 1, sum + v);

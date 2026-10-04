@@ -11,14 +11,11 @@ export interface RelayerSubmitResponse {
 /**
  * Terms on which a relayer accepts a shielded fee, as published by `/chains`.
  *
- * **Presence means required.** A chain that returns this object will refuse
- * (402) any spend or swap that does not carry a fee output addressed to
- * {@link address}; a chain that omits it charges nothing. There is no
- * `required` flag, because a flag could disagree with the object's presence.
+ * Presence means required: a chain that returns this object refuses (402) any spend or swap
+ * without a fee output addressed to {@link address}; a chain that omits it charges nothing.
  *
- * Terms only, no amount: an amount moves with the gas price and an oracle rate,
- * and `/chains` is a boot registry behind a 60s cache. `/v1/spend/estimate`
- * returns the live amount.
+ * Terms only: the amount moves with the gas price and an oracle rate, and `/v1/spend/estimate`
+ * returns the live figure.
  *
  * @internal
  */
@@ -26,34 +23,25 @@ export interface ShieldedFeeTerms {
     /** bech32m address to address the fee note to. */
     address: string;
     /**
-     * How far below the relayer's own submit-time quote a payment may fall and
-     * still be accepted. The relayer re-derives the requirement when the spend
-     * arrives, so this is the drift allowed between quoting and submitting.
+     * How far below the relayer's submit-time quote a payment may fall and still be accepted:
+     * the drift allowed between quoting and submitting.
      */
     graceBps: number;
     /** Markup over raw gas cost, already included in every quoted amount. */
     markupBps: number;
     /**
-     * Assets accepted as a fee.
-     *
-     * A spend is built in a single asset, so this doubles as the list of assets
-     * the relayer will move at all: one absent from here cannot pay for its own
-     * transfer.
-     *
-     * Repeated in full rather than named by id, so this object carries the
-     * `scale` needed to size a note without joining back to
-     * {@link ChainInfo.tokens}.
+     * Assets accepted as a fee. A spend is built in a single asset, so one absent from here
+     * cannot pay for its own transfer and the relayer will not move it. Each entry carries the
+     * `scale` needed to size a fee note.
      */
     tokens: ChainToken[];
 }
 
 /**
- * One chain, as `/chains` describes it. The relayer is the only service that
- * enumerates every chain, so this is the registry a client boots from.
+ * One chain, as `/chains` describes it: the registry a client boots from.
  *
- * Every field past `chainId` is optional: a deployment that has not described
- * something omits it, and a client falls back to its own defaults rather than
- * to a guess.
+ * A deployment omits the optional fields it has not described, and a client falls back to its
+ * own defaults.
  *
  * @internal
  */
@@ -88,22 +76,14 @@ export interface ChainInfo {
     /**
      * Browser-reachable RPC; not the relayer's own endpoint.
      *
-     * This is the URL offered to the user's wallet via
-     * `wallet_addEthereumChain`, so it must stay a general-purpose endpoint the
-     * wallet can use for everything, including writes and background polling.
-     * Do not point it at the read proxy; see {@link readRpcUrl}.
+     * Offered to the user's wallet via `wallet_addEthereumChain`, so it must be a general-purpose
+     * endpoint that serves writes, `eth_subscribe` and background polling; a read-only proxy
+     * there would break the wallet. See {@link readRpcUrl}.
      */
     rpcUrl?: string;
     /**
-     * Read-only RPC for the SDK's own `eth_call`/`eth_getLogs` traffic.
-     *
-     * Separate from {@link rpcUrl} because that one is installed into the user's
-     * wallet as a chain's endpoint, permanently and per user. A read-only,
-     * rate-limited proxy in that slot would break the wallet: it would issue
-     * `eth_sendRawTransaction`, `eth_subscribe` and background block polling
-     * against an endpoint that serves none of them.
-     *
-     * Consumers read `readRpcUrl ?? rpcUrl`.
+     * Read-only RPC for the SDK's own `eth_call`/`eth_getLogs` traffic. Consumers read
+     * `readRpcUrl ?? rpcUrl`.
      */
     readRpcUrl?: string;
     treeDepth?: number;
@@ -130,22 +110,19 @@ export interface ChainToken {
     /** Absent until read, or where the token implements no `symbol()`. */
     symbol?: string;
     /**
-     * Protocol fee on a shield of this asset, in bps. Absent until the relayer
-     * has indexed an `AssetFeeSet` for it.
-     *
-     * Absent means **unknown, not zero** — the registry falls back to reading
-     * the pool rather than quoting a free deposit.
+     * Protocol fee on a shield of this asset, in bps. Absent until the relayer has indexed an
+     * `AssetFeeSet` for it, which means unknown, not zero: the registry falls back to reading
+     * the pool.
      */
     depositBps?: number;
     /** Protocol fee on an unshield of this asset, in bps. See `depositBps`. */
     withdrawBps?: number;
     /**
-     * Present iff the pool routes this asset's balance to a yield venue.
+     * Present when the pool routes this asset's balance to a yield venue.
      *
-     * Absent means plain custody, where a circuit unit is worth `scale` base
-     * units permanently. Also absent for a
-     * *yielding* asset the relayer has not priced yet: `scale` is not a safe
-     * fallback there, as it is off by whatever the venue has earned.
+     * Absent means plain custody, where a circuit unit is worth `scale` base units, or a yield
+     * asset the relayer has not priced yet: `scale` is not a safe fallback there, as it is off
+     * by whatever the venue has earned.
      */
     yieldState?: YieldStateInfo;
 }
@@ -184,10 +161,9 @@ export interface ChainsResponse {
 /**
  * One accepted fee token, priced.
  *
- * `assetId`, `scale` and `circuitAmount` arrive together or not at all: they
- * are absent when the relayer cannot map this token to a registered asset,
- * which means a fee note cannot be built for it yet. `amount` is still
- * meaningful for display.
+ * `assetId`, `scale` and `circuitAmount` arrive together or not at all: they are absent when the
+ * relayer cannot map this token to a registered asset, so no fee note can be built for it.
+ * `amount` is still meaningful for display.
  *
  * @internal
  */
@@ -201,11 +177,8 @@ export interface RelayerFeeQuote {
     assetId?: number;
     scale?: string;
     /**
-     * {@link amount} rounded **up** to a whole circuit unit — the exact `value`
-     * to put in the fee note.
-     *
-     * Rounded server-side so there is a single implementation of the rounding;
-     * rounding down would underpay by up to one unit and be refused.
+     * {@link amount} rounded up to a whole circuit unit: the exact `value` to put in the fee
+     * note. Rounding down would underpay by up to one unit and be refused.
      */
     circuitAmount?: string;
 }

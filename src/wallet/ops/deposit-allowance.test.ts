@@ -1,5 +1,3 @@
-// `setupDepositAllowance`: the webapp's Permit2 setup flow, in the SDK.
-
 import { describe, expect, it, vi } from "vitest";
 import { assetId, branded, evmAddress, type Hex32 } from "../../core/brand.js";
 import { TxRevertedError, UserRejectedError } from "../../errors/chain.js";

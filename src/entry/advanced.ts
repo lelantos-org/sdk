@@ -1,8 +1,8 @@
 // `@lelantos-org/sdk/advanced`: integrator plumbing behind `connect()`.
 //
 // `createWallet(KeySource, WalletConfig)` with hand-built pluggables: chain ports and the viem
-// adapter, signers, the relayer submitter, note stores and sources, tree/nullifier persistence, coin
-// selectors and scanners. Semver-covered, but expect wider changes than the root surface.
+// adapter, signers, the relayer submitter, note stores and sources, tree/nullifier persistence,
+// coin selectors and scanners. Semver-covered, but expect wider changes than the root surface.
 
 export { isNetworkDeployed, resolveNetwork } from "../chain/networks.js";
 export {
@@ -32,6 +32,7 @@ export type {
     DepositSubmitted,
     EscrowedDepositView,
     Permit2SignArgs,
+    PublishedNote,
     TokenMeta,
     TxLog,
 } from "../chain/types.js";

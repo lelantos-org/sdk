@@ -36,7 +36,7 @@ const usdc: AssetUnits = { decimals: 6, scale: 1_000n };
 const weth: AssetUnits = { decimals: 18, scale: 10n ** 15n };
 const yieldUsdc: AssetUnits = { decimals: 6, scale: 1_000n, index: (RAY * 1_0371n) / 1_0000n };
 
-/** Units of an asset whose unit is worth at least one base unit, the precondition of the round trip. */
+/** Assets whose unit is worth at least one base unit, the precondition of the round trip. */
 const plainAsset = fc
     .record({ decimals: fc.integer({ min: 0, max: 24 }), exp: fc.integer({ min: 0, max: 18 }) })
     .filter(({ decimals, exp }) => exp <= decimals)

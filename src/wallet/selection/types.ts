@@ -1,5 +1,4 @@
 // Coin selection types: request options, results, and the strategy interface.
-// Kept separate from the algorithms so type-only importers pull in no code.
 
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import type { StoredNote } from "../notes/note-store.js";
@@ -29,7 +28,10 @@ export interface SelectOpts {
      * an adapter without that method leaves the cooldown inert.
      */
     tipBlock?: number | undefined;
-    /** Tiebreak shuffle width: notes within `(1 ± bucketPct) * pivot`. Default 0.05. */
+    /**
+     * Tiebreak width: covers of the chosen size summing within `(1 ± bucketPct)`
+     * of the smallest are equally likely. Default 0.05.
+     */
     bucketPct?: number | undefined;
     /**
      * Maximum notes a single spend may consume (the circuit's `nIn`). Defaults
@@ -37,24 +39,21 @@ export interface SelectOpts {
      */
     maxInputs?: number | undefined;
     /**
-     * Restrict candidates to these note ids.
+     * Restrict candidates to these note ids, on top of the other spendability
+     * rules: a named id that is spent, reserved or cooling down stays excluded.
      *
-     * Used by consolidation. Selecting by amount does not pin the notes: SFRT
-     * returns the smallest-sum cover, and a single note valued between the
-     * target and the dust set's total is a cheaper cover than the dust set, so
-     * the merge would not consolidate anything.
-     *
-     * Applied in addition to the other spendability rules: a named id that is
-     * spent, reserved or cooling down stays excluded.
+     * Used by consolidation, because selecting by amount does not pin the
+     * notes: a single note valued between the target and the dust set's total
+     * is a smaller cover than the dust set, and SFRT would take it.
      */
     only?: readonly string[] | undefined;
     /**
      * Injectable randomness for tests: returns a uniform integer in `[0, n)`.
+     * Defaults to `randomBelow` from `@lelantos-org/sdk/primitives`.
      *
-     * An integer picker rather than a float: scaling a float over `n` buckets
-     * is non-uniform unless `n` is a power of two, and a skew in which note is
-     * picked is the fingerprint the tiebreak defends against. Defaults to
-     * `randomBelow` from `@lelantos-org/sdk/primitives`.
+     * An integer picker, because scaling a float over `n` buckets is non-uniform
+     * unless `n` is a power of two, and a skewed pick is the fingerprint the
+     * tiebreak defends against.
      */
     pick?: ((n: number) => number) | undefined;
 }
@@ -86,17 +85,19 @@ export type SelectionResult = DirectSelection | ConsolidateFirst;
  * would erase the brand.
  */
 export interface WithheldValue {
-    /** Reserved by a submit whose outcome was never confirmed. */
+    /** Held by an in-flight spend, or reserved by a submit of unknown outcome. */
     reserved: bigint;
     /** Below the dust threshold. */
     dust: bigint;
     /** Too recently seen to have cleared the spend cooldown. */
     cooldown: bigint;
     /**
-     * Spendable, but beyond the circuit's input arity.
+     * Spendable, but beyond the circuit's input arity: a balance spread across
+     * more than `maxInputs` notes has a remainder no single spend can reach.
+     * Recovered by consolidation, not by waiting.
      *
-     * Resolved by consolidation rather than time. It depends on `maxInputs`, so
-     * `partitionSpendable` leaves it `0n` and `WalletApi.spendableMax` fills it in.
+     * Depends on `maxInputs`, so `partitionSpendable` leaves it `0n` and
+     * `spendableMax` fills it in.
      */
     slots: bigint;
 }
@@ -113,14 +114,8 @@ export interface CoinSelector {
 
 /** What one spend of an asset can reach, and what is holding the rest back. */
 export interface SpendableMax {
-    /** Largest amount a single spend can cover, after `reserve`. */
+    /** Largest amount a single spend can cover, after a same-asset `fee`. */
     max: CircuitAmount;
-    /**
-     * Value the balance counts but this spend cannot reach, by cause.
-     *
-     * `slots` covers spendable notes beyond the circuit's input arity: a balance
-     * spread across more than `maxInputs` notes has a remainder no single spend
-     * can reach. Consolidation recovers it; the other causes resolve over time.
-     */
+    /** Value the balance counts but this spend cannot reach, by cause. */
     withheld: WithheldValue;
 }

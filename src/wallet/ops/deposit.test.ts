@@ -10,9 +10,12 @@ import {
     type Hex32,
     type TokenAmount,
 } from "../../core/brand.js";
+import { fieldToBytes32 } from "../../core/hex.js";
+import { buildInner, commitWithInner } from "../../crypto/commit.js";
 import { Jubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
 import { isWalletError } from "../../errors/guard.js";
+import { deriveDefaultPk } from "../../keys/diversified.js";
 import { decodeNotePayload, stripClueBitsPrefix } from "../../notes/codec.js";
 import { decryptNote } from "../../notes/encrypt.js";
 import { computePiHash } from "../../protocol/abi-hash.js";
@@ -26,11 +29,10 @@ import { executeDeposit, quoteDeposit } from "./deposit.js";
 
 // Paying a deposit's relayer note in a chosen asset.
 //
-// The pool branches on `feeAssetId`: a note in the deposit asset (or of zero
-// value) rides the single-token pull, one in another asset is a second pull
-// under a two-token permit. These assert the request, the fee note, the signed
-// ceilings and the strategy agree on which branch a deposit takes, since any
-// disagreement reverts on chain (`BadMaxFee`, `InvalidSigner`, a short
+// The pool branches on `feeAssetId`: a note in the deposit asset (or of zero value) rides the
+// single-token pull, one in another asset is a second pull under a two-token permit. These assert
+// the request, the fee note, the signed ceilings and the strategy agree on which branch a deposit
+// takes, since any disagreement reverts on chain (`BadMaxFee`, `InvalidSigner`, a short
 // allowance) or strands the escrow (`DigestMismatch` at flush).
 
 const USDC = assetId(1n);
@@ -77,8 +79,8 @@ interface Recorded {
 }
 
 /**
- * A wallet whose chain records every signature and submission, and whose
- * relayer quotes `quotes` circuit units per asset (none: it charges nothing).
+ * A wallet whose chain records every signature and submission, and whose relayer quotes `quotes`
+ * circuit units per asset (none: it charges nothing).
  */
 async function makeCtx(opts: {
     quotes?: Record<string, bigint>;
@@ -88,6 +90,8 @@ async function makeCtx(opts: {
     erc20?: Record<string, bigint>;
     /** Public balance per token (and `"native"`). Absent: unreadable. */
     balances?: Record<string, bigint>;
+    /** The refund cap the pool emits with the escrow. Absent: zero, as for a plain asset. */
+    pulled?: bigint;
 }) {
     const P = await Poseidon.build();
     const J = await Jubjub.build();
@@ -117,7 +121,7 @@ async function makeCtx(opts: {
         ) => {
             rec.submitted.push(a);
             a.onSent?.(TX);
-            return minedDeposit(a.deposit, { id: 9n });
+            return minedDeposit(a.deposit, { id: 9n, pulled: opts.pulled });
         },
         submitDepositNative: async (a: {
             deposit: DepositRequest;
@@ -126,7 +130,7 @@ async function makeCtx(opts: {
         }) => {
             rec.native.push(a);
             a.onSent?.(TX);
-            return minedDeposit(a.deposit, { id: 9n });
+            return minedDeposit(a.deposit, { id: 9n, pulled: opts.pulled });
         },
         submitDepositAuthorized: async (a: {
             deposit: DepositRequest;
@@ -134,7 +138,7 @@ async function makeCtx(opts: {
         }) => {
             rec.authorized.push(a.deposit);
             a.onSent?.(TX);
-            return minedDeposit(a.deposit, { id: 9n });
+            return minedDeposit(a.deposit, { id: 9n, pulled: opts.pulled });
         },
         cancelDelay: async () => 7_200,
         permit2Address: () => PERMIT2,
@@ -182,7 +186,7 @@ async function makeCtx(opts: {
         },
     } as unknown as WalletContext;
 
-    return { ctx, rec, J, me, relayer };
+    return { ctx, rec, P, J, me, relayer };
 }
 
 /** The fee note's plaintext, decrypted as its addressee would. */
@@ -199,6 +203,11 @@ function openFeeNote(J: Jubjub, ivk: bigint, aux: AuxOutput) {
     return decodeNotePayload(plain!);
 }
 
+/** The `inner` a request must publish for a note its addressee opens to `opened`. */
+function innerFor(P: Poseidon, ivk: bigint, opened: { rho: bigint; rcm: bigint }) {
+    return fieldToBytes32(buildInner(P, { pk: deriveDefaultPk(P, ivk), ...opened }));
+}
+
 /** Nothing reached the chain: no signature, and no submission on any path. */
 function expectNothingSent(rec: Recorded) {
     expect(rec.signed).toHaveLength(0);
@@ -209,7 +218,7 @@ function expectNothingSent(rec: Recorded) {
 
 describe("deposit relayer fee asset", () => {
     it("pays the note in another asset: request, note, commitment and two-token permit", async () => {
-        const { ctx, rec, J, relayer } = await makeCtx({ quotes: { "1": 3n, "2": 7n } });
+        const { ctx, rec, P, J, relayer } = await makeCtx({ quotes: { "1": 3n, "2": 7n } });
 
         await executeDeposit(ctx, { amount: circuitAmount(1_000n), asset: USDC, feeAsset: WETH });
 
@@ -219,14 +228,13 @@ describe("deposit relayer fee asset", () => {
         // WETH's quote, not USDC's.
         expect(deposit.feeIn).toBe(7n);
 
-        expect(openFeeNote(J, relayer.ivk, feeAux)).toMatchObject({ asset: WETH, value: 7n });
-        // The flush circuit opens `feeCvDep` under the fee leaf's asset.
-        expect(deposit.feeCvDep).toEqual(
-            J.valueCommit(7n, J.hashToAssetGen(WETH), deposit.feeRcv).slice(0, 2),
-        );
+        const opened = openFeeNote(J, relayer.ivk, feeAux);
+        expect(opened).toMatchObject({ asset: WETH, value: 7n });
+        // The flush circuit hashes `feeInner` with the request's `feeAssetId` and `feeIn` into
+        // the fee leaf, so the relayer's plaintext must reproduce it.
+        expect(deposit.feeInner).toBe(innerFor(P, relayer.ivk, opened));
 
-        // [USDC: principal + 0.2% fee, WETH: 7 units at scale 1000], bound to
-        // the request actually submitted.
+        // [USDC: principal + 0.2% fee, WETH: 7 units at scale 1000], bound to the request sent.
         expect(rec.signed[0]).toMatchObject({
             token: TOKEN_USDC,
             maxTotal: 10_020n,
@@ -255,22 +263,21 @@ describe("deposit relayer fee asset", () => {
         expect(permit2.maxFee).toBe(0n);
     });
 
-    it("self-pads a zero fee in the deposit asset and names asset 0", async () => {
+    it("self-pads a zero fee and names asset 0, in the request and in the note", async () => {
         // No shielded fee address: the relayer subsidises deposits.
-        const { ctx, rec, J, me } = await makeCtx({});
+        const { ctx, rec, P, J, me } = await makeCtx({});
 
         await executeDeposit(ctx, { amount: circuitAmount(1_000n), asset: USDC, feeAsset: WETH });
 
         const { deposit, feeAux } = rec.submitted[0]!;
-        // A zero-value leaf's asset is 0 in the circuit; anything else reverts
-        // `FeeAssetMustBeZero`.
+        // The pool reverts `FeeAssetMustBeZero` for any other id on a zero-value leaf.
         expect(deposit.feeIn).toBe(0n);
         expect(deposit.feeAssetId).toBe(0n);
-        // Still the ordinary self-pad scanners discard, in the deposit asset.
-        expect(openFeeNote(J, me.ivk, feeAux)).toMatchObject({ asset: USDC, value: 0n });
-        expect(deposit.feeCvDep).toEqual(
-            J.valueCommit(0n, J.hashToAssetGen(USDC), deposit.feeRcv).slice(0, 2),
-        );
+        // Still the ordinary self-pad scanners discard. Its plaintext names the asset the leaf
+        // is hashed under.
+        const opened = openFeeNote(J, me.ivk, feeAux);
+        expect(opened).toMatchObject({ asset: 0n, value: 0n });
+        expect(deposit.feeInner).toBe(innerFor(P, me.ivk, opened));
         // Single-token: `isSameFeeAsset` holds for any zero fee.
         expect(rec.signed[0]).not.toHaveProperty("feeToken");
         expect(rec.signed[0]!.maxTotal).toBe(10_020n);
@@ -323,8 +330,8 @@ describe("deposit relayer fee asset", () => {
             asset: YIELD_USDC,
             feeAsset: USDC,
         });
-        // Decided by id, not token: the two entries name one ERC-20. The
-        // principal is quoted without the note (ceil(1_002 units) + 50 bps).
+        // Decided by id, not token: the two entries name one ERC-20. The principal is quoted
+        // without the note (ceil(1_002 units) + 50 bps).
         expect(rec.submitted[0]!.deposit.feeAssetId).toBe(USDC);
         expect(rec.signed[0]).toMatchObject({
             token: TOKEN_USDC,
@@ -335,8 +342,8 @@ describe("deposit relayer fee asset", () => {
     });
 });
 
-// A Permit2 allowance is per token, so a window for the deposit token alone
-// does not cover a relayer note paid in another one.
+// A Permit2 allowance is per token, so a window for the deposit token alone does not cover a
+// relayer note paid in another one.
 describe("deposit strategy with a separate fee token", () => {
     const deposit = { amount: circuitAmount(1_000n), asset: USDC, feeAsset: WETH };
 
@@ -403,8 +410,10 @@ describe("deposit result", () => {
     }
 
     it("same asset: protocol and relayer fees, one pull, a complete escrow", async () => {
-        const { res, rec, me, phases } = await run({ quotes: { "1": 3n } }, { asset: USDC });
+        const { res, rec, P, me, phases } = await run({ quotes: { "1": 3n } }, { asset: USDC });
         const { deposit } = rec.submitted[0]!;
+        // The leaf the flush inserts: the request publishes only `inner`.
+        const leaf = fieldToBytes32(commitWithInner(P, USDC, 1_000n, BigInt(deposit.inner)));
 
         expect(res).toMatchObject({
             kind: "deposit",
@@ -426,25 +435,25 @@ describe("deposit result", () => {
             depositId: 9n,
             native: false,
             asset: USDC,
-            commitment: deposit.outCm,
+            commitment: leaf,
             cancelInputs: {
                 publicIn: 1_000n,
-                cm: deposit.outCm,
-                cvDep: deposit.cvDep,
+                inner: deposit.inner,
                 publicAssetId: USDC,
                 feeBpsAtSubmit: 20,
                 payer: PAYER,
                 submittedAt: 1_000,
                 feeIn: 3n,
                 feeAssetId: USDC,
-                feeCm: deposit.feeCm,
-                feeCvDep: deposit.feeCvDep,
+                feeInner: deposit.feeInner,
+                // A plain asset: the pool publishes a zero cap.
+                pulled: 0n,
             },
             // The mined block plus the pool's live cancel delay.
             cancellableAtBlock: 8_200,
         });
-        expect(res.commitments).toEqual([deposit.outCm]);
-        expect(res.ownCommitments).toEqual([deposit.outCm]);
+        expect(res.commitments).toEqual([leaf]);
+        expect(res.ownCommitments).toEqual([leaf]);
         expect(Object.isFrozen(res) && Object.isFrozen(res.escrow)).toBe(true);
         expect(phases).toEqual([
             ["preparing", { opId: "op-1" }],
@@ -466,7 +475,20 @@ describe("deposit result", () => {
             { asset: WETH, amount: 7n, baseUnits: 7_000n },
         ]);
         expect(res.escrow.cancelInputs).toMatchObject({ feeIn: 7n, feeAssetId: WETH });
-        expect(res.escrow.cancelInputs.feeCm).toBe(rec.submitted[0]!.deposit.feeCm);
+        expect(res.escrow.cancelInputs.feeInner).toBe(rec.submitted[0]!.deposit.feeInner);
+    });
+
+    // A yield escrow's refund is capped at what the pool pulled for it, and a cancel must hand
+    // back exactly the figure the `DepositEscrowed` log states. Here that is one base unit above
+    // the quote, as an index that moved before inclusion leaves it: the escrow keeps the log's
+    // figure, not the plan's.
+    it("yield asset: the escrow keeps the refund cap the pool published", async () => {
+        const { res } = await run({ quotes: { "3": 3n }, pulled: 10_051n }, { asset: YIELD_USDC });
+        expect(res.pulled).toMatchObject([{ asset: YIELD_USDC, baseUnits: 10_050n }]);
+        expect(res.escrow.cancelInputs).toMatchObject({
+            publicAssetId: YIELD_USDC,
+            pulled: 10_051n,
+        });
     });
 
     it("zero fee: relayer null, never a zero Money, and the note names asset 0", async () => {

@@ -2,20 +2,15 @@
 //
 // On Ethereum and OP-stack chains (Base, Optimism) `block.number` is the
 // block's own height, so a log's `blockNumber` is the value the contract saw.
-//
-// On Arbitrum, `block.number` inside the EVM approximates the *L1* height,
-// while receipts and logs report the L2 height. The two are unrelated
-// magnitudes: an L2 block around 495,000,000 sits at an L1 height around
-// 25,700,000.
+// On Arbitrum, `block.number` inside the EVM approximates the L1 height, while
+// receipts and logs report the unrelated L2 height.
 //
 // MASP folds `uint32(block.number)` into the deposit digest (`_depositDigest`).
 // Replaying the L2 height reconstructs a different digest, and both
-// `flushBatch` and `cancelDeposit` revert `DigestMismatch(id)` permanently,
-// since nothing about the deposit changes.
+// `flushBatch` and `cancelDeposit` revert `DigestMismatch(id)` permanently.
 //
 // Arbitrum nodes expose the value as a non-standard `l1BlockNumber` field on
-// the block. Its absence means the EVM reports the chain's own height; keying
-// on the field rather than a chain-id allowlist also covers future rollups.
+// the block. Its absence means the EVM reports the chain's own height.
 
 import type { PublicClient } from "viem";
 
@@ -27,11 +22,9 @@ interface RawBlock {
 /**
  * The value Solidity's `block.number` yields inside `blockNumber`.
  *
- * Returns `blockNumber` unchanged when the node reports no `l1BlockNumber`,
- * which is the case on every non-Arbitrum chain.
- *
- * Costs one `eth_getBlockByNumber`. Callers are on the deposit-cancel path,
- * which is rare; do not put this in a polling loop without caching.
+ * Returns `blockNumber` unchanged when the node reports no `l1BlockNumber`.
+ * Costs one `eth_getBlockByNumber`; do not call it from a polling loop without
+ * caching.
  */
 export async function evmBlockNumber(
     publicClient: PublicClient,
@@ -43,8 +36,8 @@ export async function evmBlockNumber(
     })) as RawBlock | null;
 
     const l1 = block?.l1BlockNumber;
-    // Guard the empty string too: a node that returns "" would otherwise
-    // BigInt-parse to 0 and silently produce a digest that never matches.
+    // Covers the empty string too, which would otherwise BigInt-parse to 0 and
+    // produce a digest that never matches.
     if (!l1) return blockNumber;
     return BigInt(l1);
 }

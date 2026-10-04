@@ -1,16 +1,12 @@
 import { maspAbi, nativeAdapterAbi } from "@lelantos-org/contracts";
-import { toEventSignature, toFunctionSelector, toFunctionSignature } from "viem";
+import { toEventSelector, toEventSignature, toFunctionSelector, toFunctionSignature } from "viem";
 import { describe, expect, it } from "vitest";
 import { MASP_ABI, NATIVE_ADAPTER_ABI } from "./abi.js";
 
 // `abi.ts` is hand-maintained and can drift from the deployed contracts
 // silently: a wrong tuple shape encodes a call that reverts, or one that
-// succeeds against the wrong slot. `@lelantos-org/contracts` ships the
-// Foundry-generated ABI to compare against.
-//
-// It is a devDependency, not a runtime one: importing `maspAbi` into the bundle
-// would cost ~27 KB minified for a 30 KB constant that cannot be shaken
-// per entry, against a ~6 KB hand-maintained subset.
+// succeeds against the wrong slot. `@lelantos-org/contracts`, a devDependency,
+// ships the Foundry-generated ABI to compare against.
 
 type AbiParam = { type: string; components?: readonly AbiParam[] };
 type AbiItem = { type: string; name?: string; outputs?: readonly AbiParam[] };
@@ -21,13 +17,12 @@ const sigOf = (i: AbiItem): string =>
         : toFunctionSignature(i as Parameters<typeof toFunctionSignature>[0]);
 
 /**
- * Return types, rendered like an input signature.
+ * Return types, rendered like an input signature, names dropped.
  *
- * `toFunctionSignature` covers inputs only, since outputs are not part of the
- * selector. An entry such as `asset` or `escrowed` can match its canonical
- * selector while disagreeing on the return type, and a wrong return shape
- * decodes to the wrong fields rather than reverting. Names are dropped; only
- * the type structure is binding.
+ * `toFunctionSignature` covers inputs only, so an entry such as `asset` or
+ * `escrowed` can match its canonical selector while disagreeing on the return
+ * type, and a wrong return shape decodes to the wrong fields rather than
+ * reverting.
  */
 const outputsOf = (i: AbiItem): string => {
     const render = (p: AbiParam): string =>
@@ -48,22 +43,15 @@ const indexBy = (abi: readonly AbiItem[]) =>
 const fingerprint = (i: AbiItem): string => `${sigOf(i)} -> ${outputsOf(i)}`;
 
 /**
- * Entries that do not match the deployed contract, enumerated rather than
- * skipped wholesale. Anything here is a live incompatibility, not a style
- * difference.
- *
- * May be empty. The SDK can add a read before `@lelantos-org/contracts`
- * publishes the contract change behind it; such an entry is listed here until
- * then. The second test below fails once an exempted entry matches, forcing its
- * removal.
+ * Entries exempt from the comparison because `@lelantos-org/contracts` has not
+ * yet published the contract change behind them. May be empty. The second test
+ * below fails once an exempted entry matches, forcing its removal.
  */
 const PENDING_MIGRATION = new Set<string>();
 
 /**
- * The pool and the native bridge are separate deployments, so each
- * hand-written subset is checked against its own canonical ABI. A native
- * entry compared against `maspAbi` would report as absent, which reads like a
- * rename rather than a different contract address.
+ * The pool and the native bridge are separate deployments, so each subset is
+ * checked against its own canonical ABI.
  */
 const SUBSETS = [
     { name: "MASP_ABI", items: MASP_ABI as readonly AbiItem[], canonical: maspAbi },
@@ -87,8 +75,8 @@ describe.each(SUBSETS)("$name vs the canonical contracts ABI", ({ items, canonic
     });
 
     it("covers every entry that is not explicitly pending migration", () => {
-        // A new hand-written entry must be compared, not silently uncovered,
-        // and a stale exemption must be removed once the entry matches.
+        // Every entry is either compared or exempted, and an exemption is
+        // removed once its entry matches.
         const exempted = items.filter((i) => PENDING_MIGRATION.has(`${i.type}:${i.name}`));
         expect(checked.length + exempted.length).toBe(items.length);
 
@@ -105,23 +93,38 @@ describe.each(SUBSETS)("$name vs the canonical contracts ABI", ({ items, canonic
     });
 });
 
-// The relayer pins the same selectors (`backend` relayer `adapters/abi.rs`), and
-// HANDOFF-listed values from the Foundry build. A deposit struct that gains a
-// field (here `feeAssetId`, `Permit2Sig.maxFee`, `FeeNote.feeAssetId`) moves
-// all three, so a stale copy on either side fails here rather than on chain.
+// The relayer pins the same selectors (`backend` relayer `adapters/abi.rs`).
+// Each follows the `DepositRequest`, `Permit2Sig` and `FeeNote` layouts, so a
+// copy that drifts from the contracts fails here rather than on chain. The
+// literals are `cast sig` / `cast sig-event` over the contracts' signatures.
 describe("deposit selectors", () => {
-    const selectorOf = (name: string) => {
-        const item = (MASP_ABI as readonly AbiItem[]).find(
-            (i) => i.type === "function" && i.name === name,
-        );
+    const selectorOf = (name: string, abi: readonly AbiItem[] = MASP_ABI as readonly AbiItem[]) => {
+        const item = abi.find((i) => i.type === "function" && i.name === name);
         return toFunctionSelector(item as Parameters<typeof toFunctionSelector>[0]);
     };
 
     it.each([
-        ["deposit", "0xfee3714c"],
-        ["depositAuthorized", "0xdf1daf3b"],
-        ["cancelDeposit", "0x5a0083a7"],
+        ["deposit", "0x8969b932"],
+        ["depositAuthorized", "0x4778b347"],
+        ["cancelDeposit", "0xc4e85ddc"],
     ])("%s is %s", (name, selector) => {
         expect(selectorOf(name)).toBe(selector);
+    });
+
+    it("cancelNative, on the adapter, is 0xa15198c3", () => {
+        expect(selectorOf("cancelNative", NATIVE_ADAPTER_ABI as readonly AbiItem[])).toBe(
+            "0xa15198c3",
+        );
+    });
+
+    // A deposit reads its escrow off the receipt by this topic and a cancel by
+    // id queries logs by it, so a wrong one finds no escrow at all.
+    it("DepositEscrowed is topic 0x48786aa9…", () => {
+        const item = (MASP_ABI as readonly AbiItem[]).find(
+            (i) => i.type === "event" && i.name === "DepositEscrowed",
+        );
+        expect(toEventSelector(item as Parameters<typeof toEventSelector>[0])).toBe(
+            "0x48786aa9d3678601a40c373a6118f7b062456414dee7cf289e46a81059fcbe57",
+        );
     });
 });

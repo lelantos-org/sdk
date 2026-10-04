@@ -1,10 +1,8 @@
-// Coin-cover helper shared by `transfer` and `withdraw`: select notes,
-// consolidate and retry, or throw on insufficient cover.
+// Cover for a spend: select notes, consolidate and retry, or throw on insufficient cover.
 //
-// **Options are re-read per attempt.** `selectOpts` carries `tipBlock`, and the
-// cooldown rule is `tip - firstSeenBlock < cooldownBlocks`. Consolidation
-// creates a note at or after the tip the first attempt saw, so a retry reusing
-// that tip would always exclude the merged note.
+// Selection options are re-read per attempt. `selectOpts` carries `tipBlock`, and the cooldown rule
+// is `tip - firstSeenBlock < cooldownBlocks`. Consolidation creates a note at or after the tip the
+// first attempt saw, so a retry reusing that tip would always exclude the merged note.
 
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { InvalidArgumentError } from "../../errors/config.js";
@@ -28,22 +26,15 @@ import type { SelectionOptions } from "../types/options.js";
 /**
  * Consolidation rounds before giving up.
  *
- * One merge frees `maxInputs - 1` slots' worth of value, so some targets need
- * several rounds. Each round costs a self-spend and a wait for its note to age;
- * three rounds cover typical note sets, and wallets needing more should use an
- * explicit sweep.
+ * One merge frees `maxInputs - 1` slots' worth of value, so some targets need several rounds. Each
+ * round costs a self-spend and a wait for its note to age.
  */
 const MAX_ROUNDS = 3;
 
 interface CoverArgs {
     asset: AssetId;
     target: CircuitAmount;
-    /**
-     * Selection options, rebuilt for each attempt.
-     *
-     * A factory so `tipBlock` is re-read between rounds; see the note at the top
-     * of this file.
-     */
+    /** Selection options, rebuilt for each attempt so `tipBlock` is re-read between rounds. */
     selectOpts?: (() => Promise<SelectOpts | undefined>) | undefined;
     autoConsolidate?: boolean | undefined;
 }
@@ -82,9 +73,9 @@ export async function ensureCover(
         return sel;
     };
 
-    // What the previous round was asked to merge. An identical merge in two
-    // consecutive rounds means consolidation made no progress. This is separate
-    // from `MAX_ROUNDS`, which bounds rounds that progress without reaching cover.
+    // What the previous round was asked to merge. An identical merge in two consecutive rounds
+    // means consolidation made no progress; `MAX_ROUNDS` bounds rounds that progress without
+    // reaching cover.
     let previous: string | undefined;
 
     for (let round = 0; ; round++) {
@@ -99,8 +90,7 @@ export async function ensureCover(
                 reason: "arity",
                 consolidate: hints(sel.consolidate),
                 consolidateSum: sel.consolidateSum,
-                // Consolidation runs at the end of each round and this throw is at
-                // the start, so `round > 0` means consolidation ran.
+                // Consolidation runs at the end of each round, so `round > 0` means it ran.
                 consolidationAttempted: round > 0,
             });
         }
@@ -111,13 +101,11 @@ export async function ensureCover(
 }
 
 /**
- * Rebuild a selector's funding error with the notes this wallet's in-flight
- * spends hold.
+ * Rebuild a selector's funding error with the notes this wallet's in-flight spends hold.
  *
- * The selector only sees notes no lease holds, so a spend losing a race with a
- * concurrent one would otherwise read "insufficient balance" although the notes
- * exist and are merely busy. Counting them as reserved turns that into
- * `NOTES_HELD`, which is retryable once the other spend settles.
+ * The selector only sees notes no lease holds, so a spend losing a race with a concurrent one would
+ * otherwise read "insufficient balance" although the notes exist. Counting them as reserved turns
+ * that into `NOTES_HELD`, which is retryable once the other spend settles.
  */
 function withLeasedNotes(
     err: unknown,

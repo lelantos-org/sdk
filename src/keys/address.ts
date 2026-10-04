@@ -5,23 +5,19 @@
 //        || pk   (32 B, little-endian field scalar — note-commitment binding)
 //        || ck   (32 B, Baby-Jubjub packed — FMD clue key)
 //
-// The HRP carries the format version: changing it invalidates existing strings, so format
-// changes fail fast.
+// The HRP carries the format version: a format change takes a different HRP, under which
+// existing strings fail to decode.
 //
-// `pk = Poseidon(TAG_PK, ivk)` is exposed so any sender can construct a
-// valid note commitment for the recipient. Spend authority remains gated
-// solely by `nsk` (nullifier check uses `nsk`, not `pk`); publishing `pk`
-// does not enable forgery and does not worsen linkability beyond `pk_d`.
+// `pk = Poseidon(TAG_PK, ivk, d0)` is published so a sender can build the recipient's note
+// commitment. It grants no spend authority, which rests on `nsk`, and adds no linkability beyond
+// `pk_d`.
 //
-// `ck = dk · Base8` is the public half of the FMD key. Senders expand it into
-// flag-key points (`fmdExpandFlagKey`) to build a clue; recovering the
-// detection scalars from it requires a discrete log, so the address confers
-// the ability to flag a recipient but not to detect for them. The detection
-// secret `dk` must never appear in an address.
+// `ck = dk · Base8` is the public half of the FMD key. Senders expand it into flag-key points
+// (`fmdExpandFlagKey`); recovering the detection scalars from it requires a discrete log, so an
+// address lets a sender flag the recipient but not detect for them. `dk` must never appear in an
+// address.
 //
-// Both point fields are validated on decode (on-curve, prime-order subgroup,
-// non-identity). A payload carrying a field scalar in the `ck` slot therefore
-// fails to decode rather than yielding a usable address.
+// Both point slots are validated on decode: on-curve, prime-order subgroup, non-identity.
 
 import { bech32m } from "bech32";
 import { branded, type ShieldedAddress } from "../core/brand.js";
@@ -55,20 +51,17 @@ export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): Shi
 /**
  * Decode a payment address, validating both point slots.
  *
- * Every failure is an `InvalidArgumentError` (`INVALID_ARGUMENT`), since addresses are user input. The whole
- * body is wrapped because `bech32m.decode` throws an untyped error on a bad checksum or charset.
- *
- * The address is omitted from the message: error text reaches application logs verbatim, and an
- * address identifies a payee.
+ * Every failure is an `InvalidArgumentError` (`INVALID_ARGUMENT`). The message omits the address:
+ * error text reaches application logs verbatim, and an address identifies a payee.
  */
 export function decodeAddress(J: Jubjub, addr: string): DecodedAddress {
     return rethrowBech32(() => decode(J, addr), "invalid shielded address", "address");
 }
 
 /**
- * Run a bech32m decode, typing what `bech32m` throws untyped (a bad checksum or charset) as
- * `InvalidArgumentError`. The library's message quotes the input ("Invalid checksum for
- * lelantos1…"), so it is kept on `cause` rather than in the message.
+ * Run a bech32m decode, rethrowing the untyped error `bech32m` raises on a bad checksum or
+ * charset as `InvalidArgumentError`. The library's message quotes the input, so it is kept on
+ * `cause`, not in the message.
  *
  * @internal
  */
@@ -100,9 +93,8 @@ function decode(J: Jubjub, addr: string): DecodedAddress {
     }
 
     const pk_d = unpackChecked(J, payload.slice(0, FIELD_BYTES), "pk_d");
-    // The scalar slot needs its own range check. An unreduced `pk` would make the sender commit
-    // to `pk mod r` while the recipient derives a canonical `pk` from `ivk`, producing a note the
-    // recipient cannot spend.
+    // Range check: an unreduced `pk` would make the sender commit to `pk mod r` while the
+    // recipient derives a canonical `pk` from `ivk`, producing a note the recipient cannot spend.
     const pk = fromLeBytes(payload.slice(FIELD_BYTES, 2 * FIELD_BYTES));
     assertField(pk, "address pk");
     const ck = unpackChecked(J, payload.slice(2 * FIELD_BYTES), "ck");
@@ -110,9 +102,8 @@ function decode(J: Jubjub, addr: string): DecodedAddress {
     return { pk_d, pk, ck };
 }
 
-// Rejects the identity alongside the usual curve checks: an identity `ck`
-// expands to flag-key points with a known discrete log, which makes every
-// clue bit predictable.
+// Rejects the identity alongside the curve checks: an identity `ck` expands to flag-key points
+// with a known discrete log, which makes every clue bit predictable.
 function unpackChecked(J: Jubjub, bytes: Uint8Array, name: string): Point {
     const bad = (why: string): never => {
         throw new InvalidArgumentError(`invalid shielded address: ${name} ${why}`, {

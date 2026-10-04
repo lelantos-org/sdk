@@ -1,5 +1,5 @@
-// `cancelDeposit`: by the escrow a deposit returned, or by id with the inputs rebuilt
-// from the pool's `DepositEscrowed` log; native escrows through `NativeAdapter`.
+// `cancelDeposit`: by the escrow a deposit returned, or by id with the inputs rebuilt from the
+// pool's `DepositEscrowed` log; native escrows through `NativeAdapter`.
 
 import { describe, expect, it, vi } from "vitest";
 import type { CancelDepositInputs, DepositEscrowedRecord } from "../../chain/types.js";
@@ -12,8 +12,11 @@ import { executeCancelDeposit } from "./cancel-deposit.js";
 
 const USDC = assetId(1n);
 const WETH = assetId(2n);
+const YIELD_USDC = assetId(3n);
 const PAYER = evmAddress(`0x${"aa".repeat(20)}`);
 const TX = branded<Hex32>(`0x${"cc".repeat(32)}`);
+/** The escrow's leaf, which no event carries; a cancel never reads it. */
+const LEAF = branded<Hex32>(`0x${"0c".repeat(32)}`);
 
 const record = (over: Partial<DepositEscrowedRecord> = {}): DepositEscrowedRecord => ({
     id: 5n,
@@ -22,18 +25,17 @@ const record = (over: Partial<DepositEscrowedRecord> = {}): DepositEscrowedRecor
     publicAssetId: USDC,
     publicIn: 1_000n,
     feeBpsAtSubmit: 20,
-    cm: branded<Hex32>(`0x${"01".repeat(32)}`),
-    cvDep: [1n, 2n],
-    rcv: 3n,
+    inner: branded<Hex32>(`0x${"01".repeat(32)}`),
     feeIn: 7n,
     feeAssetId: WETH,
-    feeCm: branded<Hex32>(`0x${"02".repeat(32)}`),
-    feeCvDep: [4n, 5n],
+    feeInner: branded<Hex32>(`0x${"02".repeat(32)}`),
+    // USDC is a plain asset, so the pool publishes a zero refund cap.
+    pulled: 0n,
     submittedAt: 900,
     ...over,
 });
 
-const inputsOf = ({ id: _, recipient: __, rcv: ___, ...rest }: DepositEscrowedRecord) =>
+const inputsOf = ({ id: _, recipient: __, ...rest }: DepositEscrowedRecord) =>
     rest as CancelDepositInputs;
 
 async function harness(opts: { record?: DepositEscrowedRecord | null; pending?: boolean } = {}) {
@@ -82,7 +84,7 @@ describe("cancelDeposit", () => {
             depositId: 5n,
             native: false,
             asset: USDC,
-            commitment: record().cm,
+            commitment: LEAF,
             cancelInputs: inputsOf(record()),
             cancellableAtBlock: 8_100,
         };
@@ -136,6 +138,57 @@ describe("cancelDeposit", () => {
         expect(res).toMatchObject({ native: true, feeRefunded: null });
     });
 
+    // A yield escrow's refund cap is digest-bound and only the `DepositEscrowed` log carries it,
+    // so every route to the chain hands back that figure, never one recomputed here.
+    describe("a yield escrow's refund cap", () => {
+        const PULLED = 10_050n;
+        const yielding = (over: Partial<DepositEscrowedRecord> = {}) =>
+            record({
+                publicAssetId: YIELD_USDC,
+                feeIn: 0n,
+                feeAssetId: assetId(0n),
+                pulled: PULLED,
+                ...over,
+            });
+
+        it("goes back as the log published it when given only the id", async () => {
+            const { ctx, chain, run } = await harness({ record: yielding() });
+            await executeCancelDeposit(ctx, { depositId: 5n }, run);
+            expect(chain.cancelDeposit).toHaveBeenCalledWith(
+                5n,
+                expect.objectContaining({ pulled: PULLED }),
+            );
+        });
+
+        it("goes back from the escrow a deposit returned, after a reload", async () => {
+            const { ctx, chain, run } = await harness();
+            const escrow: DepositEscrow = {
+                depositId: 5n,
+                native: false,
+                asset: YIELD_USDC,
+                commitment: LEAF,
+                cancelInputs: inputsOf(yielding()),
+                cancellableAtBlock: 8_100,
+            };
+            await executeCancelDeposit(ctx, structuredClone(escrow), run);
+            expect(chain.fetchDepositEscrowed).not.toHaveBeenCalled();
+            expect(chain.cancelDeposit).toHaveBeenCalledWith(
+                5n,
+                expect.objectContaining({ pulled: PULLED }),
+            );
+        });
+
+        it("reaches the adapter for an adapter-owned escrow", async () => {
+            const native = yielding({ payer: evmAddress(NATIVE_ADAPTER_ADDR) });
+            const { ctx, chain, run } = await harness({ record: native });
+            await executeCancelDeposit(ctx, { depositId: 5n }, run);
+            expect(chain.cancelDepositNative).toHaveBeenCalledWith(
+                5n,
+                expect.objectContaining({ pulled: PULLED }),
+            );
+        });
+    });
+
     it("refuses an id with no log, and an escrow no longer pending, without sending", async () => {
         const missing = await harness({ record: null });
         await expect(
@@ -162,6 +215,18 @@ describe("cancelDeposit", () => {
             ),
         ).rejects.toMatchObject({ argument: "cancelInputs" });
         expect(chain.getEscrowed).not.toHaveBeenCalled();
+    });
+
+    // The cap is digest-bound, so a defaulted zero would pass here and revert `DigestMismatch` for
+    // a yield asset instead.
+    it("refuses a held escrow whose inputs lack the refund cap, before any read", async () => {
+        const { ctx, chain, run } = await harness();
+        const { pulled: _, ...saved } = inputsOf(record());
+        await expect(
+            executeCancelDeposit(ctx, { depositId: 5n, cancelInputs: saved } as never, run),
+        ).rejects.toMatchObject({ code: "INVALID_ARGUMENT", argument: "cancelInputs" });
+        expect(chain.getEscrowed).not.toHaveBeenCalled();
+        expect(chain.cancelDeposit).not.toHaveBeenCalled();
     });
 
     it("needs a signing chain layer, and the log reader for a bare id", async () => {

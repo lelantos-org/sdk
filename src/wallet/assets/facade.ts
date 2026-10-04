@@ -49,8 +49,8 @@ export function lazyAssets(
     cfg: AssetsConfig,
     tokens?: (() => Promise<readonly ChainToken[]>) | undefined,
 ): AssetsFacade {
-    // The registry (fee, yield and ladder resolution) loads at the first lookup, so a wallet that
-    // only syncs and lists notes never downloads it. A failed load is retried on the next lookup.
+    // Imported at the first lookup, so a wallet that only syncs and lists notes never loads the
+    // registry module. A failed import is retried on the next lookup.
     let registry: Promise<AssetRegistry> | undefined;
     const get = (): Promise<AssetRegistry> => {
         registry ??= import("./registry.js").then(

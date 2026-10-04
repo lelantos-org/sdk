@@ -1,7 +1,5 @@
-// `fmdUrl` is optional when the pluggables it would build are supplied.
-//
-// `validateConfig` accepts `noteSource` in place of `fmdUrl`, so the client is
-// built only when a default needs one.
+// `fmdUrl` is optional when the pluggables it would build are supplied: `validateConfig` accepts
+// `noteSource` in its place, so the client is built only when a default needs one.
 
 import { describe, expect, it } from "vitest";
 import type { ChainAdapter } from "../../chain/port.js";

@@ -95,7 +95,6 @@ describe("concurrent syncs", () => {
         });
 
         await expect(wallet.sync({ scope: "notes" })).rejects.toThrow("scanner died");
-        // A failed sync must not block the queue.
         await expect(wallet.sync({ scope: "notes" })).rejects.toThrow("scanner died");
     });
 });

@@ -2,20 +2,21 @@ import { describe, expect, it } from "vitest";
 import { BN254_FR } from "../core/field.js";
 import { randomFr, randomJubjubScalar } from "../core/random.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
+import { buildNullifierFromNsk } from "../crypto/nullifier.js";
 import { Poseidon } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
 import { fmdClueKeyFromRoot } from "../fmd/keys.js";
 import type { Note } from "../notes/note.js";
 import type { SpendKind } from "../protocol/transact.js";
 import type { Prover } from "../prover/types.js";
-import type { InputSlot } from "./common.js";
+import { buildInputs, type InputSlot } from "./common.js";
 import { buildSpend, type SpendArgs } from "./spend.js";
 
-// `kind` routes the on-chain call: a transfer tagged `withdrawNative` would
-// reach NativeAdapter.withdrawNative and unwrap WETH to a recipient. It is a plain
-// argument to the shared builder, so each kind is asserted here.
+// `kind` routes the on-chain call: a transfer tagged `withdrawNative` would reach
+// NativeAdapter.withdrawNative and unwrap WETH to a recipient. It is a plain argument to the
+// shared builder, so each kind is asserted here.
 
-/** Records the witness instead of proving; proving is minutes and ~29 MB. */
+/** Records the witness instead of proving. */
 function recordingProver(): Prover & { last?: Record<string, unknown> } {
     const p: Prover & { last?: Record<string, unknown> } = {
         async prove(input) {
@@ -35,16 +36,11 @@ function recordingProver(): Prover & { last?: Record<string, unknown> } {
     return p;
 }
 
+/** Diversifier of every real input slot. These tests record the witness, so any value serves. */
+const D = (1n << 127n) + 5n;
+
 function note(_J: Jubjub, value: bigint, pk: bigint): Note {
-    return {
-        asset: 1n,
-        value,
-        pk,
-        rho: randomFr(),
-        rcm: randomFr(),
-        rcv: randomJubjubScalar(),
-        rcvDep: randomJubjubScalar(),
-    };
+    return { asset: 1n, value, pk, rho: randomFr(), rcm: randomFr() };
 }
 
 describe("buildSpend", () => {
@@ -60,6 +56,7 @@ describe("buildSpend", () => {
             cached: {
                 note: note(J, 100n, pk),
                 nsk: randomJubjubScalar(),
+                d: D,
                 leafIndex: 0,
             },
             pathElements: Array.from({ length: treeDepth }, () => [0n, 0n, 0n]),
@@ -95,7 +92,9 @@ describe("buildSpend", () => {
 
             expect(built.payload.kind).toBe(kind);
             expect(built.payload.pubInputs.publicOut).toBe(publicOut);
-            expect(built.payload.pubInputs.publicIn).toBe(0n);
+            // A transfer names no asset: the circuit forces `public_asset_id` to 0 with
+            // `public_out`, and the pool reverts `MustNotNameAsset`.
+            expect(built.payload.pubInputs.publicAssetId).toBe(kind === "transfer" ? 0n : 1n);
             expect(built.cm).toHaveLength(2);
             expect(built.payload.aux).toHaveLength(2);
             // Only `SwapWrapper.swap` reads `intentHash`; every other spend
@@ -103,8 +102,8 @@ describe("buildSpend", () => {
             expect(built.payload.pubInputs.intentHash).toBe(0n);
         }
 
-        // A swap's leg 1 is a `withdraw` binding the swap intent's hash — a
-        // full field word, well past 160 bits, carried through unmasked.
+        // A swap's leg 1 is a `withdraw` binding the swap intent's hash: a full field word,
+        // well past 160 bits, carried through unmasked.
         const intentHash = BN254_FR - 1n;
         const outs: [Note, Note] = [note(J, 60n, pk), note(J, 0n, pk)];
         const swapLeg = await buildSpend({ ...base("withdraw", 40n, outs), intentHash });
@@ -137,7 +136,12 @@ describe("buildSpend", () => {
             treeDepth: 4,
             inputs: [
                 {
-                    cached: { note: note(J, 100n, pk), nsk: randomJubjubScalar(), leafIndex: 0 },
+                    cached: {
+                        note: note(J, 100n, pk),
+                        nsk: randomJubjubScalar(),
+                        d: D,
+                        leafIndex: 0,
+                    },
                     pathElements: Array.from({ length: 4 }, () => [0n, 0n, 0n]),
                     pathIndices: [0, 0, 0, 0],
                 },
@@ -189,10 +193,9 @@ describe("buildSpend", () => {
 });
 
 describe("buildSpend pre-flight", () => {
-    // Each of these builds a witness the prover accepts the shape of and then
-    // fails on seconds to a minute later, as an opaque circom assertion or as a
-    // valid-looking proof the chain rejects. All are caught before any artifact
-    // is fetched.
+    // Each of these builds a witness the prover accepts the shape of and then fails on, as an
+    // opaque circom assertion or as a valid-looking proof the chain rejects. All are caught
+    // before any artifact is fetched.
 
     async function fixture() {
         const P = await Poseidon.build();
@@ -203,7 +206,7 @@ describe("buildSpend pre-flight", () => {
         const treeDepth = 4;
 
         const slot = (): InputSlot => ({
-            cached: { note: note(J, 100n, pk), nsk: randomJubjubScalar(), leafIndex: 0 },
+            cached: { note: note(J, 100n, pk), nsk: randomJubjubScalar(), d: D, leafIndex: 0 },
             pathElements: Array.from({ length: treeDepth }, () => [0n, 0n, 0n]),
             pathIndices: Array.from({ length: treeDepth }, () => 0),
         });
@@ -238,10 +241,9 @@ describe("buildSpend pre-flight", () => {
         await expect(buildSpend(args())).resolves.toBeDefined();
     });
 
-    // Mixing assets is legal (see the "buildSpend, multi-asset" block below);
-    // an asset that fails to conserve is not. These are the two shapes a
-    // mis-built selection takes: an input nothing spends, and an output nothing
-    // funds.
+    // Mixing assets is legal (see "buildSpend, multi-asset" below); an asset that fails to
+    // conserve is not. A mis-built selection takes two shapes: an input nothing spends, and an
+    // output nothing funds.
 
     it("rejects an input whose asset no output accounts for", async () => {
         const { J, pk, slot, args } = await fixture();
@@ -265,7 +267,7 @@ describe("buildSpend pre-flight", () => {
 
     it("rejects slot counts that do not match the named shape", async () => {
         const { args } = await fixture();
-        // Two outputs against a 3x3 key builds a 34-coefficient witness and a
+        // A 2x2 witness against a 3x3 key has the wrong number of public inputs and a
         // different Fiat-Shamir `z`.
         await expect(buildSpend(args({ shape: { nIn: 3, nOut: 3 } }))).rejects.toThrow(
             /input slots for a 3x3 circuit/,
@@ -321,12 +323,20 @@ describe("buildSpend pre-flight", () => {
             ),
         ).rejects.toThrow(/64-bit unsigned integer/);
     });
+
+    it("rejects a note under asset 0, which the circuit refuses even on a zero-value pad", async () => {
+        const { J, pk, args } = await fixture();
+        const pad = { ...note(J, 0n, pk), asset: 0n };
+
+        await expect(buildSpend(args({ outputs: [note(J, 100n, pk), pad] }))).rejects.toThrow(
+            /output slot 1 asset must not be 0/,
+        );
+    });
 });
 
-// Cross-asset fees: the circuit conserves value per asset (PerAssetValueBalance
-// in circuits/src/lib/balance.circom), so one proof may carry the asset being
-// moved alongside a second asset that pays the relayer. These pin that the SDK
-// agrees with the circuit rather than being stricter than it.
+// Cross-asset fees: the circuit conserves value per asset (PerAssetValueBalance in
+// circuits/src/lib/balance.circom), so one proof may carry the asset being moved alongside a
+// second asset that pays the relayer. These pin that the SDK is no stricter than the circuit.
 describe("buildSpend, multi-asset", () => {
     const ZERO = "0x0000000000000000000000000000000000000000";
 
@@ -342,6 +352,7 @@ describe("buildSpend, multi-asset", () => {
             cached: {
                 note: { ...note(J, value, pk), asset },
                 nsk: randomJubjubScalar(),
+                d: D,
                 leafIndex,
             },
             pathElements: Array.from({ length: treeDepth }, () => [0n, 0n, 0n]),
@@ -388,9 +399,8 @@ describe("buildSpend, multi-asset", () => {
         expect(built.cm).toHaveLength(4);
     });
 
-    /// Per-asset, not in aggregate. Asset 1 burns 5 and asset 2 mints 5, so the
-    /// totals match: this is the cross-asset forgery `PerAssetValueBalance`
-    /// exists to reject, which a single global sum would accept.
+    /// Per-asset, not in aggregate. Asset 1 burns 5 and asset 2 mints 5, so the totals match:
+    /// the cross-asset forgery `PerAssetValueBalance` rejects and a single global sum accepts.
     it("rejects an imbalance that a global sum would miss", async () => {
         const { slot, out, args } = await fixture();
         const inputs = [slot(1n, 100n, 0), slot(2n, 30n, 1)];
@@ -404,10 +414,9 @@ describe("buildSpend, multi-asset", () => {
         await expect(buildSpend(args(inputs, outputs))).rejects.toThrow(/balance for asset/);
     });
 
-    /// `publicOut` leaves the pool in the transparent bucket, which the circuit
-    /// hard-wires to a single `public_asset_id`. It must count against that
-    /// asset only; charged to the fee asset, a withdraw would appear to balance
-    /// while taking value from the fee.
+    /// `publicOut` leaves the pool in the transparent bucket, which the circuit ties to a single
+    /// `public_asset_id`. It must count against that asset only; charged to the fee asset, a
+    /// withdraw would appear to balance while taking value from the fee.
     it("attributes publicOut to the transparent bucket's asset alone", async () => {
         const { slot, out, args } = await fixture();
         const ok = args(
@@ -425,5 +434,53 @@ describe("buildSpend, multi-asset", () => {
             40n,
         );
         await expect(buildSpend({ ...bad, kind: "withdraw" })).rejects.toThrow(/asset 1/);
+    });
+});
+
+describe("buildInputs", () => {
+    const DEPTH = 4;
+    const real = (nsk: bigint): InputSlot => ({
+        cached: {
+            note: { asset: 1n, value: 100n, pk: randomFr(), rho: randomFr(), rcm: randomFr() },
+            nsk,
+            d: D,
+            leafIndex: 0,
+        },
+        pathElements: Array.from({ length: DEPTH }, () => [0n, 0n, 0n]),
+        pathIndices: Array.from({ length: DEPTH }, () => 0),
+    });
+
+    it("keys every dummy by the real input's nsk, under a fresh rho and rcm", async () => {
+        const P = await Poseidon.build();
+        const nsk = randomJubjubScalar();
+
+        // The real slot need not come first.
+        const built = buildInputs(P, [null, real(nsk), null, null], DEPTH);
+        const dummies = built.filter((s) => s.isDummy);
+
+        expect(built.map((s) => s.isDummy)).toEqual([true, false, true, true]);
+        for (const d of dummies) {
+            expect(d.nsk).toBe(nsk);
+            expect(d.nf).toBe(buildNullifierFromNsk(P, nsk, d.rho, d.cm));
+            // Not the zero key, which every observer holds.
+            expect(d.nf).not.toBe(buildNullifierFromNsk(P, 0n, d.rho, d.cm));
+        }
+        expect(new Set(dummies.map((d) => d.rho)).size).toBe(3);
+        expect(new Set(dummies.map((d) => d.rcm)).size).toBe(3);
+        expect(new Set(built.map((s) => s.nf)).size).toBe(4);
+    });
+
+    it("carries the slot's diversifier on a real input and zero on a dummy", async () => {
+        const P = await Poseidon.build();
+
+        const built = buildInputs(P, [null, real(randomJubjubScalar()), null, null], DEPTH);
+
+        expect(built.map((s) => s.d)).toEqual([0n, D, 0n, 0n]);
+    });
+
+    it("rejects slots with no real input", async () => {
+        const P = await Poseidon.build();
+
+        expect(() => buildInputs(P, [null, null], DEPTH)).toThrow(InvalidArgumentError);
     });
 });

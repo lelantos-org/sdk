@@ -2,18 +2,18 @@
 //
 // Run: npm run bench:scan
 //
-// Two sections:
+// Sections:
 //   primitives — the wasm curve ops in isolation, where sync time is spent.
-//                `inSubgroup` is no longer on the decrypt path; it is kept as
-//                the cost the cofactor clearing replaced.
-//   scan       — end-to-end `scanNotes` throughput at a few hit rates.
+//                `inSubgroup` is not on the decrypt path, which clears the
+//                cofactor instead; it is reported for reference.
+//   per-note   — one trial decrypt and one `fmdTest` on a foreign note.
+//   scan       — end-to-end `LocalScanner.scan` throughput at a few hit rates.
 //
 // Scalars are full-width (mod BABYJUB_SUBGROUP_ORDER, ~251 bits). `mul_scalar`
 // runs `n.bits()` iterations, so a short scalar understates its cost.
 //
-// `fmdTest` is reported for reference; there is no client-side FMD pre-filter
-// (see `src/sync/scanner.ts`). It shares `decompress` and `in_subgroup` with
-// trial-decrypt and tracks the same optimisations.
+// `fmdTest` is reported for reference: the scan path does not call it (see
+// `src/sync/scanner.ts`).
 
 import {
     BABYJUB_SUBGROUP_ORDER,
@@ -113,9 +113,7 @@ async function main(): Promise<void> {
     );
     console.log(`  fmdTest / decrypt          ${(fmd / decrypt).toFixed(2).padStart(8)}x`);
     // Trial-decrypt performs one 251-bit scalar mult, the ECDH. `epk`'s cofactor
-    // is cleared by three doublings rather than tested with a second mult, so
-    // `inSubgroup` above is reported for reference and is no longer on this
-    // path — see `wasm/jubjub/src/decrypt.rs`.
+    // is cleared by three doublings; see `wasm/jubjub/src/decrypt.rs`.
     console.log(`  ECDH mult share            ${((100 * mul) / decrypt).toFixed(0).padStart(7)}%`);
 
     console.log("\nend-to-end scan");
@@ -153,7 +151,6 @@ function buildBatch(
             value: BigInt(i + 1),
             rho: BigInt(i + 1000),
             rcm: BigInt(i + 2000),
-            rcvDep: BigInt(i + 3000),
         };
         const enc = encryptNote({
             J,
@@ -167,9 +164,9 @@ function buildBatch(
         inputs.push({
             ciphertext: wire,
             epk: enc.epk,
-            // The real commitment. `scanNotes` rebuilds it from the decrypted
-            // plaintext and rejects a mismatch, so a placeholder here would
-            // make every "mine" note a `cmMismatch` and report no hits.
+            // `scanNotes` rebuilds the commitment from the decrypted plaintext and
+            // rejects a mismatch, so a placeholder would turn every "mine" note
+            // into a `cmMismatch` and report no hits.
             cm: buildNoteCommitment(P, { ...payload, pk: owner.pk }),
             leafIndex: i,
             blockNumber: i,

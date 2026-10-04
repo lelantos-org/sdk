@@ -1,11 +1,4 @@
 // Shared bundle types and builder helpers for deposit, transfer and withdraw.
-//
-// `buildSpend` proves the transact SNARK for transfer, withdraw and
-// withdrawNative, and returns a `SubmitTransactPayload` for `/v1/spend`.
-// `buildDeposit` does not prove; deposits go through `MASP.deposit` (Permit2
-// witness) and it returns a `BuiltDeposit` the wallet signs and broadcasts. The
-// relayer serves no deposit route: it picks the escrow up from the
-// `DepositEscrowed` event.
 
 import {
     circuitSignals,
@@ -20,8 +13,7 @@ import {
 import { assertField } from "../core/field.js";
 import { randomFr } from "../core/random.js";
 import { buildRho, type Field, type Jubjub, type Point, type Poseidon } from "../crypto/index.js";
-import { InternalError } from "../errors/base.js";
-import { WalletConfigError } from "../errors/config.js";
+import { InvalidArgumentError, WalletConfigError } from "../errors/config.js";
 import { FMD_DEFAULT_GAMMA, fmdExpandFlagKey } from "../fmd/keys.js";
 import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
@@ -34,19 +26,19 @@ import type { Groth16Proof, Prover, ProverArtifacts } from "../prover/types.js";
 export interface OutputRecipient {
     pk_d: Point;
     /**
-     * Note-commitment binding scalar; same value the receiver derives via
-     * `derivePkFromIvk`. Part of the bech32m address.
+     * Note-commitment binding scalar from the bech32m address: the receiver derives it from
+     * its `ivk` and default diversifier.
      */
     pk: Field;
     /**
-     * FMD clue key from the recipient's address: the public half. Expanding it
-     * yields flag-key points, never detection scalars.
+     * FMD clue key from the recipient's address (the public half). Expanding it yields
+     * flag-key points, never detection scalars.
      */
     ck: Point;
 }
 
 /**
- * Per-output rng material. Caller owns randomness; SDK is pure.
+ * Per-output randomness, supplied by the caller.
  *
  * @internal
  */
@@ -60,39 +52,36 @@ export interface BundleCommon {
     P: Poseidon;
     J: Jubjub;
     chainId: bigint;
-    asset: bigint;
-    payerAddress: string; // 0x ETH (deposit ERC20 source; pass `0x0` for transfer/withdraw)
     /**
-     * 0x ETH. The address the relayer publishes as its submitter (`/chains`
-     * `relayerAddress`), which is the pool's `msg.sender` for its spends and so
-     * must equal `pi.relayer`. For a relayer submitting through its `Bundler`
-     * contract this is the Bundler's address, not the EOA signing the outer
-     * transaction.
+     * Registry id `publicOut` leaves the pool in. Published as `publicAssetId` only when
+     * `publicOut` is non-zero.
+     */
+    asset: bigint;
+    payerAddress: string; // 0x ETH, non-zero: the pool reverts `ZeroPayer`
+    /**
+     * 0x ETH. The relayer's submitter address (`/chains` `relayerAddress`): the pool's
+     * `msg.sender` for its spends, so it must equal `pi.relayer`. For a relayer submitting
+     * through its `Bundler` contract this is the Bundler's address, not the signing EOA.
      */
     relayerAddress: string;
-    recipientAddress: string; // 0x ETH (on-chain recipient for withdraw, sender for deposit/transfer)
+    recipientAddress: string; // 0x ETH, non-zero: the on-chain recipient of `publicOut`
     /**
-     * `PubInputs.Transact.intentHash`, a field element. A swap's withdraw leg
-     * must set it to `swapIntentHash` of the swap it funds; every other spend
-     * leaves it at the zero default.
+     * `PubInputs.Transact.intentHash`, a field element. A swap's withdraw leg must set it to
+     * `swapIntentHash` of the swap it funds; every other spend leaves it at the zero default.
      */
     intentHash?: bigint;
     /**
-     * Pluggable prover. Pass either:
-     *   - `artifacts: ProverArtifacts` — the SDK proves with snarkjs
-     *   - `prover: Prover` — a custom backend (remote / worker / mock)
-     * Exactly one is required.
+     * Proving backend: `artifacts` (the SDK proves with snarkjs) or a custom `prover`
+     * (remote, worker, mock). One is required; `prover` takes precedence.
      */
     artifacts?: ProverArtifacts;
     prover?: Prover;
     treeDepth: number;
     /**
-     * Circuit arity, when the caller knows it.
-     *
-     * Optional because `toCircomInput` infers the shape from the array lengths.
-     * Supplying it enables a pre-flight check that the slot counts match the
-     * zkey; without it a spend with the wrong output count for the key builds a valid
-     * witness with the wrong number of public inputs and fails inside the prover.
+     * Circuit arity, when the caller knows it. Supplying it enables a pre-flight check of the
+     * slot counts. `toCircomInput` infers the shape from the array lengths, so without it a
+     * spend with the wrong slot count for the zkey builds a valid witness with the wrong
+     * number of public inputs and fails inside the prover.
      */
     shape?: CircuitShape;
 }
@@ -106,10 +95,7 @@ export interface BuiltBundle {
     producedNotes: Note[];
 }
 
-/**
- * One real input slot for transfer/withdraw. Pass `null` in the
- * per-slot tuple to fill that slot with a dummy.
- */
+/** One real input slot of a spend. A `null` entry in {@link InputSlots} is a dummy. */
 export interface InputSlot {
     cached: SpendableCachedNote;
     pathElements: Field[][];
@@ -117,10 +103,8 @@ export interface InputSlot {
 }
 
 /**
- * Real-or-dummy input mask, one entry per input slot: an `InputSlot` for a
- * real spend or `null` for a dummy. Length must equal the shape's `nIn`, and
- * at least one entry must be non-null. The balance equation is enforced
- * inside the builder.
+ * One entry per input slot: an `InputSlot` for a real spend or `null` for a dummy. Length
+ * must equal the shape's `nIn`, and at least one entry must be non-null.
  *
  * @internal
  */
@@ -129,25 +113,31 @@ export type InputSlots = readonly (InputSlot | null)[];
 type SpentNoteInput = ReturnType<typeof toSpentNoteFromPath>;
 
 /**
- * Fill every input slot, substituting a dummy for `null`. Every dummy gets a
- * fresh `rho` and fresh blinders: both reach the public inputs, `rho` through
- * the nullifier and `rcv` through `in_cv`.
+ * Fill every input slot, substituting a dummy for `null`. A dummy's nullifier is public: it
+ * is keyed by the `nsk` of the first real slot and takes a fresh `rho` and `rcm`, so it reads
+ * as a real one. Requires at least one real slot.
  *
  * @internal
  */
 export function buildInputs(P: Poseidon, slots: InputSlots, treeDepth: number): SpentNoteInput[] {
+    const nsk = slots.find((s): s is InputSlot => s !== null)?.cached.nsk;
+    if (nsk === undefined) {
+        throw new InvalidArgumentError("buildInputs: at least one real input required", {
+            argument: "slots",
+        });
+    }
     return slots.map((s) =>
         s
             ? toSpentNoteFromPath(P, s.cached, s.pathElements, s.pathIndices)
-            : dummyInputAt(P, treeDepth, randomFr()),
+            : dummyInputAt(P, treeDepth, { nsk, rho: randomFr(), rcm: randomFr() }),
     );
 }
 
 /**
- * Bind each output-note rho to the Orchard-style derivation the transact
- * circuit enforces: rho = Poseidon(TAG_RHO, nullifier[0], out_index). Overrides
- * any caller-supplied rho so no two committed output notes can share a rho
- * (→ a future nullifier). MUST run before aux/cm are built from the notes.
+ * Set each output note's rho to the derivation the transact circuit enforces:
+ * `rho = Poseidon(TAG_RHO, nullifier[0], out_index)`. Overrides any caller-supplied rho, so
+ * no two committed output notes share a rho, and hence a future nullifier. Must run before
+ * aux and commitments are built from the notes.
  *
  * @internal
  */
@@ -182,23 +172,24 @@ export async function finalize(
     inputs: readonly SpentNoteInput[],
     outputs: readonly Note[],
     merkleRoot: Field,
-    publicIn: bigint,
     publicOut: bigint,
     auxAndWitness: readonly OutputAuxWithWitness[],
 ): Promise<BuiltBundle> {
     // Resolved before the witness is built, so a missing backend fails fast.
     const prove = proverFor(common);
     const intentHash = common.intentHash ?? 0n;
-    // The contract compares the full uint256 word; an unreduced value would
-    // make the proof bind a different word than the wrapper recomputes.
+    // The contract compares the full uint256 word; an unreduced value would make the proof
+    // bind a different word than the wrapper recomputes.
     assertField(intentHash, "intentHash");
     const aux: OutputAux[] = auxAndWitness.map((a) => a.aux);
 
-    const { J, asset } = common;
+    // A spend that withdraws nothing names no asset: the circuit enforces
+    // `public_out == 0 ⇒ public_asset_id == 0` and the pool's `transfer` reverts
+    // `MustNotNameAsset`.
+    const publicAssetId = publicOut === 0n ? 0n : common.asset;
 
-    const baseInput = toCircomInput(common.P, J, {
-        publicAssetId: asset,
-        publicIn,
+    const baseInput = toCircomInput(common.P, {
+        publicAssetId,
         publicOut,
         inputs: [...inputs],
         outputs: [...outputs],
@@ -214,9 +205,8 @@ export async function finalize(
     });
 
     const z = fiatShamirZ(flatten(baseInput));
-    // `circuitSignals` drops the challenge-only fields. They are logical public
-    // inputs (hashed into `z` above) but not circuit signals, and the
-    // witness calculator rejects a key the circuit does not declare.
+    // `circuitSignals` drops the challenge-only fields: they are hashed into `z` above but are
+    // not circuit signals, and the witness calculator rejects a key the circuit does not declare.
     const proof = await prove({ ...circuitSignals({ ...baseInput, z: z.toString() }) });
 
     return {
@@ -224,21 +214,17 @@ export async function finalize(
             chainId: common.chainId,
             kind,
             proof: groth16ToWire(proof),
-            pubInputs: extractPubInputs(common, baseInput, publicIn, publicOut),
+            pubInputs: extractPubInputs(common, baseInput),
             aux: [...aux],
         },
-        // Read back from the witness, where `toCircomInput` already hashed each
-        // output commitment, so the value the proof commits to has one source.
+        // Read back from the witness, where `toCircomInput` hashed each output commitment, so
+        // the value the proof commits to has one source.
         cm: baseInput.out_cm.map((c) => BigInt(c)),
         producedNotes: [...outputs],
     };
 }
 
-/**
- * The configured proving backend, as a function from circuit input to proof.
- *
- * The single check that one of `prover` or `artifacts` is set.
- */
+/** The configured proving backend, as a function from circuit input to proof. */
 function proverFor(
     common: BundleCommon,
 ): (input: Record<string, unknown>) => Promise<Groth16Proof> {
@@ -248,58 +234,36 @@ function proverFor(
         throw new WalletConfigError("BundleCommon: either `prover` or `artifacts` is required");
     }
     return async (input) => {
-        // Loaded lazily. Only `prover/snarkjs.ts` may reach the optional `snarkjs` peer,
-        // and only lazily; an eager import on the default path makes the optional
-        // dependency mandatory. This module is on the default path (`buildSpend` →
-        // `finalize` → here), so a static import would make every `./protocol`
-        // consumer carry the backend.
+        // Imported lazily: a static import would make the optional `snarkjs` peer mandatory
+        // for every `./protocol` consumer.
         const { SnarkjsProver } = await import("../prover/snarkjs.js");
         return (await new SnarkjsProver(artifacts).prove(input)).proof;
     };
 }
 
 /**
- * Lift the public-input subset of the (decimal-string) circom witness back
- * into native bigints for the relayer wire format.
+ * Parse the public-input subset of the circom witness (decimal strings) into bigints for the
+ * relayer wire format.
  *
  * @internal
  */
-function extractPubInputs(
-    common: BundleCommon,
-    base: TransactWitnessBundle,
-    publicIn: bigint,
-    publicOut: bigint,
-): TransactPubInputs {
-    // The explicit re-parse is the trust boundary between the prover witness
-    // (decimal strings) and the relayer wire format (bigints/points). Typing
-    // the witness as `TransactWitnessBundle` keeps it cast-free.
-    // A curve point is always (x, y) whatever the shape — unlike the
-    // per-slot arrays below, whose length is `nIn` or `nOut`.
-    const point = (v: readonly string[] | undefined): [bigint, bigint] => {
-        if (v?.length !== 2) {
-            throw new InternalError(
-                `extractPubInputs: a curve point needs 2 coordinates, got ${v?.length}`,
-            );
-        }
-        return [BigInt(v[0] as string), BigInt(v[1] as string)];
-    };
+function extractPubInputs(common: BundleCommon, base: TransactWitnessBundle): TransactPubInputs {
     const scalars = (v: readonly string[]): bigint[] => v.map((x) => BigInt(x));
 
     return {
         merkleRoot: BigInt(base.merkle_root),
         nullifier: scalars(base.nullifier),
         outCm: scalars(base.out_cm),
-        publicAssetId: common.asset,
-        publicIn,
-        publicOut,
-        inCv: base.in_cv.map(point),
-        outCv: base.out_cv.map(point),
+        publicAssetId: BigInt(base.public_asset_id),
+        publicOut: BigInt(base.public_out),
+        // The calldata copy of the circuit's `digest` output; the pool hashes it into `z` and
+        // hands it to the verifier.
+        digest: BigInt(base.digest),
         recipient: common.recipientAddress,
         chainId: common.chainId,
         payer: common.payerAddress,
         relayer: common.relayerAddress,
         intentHash: BigInt(base.intent_hash),
-        outCvDep: base.out_cv_dep.map(point),
     };
 }
 

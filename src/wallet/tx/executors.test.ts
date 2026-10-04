@@ -14,8 +14,8 @@ import type { StoredNote } from "../notes/note-store.js";
 import { executeTransfer } from "../ops/transfer.js";
 import { executeWithdraw } from "../ops/withdraw.js";
 
-// The executors depend on `WalletContext`, not on `Wallet`, so the fixture
-// is a context over stubs: no chain adapter, prover or note store.
+// The executors depend on `WalletContext`, not on `Wallet`, so the fixture is a context over stubs:
+// no chain adapter, prover or note store.
 
 /** Every published shape, tagged with the id that names its `describe` block. */
 const SHAPES = TRANSACT_SHAPES.map((shape) => ({ id: shapeId(shape), shape }));
@@ -24,10 +24,8 @@ const RELAYER_ADDR = TEST_RELAYER_ADDR;
 const A1 = assetId(1n);
 
 /**
- * The smallest chain layer that satisfies `ChainReader`.
- *
- * Typed rather than cast, since it is the subject of "spends against a chain
- * layer that cannot sign".
+ * The smallest chain layer that satisfies `ChainReader`. Typed rather than cast, since it is the
+ * subject of "spends against a chain layer that cannot sign".
  */
 const BARE_READER: ChainReader = {
     chainId: async () => 31337n,
@@ -61,10 +59,9 @@ describe("executeTransfer", () => {
     });
 
     it("spends against a chain layer that cannot sign", async () => {
-        // A transfer proves ownership in the circuit and the relayer broadcasts
-        // it and pays gas, so the signing half of the port is never reached and
-        // a wallet without an EVM key (e.g. a passkey) can transfer. Deposit
-        // requires signing; `capability.test.ts` enforces that at the type level.
+        // A transfer proves ownership in the circuit and the relayer broadcasts it and pays gas, so
+        // the signing half of the port is never reached and a wallet without an EVM key (e.g. a
+        // passkey) can transfer. Deposit requires signing; see `capability.test.ts`.
         const notes = [storedNote("01", 100n)];
         const { ctx, submitted, markedSpent } = await makeCtx(notes, DEFAULT_SHAPE, BARE_READER);
         const { address: recipient } = await makeCtx([]);
@@ -104,9 +101,9 @@ describe("executeTransfer", () => {
     });
 
     it("recognises a self-transfer written in uppercase bech32m", async () => {
-        // Detection compares the decoded `pk`, not the address string: bech32m
-        // permits an all-uppercase spelling, which a string compare would treat
-        // as another recipient and under-report `ownCommitments` and `ownInflow`.
+        // Detection compares the decoded `pk`, not the address string: bech32m permits an
+        // all-uppercase spelling, which a string compare would treat as another recipient and
+        // under-report `ownCommitments` and `ownInflow`.
         const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
 
         const res = await executeTransfer(ctx, {
@@ -149,9 +146,9 @@ describe("executeWithdraw", () => {
         expect((submitted[0] as { kind: string }).kind).toBe("withdrawNative");
     });
 
-    /// `NativeAdapter` calls the pool itself, so it is the caller the pool
-    /// checks (`pi.relayer == msg.sender`) and the address the WETH must land
-    /// on before it can be unwrapped. The ETH then goes to `pi.payer`.
+    /// `NativeAdapter` calls the pool itself, so it is the caller the pool checks
+    /// (`pi.relayer == msg.sender`) and the address the WETH must land on before it can be
+    /// unwrapped. The ETH then goes to `pi.payer`.
     it("binds a native withdraw to the adapter, not the relayer", async () => {
         const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
         const to = evmAddress("0x0000000000000000000000000000000000000002");
@@ -168,8 +165,8 @@ describe("executeWithdraw", () => {
         expect(pi.payer).toBe(to);
     });
 
-    /// On the ERC-20 path the relayer submits and the pool sends the token
-    /// directly to the recipient.
+    /// On the ERC-20 path the relayer submits and the pool sends the token directly to the
+    /// recipient.
     it("keeps an ERC-20 withdraw bound to the relayer", async () => {
         const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
         const to = evmAddress("0x0000000000000000000000000000000000000002");
@@ -186,16 +183,14 @@ describe("executeWithdraw", () => {
     });
 });
 
-// Nothing between the executors and the prover depends on a fixed slot count,
-// so every shape in `TRANSACT_SHAPES` runs the same assertions. A hardcoded
-// arity fails at the shape it does not match.
-//
-// The recording prover stands in for the real one, so no zkey is needed.
+// Nothing between the executors and the prover depends on a fixed slot count, so every shape in
+// `TRANSACT_SHAPES` runs the same assertions. The recording prover stands in for the real one, so
+// no zkey is needed.
 describe.each(SHAPES)("shape $id", ({ shape }) => {
     const { nIn, nOut } = shape;
 
-    // The fixture selector takes at most two notes; the remaining input slots
-    // are dummies, which exercises padding.
+    // The fixture selector takes at most two notes; the remaining input slots are dummies, which
+    // exercises padding.
     const FUNDED = [storedNote("01", 100n), storedNote("02", 200n)];
 
     const WITHDRAW_TO = evmAddress("0x0000000000000000000000000000000000000002");
@@ -217,17 +212,13 @@ describe.each(SHAPES)("shape $id", ({ shape }) => {
         });
 
         expect(res.commitments).toHaveLength(nOut);
-        // One slot is the recipient's; the rest are change to self.
         expect(res.ownCommitments).toHaveLength(nOut - 1);
         expect(res.change).toBe(300n - 30n);
 
         // The payload the relayer receives carries one slot per arity.
         const pi = (submitted[0] as { pubInputs: Record<string, unknown[]> }).pubInputs;
         expect(pi.nullifier).toHaveLength(nIn);
-        expect(pi.inCv).toHaveLength(nIn);
         expect(pi.outCm).toHaveLength(nOut);
-        expect(pi.outCv).toHaveLength(nOut);
-        expect(pi.outCvDep).toHaveLength(nOut);
         expect((submitted[0] as { aux: unknown[] }).aux).toHaveLength(nOut);
     });
 
@@ -235,7 +226,6 @@ describe.each(SHAPES)("shape $id", ({ shape }) => {
         const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], shape);
         const res = await executeWithdraw(ctx, withdrawArgs);
 
-        // Nothing is shielded to a recipient, so every slot comes back to self.
         expect(res.commitments).toHaveLength(nOut);
         expect(res.ownCommitments).toHaveLength(nOut);
         expect(res.change).toBe(60n);
@@ -246,17 +236,16 @@ describe.each(SHAPES)("shape $id", ({ shape }) => {
         const { ctx, submitted } = await makeCtx([storedNote("01", 100n)], shape);
         await executeWithdraw(ctx, withdrawArgs);
 
-        // Each dummy carries a distinct nullifier; a repeat would be a
-        // double-spend the chain rejects.
+        // Each dummy carries a distinct nullifier; a repeat would be a double-spend the chain
+        // rejects.
         const pi = (submitted[0] as { pubInputs: { nullifier: unknown[] } }).pubInputs;
         expect(pi.nullifier).toHaveLength(nIn);
         expect(new Set(pi.nullifier.map(String)).size).toBe(nIn);
     });
 });
 
-// Which failures reserve notes is decided by `outcomeUnknown` and tested in
-// `steps.test.ts`. This checks that an executor routes a failed submit through
-// that decision.
+// Which failures reserve notes is decided by `classifySubmitFailure` and tested in `steps.test.ts`.
+// This checks that an executor routes a failed submit through that decision.
 describe("a spend whose submit fails", () => {
     it("reserves its notes when the outcome is unknown", async () => {
         const { ctx, markedSpent, reserved, submit } = await makeCtx([storedNote("01", 100n)]);
@@ -278,8 +267,8 @@ describe("a spend whose submit fails", () => {
     });
 });
 
-// A spend selects its notes long before the relayer answers. Two spends in one
-// wallet must not both pick the same notes in between; see `leases.ts`.
+// A spend selects its notes long before the relayer answers. Two spends in one wallet must not both
+// pick the same notes in between; see `leases.ts`.
 describe("concurrent spends in one wallet", () => {
     const leased = (notes: StoredNote[]) => makeCtx(notes);
     const to = evmAddress("0x0000000000000000000000000000000000000002");
@@ -372,11 +361,8 @@ describe("concurrent spends in one wallet", () => {
 });
 
 describe("root verification before proving", () => {
-    // The wallet trusts the server's `leafHash` rather than deriving leaves,
-    // so a wrong one yields a wrong root with no local symptom. Proving
-    // against it costs a full Groth16 run and then fails `isKnownRoot`.
-    //
-    // Tree repair is covered in `tree-store.test.ts`; the spend path only
+    // A wrong server `leafHash` yields a wrong root with no local symptom, and a proof against it
+    // fails `isKnownRoot`. Tree repair is covered in `tree-store.test.ts`; the spend path only
     // refuses to prove against an unreconciled tree.
 
     it("proves against a root the chain confirms", async () => {
@@ -408,8 +394,8 @@ describe("root verification before proving", () => {
     });
 
     it("hands the adapter's root oracle to the tree store", async () => {
-        // `syncVerified` decides whether to consult the pool; the spend path
-        // only supplies the capability. No other test covers this wiring.
+        // `syncVerified` decides whether to consult the pool; the spend path only supplies the
+        // capability.
         const { ctx, treeStore } = await makeCtx([storedNote("01", 100n)]);
         const { address: recipient } = await makeCtx([]);
         const isKnownRoot = vi.fn(async () => true);

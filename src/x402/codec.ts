@@ -59,10 +59,8 @@ export function readSettlement(res: Response): SettleResponse | undefined {
 }
 
 /**
- * Copy of `req` carrying the payment header.
- *
- * Takes a `Request` rather than a `RequestInit` so the retry reproduces the
- * original method, body and headers exactly.
+ * Copy of `req` carrying the payment header. Takes a `Request`, not a
+ * `RequestInit`, so the retry reproduces the original method, body and headers.
  *
  * Consumes `req`'s body, so this must be the last use of it.
  */
@@ -76,9 +74,8 @@ export function withPaymentRequest(req: Request, payload: PaymentPayload): Reque
  * Lowercased hostname of a resource URL, or the URL unchanged when it does not
  * parse.
  *
- * The unit of x402 identity: budgets are enforced and the ephemeral payer is
- * derived per host. Also used in logs, since a full URL would record the paid
- * request path.
+ * The ephemeral payer is derived per host. Also used in logs, since a full URL
+ * would record the paid request path.
  */
 export function hostOf(url: string): string {
     try {
@@ -88,7 +85,6 @@ export function hostOf(url: string): string {
     }
 }
 
-// --- base64 JSON --------------------------------------------------------------
 // `btoa`/`atob` are byte-oriented, so JSON is UTF-8 encoded first; `btoa`
 // throws on non-Latin-1 characters.
 

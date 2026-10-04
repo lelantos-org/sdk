@@ -5,8 +5,8 @@ import { InvalidArgumentError } from "../errors/config.js";
 import { hexPrivateKeyToNsk, resolveNsk } from "./key-source.js";
 import { deriveNskFromPasskey, LELANTOS_PRF_SALT, prfOutputToNsk } from "./passkey.js";
 
-// There is no mnemonic behind a passkey, so a change to either constant here strands every
-// wallet derived from it.
+// No mnemonic backs a passkey, so a change to either pinned constant here strands every wallet
+// derived from it.
 
 const prf = (fill: (i: number) => number = (i) => i) =>
     Uint8Array.from({ length: 32 }, (_, i) => fill(i) & 0xff);
@@ -24,8 +24,6 @@ describe("LELANTOS_PRF_SALT", () => {
 
 describe("prfOutputToNsk", () => {
     it("pins the derivation", () => {
-        // Golden vector. A change here changes every passkey-derived address,
-        // so it must be deliberate.
         expect(prfOutputToNsk(prf()).toString()).toBe(
             "168664424338788028792489089955818917124515579265289117029718021816294593178",
         );

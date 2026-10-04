@@ -3,8 +3,8 @@
 import { WalletError, type WalletErrorOptions } from "./base.js";
 
 /**
- * Why an x402 payment was refused. Every value means *no funds moved* —
- * the checks all run before `wallet.transfer`/`wallet.withdraw` is called.
+ * Why an x402 payment was refused. Every value except `payment-rejected` means no funds
+ * moved: those checks run before `wallet.transfer`/`wallet.withdraw` is called.
  */
 export type X402RefusalReason =
     /** Cumulative spend for this asset would exceed `budget.total`. */
@@ -21,10 +21,9 @@ export type X402RefusalReason =
     | "payment-rejected";
 
 /**
- * An x402 payment could not be made. Callers branch on `reason`: a
- * `budget-exceeded` is a policy stop the agent should surface to its
- * operator, while `no-acceptable-requirements` means this server cannot be
- * paid by this wallet.
+ * An x402 payment was refused. Callers branch on `reason`: `budget-exceeded` is a policy stop
+ * the agent should surface to its operator, while `no-acceptable-requirements` means this
+ * server cannot be paid by this wallet.
  */
 export class X402PaymentError extends WalletError<"X402_PAYMENT"> {
     readonly reason: X402RefusalReason;
@@ -39,9 +38,8 @@ export class X402PaymentError extends WalletError<"X402_PAYMENT"> {
         super("X402_PAYMENT", message, opts);
         this.name = "X402PaymentError";
         this.reason = reason;
-        // Exposed as a field and excluded from `context`, which error
-        // reporters serialise in full. The resource URL identifies the paid
-        // APIs this wallet calls.
+        // A field, never `context`, which error reporters serialise in full: the resource URL
+        // identifies the paid APIs this wallet calls.
         this.resource = opts?.resource;
     }
 }

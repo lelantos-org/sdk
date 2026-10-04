@@ -1,8 +1,8 @@
 // Cross-implementation Poseidon parity, SDK side.
 //
 // The same `tests/vectors/poseidon.json` is asserted by the Rust backend in
-// `backend/crates/crypto/tests/poseidon_vectors.rs`. Both files must stay
-// byte-identical; `scripts/gen-poseidon-vectors.ts` writes both copies.
+// `backend/crates/crypto/tests/poseidon_vectors.rs`. Both files must stay byte-identical;
+// `scripts/gen-poseidon-vectors.ts` writes both copies.
 //
 // `anchors` are the digests circomlibjs publishes, tying the SDK to circomlib itself rather than
 // to whichever backend (JS or vendored wasm) is in use.
@@ -29,10 +29,9 @@ const parsed = JSON.parse(readFileSync(vectorFile, "utf8")) as {
 };
 
 /**
- * Highest arity the SDK's table serves. See `poseidon.ts`.
- *
- * The shared vector file covers the Rust crate's wider range, so rows above
- * this width are skipped here and asserted by `backend/crates/crypto`.
+ * Highest arity the SDK's table serves (see `poseidon.ts`). The shared vector file covers the Rust
+ * crate's wider range, so rows above this width are skipped here and asserted by
+ * `backend/crates/crypto`.
  */
 const MAX_ARITY = 6;
 const served = (v: Vector) => v.inputs.length <= MAX_ARITY;

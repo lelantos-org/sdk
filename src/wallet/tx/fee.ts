@@ -1,30 +1,24 @@
-// Resolving the relayer's shielded fee for a spend.
+// Resolving the relayer's shielded fee for a spend: fetch the quote, pick the paying asset, and
+// return the slot. The relayer is paid with an output note addressed to its own shielded address,
+// inside the spend it pays for (see `bundle/fee.ts`).
 //
-// The relayer is paid with an output note addressed to its own shielded
-// address, inside the spend it pays for (see `bundle/fee.ts` for why it is not
-// an on-chain transfer). This module is the wallet side: fetch the quote, pick
-// the paying asset, and return the slot.
+// The circuit conserves value per asset (`PerAssetValueBalance` in
+// `circuits/src/lib/balance.circom`), so one proof may carry the moved asset alongside a second
+// asset that pays the fee. The relayer prices every asset it accepts and refuses only a fee split
+// across assets.
 //
-// # Paying in an asset other than the one being moved
-//
-// The circuit conserves value per asset, not in aggregate
-// (`PerAssetValueBalance` in `circuits/src/lib/balance.circom`), so one proof
-// may carry the moved asset alongside a second asset that pays the fee. The
-// relayer prices every asset it accepts and refuses only a fee split across
-// assets.
-//
-// A cross-asset fee needs an input note of the fee asset and an output slot for
-// its change, on top of the fee note: two slots more than a same-asset fee. At
-// the 4x4 shape a transfer fits exactly: `[recipient, change, fee, fee-change]`.
+// A cross-asset fee needs an input note of the fee asset and an output slot for its change, on top
+// of the fee note.
 
 import type { FeeOutput } from "../../bundle/fee.js";
 import { feeOutputFromEstimate } from "../../bundle/fee.js";
 import type { AssetId, CircuitAmount } from "../../core/brand.js";
 import { assetId, branded } from "../../core/brand.js";
 import { InvalidArgumentError } from "../../errors/config.js";
+import { FeeAboveLimitError, type FeeQuoteKind } from "../../errors/funds.js";
 import type { DecodedAddress } from "../../keys/address.js";
 import type { EstimateKind } from "../../services/relayer/submitter.js";
-import { chargedMoney, shieldedMoney } from "../assets/amount.js";
+import { type Amount, chargedMoney, resolveAmount, shieldedMoney } from "../assets/amount.js";
 import type { AssetRef } from "../assets/asset-ref.js";
 import type { AssetInfo } from "../assets/info.js";
 import type { WalletContext } from "../context.js";
@@ -41,14 +35,11 @@ export interface ResolvedFee {
     /** True when the fee is paid in an asset the spend is not otherwise moving. */
     crossAsset: boolean;
     /**
-     * Cover this fee needs separately, or `undefined` for a same-asset fee,
-     * which is part of the spend's target.
+     * Cover this fee needs separately, or `undefined` for a same-asset fee, which is part of the
+     * spend's target.
      */
     cover?: { asset: AssetId; value: CircuitAmount } | undefined;
-    /**
-     * Output slots this fee occupies: the note itself, plus one for its change
-     * when it is paid in an asset the spend has no other change slot for.
-     */
+    /** Output slots this fee occupies: the note itself, plus one for a cross-asset fee's change. */
     slots: number;
 }
 
@@ -63,13 +54,11 @@ interface ResolveFeeArgs {
 /**
  * What this relay costs, as an output slot ready to splice into the spend.
  *
- * `null` means no fee slot is needed: the submitter cannot quote (a custom
- * submitter without shielded-fee support) or the relayer subsidises gas on this
- * chain.
+ * `null` means no fee slot is needed: the submitter cannot quote (a custom submitter without
+ * shielded-fee support) or the relayer subsidises gas on this chain.
  *
- * Throws when the relayer charges but does not accept the requested asset. The
- * relayer would reject such a spend with a 402 after a full Groth16 run, so it
- * fails here before any artifact is fetched.
+ * Throws when the relayer charges but does not accept the requested asset: the relayer would
+ * reject such a spend with a 402 only after it is proven.
  */
 export async function resolveFee(
     ctx: Pick<WalletContext, "J" | "cfg">,
@@ -84,6 +73,7 @@ export async function resolveFee(
 
     const crossAsset = asset !== args.spendAsset;
     const value = branded<CircuitAmount>(output.note.value);
+    assertFeeAccepted(ctx, { kind: args.kind, asset: assetId(asset), amount: value });
     return {
         output,
         asset: assetId(asset),
@@ -92,6 +82,52 @@ export async function resolveFee(
         ...(crossAsset ? { cover: { asset: assetId(asset), value } } : {}),
         slots: crossAsset ? 2 : 1,
     };
+}
+
+/**
+ * Refuse a quote the wallet's `acceptRelayerFee` turns down.
+ *
+ * The quote is the relayer's own figure and the wallet pays it as stated, so this is the only bound
+ * on it. Every quote about to be paid passes through here: spends and the self-spends nested in
+ * them via {@link resolveFee}, deposits via `resolveDepositFees`.
+ *
+ * @throws {FeeAboveLimitError}
+ */
+export function assertFeeAccepted(
+    ctx: { readonly cfg: Pick<WalletContext["cfg"], "acceptRelayerFee"> },
+    quote: { kind: FeeQuoteKind; asset: AssetId; amount: CircuitAmount },
+): void {
+    const accept = ctx.cfg.acceptRelayerFee;
+    if (accept === undefined || accept(Object.freeze({ ...quote }))) return;
+    throw new FeeAboveLimitError({
+        asset: quote.asset,
+        quoted: quote.amount,
+        source: "acceptRelayerFee",
+        kind: quote.kind,
+    });
+}
+
+/**
+ * Refuse a fee above the operation's own `maxFee`, stated in the fee asset.
+ *
+ * @throws {FeeAboveLimitError}
+ */
+export function assertWithinMaxFee(
+    maxFee: Amount | undefined,
+    kind: FeeQuoteKind,
+    feeAsset: AssetInfo,
+    fee: ResolvedFee | null,
+): void {
+    if (maxFee === undefined || fee === null) return;
+    const limit = resolveAmount(maxFee, feeAsset, "maxFee");
+    if (fee.value <= limit) return;
+    throw new FeeAboveLimitError({
+        asset: fee.asset,
+        quoted: fee.value,
+        limit,
+        source: "maxFee",
+        kind,
+    });
 }
 
 /**
@@ -117,14 +153,11 @@ export function relayerMoney(feeAsset: AssetInfo, fee: ResolvedFee | null): Mone
 }
 
 /**
- * The output slots a resolved fee occupies: the relayer's note, then the change
- * from the notes that funded it.
+ * The output slots a resolved fee occupies: the relayer's note, then the change from the notes
+ * that funded it.
  *
- * `feeSelection` is the cover `runSpend` took for a cross-asset fee, and is
- * absent for a same-asset one, whose change is part of the spend's own.
- *
- * The fee note reuses the randomness `feeOutput` drew for it so the slot is
- * self-contained; nothing depends on it being that particular draw.
+ * `feeSelection` is the cover `runSpend` took for a cross-asset fee, and is absent for a same-asset
+ * one, whose change is part of the spend's own.
  */
 export function feeSlots(
     fee: ResolvedFee | null,
@@ -142,8 +175,7 @@ export function feeSlots(
     if (!feeSelection) return [relayerSlot];
     return [
         relayerSlot,
-        // The fee asset's change. No ladder: this asset has no `publicOut` to
-        // conform to.
+        // The fee asset's change. No ladder: this asset has no `publicOut` to conform to.
         ...changeSlots({
             pk,
             ownAddr,

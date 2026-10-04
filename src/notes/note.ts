@@ -1,4 +1,4 @@
-// Note plaintext and encrypted-note types. Mirrors circuits/src/test/helpers.ts
+// Note plaintext and encrypted-note types. Mirrors circuits/test/ref/note.ts
 // so SDK and circuit witnesses share one shape.
 
 import type { Field } from "../crypto/poseidon.js";
@@ -6,21 +6,16 @@ import type { Field } from "../crypto/poseidon.js";
 export interface Note {
     asset: Field;
     value: Field;
-    pk: Field; // Poseidon(TAG_PK, ivk) — the cm-binding pubkey
+    pk: Field; // Poseidon(TAG_PK, ivk, d) — the cm-binding pubkey
     rho: Field;
     rcm: Field;
-    rcv: Field;
-    /**
-     * Pedersen blinder for the deposit-anchor value commitment cv_dep.
-     * Encoded into the encrypted plaintext so the recipient can spend
-     * without leaking pk/rho/rcm to the relayer at flush time.
-     */
-    rcvDep: Field;
 }
 
 /** @internal */
 export interface SpentNote extends Note {
     nsk: Field;
+    /** Diversifier `pk` is derived under: `pk = Poseidon(TAG_PK, ivk, d)`. Zero on a dummy. */
+    d: Field;
     cm: Field;
     nf: Field;
     leafIndex: number;

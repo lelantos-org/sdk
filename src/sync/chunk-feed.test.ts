@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { type Chunk, pageChunks } from "./chunk-feed.js";
 
-// The sliding window fetches up to eight CDN-immutable chunks in parallel. It overshoots the
-// tail, so every request it starts must be bounded and cancelled.
+// The sliding window fetches up to eight chunks in parallel. It overshoots the tail, so every
+// request it starts must be bounded and cancelled.
 
 const chunk = (chunkId: number, isComplete: boolean): Chunk => ({ chunkId, isComplete });
 
@@ -32,7 +32,6 @@ describe("pageChunks", () => {
     });
 
     it("never requests a chunk past the cap", async () => {
-        // The refill must not issue speculative requests beyond `maxChunks`.
         const { fetchChunk, started } = feed(1000);
 
         const summary = await pageChunks(fetchChunk, 0, () => {}, {
@@ -54,8 +53,7 @@ describe("pageChunks", () => {
     });
 
     it("cancels the abandoned tail of the window", async () => {
-        // Up to eight requests are in flight when the tail is seen; all must be
-        // aborted rather than run to completion.
+        // Up to eight requests are in flight when the tail is seen; all must be aborted.
         const { fetchChunk, signals } = feed(0);
 
         await pageChunks(fetchChunk, 0, () => {}, { feed: "test" });

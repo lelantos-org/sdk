@@ -1,18 +1,13 @@
 #!/usr/bin/env node
-// Fail if anything under `src/` draws randomness from a non-cryptographic
-// source.
+// Fail if anything under `src/` draws randomness from a non-cryptographic source.
 //
-// This is a privacy SDK: note blinders, the ECDH ephemeral, the FMD clue
-// blinder, the output-slot shuffle and the note-selection tiebreak are all
-// randomness, and all of them stop working if the draw is predictable. The
-// shuffle is the clearest case — it is the only thing keeping a spend's public
-// output commitments from being labelled payee-vs-relayer by slot index, so a
-// `Math.random()` in it is a privacy hole with no visible symptom, no failing
-// test, and no compiler complaint.
+// Note blinders, the ECDH ephemeral, the FMD clue blinder, the output-slot shuffle and the
+// note-selection tiebreak all rely on unpredictable draws. The shuffle alone keeps a spend's public
+// output commitments from being labelled payee-vs-relayer by slot index, and a `Math.random()` in
+// it fails no test.
 //
-// Everything must go through `core/random.ts`, which is backed by Web Crypto
-// and throws when it is unavailable rather than degrading. The allowlist below
-// is for the genuine non-security uses.
+// Every draw goes through `core/random.ts`, which is backed by Web Crypto and throws when it is
+// unavailable. ALLOW lists the non-security uses.
 
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
@@ -20,15 +15,13 @@ import { ROOT, SRC, walk } from "./lib/package.mjs";
 
 const PATTERNS = [
     { re: /\bMath\s*\.\s*random\b/, what: "Math.random" },
-    // `crypto.randomUUID` is CSPRNG-backed, but it is a formatted 122-bit
-    // identifier rather than a draw, and reaching for it here means bypassing
-    // core/random.ts. Named so the reason is on the record.
+    // CSPRNG-backed, but a formatted 122-bit identifier, and using it bypasses core/random.ts.
     { re: /\brandomUUID\b/, what: "crypto.randomUUID" },
 ];
 
 /**
- * Files permitted to draw from a non-cryptographic source, with the reason.
- * Anything added here should be provably outside the privacy surface.
+ * Files permitted to draw from a non-cryptographic source, with the reason. Each must be outside
+ * the privacy surface.
  */
 const ALLOW = new Map([
     ["src/core/async.ts", "retry backoff jitter — anti-thundering-herd, not a secret"],
@@ -52,8 +45,7 @@ function scan(file) {
     }
 }
 
-// Tests included on purpose: a test that seeds a shuffle with Math.random is asserting the wrong
-// thing, and a test helper is one import away from shipping.
+// Tests are scanned too: a test helper is one import away from shipping.
 for (const file of walk(SRC)) if (file.endsWith(".ts") && !file.endsWith(".d.ts")) scan(file);
 
 if (hits.length > 0) {

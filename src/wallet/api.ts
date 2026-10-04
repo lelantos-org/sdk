@@ -8,12 +8,14 @@
 // Errors: every method rejects with a `WalletError` (branch on `isWalletError(err, code)` and
 // `err.retryable`), except that an `AbortSignal` the caller passed rejects with its own `reason`.
 
+import type { PaymentProof } from "../bundle/payment-proof.js";
 import type { ChainReader } from "../chain/port.js";
 import type { Hex32, ShieldedAddress, ViewingKeyString } from "../core/brand.js";
 import type { CircuitShape } from "../protocol/shape.js";
 import type { AssetRef, OutAmount } from "./assets/amount.js";
 import type { AssetInfo } from "./assets/info.js";
 import type { AwaitCommitmentsResult } from "./notes/note-cache.js";
+import type { PaymentProofTarget } from "./ops/payment-proof.js";
 import type { DenominationChoice, WithdrawPreview } from "./ops/withdraw-preview.js";
 import type { SpendableMax } from "./selection/index.js";
 import type {
@@ -65,7 +67,7 @@ export interface WalletKeys {
     readonly tier: "incoming" | "full" | "spending";
     /** `lelantosivk1…`: lets a holder see incoming notes. */
     readonly viewingKey: ViewingKeyString;
-    /** `lelantosfvk1…`: also reveals which notes are spent. `undefined` on an incoming-tier wallet. */
+    /** `lelantosfvk1…`: also reveals spent notes. `undefined` on an incoming-tier wallet. */
     readonly fullViewingKey: ViewingKeyString | undefined;
 }
 
@@ -111,6 +113,15 @@ export interface SpendableMaxOptions {
     selection?: SelectionOptions | undefined;
 }
 
+/** A claim link's bearer key, as `WalletApi.claimLinkKey` derives it. */
+export interface ClaimLinkKey {
+    index: number;
+    /** The link account's spending key: the secret the link carries. */
+    nsk: bigint;
+    /** The address to fund. */
+    address: ShieldedAddress;
+}
+
 /**
  * The read surface: what a viewing key can do. `connectWatch()` returns it; {@link WalletApi}
  * extends it.
@@ -120,11 +131,10 @@ export interface SpendableMaxOptions {
 export interface ReadOnlyWalletApi {
     readonly address: ShieldedAddress;
     readonly keys: WalletKeys;
-    /** `false` for an incoming-tier key: every note reads unspent and balances are gross received. */
+    /** `false` for an incoming-tier key: every note reads unspent; balances are gross received. */
     readonly spentKnown: boolean;
     readonly shape: CircuitShape;
 
-    // --- sync --------------------------------------------------------------------------------
     /** Queued behind a sync in progress. */
     sync(opts?: SyncOptions): Promise<SyncReport>;
     /** Sync until every commitment is stored. Resolves a status; see `throwOnTimeout`. */
@@ -132,8 +142,21 @@ export interface ReadOnlyWalletApi {
         cms: readonly (Hex32 | string)[],
         opts?: AwaitCommitmentsOptions,
     ): Promise<AwaitCommitmentsResult>;
+    /**
+     * Whether the pool itself published `commitment` in the mined transaction `txHash`, read from
+     * that transaction's receipt over the wallet's own RPC.
+     *
+     * Notes come from an indexer, and anyone who knows an address can encrypt a well-formed note
+     * to it, so a note in `notes()` shows what the indexer served, not what the pool holds. A
+     * payee crediting a payment on a receipt (`{ txHash, commitment }`) should require both: the
+     * note, for its asset and value, and this, for its existence. `false` for a transaction that
+     * does not carry it, including a deposit's escrow, which is not in the tree until flushed.
+     *
+     * Waits for the transaction to be mined. Rejects `UNSUPPORTED_OPERATION` when the wallet has
+     * no chain layer that reads receipts.
+     */
+    confirmCommitment(commitment: Hex32 | string, txHash: Hex32 | string): Promise<boolean>;
 
-    // --- observe -----------------------------------------------------------------------------
     /** The current snapshot. Same object until the next change. */
     state(): WalletState;
     /**
@@ -144,7 +167,6 @@ export interface ReadOnlyWalletApi {
      */
     subscribe(listener: StateListener): () => void;
 
-    // --- read --------------------------------------------------------------------------------
     balance(asset: AssetRef): Promise<Balance>;
     notes(filter?: NotesFilter): Promise<WalletNote[]>;
     /** Chain-verified registry entry; cached briefly, `refresh` re-reads. */
@@ -156,15 +178,14 @@ export interface ReadOnlyWalletApi {
     /** The asset's denominations, labelled for a picker; `[]` without a ladder. */
     withdrawDenominations(asset: AssetRef): Promise<DenominationChoice[]>;
 
-    // --- lifecycle ---------------------------------------------------------------------------
     /** Drop spent notes from the store. */
     compact(): Promise<{ removed: number }>;
     /**
      * Release what the SDK built for this wallet: the scanner workers and prover it created from
      * a `ScannerOption` / `ProverConfig`. A `Scanner` or `Prover` instance passed to `connect` /
-     * `createWallet` is not disposed (its lifetime stays with the caller, so it can be shared
-     * across wallets), and stores and persistence backends are never closed. Idempotent; every
-     * method but `state` / `subscribe` / `dispose` then rejects `UNSUPPORTED_OPERATION`.
+     * `createWallet` is not disposed (the caller owns it and may share it across wallets), and
+     * stores and persistence backends are never closed. Idempotent; every method but `state` /
+     * `subscribe` / `dispose` then rejects `UNSUPPORTED_OPERATION`.
      */
     dispose(): Promise<void>;
     [Symbol.asyncDispose](): Promise<void>;
@@ -180,8 +201,7 @@ export interface WalletApi extends ReadOnlyWalletApi {
     /** Fetch and warm the prover now rather than at the first spend. */
     warmProver(opts?: { signal?: AbortSignal | undefined }): Promise<void>;
 
-    // --- quotes ------------------------------------------------------------------------------
-    /** Relayer fee for `kind` and the assets it accepts. `native` prices the native-path estimate. */
+    /** Relayer fee for `kind` and the assets it accepts. `native` prices the native path. */
     quoteFee(
         kind: FeeKind,
         opts?: { native?: boolean | undefined; signal?: AbortSignal | undefined },
@@ -194,7 +214,6 @@ export interface WalletApi extends ReadOnlyWalletApi {
     quoteDeposit(args: DepositOptions): Promise<DepositQuote>;
     quoteSwap(args: QuoteSwapOptions): Promise<SwapQuote>;
 
-    // --- deposit -----------------------------------------------------------------------------
     deposit(args: DepositOptions): Promise<DepositResult>;
     /** Await the relayer's flush: `awaitCommitments([escrow.commitment])`. */
     awaitDeposit(
@@ -208,8 +227,28 @@ export interface WalletApi extends ReadOnlyWalletApi {
     ): Promise<CancelDepositResult>;
     setupDepositAllowance(args: AllowanceSetupOptions): Promise<void>;
 
-    // --- spend -------------------------------------------------------------------------------
     transfer(args: TransferOptions): Promise<TransferResult>;
+    /**
+     * A proof, for a third party, of one payment this wallet made: `txHash` and the payee's
+     * `commitment` from the spend's result (`TransferResult.recipientCommitment`). Whoever holds
+     * it and the payee's address learns that output's asset and value (`verifyPaymentProof`) and
+     * nothing else; give it only to them.
+     *
+     * Recomputed from the seed and the chain, so it can be produced at any time, on any device,
+     * for any spend this account made with ephemerals derived from the seed. Rejects
+     * `INVALID_ARGUMENT` for an output another wallet made, and `UNSUPPORTED_OPERATION` without
+     * a chain layer that reads logs.
+     */
+    paymentProof(target: PaymentProofTarget): Promise<PaymentProof>;
+    /**
+     * The spending key and address of this account's `index`-th claim link on this chain: a
+     * fresh account to fund and hand over as a bearer link. Derived from the seed, so a link the
+     * payee never opens can be recomputed and swept back from any device.
+     *
+     * An index must fund at most one link: two links from one index share a key, so the holder
+     * of the first can take the second. Use the first index whose account has never held a note.
+     */
+    claimLinkKey(index: number): Promise<ClaimLinkKey>;
     withdraw(args: WithdrawOptions): Promise<WithdrawResult>;
     swap(args: SwapOptions): Promise<SwapResult>;
     /** Re-split off-ladder notes onto the ladder; returns rounds run. Best-effort. */

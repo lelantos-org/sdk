@@ -1,31 +1,15 @@
-// Funds errors: balance, held notes, cover, fee asset.
-//
-// Four distinct answers to "why can't this spend be funded?", each with its own
-// remedy:
-//
-//   * `INSUFFICIENT_BALANCE`: the unspent notes of the asset do not add up to
-//     the amount. Top up or send less.
-//   * `NOTES_HELD`: they would, but some are held back (reserved by an earlier
-//     spend, in their spend cooldown, or below the dust threshold). Usually a
-//     wait; `retryable` says whether waiting alone can fix it.
-//   * `INSUFFICIENT_COVER`: the spendable notes add up, but no combination fits
-//     the circuit's input slots. Consolidate.
-//   * `FEE_ASSET_NOT_QUOTED`: the relayer will not take the asset named to pay
-//     its fee. Pick one of `accepted`.
-//
-// Amounts, asset ids and note ids are typed fields, never part of the message,
-// which reaches application logs verbatim.
+// Funds errors: balance, held notes, cover, fee asset, fee limit. Each has its own remedy, given
+// on its class.
 
 import type { AssetId, CircuitAmount } from "../core/brand.js";
 import { WalletError, type WalletErrorOptions } from "./base.js";
 
 /**
- * Fields required by the consolidation recovery flow.
+ * The note fields the consolidation recovery flow needs.
  *
- * `InsufficientCoverError` carries this rather than `StoredNote`: it is thrown
- * on the ordinary cover-failure path and so reaches application error
- * reporting, where `rho`, `rcm` and `rcvDep` are note secrets and `cm`
- * identifies a pool leaf.
+ * `InsufficientCoverError` carries this rather than `StoredNote` because it reaches
+ * application error reporting, where `rho` and `rcm` are note secrets and `cm` identifies a
+ * pool leaf.
  */
 export interface ConsolidateHint {
     id: string;
@@ -33,15 +17,17 @@ export interface ConsolidateHint {
 }
 
 /**
- * The unspent notes of `asset`, all of them counted, do not reach `required`.
+ * The unspent notes of `asset`, all of them counted, do not reach `required`. Top up or send
+ * less.
  *
- * Distinct from {@link NotesHeldError}: nothing is being held back, so no
- * wait helps. `available` is every unspent note of the asset the spend was
- * allowed to consider.
+ * Distinct from {@link NotesHeldError}: nothing is being held back, so no wait helps.
  */
 export class InsufficientBalanceError extends WalletError<"INSUFFICIENT_BALANCE"> {
     readonly asset: AssetId;
-    /** Unspent value of `asset`, held-back notes included, in circuit units. */
+    /**
+     * Value of every unspent note of `asset` the spend was allowed to consider, held-back notes
+     * included, in circuit units.
+     */
     readonly available: CircuitAmount;
     /** What the spend needed, same-asset fee included, in circuit units. */
     readonly required: CircuitAmount;
@@ -85,10 +71,10 @@ export interface HeldNotes {
 /**
  * The balance covers `required`, but not without notes that are held back.
  *
- * `retryable` is true when the reserved and cooling-down notes alone make up
- * the shortfall, so the same call will succeed once they are released (an
- * in-flight spend settles, a reservation expires, a block arrives). When only
- * dust would close the gap it is false: lower `dustThreshold` or send less.
+ * `retryable` is true when the reserved and cooling-down notes alone make up the shortfall,
+ * so the same call succeeds once they are released (an in-flight spend settles, a reservation
+ * expires, a block arrives). It is false when only dust would close the gap: lower
+ * `dustThreshold` or send less.
  */
 export class NotesHeldError extends WalletError<"NOTES_HELD"> {
     readonly asset: AssetId;
@@ -148,12 +134,9 @@ export type InsufficientCoverReason =
  * The balance covers `target`, but no combination within the circuit's input
  * arity does. Merging the notes in `consolidate` into one fixes it.
  *
- * `consolidationAttempted` distinguishes the two ways this is reached:
- *
- *   * `false`: the caller did not ask for consolidation. Self-spend
- *     `consolidate`, re-sync, and retry, or pass `{ autoConsolidate: true }`.
- *   * `true`: consolidation ran and the cover still did not appear.
- *     Repeating the same call will not help.
+ * When `consolidationAttempted` is false, self-spend `consolidate`, re-sync and retry, or pass
+ * `{ autoConsolidate: true }`. When it is true, consolidation ran and the cover still did not
+ * appear, so repeating the same call will not help.
  */
 export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
     readonly target: CircuitAmount;
@@ -175,8 +158,7 @@ export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
         },
         opts?: WalletErrorOptions,
     ) {
-        // Counted from the hint list rather than hardcoded, so the message
-        // tracks the deployed circuit's input arity.
+        // Counted from the hint list, so the message tracks the deployed circuit's input arity.
         const n = args.consolidate.length;
         const notes = `${n} smallest note${n === 1 ? "" : "s"}`;
         const attempted = args.consolidationAttempted ?? false;
@@ -234,5 +216,59 @@ export class FeeAssetNotQuotedError extends WalletError<"FEE_ASSET_NOT_QUOTED"> 
         this.asset = args.asset;
         if (args.kind !== undefined) this.kind = args.kind;
         this.accepted = args.accepted;
+    }
+}
+
+/** Which limit a relayer fee quote exceeded. */
+export type FeeLimitSource =
+    /** The operation's own `maxFee`. */
+    | "maxFee"
+    /** The wallet's `acceptRelayerFee`. */
+    | "acceptRelayerFee";
+
+/**
+ * The relayer quoted a fee the caller's limit does not allow. Raise the limit, wait for gas to
+ * fall, or use another relayer.
+ *
+ * Nothing but this limit bounds the relayer's quote, so an operation that runs unattended
+ * should set one. Checked before proving or signing: nothing was built, leased or sent.
+ * `retryable`, since a quote follows gas and may fall back under the limit.
+ */
+export class FeeAboveLimitError extends WalletError<"FEE_ABOVE_LIMIT"> {
+    /** The asset the fee was quoted in. */
+    readonly asset: AssetId;
+    /** What the relayer quoted, in circuit units of `asset`. */
+    readonly quoted: CircuitAmount;
+    /** The `maxFee` exceeded, in circuit units of `asset`. Absent for `acceptRelayerFee`. */
+    readonly limit?: CircuitAmount | undefined;
+    readonly source: FeeLimitSource;
+    /** The operation priced. */
+    readonly kind: FeeQuoteKind;
+
+    constructor(
+        args: {
+            asset: AssetId;
+            quoted: CircuitAmount;
+            limit?: CircuitAmount | undefined;
+            source: FeeLimitSource;
+            kind: FeeQuoteKind;
+        },
+        opts?: WalletErrorOptions,
+    ) {
+        super(
+            "FEE_ABOVE_LIMIT",
+            "the relayer's fee quote is above the limit set for it " +
+                (args.source === "maxFee"
+                    ? "(`maxFee`; see `quoted` and `limit`)"
+                    : "(`acceptRelayerFee` refused it; see `quoted`)") +
+                "; nothing was sent",
+            { ...opts, retryable: true },
+        );
+        this.name = "FeeAboveLimitError";
+        this.asset = args.asset;
+        this.quoted = args.quoted;
+        if (args.limit !== undefined) this.limit = args.limit;
+        this.source = args.source;
+        this.kind = args.kind;
     }
 }

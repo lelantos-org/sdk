@@ -9,8 +9,8 @@ const log = getLogger("lelantos:wallet:http");
 /**
  * Transport options for `service`'s client.
  *
- * `onRetry` gains the service name, and a throw from it is logged and swallowed so an
- * observability hook cannot fail a request. `submitTimeoutMs` falls back to `presetSubmitTimeoutMs`.
+ * `onRetry` gains the service name, and a throw from it is logged and swallowed so an observability
+ * hook cannot fail a request. `submitTimeoutMs` falls back to `presetSubmitTimeoutMs`.
  */
 export function serviceHttpOptions(
     http: HttpOptions | undefined,

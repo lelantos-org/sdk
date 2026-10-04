@@ -1,6 +1,6 @@
-// Shared loader for wasm-pack (`--target web`) modules. Handles the Node vs browser vs
-// injected-loader branch + lazy init-once promise. Specifiers passed to `defaultImport()` are
-// package subpath imports (`#wasm/<name>`) declared in package.json `imports`.
+// Shared loader for wasm-pack (`--target web`) modules: the Node, browser and injected-loader
+// branches behind a lazy init-once promise. Specifiers passed to `defaultImport()` are package
+// subpath imports (`#wasm/<name>`) declared in package.json `imports`.
 
 import { memoAsync } from "../../core/async.js";
 import { IS_NODE, NODE_FS_PROMISES } from "../detect.js";
@@ -46,11 +46,9 @@ interface WasmLoaderHandle<M extends WasmModuleBase> {
     /** Last Node `pkg/` JS-module URL (set after `load()` on Node). */
     getNodePkgUrl(): string | null;
     /**
-     * Forget the memoised module so the next `load()` runs `postInit` again.
-     *
-     * For teardown that invalidates what `postInit` established — tearing down
-     * a rayon thread pool leaves the module loaded but unusable, and a
-     * memoised handle would never rebuild the pool.
+     * Forget the memoised module so the next `load()` runs `postInit` again. For
+     * teardown that invalidates what `postInit` established, such as shutting
+     * down a rayon thread pool.
      */
     reset(): void;
 }
@@ -82,10 +80,9 @@ export function createWasmLoader<M extends WasmModuleBase>(
         return mod;
     }
 
-    // Evicted on rejection — see `memoAsync`. One EMFILE on the Node wasm
-    // read, one 502 on the browser fetch, or one `postInit` timeout would
-    // otherwise be replayed to every later caller in this realm, including
-    // after a working loader override is installed.
+    // `memoAsync` evicts a rejection, so a transient failure (the Node wasm
+    // read, the browser fetch, a `postInit` timeout) is retried by the next
+    // caller instead of being replayed to every later one.
     const memo = memoAsync(init);
 
     return {

@@ -3,9 +3,8 @@ import type { Field, Poseidon } from "./poseidon.js";
 import { TAG_NF } from "./tags.js";
 
 /** @internal */
-// Mirrors Nullifier in note.circom: nf = Poseidon(TAG_NF, nk, rho, cm).
-// Takes nk directly so FVK holders (nk without nsk) can recompute nullifiers.
-// Use buildNullifierFromNsk for the spending-key path.
+// Mirrors Nullifier in note.circom: nf = Poseidon(TAG_NF, nk, rho, cm). Takes nk so FVK holders
+// (nk without nsk) can recompute nullifiers.
 //
 // `cm` is in the preimage so the nullifier identifies the exact note. Without it, two notes
 // sharing a rho share a nullifier and spending either makes the other unspendable (the faerie-gold
@@ -16,7 +15,7 @@ export function buildNullifier(P: Poseidon, nk: Field, rho: Field, cm: Field): F
 }
 
 /** @internal */
-// Convenience wrapper for spend paths that have nsk on hand.
+// `buildNullifier` with nk derived from nsk, for the spending-key path.
 export function buildNullifierFromNsk(P: Poseidon, nsk: Field, rho: Field, cm: Field): Field {
     return buildNullifier(P, deriveNk(P, nsk), rho, cm);
 }

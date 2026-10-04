@@ -87,7 +87,6 @@ class FakeScanner implements Scanner {
                 value: 10n,
                 rho: 0n,
                 rcm: 0n,
-                rcvDep: 0n,
                 cm: i.cm,
                 leafIndex: i.leafIndex,
                 blockNumber: i.blockNumber,
@@ -218,7 +217,6 @@ describe("syncWallet paging", () => {
 
 describe("syncWallet cancellation", () => {
     it("stops at the next page boundary when aborted", async () => {
-        // Without a signal a sync can page through `MAX_PAGES * limit` notes.
         const source = new FakeSource(rows(1, 5000));
         const ctrl = new AbortController();
         const { deps: d } = await deps(source, new FakeScanner(new Set()));

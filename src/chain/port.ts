@@ -1,19 +1,12 @@
 // The `ChainAdapter` port, its read-only half, and their capability subtypes.
 //
-// The port is split in two. `ChainReader` is everything a chain can answer
-// without a signing key; `ChainAdapter` adds the members that put a
-// transaction on chain from the user's own EOA. A spend proves in the circuit
-// and is broadcast by the relayer, so the spend path never leaves
-// `ChainReader`, while a deposit requires `ChainAdapter`. A wallet backed by a
-// passkey has the former and not the latter.
+// `ChainReader` is everything a chain can answer without a signing key;
+// `ChainAdapter` adds the members that put a transaction on chain from the
+// user's own EOA. A spend is broadcast by the relayer, so it needs only
+// `ChainReader`; a deposit requires `ChainAdapter`.
 //
 // Most members are optional: an adapter implements the deposit paths its
-// chain supports. Callers discover which path is available through the
-// `supports*` guards below, since the interface alone cannot say.
-//
-// Each half is assembled from narrower interfaces grouped by what they touch
-// (registry, tree, tokens, receipts; deposits, Permit2 windows, the native
-// coin), so a component can depend on only the slice it reads.
+// chain supports, and callers discover them through the `supports*` guards.
 
 import type { AssetId, EvmAddress, Hex32, TokenAmount } from "../core/brand.js";
 import type { IsKnownRoot } from "../crypto/path.js";
@@ -32,6 +25,7 @@ import type {
     DepositSubmitted,
     EscrowedDepositView,
     Permit2SignArgs,
+    PublishedNote,
     TokenMeta,
     TxLog,
 } from "./types.js";
@@ -42,67 +36,64 @@ export interface RegistryReads {
     /** Used as the Permit2 `spender`. */
     maspAddress(): Promise<EvmAddress>;
     /**
-     * `NativeAdapter` address, or `undefined` where none is deployed. It is
-     * the `payer` a native deposit must name, so the deposit builder needs it
-     * before it builds the request. Also read by `withdraw({ native })`, a relayed
-     * spend, hence a read rather than part of the signing half. Optional.
+     * `NativeAdapter` address, or `undefined` where none is deployed: the
+     * `payer` a native deposit names. Also read by `withdraw({ native })`.
+     * Optional.
      */
     nativeAdapterAddress?(): EvmAddress | undefined;
     /**
-     * The registry entry, including the asset's two protocol fee rates. There
-     * is no pool-wide rate: fees are per-asset and per-leg, so they are read
-     * with the entry that defines them. 0 bps disables a leg's fee.
+     * The registry entry, including the asset's protocol fee rates, which are
+     * per-asset and per-leg. 0 bps disables a leg's fee.
      */
     fetchAsset(id: AssetId): Promise<AssetEntry>;
-    /** `MASP.escrowed(id)` — null if flushed/cancelled. Optional. */
+    /** `MASP.escrowed(id)`; `null` if flushed or cancelled. Optional. */
     getEscrowed?(id: bigint): Promise<EscrowedDepositView | null>;
     /**
-     * The `DepositEscrowed` log for escrow `id`, decoded, or `null` when none is found from
-     * `fromBlock` (default: an adapter-chosen recent window) to the tip. `cancelDeposit({ depositId })`
-     * rebuilds its cancel inputs from it. Optional.
+     * The decoded `DepositEscrowed` log for escrow `id`, or `null` when none is
+     * found from `fromBlock` (default: an adapter-chosen recent window) to the
+     * tip. `cancelDeposit({ depositId })` rebuilds its cancel inputs from it.
+     * Optional.
      */
     fetchDepositEscrowed?(id: bigint, fromBlock?: bigint): Promise<DepositEscrowedRecord | null>;
     /**
-     * Blocks, in the EVM's `block.number`, after `submittedAt` before `cancelDeposit` is
-     * allowed. Optional.
+     * Blocks, in the EVM's `block.number`, after `submittedAt` before
+     * `cancelDeposit` is allowed. Optional.
      */
     cancelDelay?(): Promise<number>;
-    /** Optional; adapters that don't use Permit2 omit. */
+    /** Optional: omitted by adapters that do not use Permit2. */
     permit2Address?(): EvmAddress;
 }
 
 /** What a spend needs to witness against the pool's tree and the selector's cooldown. */
 export interface TreeReads {
     /**
-     * Whether the pool would accept a proof against `root`, from the 64-root
-     * ring it keeps. This is authoritative; the commitment mirror approximates it.
-     *
-     * Optional, like the reads around it: an adapter that cannot reach the pool
-     * leaves the mirror as the last word.
+     * Whether the pool would accept a proof against `root`, from the ring of
+     * recent roots it keeps. Authoritative; the commitment mirror approximates
+     * it. Optional: without it the mirror decides.
      */
     isKnownRoot?: IsKnownRoot;
     /**
      * Current chain tip. Feeds `SelectOpts.tipBlock`, without which the
-     * selector's spend cooldown is inert. Names no address and no topic.
-     * Optional.
+     * selector's spend cooldown is inert. The request names no address and no
+     * topic. Optional.
      */
     blockNumber?(): Promise<number>;
 }
 
 /** ERC-20, native-coin and Permit2 state of an account. */
 export interface TokenReads {
-    /** `IAllowanceTransfer.allowance` — cap, expiry, nonce. Optional. */
+    /** `IAllowanceTransfer.allowance`: cap, expiry, nonce. Optional. */
     permit2Allowance?(
         token: EvmAddress,
         owner: EvmAddress,
         spender: EvmAddress,
     ): Promise<{ amount: TokenAmount; expiration: number; nonce: number }>;
     /**
-     * Free slot in Permit2's unordered nonce bitmap. Optional; adapters
-     * returning a deterministic nonce can omit.
+     * Free slot in Permit2's unordered nonce bitmap. Optional: omitted by
+     * adapters returning a deterministic nonce.
      */
     permit2Nonce?(): Promise<bigint>;
-    /** Optional. CLIs/UIs feature-check before calling. */
+    /** Optional; callers feature-check before calling. */
     tokenMeta?(tokenAddr: EvmAddress): Promise<TokenMeta>;
     tokenBalanceOf?(tokenAddr: EvmAddress, account: EvmAddress): Promise<TokenAmount>;
     /** Wei. Optional. */
@@ -116,7 +107,7 @@ export interface TokenReads {
 
 /** Receipts of mined transactions. */
 export interface ReceiptReads {
-    /** Returns block number + receipt status (1 = success, 0 = revert). */
+    /** Block number and receipt status (1 = success, 0 = revert). */
     waitTxReceipt?(
         txHash: Hex32,
         confirmations?: number,
@@ -126,29 +117,34 @@ export interface ReceiptReads {
      *
      * Read after a relayed spend to find the wallet's own operation in a
      * transaction the relayer may have bundled with others'. Only the hash is
-     * sent; the matching against the wallet's commitments happens locally.
+     * sent; matching against the wallet's commitments happens locally.
      * Optional: without it a spend result carries no `operation`.
      */
     txReceiptLogs?(txHash: Hex32): Promise<readonly TxLog[]>;
+    /**
+     * The decoded `NotePayload` the pool emitted for commitment `cm` in mined
+     * transaction `txHash`, or `null` when that transaction carries none from
+     * the pool. A payment proof needs the output's published `ephPub` and
+     * ciphertext. Optional.
+     */
+    fetchNotePayload?(txHash: Hex32, cm: Hex32): Promise<PublishedNote | null>;
 }
 
 /**
- * Everything a chain can answer without a signing key.
+ * Everything a chain can answer without a signing key, which is all the spend
+ * path uses.
  *
- * This is the whole surface the spend path uses: `executeTransfer` touches
- * none of it, `executeWithdraw` reads `nativeAdapterAddress`, and the selector
- * and tree sync read `blockNumber` and `isKnownRoot`. `fetchAsset` is required
- * because every amount the wallet formats, every fee it quotes and every asset
- * it names resolves through the registry.
+ * `fetchAsset` is required because every amount the wallet formats, every fee
+ * it quotes and every asset it names resolves through the registry.
  *
- * Implementations MUST be deterministic w.r.t. constructor inputs (no hidden
+ * Implementations must be deterministic w.r.t. constructor inputs (no hidden
  * global state).
  */
 export interface ChainReader extends RegistryReads, TreeReads, TokenReads, ReceiptReads {}
 
 /** Signing as the user's EOA, and the deposit and cancel calls that spend its gas. */
 export interface DepositWrites {
-    /** Signer's eth address (== `pi.payer` for deposit). */
+    /** The signer's address; `pi.payer` for a deposit. */
     payerAddress(): Promise<EvmAddress>;
     /**
      * Sign a Permit2 witness transfer bound to
@@ -160,8 +156,9 @@ export interface DepositWrites {
      */
     signPermit2(args: Permit2SignArgs): Promise<Permit2Sig>;
     /**
-     * `MASP.deposit(d, sig, aux)`. Resolves once mined with the hash, block and the
-     * `DepositEscrowed` payload from the receipt. Optional: relayer-broadcast adapters omit.
+     * `MASP.deposit(d, sig, aux, feeAux)`. Resolves once mined, with the hash,
+     * block and `DepositEscrowed` payload from the receipt. Optional: omitted
+     * by relayer-broadcast adapters.
      */
     submitDeposit?(args: {
         deposit: DepositRequest;
@@ -169,10 +166,7 @@ export interface DepositWrites {
         aux: AuxOutput;
         /** The relayer fee note payload; a deposit mints two leaves. */
         feeAux: AuxOutput;
-        /**
-         * Fired after the wallet signs and the tx hash is known, before
-         * receipt-wait.
-         */
+        /** Fired once the wallet has signed and the tx hash is known, before the receipt wait. */
         onSent?: (txHash: Hex32) => void;
     }): Promise<DepositSubmitted>;
     /**
@@ -182,12 +176,12 @@ export interface DepositWrites {
     submitDepositAuthorized?(args: {
         deposit: DepositRequest;
         aux: AuxOutput;
-        /** The relayer fee note payload; a deposit mints two leaves. */
+        /** The relayer fee note payload. */
         feeAux: AuxOutput;
         onSent?: (txHash: Hex32) => void;
     }): Promise<DepositSubmitted>;
     /**
-     * `MASP.cancelDeposit`. On-chain digest check rejects tampered
+     * `MASP.cancelDeposit`. The on-chain digest check rejects tampered
      * preimages. Resolves once mined, with the refund split read off
      * `DepositCanceled`. Optional.
      */
@@ -244,7 +238,7 @@ export interface NativeWrites {
     submitDepositNative?(args: {
         deposit: DepositRequest;
         aux: AuxOutput;
-        /** The relayer fee note payload; a deposit mints two leaves. */
+        /** The relayer fee note payload. */
         feeAux: AuxOutput;
         value: bigint;
         onSent?: (txHash: Hex32) => void;
@@ -265,13 +259,10 @@ export interface NativeWrites {
 /**
  * A reader that also holds a signing key.
  *
- * Every member here either signs as the user's EOA or spends its gas, making
- * this the deposit half: shielding moves public tokens out of an address that
- * must both custody them and pay for the transaction. Narrow with
- * {@link supportsSigning} before using any of these.
- *
- * Adapters MUST be deterministic w.r.t. constructor inputs (no hidden
- * global state).
+ * Every member added here either signs as the user's EOA or spends its gas:
+ * shielding moves public tokens out of an address that must both custody them
+ * and pay for the transaction. Narrow with {@link supportsSigning} before
+ * using any of them.
  */
 export interface ChainAdapter extends ChainReader, DepositWrites, Permit2Writes, NativeWrites {}
 
@@ -292,9 +283,8 @@ export type AllowanceTransferChain = ChainAdapter &
     >;
 
 /**
- * Native-ETH deposit path. The pool is ERC-20 only, so this runs through
- * `NativeAdapter`, which wraps `msg.value` and escrows the WETH as its own
- * payer; the address is therefore part of the capability, not only the call.
+ * Native-ETH deposit path through `NativeAdapter`. The adapter is the
+ * deposit's payer, so its address is part of the capability, not only the call.
  *
  * @internal
  */
@@ -304,9 +294,8 @@ export type NativeEthChain = ChainAdapter &
 /**
  * Batched AllowanceTransfer setup: one signature and one tx for N tokens.
  *
- * A strict narrowing of {@link AllowanceTransferChain}: an adapter that supports
- * single-token setup but not the batch stays usable, without the multi-token
- * flow.
+ * A strict narrowing of {@link AllowanceTransferChain}: an adapter with
+ * single-token setup only stays usable, without the multi-token flow.
  *
  * @internal
  */
@@ -316,13 +305,12 @@ export type AllowanceBatchChain = AllowanceTransferChain &
 /**
  * Whether this reader also signs; the gate in front of every deposit path.
  *
- * Both members are required on {@link ChainAdapter}, so their presence
+ * Both members tested are required on {@link ChainAdapter}, so their presence
  * separates the two halves of the port.
  *
- * This is the primitive for code holding a bare chain layer. Code holding a
- * wallet should use `supportsDeposit(wallet)` from `@lelantos-org/sdk/advanced`,
- * which answers the same question and narrows the wallet rather than the layer
- * inside it.
+ * Code holding a wallet rather than a bare chain layer should use
+ * `supportsDeposit(wallet)` from `@lelantos-org/sdk/advanced`, which narrows
+ * the wallet instead.
  */
 export function supportsSigning(c: ChainReader): c is ChainAdapter {
     // `Partial`, not `ChainAdapter`: this probes for absence, so the cast must
@@ -331,9 +319,8 @@ export function supportsSigning(c: ChainReader): c is ChainAdapter {
     return typeof a.payerAddress === "function" && typeof a.signPermit2 === "function";
 }
 
-// The three guards below need no cast: the predicate on the left of `&&`
-// narrows `c` to `ChainAdapter` for the rest of the expression, and every
-// member they test is optional there.
+// The three guards below need no cast: the predicate left of `&&` narrows `c`
+// to `ChainAdapter`, where every member they test is optional.
 export function supportsAllowanceBatch(c: ChainReader): c is AllowanceBatchChain {
     return (
         supportsAllowanceTransfer(c) &&

@@ -1,8 +1,7 @@
 // `createWallet(KeySource, WalletConfig)`: the advanced construction path, with every pluggable
 // under the caller's control. `connect()` builds its config from a preset and lands here too.
 //
-// Builds a `WalletContext` and returns the frozen wallet object over it (`./surface/api.ts`).
-// Operations (`./ops/`) and the spend pipeline (`./tx/`) take the context, never the object. The
+// Builds a `WalletContext` and returns the frozen wallet object over it (`./surface/api.ts`). The
 // spend path loads with `await import(...)`, so a caller who never spends never downloads the
 // prover or viem.
 
@@ -31,16 +30,14 @@ const log = getLogger("lelantos:wallet");
  * Build a wallet from any key source, wiring defaults for omitted pluggables. Collects every config
  * problem into `WalletConfigError.missing`.
  *
- * The advanced construction path: use it when `connect()`'s options cannot express the wiring,
- * e.g. to inject a custom `submitter` (a bundler, a capturing test double), `selector`,
- * `noteSource`, pre-built `treeStore` / `nullifierStore`, or a `feeBps` override. `connect()`
- * deliberately does not accept those.
+ * Use it when `connect()`'s options cannot express the wiring: a custom `submitter` (a bundler, a
+ * capturing test double), `selector`, `noteSource`, pre-built `treeStore` / `nullifierStore`, or a
+ * `feeBps` override, none of which `connect()` accepts.
  *
- * The prover defaults to a lazy build over the bundled artifacts, so this does no
- * artifact I/O.
+ * The prover defaults to a lazy build over the bundled artifacts, so this does no artifact I/O.
  *
- * **Ownership.** The wallet disposes only what it built. A `Prover` or `Scanner` passed in `cfg`
- * is left running by `wallet.dispose()` and by a failed `createWallet`; the caller releases it.
+ * Ownership: the wallet disposes only what it built. A `Prover` or `Scanner` passed in `cfg` is
+ * left running by `wallet.dispose()` and by a failed `createWallet`; the caller releases it.
  * Stores, persistence backends, the chain adapter and the submitter are never closed by the SDK.
  */
 export function createWallet(source: KeySource, cfg: WalletConfig): Promise<WalletApi> {

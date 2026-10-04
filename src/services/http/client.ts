@@ -1,32 +1,24 @@
-// Shared HTTP transport: per-attempt AbortController timeout,
+// Shared HTTP transport for every SDK client: per-attempt timeout,
 // exponential-backoff retry with jitter, and typed `NetworkError`.
+// `./json-client.ts` layers JSON on top.
 //
-// The JSON layer lives in `./json-client.ts` and composes this transport.
+// Cancellation: each attempt gets its own controller, aborted on timeout so a
+// dead request releases its connection instead of running beside the retry. A
+// caller `signal` in `init` stops the retry loop and rejects with the caller's
+// own abort reason; it is not retried as a network failure.
 //
-// Cancellation
-// ------------
-// Each attempt gets its own controller, aborted on timeout so a dead request
-// releases its connection instead of running on beside the retry. A caller
-// `signal` in `init` is honoured separately: it stops the retry loop rather
-// than being retried as a network failure, and the rejection is the caller's
-// own abort reason.
-//
-// Every HTTP client in the SDK uses this transport for timeout/retry/backoff.
-//
-// Retry and idempotency
-// ---------------------
-// Retries key on whether the request is idempotent, not on its method. GET,
-// HEAD and OPTIONS are idempotent by default; any request can declare itself
-// so with `idempotent: true` (the relayer's fee estimates are POSTs that only
-// read). Idempotent requests retry on no response, 408, 429 and any 5xx.
+// Retry is keyed on idempotency, not method. GET, HEAD and OPTIONS are
+// idempotent by default; any request can declare itself so with
+// `idempotent: true` (the relayer's fee estimates are POSTs that only read).
+// Idempotent requests retry on no response, 408, 429 and any 5xx.
 //
 // Non-idempotent requests (the submit endpoints) carry one client-generated
-// `Idempotency-Key` for every attempt and retry only where the server cannot
-// have acted: no response, 429 and 503. A 500 or 502 on a submit may follow a broadcast (the relayer answers 502
-// for "outcome unknown"), so it is surfaced rather than resent.
+// `Idempotency-Key` across all attempts and retry only on no response, 429 and
+// 503. A 500 or 502 on a submit may follow a broadcast (the relayer answers
+// 502 for "outcome unknown"), so it is surfaced rather than resent.
 //
 // A retried submit that first got no response may still have landed; the
-// final error's `attempts` records that, and the spend path reserves the notes.
+// final error's `attempts` records that.
 
 import { retry, withTimeout } from "../../core/async.js";
 import { randomHex } from "../../core/random.js";
@@ -49,12 +41,12 @@ export interface HttpClientOptions {
      */
     timeoutMs?: number | undefined;
     /**
-     * Per-attempt deadline for non-idempotent requests — the submit endpoints,
+     * Per-attempt deadline for non-idempotent requests: the submit endpoints,
      * which the relayer answers only once the transaction is mined. Takes
      * precedence over `timeoutMs` for them; default `timeoutMs`, else 30 000.
      *
-     * Per chain in practice: a relayer on a slow-block chain, or one waiting to
-     * fill a bundle, needs longer than one on an L2.
+     * Chain-dependent: a relayer on a slow-block chain, or one waiting to fill
+     * a bundle, needs longer than one on an L2.
      */
     submitTimeoutMs?: number | undefined;
     /** Additional attempts after the first. Default 3. */
@@ -73,11 +65,8 @@ export interface HttpClientOptions {
         | ((info: { url: string; method: string; attempt: number; delayMs: number }) => void)
         | undefined;
     /**
-     * Invoked when the server returns 402, before `NetworkError` is thrown.
-     * Return a `Response` to replace the 402 (its ok/non-ok status is then
-     * honored) or null to fall through to the normal error path. Owns its
-     * own retry semantics: the outer retry loop does NOT loop on the
-     * returned response.
+     * Invoked on a 402 response, before `NetworkError` is thrown; see
+     * {@link StatusHook} for the contract.
      */
     onPaymentRequired?: StatusHook;
 }
@@ -86,8 +75,8 @@ export interface HttpClientOptions {
  * Handles a response with a particular status before it becomes an error.
  *
  * Returns a replacement `Response` (whose own status is then honoured) or
- * `null` to fall through to the error path. Runs once per attempt; the retry
- * loop does not repeat on the replacement.
+ * `null` to fall through to the error path. Runs at most once per attempt:
+ * the replacement is not passed back to the hook.
  */
 export type StatusHook = (
     res: Response,
@@ -118,18 +107,15 @@ const DEFAULTS = {
 };
 
 const IDEMPOTENT = new Set(["GET", "HEAD", "OPTIONS"]);
-/**
- * Statuses a submit retries on: the server refused before acting. A 500 or 502
- * may have followed a broadcast, so it is never resent.
- */
+/** Statuses a submit retries on: the server refused before acting. */
 const SUBMIT_RETRY_STATUS = new Set([429, 503]);
 
 /**
- * Request defaults applied to every SDK-originated request.
+ * Defaults for every SDK request; caller `init` overrides them.
  *
  * Browser `fetch` otherwise sends the page origin as `Referer` and attaches
  * same-origin cookies. No Lelantos service reads either, and both are recorded
- * by intermediate proxies and access logs. Caller `init` overrides these.
+ * by intermediate proxies and access logs.
  */
 export const PRIVACY_REQUEST_DEFAULTS: Readonly<RequestInit> = Object.freeze({
     credentials: "omit",
@@ -170,9 +156,8 @@ export function createHttpClient(
                 ? (opts.timeoutMs ?? DEFAULTS.timeoutMs)
                 : (opts.submitTimeoutMs ?? opts.timeoutMs ?? DEFAULTS.submitTimeoutMs);
 
-            // Held separately, not copied into `request`: each attempt composes
-            // it with a fresh per-attempt controller, which would overwrite a
-            // shared signal.
+            // Kept out of `request`: each attempt sets `signal` to its own
+            // controller's.
             const callerSignal = init?.signal ?? undefined;
             const request: HttpRequestInit = { ...PRIVACY_REQUEST_DEFAULTS, ...init };
             delete request.signal;
@@ -187,11 +172,10 @@ export function createHttpClient(
                 };
             }
 
-            // One entry per attempt, shared by every attempt's error, so the
-            // final error reports the history while its own `status` and `body`
-            // stay the final attempt's: a timeout after a 5xx must still read as
-            // "no response", or a submit whose last attempt may have landed looks
-            // definitely refused.
+            // One entry per attempt, shared by every attempt's error. The final
+            // error's own `status` and `body` stay the final attempt's: a timeout
+            // after a 5xx must read as "no response", or a submit whose last
+            // attempt may have landed looks definitely refused.
             const attempts: NetworkAttempt[] = [];
 
             const attempt = async (): Promise<Response> => {
@@ -199,8 +183,8 @@ export function createHttpClient(
                 if (callerSignal?.aborted) throw new AbortMarker(callerSignal.reason);
 
                 // Rejecting the wrapper promise does not stop the request, so
-                // the controller is aborted explicitly. Otherwise, with retries,
-                // one logical call could hold several live sockets (for a
+                // the controller is aborted explicitly. Otherwise one logical
+                // call could hold several live sockets across retries (for a
                 // submit, several copies of the same payload in flight).
                 const ctrl = new AbortController();
                 const perAttempt: RequestInit = { ...request, signal: ctrl.signal };
@@ -215,9 +199,8 @@ export function createHttpClient(
                     );
                 } catch (err) {
                     ctrl.abort();
-                    // The caller's abort and a timeout both surface as an
-                    // `AbortError` here, so the signal, not the error, decides
-                    // which occurred. A cancelled request must not be retried.
+                    // The signal, not the error, decides whether the caller
+                    // cancelled. A cancelled request must not be retried.
                     if (callerSignal?.aborted) throw new AbortMarker(callerSignal.reason);
                     attempts.push({});
                     const timedOut = err instanceof TimeoutMarker;
@@ -268,23 +251,20 @@ export function createHttpClient(
                     },
                 });
             } catch (err) {
-                // Surface the caller's own reason, not an SDK error wrapping
-                // it: `fetch` rejects with the reason, and so should this.
+                // Reject with the caller's own reason, as `fetch` does, not an
+                // SDK error wrapping it.
                 throw err instanceof AbortMarker ? err.reason : err;
             }
         },
     };
 }
 
-/** Internal marker so `withTimeout` rejections are distinguishable. */
+/** Distinguishes a `withTimeout` rejection from a `fetch` failure. */
 class TimeoutMarker extends Error {}
 
 /**
- * Internal marker carrying the caller's abort reason through the retry loop.
- *
- * `isTransient` treats it as non-retryable and the catch above rethrows the
- * reason itself, so a cancelled request neither retries nor surfaces as a
- * network failure.
+ * Carries the caller's abort reason through the retry loop: `isTransient`
+ * does not retry it, and the client rejects with the reason itself.
  */
 class AbortMarker extends Error {
     constructor(readonly reason: unknown) {

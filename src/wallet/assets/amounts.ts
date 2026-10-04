@@ -44,13 +44,12 @@ export function nearestDenomination(
 
 /**
  * Split a withdrawal's gross into what the recipient receives and what the
- * protocol keeps, reading `withdrawBps`, `scale`, `index` and `yieldEnabled`
- * off the asset.
+ * protocol keeps.
  *
- * The asset-aware wrapper over {@link withdrawNet}; the fields are mapped by
- * `withdrawTerms`. An omitted `yieldEnabled` would misreport the net on the
- * yield branch, and reading the rate from the asset prevents passing the
- * deposit rate to a withdrawal.
+ * {@link withdrawNet} with `withdrawBps`, `scale`, `index` and `yieldEnabled`
+ * read off the asset, so the deposit rate cannot be passed in its place and
+ * `yieldEnabled` cannot be omitted, which would misreport the net of a yield
+ * asset.
  */
 export function withdrawNetFor(publicOut: CircuitAmountLike, asset: AssetInfo): WithdrawNet {
     return withdrawNet({ publicOut: circuitAmount(publicOut), ...withdrawTerms(asset) });

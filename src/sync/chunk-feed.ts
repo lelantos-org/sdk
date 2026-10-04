@@ -1,10 +1,9 @@
 // Sliding-window pager shared by the server's two chunk feeds.
 //
-// Commitments (`TreeStore`) and spent nullifiers (`NullifierStore`) are served as
-// append-only, fixed-size chunks addressed by index, where `isComplete` marks every
-// chunk except the tail. Complete chunks are CDN-immutable, so a window is fetched
-// in parallel; both consumers build positional state, so results are consumed in
-// chunk-id order regardless of arrival order.
+// Commitments (`TreeStore`) and spent nullifiers (`NullifierStore`) are served as append-only,
+// fixed-size chunks addressed by index, where `isComplete` marks every chunk except the tail.
+// Complete chunks are immutable, so a window is fetched in parallel; both consumers build
+// positional state, so results are consumed in chunk-id order regardless of arrival order.
 
 import { linkAbort } from "../core/async.js";
 import { getLogger } from "../log/logger.js";
@@ -15,16 +14,15 @@ export const CHUNK_SIZE = 1024;
 /**
  * Merkle depth of the deployed tree, and the default for every preset.
  *
- * The authoritative value is `WalletConfig.treeDepth`, which the spend path
- * passes to the circuit. Code deriving tree geometry must use the configured
- * depth, or a custom preset builds a local tree that does not match its proofs.
+ * The authoritative value is `WalletConfig.treeDepth`, which the spend path passes to the circuit.
+ * Tree geometry must be derived from it, or a custom preset builds a local tree that does not
+ * match its proofs.
  */
 export const TREE_DEPTH = 10;
 
 /**
- * Upper bound on chunks in either feed: the tree holds `4^depth` leaves and a
- * nullifier exists only for a spent leaf. Prevents unbounded paging against a
- * server that always reports `isComplete`.
+ * Upper bound on chunks in either feed: the tree holds `4^depth` leaves and a nullifier exists
+ * only for a spent leaf. Bounds paging against a server that always reports `isComplete`.
  */
 export function maxChunksFor(treeDepth: number): number {
     return Math.ceil(4 ** treeDepth / CHUNK_SIZE);
@@ -63,16 +61,12 @@ export function chunkOf(entryIndex: number): number {
 }
 
 /**
- * Page `fetch` from `firstChunkId` to the tail, handing each chunk to
- * `consume` in ascending chunk-id order.
+ * Page `fetchChunk` from `firstChunkId` to the tail, handing each chunk to `consume` in ascending
+ * chunk-id order.
  *
- * The window is abandoned once an incomplete chunk is seen, so a sync issues at
- * most `FETCH_WINDOW - 1` speculative requests beyond the tail, each for an
- * empty partial chunk.
- *
- * `signal` is passed to `fetchChunk`, so abandoning the window cancels those
- * requests. Their rejections are swallowed so that an abort or network error
- * past the tail does not surface as an unhandled rejection.
+ * The window is abandoned once an incomplete chunk is seen, so a sync issues at most
+ * `FETCH_WINDOW - 1` speculative requests beyond the tail. `fetchChunk` receives a signal that
+ * cancels them, and their rejections are swallowed.
  */
 export async function pageChunks<C extends Chunk>(
     fetchChunk: (chunkId: number, signal?: AbortSignal | undefined) => Promise<C>,
@@ -82,13 +76,12 @@ export async function pageChunks<C extends Chunk>(
     opts: PagingOpts & { feed: string },
 ): Promise<PagingSummary> {
     const maxChunks = opts.maxChunks ?? MAX_CHUNKS;
-    // Highest id this call may request. Bounding the fetch, not only the consume
-    // loop, prevents the refill below from issuing speculative requests past the
-    // cap.
+    // Highest id this call may request, so the refill below issues no speculative requests past
+    // the cap.
     const lastChunkId = firstChunkId + maxChunks - 1;
 
-    // Cancels the speculative tail of the window on every exit path, including a
-    // throw from `consume`. Linked to the caller's signal so either can abort.
+    // Cancels the speculative tail of the window on every exit path, including a throw from
+    // `consume`. Linked to the caller's signal so either can abort.
     const cancel = linkAbort(opts.signal);
 
     const inflight: Promise<C>[] = [];
@@ -109,16 +102,14 @@ export async function pageChunks<C extends Chunk>(
 
             while (inflight.length < FETCH_WINDOW && nextFetch <= lastChunkId) {
                 const pending = fetchChunk(nextFetch++, cancel.signal);
-                // Observed at once: a speculative chunk can reject while an earlier one is still
-                // awaited, which would otherwise be reported as an unhandled rejection before the
-                // `finally` below attaches its handler. Awaiting `pending` still rejects.
+                // A speculative chunk can reject while an earlier one is awaited; handling it here
+                // avoids an unhandled rejection. Awaiting `pending` still rejects.
                 pending.catch(() => {});
                 inflight.push(pending);
             }
 
             const next = inflight.shift();
-            // Empty only at the cap, e.g. when `maxChunks` lands exactly on a
-            // window boundary.
+            // Empty only at the cap.
             if (!next) return done("maxChunks");
 
             const chunk = await next;

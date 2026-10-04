@@ -1,5 +1,4 @@
-// The public-method boundary: nothing but a `WalletError` (or the caller's own
-// abort reason) leaves a wallet method.
+// The public-method boundary.
 
 import { errMessage, InternalError } from "./base.js";
 import { isWalletError } from "./guard.js";
@@ -26,8 +25,8 @@ export async function boundary<T>(
             if (err.context) err.context.op ??= op;
             throw err;
         }
-        // The original message is kept: it is what escaped before this boundary
-        // existed, and applications word advice from it (a wallet's "nonce too low").
+        // The original message is kept: applications word advice from it (a wallet's
+        // "nonce too low").
         throw new InternalError(`${op}: unexpected failure (see \`cause\`): ${errMessage(err)}`, {
             cause: err,
             context: { op },

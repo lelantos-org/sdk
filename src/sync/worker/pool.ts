@@ -1,8 +1,7 @@
 // Pool of scanner workers, one RPC client per worker.
 //
-// Correlation, timeouts and crash handling all come from `src/runtime/rpc/`, so
-// concurrent `runOne` calls on one worker stay correlated and a dead worker
-// rejects its in-flight calls rather than leaving them pending.
+// Correlation, timeouts and crash handling come from `src/runtime/rpc/`; a dead worker rejects
+// its in-flight calls rather than leaving them pending.
 
 import type { Field } from "../../crypto/index.js";
 import { InternalError } from "../../errors/base.js";
@@ -65,17 +64,15 @@ export class WorkerPoolScanner implements Scanner {
             timeouts: { init: INIT_TIMEOUT_MS, scan: SCAN_TIMEOUT_MS },
         });
         const ready = rpc.call("init", this.wasm ? { wasm: this.wasm } : {});
-        // `ready` is only awaited inside `runChunk`, so a pool that is disposed
-        // or never scans would trip Node's `unhandledRejection`. Marking it
-        // handled does not swallow it: `runChunk` awaits the same promise.
+        // `ready` is awaited only inside `runChunk`, so a pool that is disposed or never scans
+        // would trip Node's `unhandledRejection`. `runChunk` still observes the rejection.
         ready.catch(() => {});
         return { rpc, ready };
     }
 
     /**
-     * Replace a dead worker. The scan that killed it is not retried: its input
-     * buffers were transferred and are detached, so a resend would scan
-     * empty ciphertexts and report no hits.
+     * Replace a dead worker. The scan that killed it is not retried: its input buffers were
+     * transferred and are detached, so a resend would scan empty ciphertexts and report no hits.
      */
     private recycle(index: number): void {
         log.warn("recycling scanner worker", { index });
@@ -96,14 +93,9 @@ export class WorkerPoolScanner implements Scanner {
         const ivkStr = ivk.toString();
         log.debug("scanning", { notes: inputs.length, chunks: chunks.length, workers: n });
 
-        // One in-flight scan per slot, pulling from a shared queue.
-        //
-        // A worker handles messages serially, so queuing several chunks on one
-        // slot would make queued chunks consume `SCAN_TIMEOUT_MS` before doing
-        // any work, and `recycle` would then discard a healthy worker.
-        //
-        // Pulling also load-balances: a slot that finishes early takes the next
-        // chunk instead of idling.
+        // One in-flight scan per slot, pulling from a shared queue. A worker handles messages
+        // serially, so chunks queued on one slot would consume `SCAN_TIMEOUT_MS` before doing any
+        // work, and `recycle` would then discard a healthy worker.
         const partials: ScanHit[][] = new Array(chunks.length);
         let nextChunk = 0;
         const runner = async (slotIndex: number): Promise<void> => {

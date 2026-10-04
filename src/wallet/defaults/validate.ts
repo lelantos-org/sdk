@@ -1,5 +1,4 @@
-// Config validation. Collects every problem into one error rather than failing
-// on the first.
+// Config validation. Collects every problem into one error rather than failing on the first.
 
 import { WalletConfigError } from "../../errors/config.js";
 import { MAX_TREE_DEPTH } from "../constants.js";
@@ -10,9 +9,8 @@ export function validateConfig(cfg: WalletConfig): void {
     if (cfg.chainId === undefined || cfg.chainId === null) missing.push("`chainId`");
     if (!cfg.relayerAddress) missing.push("`relayerAddress`");
     if (!cfg.chain) missing.push("`chain` (ChainAdapter)");
-    // Integral and bounded. `treeDepth` sizes the local MerkleTree and is passed
-    // to the circuit (`4 ** treeDepth` leaves); an invalid value yields a tree
-    // that cannot reconcile, with the failure far from the config.
+    // `treeDepth` sizes the local MerkleTree and is passed to the circuit (`4 ** treeDepth`
+    // leaves); an invalid value yields a tree that cannot reconcile, far from the config.
     if (
         cfg.treeDepth === undefined ||
         !Number.isInteger(cfg.treeDepth) ||

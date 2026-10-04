@@ -1,8 +1,5 @@
-// WASM module loading for Poseidon-5.
-//
-// Isolates bundler handling from the hashing. The boilerplate is
-// `runtime/wasm/module-loader.ts`, shared with `../jubjub-wasm/loader.ts`; the
-// Node/browser/injected branch under it is `runtime/wasm/loader.ts`.
+// WASM module loading for Poseidon-5, kept apart from the hashing. Built on the factory in
+// `runtime/wasm/module-loader.ts`, shared with `../jubjub-wasm/loader.ts`.
 
 import type { WasmLoaderOverride, WasmModuleBase } from "../../runtime/wasm/loader.js";
 import { createModuleLoader } from "../../runtime/wasm/module-loader.js";
@@ -13,15 +10,15 @@ export interface PoseidonWasmMod extends WasmModuleBase {
 }
 
 /**
- * Override for bundlers that rewrite `new URL(..., import.meta.url)` to a
- * runtime-invalid location. Call before `Poseidon.build()`.
+ * Override for bundlers that rewrite `new URL(..., import.meta.url)` to a runtime-invalid
+ * location.
  *
  * @internal
  */
 export type PoseidonWasmLoader = WasmLoaderOverride<PoseidonWasmMod>;
 
-// The import thunk and both URLs stay here, not in the shared factory: they
-// resolve against *this* file. See the bundler contract in `runtime/wasm/module-loader.ts`.
+// The import thunk and both URLs resolve against this file, so they cannot move into the shared
+// factory. See the bundler contract in `runtime/wasm/module-loader.ts`.
 const loader = createModuleLoader<PoseidonWasmMod>({
     owner: "Poseidon",
     importModule: () => import("#wasm/poseidon"),

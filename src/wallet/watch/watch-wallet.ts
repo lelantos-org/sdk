@@ -34,8 +34,8 @@ const log = getLogger("lelantos:watch");
  *
  * The tier is read from the key and reported by `spentKnown` and `keys.tier`.
  *
- * **Ownership.** `dispose()` releases only a scanner the SDK built (the default `LocalScanner`); a
- * `cfg.scanner` passed in stays with the caller. Stores and the reader are never closed.
+ * `dispose()` releases only a scanner the SDK built (the default `LocalScanner`); a `cfg.scanner`
+ * passed in stays with the caller. Stores and the reader are never closed.
  */
 export function createWatchWallet(
     key: ViewingKey | FullViewingKey | ViewingKeyString | string,

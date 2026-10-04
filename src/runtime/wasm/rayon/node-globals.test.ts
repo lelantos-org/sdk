@@ -2,11 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { installWorkerGlobals, withWorkerGlobals } from "./node-globals.js";
 
 // The stubs (`self`, `addEventListener`, `removeEventListener`,
-// `postMessage`) must not outlive the pkg module load. Left on globalThis they
-// make the Node main thread answer yes to the conventional worker-context
-// check —
-//   typeof self !== "undefined" && typeof postMessage === "function"
-// — for the rest of the process, for every library in it.
+// `postMessage`) must not outlive the pkg module load; see `node-globals.ts`.
 
 const KEYS = ["self", "addEventListener", "removeEventListener", "postMessage"] as const;
 

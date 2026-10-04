@@ -4,9 +4,9 @@
 // `ChainReader` or an un-narrowed `WalletApi.chain`, the directive is unused and the type check
 // fails. The functions are never called.
 //
-// Counterpart of `watch/capability.test-d.ts`, which separates viewing from spending. This file
-// separates spending from the pool (authorised by the circuit, broadcast by the relayer) from
-// shielding into it, which needs an EOA holding the tokens and gas.
+// `watch/capability.test-d.ts` separates viewing from spending; this file separates spending from
+// the pool (authorised by the circuit, broadcast by the relayer) from shielding into it, which
+// needs an EOA holding the tokens and gas.
 
 import type { ChainAdapter, ChainReader } from "../../chain/port.js";
 import type { WalletApi } from "../api.js";

@@ -1,20 +1,7 @@
-// Baby-Jubjub types + shared constants. Runtime implementation lives in
-// `./jubjub-wasm/` (Rust/WASM).
+// Baby-Jubjub types. Runtime implementation lives in `./jubjub-wasm/` (Rust/WASM).
 
 import type { Field } from "./poseidon.js";
 
 export type Point = [Field, Field];
-
-/**
- * Fixed independent generator for value-commitment blinding:
- *   cv = value · gen + rcv · H
- * Must match `circuits/src/lib/value_commit.circom` byte-for-byte.
- *
- * @internal
- */
-export const H_BASE: Point = [
-    5802099305472655231388284418920769829666717045250560929368476121199858275951n,
-    5980429700218124965372158798884772646841287887664001482443826541541529227896n,
-];
 
 export { Jubjub } from "./jubjub-wasm/index.js";

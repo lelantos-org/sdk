@@ -1,6 +1,6 @@
 // Modular square root + Legendre symbol over the BN254 scalar field.
-// Consumed by FMD bit derivation (`sharedBit` in `fmd/clue.ts`) and by the (bit, y) witness for
-// the `HashToBit` gadget in circuits/src/lib/hash_to_bit.circom.
+// Consumed by FMD bit derivation (`fmdSharedBit` in `fmd/clue.ts`) and by the (bit, y) witness of
+// `fmdLegendreWitness`.
 // BN254 has 2-adicity 28 (r-1 = 2^28 · q): full Tonelli–Shanks required, no shortcut formula.
 
 import { BN254_FR, FMD_LEGENDRE_QNR } from "../core/field.js";
@@ -50,9 +50,7 @@ export function modSqrt(n: bigint, p: bigint): bigint | null {
         s++;
     }
 
-    // Find any QNR z. For BN254 Fr, the only modulus the SDK uses, z is the constant exported by
-    // `core/field.ts` and pinned in `hash_to_bit.circom`, avoiding three 254-bit `modPow`s per
-    // `fmdLegendreWitness`.
+    // Any QNR z works. BN254 Fr takes the constant from `core/field.ts` instead of searching.
     let z: bigint;
     if (p === BN254_FR) {
         z = FMD_LEGENDRE_QNR;
@@ -84,8 +82,9 @@ export function modSqrt(n: bigint, p: bigint): bigint | null {
 }
 
 /** @internal */
-// Witness pair for HashToBit. bit=1 ⇒ hash is QR and y² = hash; bit=0 ⇒ hash is QNR and
-// y² · Z = hash. Throws on hash=0 (probability 1/r; treated as an internal error).
+// Witness pair for the Legendre bit of a hash, with Z = FMD_LEGENDRE_QNR. bit=1 ⇒ hash is QR and
+// y² = hash; bit=0 ⇒ hash is QNR and y² · Z = hash. Throws on hash=0 (probability 1/r; treated as
+// an internal error).
 export function fmdLegendreWitness(h: bigint): { bit: 0 | 1; y: bigint } {
     const sym = legendreSymbol(h, BN254_FR);
     assertInvariant(sym !== 0, "FMD legendre witness: hash collided to zero");

@@ -1,13 +1,9 @@
-// Quote-fetch helper for the MetaQuoter backend.
+// Quote-fetch helper for the MetaQuoter backend: the best route for
+// `(tokenIn, tokenOut, amountIn)`.
 //
-// Fetches the best route for `(tokenIn, tokenOut, amountIn)`. Proof bundling
-// reuses `buildWithdraw` + `buildDeposit` from `bundle/`; the caller assembles
-// `SwapWrapper.swap(SwapArgs)` calldata against its own signer/relayer.
-//
-// Built on `services/http/json-client.ts`, which provides the per-attempt timeout, retry
-// with backoff, and URL redaction in errors and logs.
-//
-// Retrying is safe despite the POST: a quote reads a venue and moves nothing.
+// Built on `services/http/json-client.ts`, which provides the per-attempt
+// timeout, retry with backoff, and URL redaction in errors and logs. Retrying
+// is safe despite the POST: a quote reads a venue and moves nothing.
 
 import { unixNow } from "../../core/time.js";
 import { WireFormatError } from "../../errors/network.js";
@@ -25,9 +21,8 @@ export type SwapVenue = "univ3" | "univ4";
 const VENUES: ReadonlySet<string> = new Set<SwapVenue>(["univ3", "univ4"]);
 
 /**
- * Best route returned by `POST /v1/quotes`. All `bigint`-shaped fields
- * arrive as decimal strings on the wire; this type holds the parsed
- * `bigint` values.
+ * Best route returned by `POST /v1/quotes`. `bigint` fields arrive as decimal
+ * strings on the wire and are held here parsed.
  */
 export interface SwapRouteQuote {
     venue: SwapVenue;
@@ -52,14 +47,13 @@ export interface SwapRouteQuote {
      * caller must encode as `pi.publicIn` on the deposit leg.
      */
     minOut: bigint;
-    /** Wrapper-overhead-included gas estimate. */
+    /** Gas estimate, wrapper overhead included. */
     gasEstimate: number;
     /** Unix seconds at which the venue was queried. */
     quotedAt: number;
 }
 
 export interface SwapQuoteRequest {
-    /** `bigint` to match `WalletConfig.chainId` and `ChainAdapter.chainId()`. */
     chainId: bigint;
     tokenIn: `0x${string}`;
     tokenOut: `0x${string}`;
@@ -70,9 +64,9 @@ export interface SwapQuoteRequest {
 
 /**
  * Transport options. Extends {@link HttpClientOptions}, so `retries`,
- * `backoffMs` and `onRetry` work here exactly as on the relayer and FMD
- * clients; `timeoutMs` keeps this client's shorter 5s default, since a stale
- * quote is worth less than a fast failure.
+ * `backoffMs` and `onRetry` work as on the relayer and FMD clients. `timeoutMs`
+ * defaults to a shorter 5s here, since a stale quote is worth less than a fast
+ * failure.
  *
  * @internal
  */
@@ -83,12 +77,13 @@ export interface FetchSwapQuoteOptions extends HttpClientOptions {
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**
- * Fetch the best route from MetaQuoter. `baseUrl` should be the root the
- * service is mounted on (no trailing `/v1/quotes`).
+ * Fetch the best route from MetaQuoter. `baseUrl` is the root the service is
+ * mounted on (no trailing `/v1/quotes`).
  *
  * Throws `NetworkError` (`QUOTER_TIMEOUT` / `QUOTER_FAILED`) on transport
- * failure and `WireFormatError` on a response that does not match the
- * contract above; both are `WalletError`s, so `isWalletError` recognises them.
+ * failure and `WireFormatError` on a response that is not a
+ * {@link SwapRouteQuote}; both are `WalletError`s, so `isWalletError`
+ * recognises them.
  */
 export async function fetchSwapQuote(
     baseUrl: string,
@@ -116,12 +111,8 @@ export async function fetchSwapQuote(
 }
 
 /**
- * Validate the wire shape rather than asserting it.
- *
- * A type cast would surface a missing `min_out` as a `TypeError` from
- * `BigInt(undefined)` and an `expected_out` of `"abc"` as a `SyntaxError`,
- * neither naming the field. A quote sets how much a caller accepts from a swap,
- * so a malformed one must fail with the offending field named.
+ * Validates the wire shape. A quote sets how much a caller accepts from a swap,
+ * so a malformed one fails with a `WireFormatError` naming the offending field.
  */
 function swapQuote(raw: unknown): SwapRouteQuote {
     const d = obj(raw, "$");
@@ -144,9 +135,8 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HEX_BLOB = /^0x([0-9a-fA-F]{2})*$/;
 
 /**
- * The adapter goes on-chain as an allowlisted `ISwapAdapter`. Checked for
- * width here so a truncated or `0x`-less value is reported against its field
- * rather than reverting the swap.
+ * Checks prefix and width, so a truncated or `0x`-less adapter is reported
+ * against its field rather than reverting the swap on-chain.
  */
 function hexAddress(v: unknown, path: string): `0x${string}` {
     const s = str(v, path);

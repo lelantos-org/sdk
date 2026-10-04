@@ -1,17 +1,14 @@
-// Local spent-nullifier set: mirrors the server's nullifier chunk feed and answers whether a note
-// is spent without a network round-trip.
-//
-// The server exposes no spent query, since asking whether nullifier N is spent reveals a note the
-// caller owns. The whole set is mirrored and queried locally.
+// Local spent-nullifier set: mirrors the server's whole nullifier chunk feed and answers locally
+// whether a note is spent. The server exposes no spent query, since asking whether nullifier N is
+// spent reveals a note the caller owns.
 //
 // Paging lives in `./chunk-feed.js`; this file tracks which entries are folded in. Entries are
-// ordered by insertion, so a chunk's k-th entry has sequence `chunkId * CHUNK_SIZE + k`.
+// ordered by insertion, so a chunk's k-th entry has sequence `chunkId * CHUNK_SIZE + k`. They are
+// truncated (see `WIRE_BYTES`), so every value held here is the low-bit slice of a nullifier, not
+// a field element.
 //
-// Entries are truncated (see `WIRE_BYTES`), so every value held here is the low-bit slice of a
-// nullifier, not a field element.
-//
-// Persistence: pass a `NullifierPersistence` to `NullifierStore.withPersistence`; `load` runs once
-// at startup, `save` after each `sync()` that advances the cursor.
+// Persistence: `NullifierStore.withPersistence` runs `load` once at startup and `save` after each
+// `sync()` that advances the cursor.
 
 import type { Field } from "../crypto/index.js";
 import { WireFormatError } from "../errors/network.js";
@@ -30,10 +27,9 @@ export interface NullifierFeed {
  * Low-end bytes of each nullifier the server sends. Must match `WIRE_BYTES` in the server's
  * `services::nullifiers`.
  *
- * Every wallet downloads the full feed and only tests set membership, so the remaining 22 bytes
- * are omitted. The spent set is bounded by the tree's `4^10` leaves, so the probability that a
- * live note collides is `2^20 / 2^80 = 2^-60`; a collision makes this client report the note as
- * spent, affecting spendability in this client only, not the note itself.
+ * Wallets only test set membership, so the other 22 bytes are omitted. The spent set is bounded by
+ * the tree's `4^10` leaves, so a live note collides with probability `2^20 / 2^80 = 2^-60`; a
+ * collision makes this client alone report the note as spent.
  */
 const WIRE_BYTES = 10;
 const WIRE_MASK = (1n << BigInt(WIRE_BYTES * 8)) - 1n;
@@ -142,8 +138,8 @@ export class NullifierStore {
                 stoppedBy,
             };
         } finally {
-            // Persisted even when a page failed, so the next sync resumes from the partial progress;
-            // skipped when the cursor did not move (every steady-state poll).
+            // Persisted even when a page failed, so the next sync resumes from the partial
+            // progress; skipped when the cursor did not move.
             if (this.syncedCount > startCount) {
                 await this.persistence?.save(this.saveState());
             }
@@ -168,13 +164,10 @@ export class NullifierStore {
 /**
  * Reject a chunk that does not sit exactly where the fold expects it.
  *
- * Position is implied, as for commitments: a chunk's k-th entry has sequence
- * `chunkId * CHUNK_SIZE + k`, and `syncedCount` advances by the chunk's length. An over-long chunk
- * would push `syncedCount` into the next chunk's range, so the next fold's
- * `slice(syncedCount - base)` would drop that many real entries. Their notes would never be
- * marked spent by `reconcileSpentOnChain`, and the selector would keep offering them.
- *
- * `TreeStore` applies the equivalent check in `assertContiguous`.
+ * Position is implied by `chunkId`, and `syncedCount` advances by the chunk's length. An
+ * over-long chunk would push `syncedCount` into the next chunk's range, so the next fold's
+ * `slice(syncedCount - base)` would drop that many real entries; their notes would never be
+ * marked spent, and the selector would keep offering them.
  */
 function assertWellFormed(chunk: NullifierChunkOut, expectedChunkId: number): void {
     if (chunk.chunkId !== expectedChunkId) {

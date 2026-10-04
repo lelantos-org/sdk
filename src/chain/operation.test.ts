@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { EvmAddress, Hex32 } from "../core/brand.js";
 import { keccak256 } from "../crypto/keccak.js";
 import {
+    commitmentPublished,
     locateOperation,
     NOTE_PAYLOAD_TOPIC,
     NULLIFIER_CONSUMED_TOPIC,
@@ -20,7 +21,7 @@ const topic = (sig: string) => keccak256(new TextEncoder().encode(sig));
 const ASSET_MOVED = topic("AssetMoved(uint64,address,uint256,uint256,uint64,uint64)");
 const DEPOSIT_FLUSHED = topic("DepositFlushed(uint256,bytes32)");
 const DEPOSIT_ESCROWED = topic(
-    "DepositEscrowed(uint256,address,address,uint64,uint64,uint16,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes,uint64,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes)",
+    "DepositEscrowed(uint256,address,address,uint64,uint64,uint16,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes,uint64,uint64,bytes32,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes,uint256)",
 );
 const TRANSFER = topic("Transfer(address,address,uint256)");
 
@@ -57,7 +58,7 @@ const swap = (cms: Hex32[]) => [
 describe("event topics", () => {
     it("match the pool's event signatures", () => {
         expect(NOTE_PAYLOAD_TOPIC).toBe(
-            topic("NotePayload(bytes32,uint256,uint256,uint256,uint256,bytes,uint256,uint256)"),
+            topic("NotePayload(bytes32,uint256,uint256,uint256,uint256,bytes)"),
         );
         expect(ROOT_ADVANCED_TOPIC).toBe(topic("RootAdvanced(uint64,uint64,bytes32,bytes32)"));
         expect(NULLIFIER_CONSUMED_TOPIC).toBe(topic("NullifierConsumed(bytes32)"));
@@ -137,5 +138,31 @@ describe("locateOperation", () => {
     it("is undefined when no root precedes the payloads", () => {
         const mine = outputs(0xa0);
         expect(locateOperation([...payloads(mine), root()], POOL, mine)).toBeUndefined();
+    });
+});
+
+// What a payee checks before crediting a receipt: the pool's own log, not the
+// indexer's note feed.
+describe("commitmentPublished", () => {
+    const mine = outputs(0xa0);
+
+    it("is true for a commitment a spend inserted", () => {
+        expect(commitmentPublished(transfer(mine), POOL, mine[2]!)).toBe(true);
+        expect(commitmentPublished(withdraw(mine), POOL, mine[5]!.toUpperCase())).toBe(true);
+    });
+
+    it("is false for a commitment the transaction does not carry", () => {
+        expect(commitmentPublished(transfer(mine), POOL, word(0xdead))).toBe(false);
+        expect(commitmentPublished([], POOL, mine[0]!)).toBe(false);
+    });
+
+    it("is false for a payload from a contract that is not the pool", () => {
+        const spoofed = [...nullifiers(0), root(), log(NOTE_PAYLOAD_TOPIC, mine[0], TOKEN)];
+        expect(commitmentPublished(spoofed, POOL, mine[0]!)).toBe(false);
+    });
+
+    // An escrow is not in the tree until flushed, and can still be cancelled.
+    it("is false for a deposit's escrow", () => {
+        expect(commitmentPublished([log(DEPOSIT_ESCROWED, mine[0])], POOL, mine[0]!)).toBe(false);
     });
 });

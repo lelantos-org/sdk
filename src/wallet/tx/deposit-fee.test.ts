@@ -6,7 +6,11 @@ import type { WalletContext } from "../context.js";
 import { resolveDepositFees } from "./deposit-fee.js";
 
 /** A relayer quoting `amounts` per asset at `feeAddress`, counting its quotes. */
-async function makeCtx(amounts: Record<string, bigint>, charges = true) {
+async function makeCtx(
+    amounts: Record<string, bigint>,
+    charges = true,
+    cfg: Record<string, unknown> = {},
+) {
     const J = await Jubjub.build();
     const feeAddress = await freshAddress(J);
     const calls = { estimate: 0 };
@@ -22,14 +26,14 @@ async function makeCtx(amounts: Record<string, bigint>, charges = true) {
                     return estimate;
                 },
             },
+            ...cfg,
         },
     } as unknown as Pick<WalletContext, "J" | "cfg" | "address">;
     return { ctx, calls };
 }
 
 describe("resolveDepositFees", () => {
-    // A swap escrows two deposits in different assets; one relayer quote
-    // covers both.
+    // A swap escrows two deposits in different assets; one relayer quote covers both.
     it("prices several deposits from one quote, in order", async () => {
         const { ctx, calls } = await makeCtx({ "1": 3n, "2": 7n });
 
@@ -59,5 +63,21 @@ describe("resolveDepositFees", () => {
         const [fee] = await resolveDepositFees(ctx, [assetId(1n)]);
         expect(fee?.value).toBe(0n);
         expect(fee?.asset).toBe(1n);
+    });
+
+    // A deposit's fee is pulled from the payer's public balance, so it needs the same bound.
+    it("refuses a quote `acceptRelayerFee` turns down", async () => {
+        const { ctx } = await makeCtx({ "1": 3n, "2": 7n }, true, {
+            acceptRelayerFee: (quote: { amount: bigint }) => quote.amount <= 5n,
+        });
+
+        await expect(resolveDepositFees(ctx, [assetId(1n)])).resolves.toHaveLength(1);
+        await expect(resolveDepositFees(ctx, [assetId(1n), assetId(2n)])).rejects.toMatchObject({
+            code: "FEE_ABOVE_LIMIT",
+            source: "acceptRelayerFee",
+            kind: "deposit",
+            asset: 2n,
+            quoted: 7n,
+        });
     });
 });

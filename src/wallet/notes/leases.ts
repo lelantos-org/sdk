@@ -1,19 +1,18 @@
 // In-flight note leases.
 //
 // A spend selects its notes long before it learns whether they were consumed:
-// between selection and the relayer's answer it syncs the tree, proves and
-// submits. Two spends running concurrently in one wallet would otherwise read
-// the same unspent set and pick the same notes, and the second proof would be
-// rejected as a double spend after a full Groth16 run.
+// in between it syncs the tree, proves and submits. A lease withholds those
+// notes from every other selection in the wallet meanwhile, so two concurrent
+// spends cannot pick the same note and have the second rejected as a double
+// spend after a full proof.
 //
-// A lease withholds a note from every other selection while its spend is in
-// flight. Selection and leasing happen under one lock, so no other selection
-// can observe the note set between them. The spend settles the lease: the note
-// is marked spent (success) or reserved (unknown outcome) *before* the lease is
-// released, and a definite failure releases it untouched.
+// Selection and leasing happen under one lock, so no other selection observes
+// the note set between them. The spend marks the note spent (success) or
+// reserved (unknown outcome) before releasing the lease; a definite failure
+// releases it untouched.
 //
-// In memory only. A lease guards a live operation; after a restart nothing is
-// in flight, and an unknown outcome is carried by `StoredNote.pendingSpendAt`.
+// In memory only: after a restart nothing is in flight, and an unknown outcome
+// is carried by `StoredNote.pendingSpendAt`.
 
 import { createMutex } from "../../core/async.js";
 import { InternalError } from "../../errors/base.js";

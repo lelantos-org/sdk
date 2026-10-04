@@ -1,5 +1,5 @@
 // `configureWasm`, with the prover loader (and its rayon worker glue) imported only when a prover
-// module is actually configured, so a wallet that never proves does not bundle it.
+// module is configured, so a wallet that never proves does not bundle it.
 
 import type { WasmConfig } from "../../configure-wasm.js";
 import { configureJubjubWasm } from "../../crypto/jubjub-wasm/loader.js";

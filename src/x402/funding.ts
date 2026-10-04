@@ -23,11 +23,9 @@ const log = getLogger("lelantos:x402:unshielded");
 export const SCOPE = "unshielded";
 
 /**
- * Ephemeral payer slot and how it was chosen.
- *
- * `"shared"` means no host was available, so every such payment uses the same
- * slot and therefore the same publicly-funded EVM address. Provenance is
- * carried so that case can be reported.
+ * Ephemeral payer slot and how it was chosen. `"shared"` means no host was
+ * available, so every such payment uses the same slot and therefore the same
+ * publicly funded EVM address; the provenance lets that case be reported.
  */
 interface PayerSlot {
     index: number;
@@ -44,10 +42,8 @@ export function resolvePayerSlot(pinned: number | undefined, host: string | unde
 }
 
 /**
- * The payer's balance reader, or an `unsupported` refusal when the adapter has none.
- *
- * A property of the chain adapter rather than of any one payment, so asking it
- * in `quote` costs nothing and answers before value could move.
+ * The payer's balance reader, or an `unsupported` refusal when the adapter has none. Depends
+ * only on the chain adapter, so `quote` can ask before any value moves.
  */
 function balanceReader(
     wallet: WalletApi,
@@ -72,17 +68,15 @@ async function poolCanAdd(wallet: WalletApi, asset: AssetInfo): Promise<bigint> 
 }
 
 /**
- * Whether this payment could be funded at all, moving nothing.
+ * Whether this payment could be funded, moving nothing.
  *
- * A routing filter, not a promise. It refuses an offer that certainly cannot be
- * paid — no balance reader, or neither the payer nor the pool holding the
- * shortfall — as `unsupported`, so the selector moves to the next `accepts[]`
- * entry while nothing has happened yet. Without it the same refusal arrives
- * from inside `createPaymentPayload`, by which point selection has committed
- * and the request fails outright.
+ * A routing filter, not a guarantee. An offer that certainly cannot be paid (no
+ * balance reader, or neither the payer nor the pool holding the shortfall) is
+ * refused as `unsupported`, so the selector moves to the next `accepts[]`
+ * entry; the same refusal from `createPaymentPayload` fails the request.
  *
- * An offer this accepts may still fail to fund: the figures are read seconds
- * before the payment, and a top-up pays a protocol fee out of what it withdraws.
+ * An accepted offer may still fail to fund: the figures are read before the
+ * payment, and a top-up pays a protocol fee out of what it withdraws.
  */
 export async function assertFundable(
     wallet: WalletApi,
@@ -134,11 +128,9 @@ export async function ensureFunded(
     // amortises the proof across later payments.
     const shortfall = ceilDiv(needed - held, asset.scale);
     const wanted = ceilDiv((needed - held) * opts.topUpMultiple, asset.scale);
-    // The multiple is an amortisation, not a requirement: a pool that cannot
-    // cover it can still cover this payment, and refusing would strand a payer
-    // that merely holds less than ten calls' worth. Only the shortfall itself
-    // is non-negotiable — `assertFundable` has already refused the offer when
-    // even that is out of reach, so this is the racing case.
+    // Only the shortfall is required: a pool that cannot cover the multiple
+    // tops up with what it has. `assertFundable` already refused the offer
+    // when the pool was short of the shortfall, so a refusal here is a race.
     const available = await poolCanAdd(wallet, asset);
     if (available < shortfall) {
         throw unsupported(

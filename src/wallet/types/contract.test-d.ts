@@ -1,4 +1,4 @@
-// The 0.39 application type contract, asserted at compile time.
+// The application-facing type contract, asserted at compile time.
 //
 // Each `@ts-expect-error` is an assertion: if the rejected shape starts compiling, the directive is
 // unused and the type check fails. The `_`-prefixed functions are never called.
@@ -49,8 +49,6 @@ declare const reader: ChainReader;
 declare const adapter: ChainAdapter;
 declare const prover: Prover;
 
-// --- amounts -------------------------------------------------------------------------------------
-
 function _amountForms() {
     const a: Amount[] = ["1.5", units, circuitAmount(5n), { baseUnits: 5n }, { baseUnits: base }];
     const r: Amount = { baseUnits: 5n, round: "down" };
@@ -77,8 +75,6 @@ function _outAmountIsGrossXorNet() {
     const neither: OutAmount = {};
     return [ok, both, neither];
 }
-
-// --- connect -------------------------------------------------------------------------------------
 
 function _connectShapes() {
     void connect({ network: "anvil", privateKey: "0x01" });
@@ -139,8 +135,6 @@ async function _readOnlyConnectIsStillAWalletApi() {
     void watch.capabilities;
     expectTypeOf(w.keys.tier).toEqualTypeOf<"spending">();
 }
-
-// --- ops: asset required, recipient naming, phases -----------------------------------------------
 
 function _assetIsRequiredEverywhere(w: WalletApi) {
     // @ts-expect-error — deposit without an asset.

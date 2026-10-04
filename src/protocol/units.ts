@@ -1,18 +1,16 @@
-// Decimal <-> integer conversion helpers. Dependency-free and wallet-free
-// so they can be used anywhere a raw amount needs formatting or parsing.
+// Decimal <-> integer conversion helpers, dependency-free and wallet-free.
 //
-// The MASP works in three amount spaces, which integrations commonly confuse:
+// The MASP works in three amount spaces:
 //
 //   human       "1.5"                 what a user types
 //   token       1500000000000000000n  ERC-20 base units (10 ** decimals)
 //   circuit     1500n                 what every wallet method takes
 //
-// `token = circuit * asset.scale`. See `wallet/assets/` for the
-// asset-aware wrappers (`parseAmount` / `formatAmount`).
+// `token = circuit * asset.scale`. See `wallet/assets/` for the asset-aware wrappers
+// (`parseAmount` / `formatAmount`).
 //
-// The two integer spaces are branded (`CircuitAmount`, `TokenAmount`), so the
-// conversions below are the only way to move between them and passing one
-// where the other is expected is a compile error.
+// The two integer spaces are branded (`CircuitAmount`, `TokenAmount`), so passing one where the
+// other is expected is a compile error.
 
 import { branded, type CircuitAmount, type TokenAmount } from "../core/brand.js";
 import { InvalidArgumentError } from "../errors/config.js";
@@ -20,9 +18,9 @@ import { InvalidArgumentError } from "../errors/config.js";
 const DECIMAL = /^-?(\d+)(?:\.(\d+))?$/;
 
 /**
- * Fixed-point scale of a pool-managed yield index, matching the Aave
- * scaled-balance convention. An index of exactly `RAY` means "no yield
- * accrued", where every conversion below reduces to plain `scale` arithmetic.
+ * Fixed-point scale of a pool-managed yield index, matching the Aave scaled-balance convention.
+ * At an index of exactly `RAY` (no yield accrued) every conversion below reduces to plain `scale`
+ * arithmetic.
  */
 export const RAY = 10n ** 27n;
 
@@ -75,9 +73,8 @@ export function formatUnits(value: bigint, decimals: number): string {
 /**
  * `numer / denom`, floored or ceiled, for a non-negative `numer`.
  *
- * The rounding direction is this module's core contract: down out of the pool,
- * up into it, so dust accrues to the remaining holders. All conversions share
- * this one implementation, the wallet's amount arithmetic included.
+ * Rounding direction is this module's contract: down out of the pool, up into it, so dust accrues
+ * to the remaining holders. Every conversion below goes through this function.
  */
 export function divRound(numer: bigint, denom: bigint, round: "down" | "up"): bigint {
     const down = numer / denom;
@@ -85,16 +82,13 @@ export function divRound(numer: bigint, denom: bigint, round: "down" | "up"): bi
 }
 
 /**
- * Circuit units → ERC-20 base units.
+ * Circuit units → ERC-20 base units: `token = circuit * scale * index / RAY`. At the default
+ * `index` of {@link RAY} this is exactly `circuit * scale`.
  *
- * `token = circuit * scale * index / RAY`. At the default `index` of {@link RAY}
- * the index cancels exactly, giving `circuit * scale`.
+ * With a pool-managed index the conversion is lossy, so it rounds down by default: the direction
+ * out of the pool (see `divRound`).
  *
- * With a pool-managed index the conversion is lossy, so it rounds **down** by
- * default: the direction out of the pool (see `divRound`).
- *
- * A *display* conversion: to size a payment, use {@link toTokenUnitsAtRate}
- * (see {@link YieldRate} for why).
+ * A display conversion: to size a payment, use {@link toTokenUnitsAtRate} (see {@link YieldRate}).
  */
 export function toTokenUnits(
     circuitAmount: CircuitAmount,
@@ -110,15 +104,13 @@ export function toTokenUnits(
 }
 
 /**
- * Current value of a yield asset's units as the pool measures it: `gross` is
- * the venue position plus the pool's idle balance, `supply` the units
- * outstanding against it.
+ * Current value of a yield asset's units as the pool measures it: `gross` is the venue position
+ * plus the pool's idle balance, `supply` the units outstanding against it.
  *
- * Used instead of the {@link RAY}-scaled `index` because the pool converts by
- * `units * gross / supply` (`scale` and `RAY` cancel), while the index it
- * *reports* is floored. A deposit quoted through the floored index can land
- * below what the contract charges, and a `maxTotal` signed from that figure is
- * refused by Permit2. Use `index` for display; use this to size payments.
+ * The pool converts by `units * gross / supply` (`scale` and `RAY` cancel), while the
+ * {@link RAY}-scaled `index` it reports is floored. A deposit quoted through the floored index
+ * can land below what the contract charges, and a `maxTotal` signed from that figure is refused
+ * by Permit2. Use `index` for display; use this to size payments.
  */
 export interface YieldRate {
     gross: bigint;
@@ -126,23 +118,18 @@ export interface YieldRate {
 }
 
 /**
- * Circuit units → ERC-20 base units at a pool-measured rate.
+ * Circuit units → ERC-20 base units at a pool-measured rate. Use this over {@link toTokenUnits}
+ * for any figure someone is charged; see {@link YieldRate}.
  *
- * Prefer this over {@link toTokenUnits} for any figure someone is *charged*;
- * see {@link YieldRate}.
+ * `undefined`, or a rate with no units outstanding, yields `circuit * scale`: an empty pool has no
+ * ratio and one unit is worth exactly `scale`, which pins a fresh asset's index to {@link RAY}.
  *
- * `undefined`, or a rate with no units outstanding, yields `circuit * scale`:
- * an empty pool has no ratio and one unit is worth exactly `scale` by
- * definition, which pins a new asset's index to {@link RAY}.
+ * A nonzero `supply` with zero `gross` is not that case: the venue lost everything, the contract
+ * pays out zero, and so does this. Treating it as an empty pool would price worthless units at
+ * face value.
  *
- * A nonzero `supply` with zero `gross` is **not** that case and is not
- * special-cased: the venue lost everything, the contract pays out zero, and so
- * does this. Treating it as an empty pool would price worthless units at face
- * value.
- *
- * Rounds **up** by default because the caller is paying in: rounding down
- * under-signs the Permit2 ceiling. {@link toTokenUnits} defaults to down for the
- * converse reason.
+ * Rounds up by default because the caller is paying in: rounding down under-signs the Permit2
+ * ceiling.
  */
 export function toTokenUnitsAtRate(
     circuitAmount: CircuitAmount,
@@ -171,21 +158,14 @@ export function toTokenUnitsAtRate(
  *
  * `round` picks what happens off a unit boundary:
  *
- * - `"exact"` (default) throws. Use wherever an off-boundary amount is a
- *   mistake; at a fixed `scale` nothing finer is representable, and truncating
- *   would silently short the caller.
- * - `"down"` floors, dropping the remainder silently. Use only where dust does
- *   not matter.
- * - `"up"` ceils, inverting a conversion that floored.
- *   {@link toTokenUnits} produces `floor(units * step / RAY)`, at or below the
- *   exact worth of `units`; flooring again on the way back loses a unit. `"up"`
- *   gives the smallest unit count worth at least `tokenAmount` and recovers the
- *   original exactly: `toCircuitUnits(toTokenUnits(v, …), …, { round: "up" }) === v`.
- *
- *   With a moving index a unit is worth a non-round number of base units, so
- *   most unit counts have no exact decimal at the token's `decimals`, including
- *   values a "max" control writes into a field and reads back. Rounding up
- *   cannot over-draw: if `tokenAmount <= toTokenUnits(balance, …)` then the
+ * - `"exact"` (default) throws. Use wherever an off-boundary amount is a mistake; at a fixed
+ *   `scale` nothing finer is representable, and truncating would silently short the caller.
+ * - `"down"` floors, dropping the remainder. Use only where dust does not matter.
+ * - `"up"` ceils, inverting a conversion that floored: it gives the smallest unit count worth at
+ *   least `tokenAmount`, so `toCircuitUnits(toTokenUnits(v, …), …, { round: "up" }) === v` where
+ *   flooring again would lose a unit. With a moving index most unit counts have no exact decimal
+ *   at the token's `decimals`, including values a "max" control writes into a field and reads
+ *   back. Rounding up cannot over-draw: if `tokenAmount <= toTokenUnits(balance, …)` then the
  *   result is `<= balance`.
  *
  * @throws {InvalidArgumentError} when the amount is not a whole number of circuit units
@@ -205,16 +185,12 @@ export function toCircuitUnits(
         throw new InvalidArgumentError(`toCircuitUnits: index must be positive, got ${index}`, {
             argument: "index",
         });
-    // `circuit = token * RAY / (scale * index)`. At `index === RAY` the RAYs
-    // cancel and `step` is `scale`, so the error message below still names the
-    // figure a caller recognises.
+    // `circuit = token * RAY / (scale * index)`; at `index === RAY` the RAYs cancel.
     const numer = tokenAmount * RAY;
     const step = scale * index;
     const rest = numer % step;
     if (rest !== 0n && (opts.round ?? "exact") === "exact") {
-        // At the default index the index is irrelevant to the caller, so the
-        // message omits it. With a moving index it is usually why the amount is
-        // not representable, so the message names it.
+        // The message names the index only when it is not RAY.
         throw new InvalidArgumentError(
             index === RAY
                 ? `toCircuitUnits: ${tokenAmount} is not a multiple of scale ${scale} ` +

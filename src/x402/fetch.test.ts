@@ -35,9 +35,8 @@ function encode(value: unknown): string {
 }
 
 /**
- * The payment payload on a paid retry. The retry is a single `Request` (to
- * reproduce a caller-supplied one), so the header is on the request rather
- * than a separate `init`.
+ * The payment payload on a paid retry. The retry is a single `Request`, so the
+ * header is on the request, not a separate `init`.
  */
 function decodePaymentHeader(input: unknown): PaymentPayload {
     const header = (input as Request).headers?.get(HEADER_PAYMENT_SIGNATURE);
@@ -156,9 +155,8 @@ describe("x402", () => {
     });
 
     it("pays the offer whose asset this wallet actually holds", async () => {
-        // A server may price one resource in several assets. Selection walks
-        // them in order, so an empty balance in the first must fall through
-        // rather than commit the payer to an asset it cannot spend.
+        // A server may price one resource in several assets; an empty balance
+        // in the first must fall through to the next.
         const wallet = stubWallet({ spendableMax: spendableMaxSpy({ 1: 0n, 7: 5_000n }) });
         const fetchImpl = vi
             .fn<typeof fetch>()
@@ -180,9 +178,9 @@ describe("x402", () => {
     });
 
     it("falls through to the unshielded offer it can fund", async () => {
-        // The unshielded mechanism pays from a per-host throwaway address topped
-        // up by unshielding. Until it judged that in `quote`, an unfundable
-        // first entry aborted the request instead of yielding to the next.
+        // The unshielded mechanism judges in `quote` whether its payer can be
+        // funded, so an unfundable first entry yields to the next instead of
+        // aborting the request.
         const BROKE = { ...usdc(7n), token: evmAddress(`0x${"aa".repeat(20)}`) };
         const FUNDED = usdc(8n);
         const wallet = withNsk(
@@ -399,8 +397,8 @@ describe("x402", () => {
 
 describe("x402 concurrency and request handling", () => {
     it("enforces the budget across payments that overlap in flight", async () => {
-        // Minting a payment takes seconds (prove, then submit); the ledger must
-        // count in-flight payments so concurrent calls cannot all pass the check.
+        // The ledger must count in-flight payments so concurrent calls cannot
+        // all pass the check while a payment is being minted.
         const wallet = stubWallet();
         let release: () => void = () => {};
         const gate = new Promise<void>((r) => {
