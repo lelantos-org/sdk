@@ -12,6 +12,7 @@ import {
     shieldedAddress,
     tokenAmount,
 } from "../core/brand.js";
+import { ADDRESS_HRP } from "../keys/address.js";
 import { makeAssetInfo } from "../wallet/assets/index.js";
 import type { SpendableMax, WithheldValue } from "../wallet/selection/index.js";
 import { type ReadOnlyWalletInternals, registerInternals } from "../wallet/surface/internals.js";
@@ -65,6 +66,12 @@ export function spendableMaxSpy(held: Record<string, Holding> = {}) {
     });
 }
 
+/**
+ * The payee of the shielded fixtures. Shaped like an address, which is all the stubbed `transfer`
+ * and the offer validation read; it decodes to no key.
+ */
+export const SHIELDED_PAY_TO = shieldedAddress(`${ADDRESS_HRP}1qqqq`);
+
 export const RECIPIENT_CM = hex32(`0x${"11".repeat(32)}`);
 export const CHANGE_CM = hex32(`0x${"22".repeat(32)}`);
 
@@ -91,7 +98,7 @@ export function transferSpy(txHash: Hex32 = hex32(`0x${"de".repeat(32)}`)) {
             nonZeroCommitments: [CHANGE_CM, RECIPIENT_CM],
             ownCommitments: [CHANGE_CM],
             recipientCommitment: RECIPIENT_CM,
-            recipient: shieldedAddress("lelantos1qqqq"),
+            recipient: SHIELDED_PAY_TO,
             amount: { asset: WETH.id, amount: circuitAmount(1_500n), baseUnits: tokenAmount(0n) },
             spent: ["n1"],
             change: circuitAmount(8_500n),
@@ -136,7 +143,7 @@ export function shieldedRequirements(over: Partial<PaymentRequirements> = {}): P
         network: `shielded:${X402_CHAIN_ID}`,
         amount: "1500",
         asset: "1",
-        payTo: "lelantos1qqqq",
+        payTo: SHIELDED_PAY_TO,
         maxTimeoutSeconds: 120,
         extra: { pool: "lelantos", paymentFlow: "upfront" },
         ...over,

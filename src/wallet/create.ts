@@ -11,7 +11,7 @@ import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { InternalError } from "../errors/base.js";
 import { boundary } from "../errors/boundary.js";
 import { type KeySource, loadNsk } from "../keys/key-source.js";
-import { addressFromSpendingKey, buildSpendingKey } from "../keys/keys.js";
+import { addressFromViewingKey, buildSpendingKey } from "../keys/keys.js";
 import { getLogger } from "../log/logger.js";
 import type { Scanner } from "../sync/scanner.js";
 import type { WalletApi } from "./api.js";
@@ -81,8 +81,8 @@ export async function assembleWallet(
         const notes = await NoteCache.open(resolved.noteStore);
 
         // Last: a signer-derived key prompts the user, and nothing after it can fail on config.
-        const keys = buildSpendingKey(P, J, await nsk());
-        const address = addressFromSpendingKey(J, keys);
+        const keys = buildSpendingKey(P, await nsk());
+        const address = addressFromViewingKey(P, J, keys);
 
         let api: WalletApi | undefined;
         const ctx: WalletContext = createWalletContext({

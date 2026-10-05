@@ -65,7 +65,7 @@ export function executeSwap(
                     ctx.J,
                     args.recipient ?? ctx.address,
                     "swap",
-                ).address;
+                ).decoded;
 
                 const [asset, assetOut] = await resolveSwapAssets(
                     ctx,
@@ -108,13 +108,13 @@ export function executeSwap(
                         asset: assetOut,
                         value: legs.credit,
                         fee: legs.outputFee,
-                        recipientAddress: plan.recipient,
+                        recipient: plan.recipient,
                     },
                     refund: {
                         asset,
                         value: legs.refundCredit,
                         fee: legs.refundFee,
-                        recipientAddress: ctx.address,
+                        recipient: ctx.ownAddress,
                     },
                 });
                 // The default deadline is computed here, after selection and any

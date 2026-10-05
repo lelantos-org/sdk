@@ -50,7 +50,7 @@ export function createWatchWallet(
     return boundary("connectWatch", async () => {
         validateWatchConfig(cfg);
         const [P, J] = await Promise.all([deps.P ?? Poseidon.build(), deps.J ?? Jubjub.build()]);
-        const keys = typeof key === "string" ? decodeViewingKey(P, J, key) : key;
+        const keys = typeof key === "string" ? decodeViewingKey(P, key) : key;
         const address = addressFromViewingKey(P, J, keys);
         const resolved = await resolveWatchConfig(cfg, { P, J });
         const notes = await NoteCache.open(resolved.noteStore);

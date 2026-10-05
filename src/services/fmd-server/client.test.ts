@@ -32,6 +32,9 @@ const DIGITS_ONLY_CM = "1234".padStart(64, "0");
  */
 const PACKED_BASE8 = "8b7d2d877a253c4b7733e1b91f05e0fcedf96bd11c2e572549b2a0f703727925";
 
+/** 32 bytes whose ends differ, so a reversed decode would show. */
+const PACKED_CLUE_R = `01${"00".repeat(30)}80`;
+
 const NOTE_ROW = {
     id: 7,
     chainId: 31337,
@@ -41,6 +44,7 @@ const NOTE_ROW = {
     ciphertextHex: "dead",
     // Packed Base8: 32 bytes of `y` little-endian, sign bit of `x` clear.
     ephPubPackedHex: PACKED_BASE8,
+    clueRPackedHex: PACKED_CLUE_R,
 };
 
 describe("listNotes", () => {
@@ -55,6 +59,28 @@ describe("listNotes", () => {
         // Byte-for-byte, in order: `epk` goes straight to `decryptNote`, and
         // decoding it as a big-endian integer would reverse it.
         expect(n.epk).toEqual(hexToBytes(PACKED_BASE8));
+        // As `epk`: the scanner compares it byte for byte with a packed point.
+        expect(n.clueR).toEqual(hexToBytes(PACKED_CLUE_R));
+    });
+
+    it("rejects a row without the clue point", async () => {
+        const { clueRPackedHex: _clueR, ...rest } = NOTE_ROW;
+        respondWith([rest]);
+
+        await expect(client().listNotes()).rejects.toMatchObject({
+            code: "WIRE_FORMAT",
+            path: "$[0].clueRPackedHex",
+        });
+    });
+
+    it("rejects a clue point that is not 32 bytes", async () => {
+        for (const clueRPackedHex of ["", "8b7d", `${PACKED_CLUE_R}00`, null]) {
+            respondWith([{ ...NOTE_ROW, clueRPackedHex }]);
+
+            await expect(client().listNotes()).rejects.toMatchObject({
+                path: "$[0].clueRPackedHex",
+            });
+        }
     });
 
     it("reads a bare-hex commitment as hex even when it is all digits", async () => {
@@ -112,6 +138,7 @@ describe("listMatches", () => {
         if (!m) throw new Error("expected one match");
 
         expect(m.id).toBe(42);
+        expect(m.clueR).toEqual(hexToBytes(PACKED_CLUE_R));
         const [target, init] = fetchMock.mock.calls[0]!;
         const url = new URL(target as string);
         // The token is a stable pseudonymous identifier: it must travel in a
@@ -126,6 +153,15 @@ describe("listMatches", () => {
         // the same chain-independent key and land in the wallet as unspendable
         // balance.
         expect(url.searchParams.get("chainId")).toBe(String(CHAIN));
+    });
+
+    it("rejects a match without the clue point", async () => {
+        const { id: _id, clueRPackedHex: _clueR, ...rest } = NOTE_ROW;
+        respondWith({ backfilledThroughNoteId: 40, matches: [{ ...rest, noteId: 42 }] });
+
+        await expect(client().listMatches({ token: "abcd" })).rejects.toMatchObject({
+            path: "$.matches[0].clueRPackedHex",
+        });
     });
 
     it("reads the backfill watermark from the envelope", async () => {

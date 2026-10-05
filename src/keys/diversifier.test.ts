@@ -5,10 +5,11 @@ import { bytesToBareHex } from "../core/hex.js";
 import { DIVERSIFIER_BOUND } from "../crypto/diversified-base.js";
 import {
     DIVERSIFIER_INDEX_BOUND,
+    defaultDiversifier,
     deriveDiversifierKey,
     diversifierAt,
+    diversifierForIndex,
     diversifierIndex,
-    diversifierIndexOf,
     diversifierToBytes,
     diversifierToField,
 } from "./diversifier.js";
@@ -105,8 +106,21 @@ describe("diversifier as an integer", () => {
         expect(d).toBe(fromLeBytes(bytes));
         expect(d).toBeLessThan(DIVERSIFIER_BOUND);
         expect(diversifierToBytes(d)).toEqual(bytes);
-        expect(diversifierIndexOf(dvk, d)).toBe(index);
-        expect(diversifierIndexOf(otherDvk, d)).toBeNull();
+        expect(diversifierIndex(dvk, diversifierToBytes(d))).toBe(index);
+        expect(diversifierIndex(otherDvk, diversifierToBytes(d))).toBeNull();
+    });
+
+    it.each(INDICES)("index %i of an ivk is its dvk's diversifier as an integer", (index) => {
+        expect(diversifierForIndex(7n, index)).toBe(diversifierToField(diversifierAt(dvk, index)));
+    });
+
+    it("the default diversifier is the one at index 0", () => {
+        expect(defaultDiversifier(7n)).toBe(diversifierForIndex(7n, 0));
+    });
+
+    it("rejects a non-canonical ivk ahead of a bad index", () => {
+        expect(() => diversifierForIndex(-1n, -1)).toThrow(/canonical field element/);
+        expect(() => diversifierForIndex(7n, -1)).toThrow(/integer in \[0, 2\^32\)/);
     });
 
     it("reads the bytes little-endian", () => {
@@ -118,8 +132,6 @@ describe("diversifier as an integer", () => {
     });
 
     it("treats a value outside [0, 2^128) as no diversifier", () => {
-        expect(diversifierIndexOf(dvk, DIVERSIFIER_BOUND)).toBeNull();
-        expect(diversifierIndexOf(dvk, -1n)).toBeNull();
         expect(() => diversifierToBytes(DIVERSIFIER_BOUND)).toThrow(/16-byte diversifier/);
         expect(() => diversifierToBytes(-1n)).toThrow(/16-byte diversifier/);
         expect(() => diversifierToField(new Uint8Array(32))).toThrow(/must be 16 bytes/);

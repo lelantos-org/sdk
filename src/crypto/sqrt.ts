@@ -1,10 +1,11 @@
-// Modular square root + Legendre symbol over the BN254 scalar field.
+// Modular square root + Legendre and Jacobi symbols over the BN254 scalar field.
 // Consumed by FMD bit derivation (`fmdSharedBit` in `fmd/clue.ts`) and by the (bit, y) witness of
 // `fmdLegendreWitness`.
 // BN254 has 2-adicity 28 (r-1 = 2^28 · q): full Tonelli–Shanks required, no shortcut formula.
 
 import { BN254_FR, FMD_LEGENDRE_QNR } from "../core/field.js";
 import { assertInvariant } from "../errors/base.js";
+import { InvalidArgumentError } from "../errors/config.js";
 
 function mod(a: bigint, p: bigint): bigint {
     const r = a % p;
@@ -28,12 +29,57 @@ export function modInverse(a: bigint, p: bigint): bigint {
     return modPow(a, p - 2n, p);
 }
 
-/** @internal */
+/**
+ * The Legendre symbol `(a / p)` over an odd prime `p`, by Euler's criterion: one exponentiation by
+ * the fixed exponent `(p - 1) / 2`, whatever `a` is. `fmdTest` relies on that; where running time
+ * may follow `a`, `jacobiSymbol` gives the same answer several times faster.
+ *
+ * @internal
+ */
 export function legendreSymbol(a: bigint, p: bigint): -1 | 0 | 1 {
     const am = mod(a, p);
     if (am === 0n) return 0;
     const ls = modPow(am, (p - 1n) / 2n, p);
     return ls === 1n ? 1 : -1;
+}
+
+/**
+ * The Jacobi symbol `(a / n)` of any integer `a` over an odd positive `n`, by quadratic
+ * reciprocity: a Euclidean reduction with no exponentiation, whose number of steps varies with
+ * `a`.
+ *
+ * For a prime `n` it is the Legendre symbol, and equals `legendreSymbol(a, n)` for every `a`.
+ *
+ * @throws {InvalidArgumentError} when `n` is even or not positive.
+ * @internal
+ */
+export function jacobiSymbol(a: bigint, n: bigint): -1 | 0 | 1 {
+    if (n <= 0n || (n & 1n) === 0n) {
+        throw new InvalidArgumentError("jacobi symbol: n must be odd and positive", {
+            argument: "n",
+        });
+    }
+    // Invariant: the result is `±(x / m)` with `m` odd, the sign held in `negative`.
+    let x = mod(a, n);
+    let m = n;
+    let negative = false;
+    while (x !== 0n) {
+        // (2 / m) = -1 iff m ≡ ±3 (mod 8).
+        const m8 = m & 7n;
+        const flipsOnTwo = m8 === 3n || m8 === 5n;
+        while ((x & 1n) === 0n) {
+            x >>= 1n;
+            if (flipsOnTwo) negative = !negative;
+        }
+        // (x / m) = -(m / x) iff x ≡ m ≡ 3 (mod 4), for odd x and m.
+        if ((x & m & 3n) === 3n) negative = !negative;
+        const next = m % x;
+        m = x;
+        x = next;
+    }
+    // `m` is gcd(a, n): the symbol is zero unless they are coprime.
+    if (m !== 1n) return 0;
+    return negative ? -1 : 1;
 }
 
 /** @internal */

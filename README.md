@@ -41,6 +41,11 @@ const wallet = await connect({
     privateKey: privKeyHex, // also derives the shielded key; or pass mnemonic / signer / provider
 });
 
+// One shielded address per index. All receive into this wallet, and nobody without its viewing
+// or detection key can link them.
+wallet.address; // "lelantos1…", the address at index 0
+await wallet.addressAt(1); // the same address every time
+
 // Deposit 0.5 WETH. Amounts are decimal strings of the asset's token (or branded circuit units).
 const deposit = await wallet.deposit({ asset: "WETH", amount: "0.5" });
 await wallet.awaitDeposit(deposit.escrow); // until the relayer flushes it into the tree
@@ -99,14 +104,14 @@ One home per name: `check:api` fails if a name is published from two subpaths.
 | `@lelantos-org/sdk/advanced` | `createWallet(KeySource, WalletConfig)`, `ChainAdapter` / `ChainReader` ports and the viem adapter, signers, `Submitter` / `HttpRelayerSubmitter`, note stores and sources, tree/nullifier persistence, coin selectors, scanners, `createWatchWallet` | semver, integrator tier |
 | `@lelantos-org/sdk/prover` | `Prover`, `WorkerProver`, `WasmProver`, `SnarkjsProver`, artifact resolution and caching | semver, integrator tier |
 | `@lelantos-org/sdk/protocol` | fees (`depositTotals`, `withdrawNet`, `grossForNet`), denominations, deposit pulls, units (`RAY`, `toCircuitUnits`), swap sizing, circuit shapes, relayer wire types, bundle builders, Permit2 signing | semver, integrator tier |
-| `@lelantos-org/sdk/primitives` | hex/bytes/field/randomness, Poseidon, Jubjub, keys and addresses, note encryption, FMD | semver, integrator tier |
+| `@lelantos-org/sdk/primitives` | hex/bytes/field/randomness, Poseidon, Jubjub, keys, diversifiers and addresses, note encryption and output-secret derivation, FMD | semver, integrator tier |
 | `@lelantos-org/sdk/services` | `RelayerClient`, `DepositStream`, `FmdClient`, `fetchSwapQuote`, the HTTP client | semver, integrator tier |
 | `@lelantos-org/sdk/workers/prover` | prover worker bootstrap (`new Worker(new URL(…))`) | semver |
 | `@lelantos-org/sdk/workers/scanner` | scanner worker bootstrap | semver |
 | `@lelantos-org/sdk/wasm/{prover,jubjub,poseidon}[/wasm]` | raw wasm-pack modules for bundler setups | semver |
 | `@lelantos-org/sdk/internal` | `walletInternals`, circuit internals, stored-note codec, sync engine pieces, test hooks | **unstable** |
 
-Guides for what this README no longer repeats: the bech32m
+Guides for what this README leaves out: the bech32m
 [address format](https://docs.lelantos.xyz/guide/addresses),
 [watch-only wallets](https://docs.lelantos.xyz/guide/watch-only), and
 [browser setup](https://docs.lelantos.xyz/guide/browser) — cross-origin isolation, keeping the

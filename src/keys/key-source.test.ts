@@ -4,9 +4,7 @@ import { type KeySource, loadNsk } from "./key-source.js";
 import { resolveNsk } from "./mnemonic.js";
 
 describe("resolveNsk", () => {
-    it("rejects a raw nsk of zero, which makes pk_d the identity", () => {
-        // `nsk = 0` gives `pk_d = 0 · Base8 = O`; a note encrypted to the
-        // identity is decryptable by anyone who sees the ephemeral key.
+    it("rejects a raw nsk of zero, a publicly known key", () => {
         expect(() => resolveNsk({ type: "nsk", nsk: 0n })).toThrow(/nsk must be/);
     });
 

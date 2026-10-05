@@ -1,23 +1,24 @@
-// Sapling-style note encryption.
+// Sapling-style note encryption on a diversified base.
 //
-// Sender (knows recipient pk_d):
-//   esk    ← Z_q*
-//   epk    = B · esk
-//   shared = pk_d · esk
+// Sender (knows the recipient address: g_d and pk_d = ivk · g_d):
+//   epk    = esk · g_d
+//   shared = esk · pk_d
 //   key    = blake2b("lelantos.note.kdf.v1"  || epk || shared, 32)
 //   nonce  = blake2b("lelantos.note.nonce.v1" || epk, 12)
 //   ct     = ChaCha20-Poly1305(key, nonce, plaintext)
 //
 // Receiver (knows ivk):
-//   shared = epk · ivk
+//   shared = ivk · epk
 //   key    = same blake2b
 //   nonce  = same blake2b
 //   plaintext = ChaCha20-Poly1305 decrypt; null on tag failure.
 //
-// epk is unique per note → key is single-use → nonce reuse impossible.
-// Per-note nonce derivation is defense-in-depth against key reuse.
-// A wallet's own spends derive esk from the note instead of drawing it; see
-// `./outgoing.ts` for why that keeps epk unique.
+// The receiver needs no `g_d` to decrypt. The plaintext names the diversifier, and the scanner
+// then checks `epk = esk · g_d` (`sync/scan.ts`).
+//
+// The key and nonce are functions of `epk`, so one `esk` must never encrypt two plaintexts on one
+// base. `esk` is expanded from `rseed`, and `rseed` from an output secret that binds every field
+// of the plaintext (`./seed.ts`).
 // Must match `sdk/wasm/jubjub/src/decrypt.rs` byte-for-byte.
 
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
@@ -35,6 +36,8 @@ const NONCE_DOMAIN = new TextEncoder().encode("lelantos.note.nonce.v1");
 /** @internal */
 export interface EncryptArgs {
     J: Jubjub;
+    /** Base point of the recipient address. In the prime-order subgroup, not the identity. */
+    gD: Point;
     recipientPkD: Point;
     esk: Field;
     plaintext: Uint8Array;
@@ -47,13 +50,17 @@ export interface DecryptArgs {
     note: EncryptedNote;
 }
 
-export function encryptNote({ J, recipientPkD, esk, plaintext }: EncryptArgs): EncryptedNote {
+/**
+ * @throws {InvalidArgumentError} when `esk` is zero mod q or `esk · recipientPkD` is outside the
+ * prime-order subgroup.
+ */
+export function encryptNote({ J, gD, recipientPkD, esk, plaintext }: EncryptArgs): EncryptedNote {
     const eskMod = esk % BABYJUB_SUBGROUP_ORDER;
     if (eskMod === 0n) {
         throw new InvalidArgumentError("esk must be non-zero mod q", { argument: "esk" });
     }
 
-    const epk = J.mulPointEscalar(J.base8, eskMod);
+    const epk = J.mulPointEscalar(gD, eskMod);
     const shared = J.mulPointEscalar(recipientPkD, eskMod);
     if (!J.inSubgroup(shared)) {
         throw new InvalidArgumentError("recipient key is not in the prime-order subgroup", {
@@ -90,7 +97,7 @@ export interface OpenAsSenderArgs {
  *
  * Returns `null` on a tag failure: `esk` is not this note's ephemeral secret,
  * or the note was encrypted to another address. The two are not told apart
- * here; a caller that must can compare `esk · B` with `note.epk` first.
+ * here; a caller that must can compare `esk · g_d` with `note.epk` first.
  *
  * @internal
  */

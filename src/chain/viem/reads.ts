@@ -17,7 +17,7 @@ import type {
 import { MASP_ABI, YIELD_VENUE_ABI } from "./abi.js";
 import type { ViemReadCtx } from "./ctx.js";
 import { evmBlockNumber } from "./evm-block.js";
-import { recentReceipt } from "./token.js";
+import { heldReceipt } from "./token.js";
 
 /** `bytes32(0)` — what an unset escrow row reads back as. */
 const ZERO_WORD = `0x${"0".repeat(64)}` as const;
@@ -216,7 +216,8 @@ async function defaultFromBlock(ctx: ViemReadCtx): Promise<bigint> {
 
 /**
  * The pool's `NotePayload` for `cm` in transaction `txHash`, or `null` when the
- * transaction has none.
+ * transaction has none or the node holds no receipt for `txHash`. The receipt
+ * is not waited for; `ReceiptReads.fetchNotePayload` (`../port.ts`) says why.
  *
  * Only a log the pool itself emitted counts: any contract can emit an event of
  * the same shape.
@@ -226,7 +227,8 @@ export async function fetchNotePayload(
     txHash: Hex32,
     cm: Hex32,
 ): Promise<PublishedNote | null> {
-    const receipt = await recentReceipt(ctx, txHash);
+    const receipt = await heldReceipt(ctx, txHash);
+    if (receipt === null) return null;
     const pool = ctx.maspAddress.toLowerCase();
     const wanted = cm.toLowerCase();
     for (const log of receipt.logs) {
@@ -241,6 +243,7 @@ export async function fetchNotePayload(
         });
         return {
             cm: branded<Hex32>(args.cm),
+            clueR: [args.clueRx, args.clueRy],
             ephPub: [args.ephPubX, args.ephPubY],
             ciphertext: hexToBytes(args.ciphertext),
         };

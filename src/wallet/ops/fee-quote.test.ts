@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EstimateResponse } from "../../protocol/responses.js";
-import { estimateOf } from "../../test-utils/estimate.js";
+import { estimateOf, freshAddress } from "../../test-utils/estimate.js";
 import { storedNote } from "../../test-utils/wallet.js";
 import type { AssetInfo } from "../assets/index.js";
 import { quoteFee } from "./fee-quote.js";
@@ -51,7 +51,7 @@ function ctx(opts: { estimate?: EstimateResponse | undefined; balances?: Record<
     } as unknown as Parameters<typeof quoteFee>[0];
 }
 
-const RELAYER = "lelantos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+const RELAYER = await freshAddress();
 
 /** A relayer at `RELAYER` charging `amounts` per asset id. */
 const estimate = (amounts: Record<string, bigint>) => estimateOf(RELAYER, amounts);

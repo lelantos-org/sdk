@@ -8,6 +8,7 @@ import {
     type Holding,
     NOTHING_WITHHELD,
     RECIPIENT_CM,
+    SHIELDED_PAY_TO,
     shieldedRequirements,
     spendableMaxSpy,
     transferSpy,
@@ -52,7 +53,7 @@ describe("shieldedExact", () => {
         const result = await shieldedExact(wallet).createPaymentPayload(2, shieldedRequirements());
 
         expect(transfer).toHaveBeenCalledWith(
-            expect.objectContaining({ recipient: "lelantos1qqqq", amount: 1500n, asset: 1n }),
+            expect.objectContaining({ recipient: SHIELDED_PAY_TO, amount: 1500n, asset: 1n }),
         );
         expect(result).toEqual({
             x402Version: 2,
@@ -129,6 +130,14 @@ describe("shieldedExact.quote", () => {
 
     it("refuses a non-integer asset id", () =>
         rejects({ asset: "0xC02aaA39" }, /asset must be a decimal integer/));
+
+    it("refuses a payTo that is not a `lelantos1…` address", async () => {
+        const evm = "0x0000000000000000000000000000000000000001";
+        // A viewing key shares the charset and differs only in its prefix.
+        for (const payTo of [evm, "lelantosivk1qqqq", SHIELDED_PAY_TO.toUpperCase(), ""]) {
+            await rejects({ payTo }, /payTo is not a shielded address/);
+        }
+    });
 
     it("refuses an offer in an asset this wallet cannot cover", async () => {
         // `unsupported-requirements`, so `select` moves to the next `accepts[]`

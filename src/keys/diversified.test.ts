@@ -5,8 +5,13 @@ import { DIVERSIFIER_BOUND, diversifiedBase } from "../crypto/diversified-base.j
 import type { Point } from "../crypto/jubjub.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
-import { buildDiversifiedKeys, deriveDiversifiedPk, deriveDkRoot } from "./diversified.js";
-import { deriveDiversifierKey, diversifierAt, diversifierToField } from "./diversifier.js";
+import {
+    buildDiversifiedKeys,
+    deriveDiversifiedPk,
+    deriveDkRoot,
+    ownsAddress,
+} from "./diversified.js";
+import { diversifierForIndex } from "./diversifier.js";
 
 const q = BABYJUB_SUBGROUP_ORDER;
 const isIdentity = (p: Point) => p[0] === 0n && p[1] === 1n;
@@ -20,8 +25,7 @@ describe("diversified keys", () => {
         J = await Jubjub.build();
         P = await Poseidon.build();
         ivk = deriveIvk(P, 42n);
-        const dvk = deriveDiversifierKey(ivk);
-        ds = [0, 1, 2, 2 ** 32 - 1].map((index) => diversifierToField(diversifierAt(dvk, index)));
+        ds = [0, 1, 2, 2 ** 32 - 1].map((index) => diversifierForIndex(ivk, index));
     });
 
     it("pk is Poseidon(3, ivk, d) and differs across d", () => {
@@ -89,6 +93,35 @@ describe("diversified keys", () => {
                 /dk_root must be non-zero mod q/,
             );
         }
+    });
+
+    it("owns exactly the addresses it derives", () => {
+        const stranger = deriveIvk(P, 43n);
+        for (const d of ds) {
+            const own = buildDiversifiedKeys(P, J, ivk, d);
+            expect(ownsAddress(P, J, ivk, own)).toBe(true);
+            expect(ownsAddress(P, J, stranger, own)).toBe(false);
+        }
+        // A diversifier the account never issued still names one of its addresses.
+        expect(ownsAddress(P, J, ivk, buildDiversifiedKeys(P, J, ivk, 0n))).toBe(true);
+    });
+
+    it("does not own an address with any one field from elsewhere", () => {
+        const own = buildDiversifiedKeys(P, J, ivk, ds[0]!);
+        const sibling = buildDiversifiedKeys(P, J, ivk, ds[1]!);
+        const foreign = buildDiversifiedKeys(P, J, deriveIvk(P, 43n), ds[0]!);
+        for (const from of [sibling, foreign]) {
+            for (const field of ["pk", "pk_d", "ck_d"] as const) {
+                expect(ownsAddress(P, J, ivk, { ...own, [field]: from[field] })).toBe(false);
+            }
+        }
+        expect(ownsAddress(P, J, ivk, { ...own, d: sibling.d })).toBe(false);
+    });
+
+    it("owns no address whose d is not a 16-byte diversifier", () => {
+        const own = buildDiversifiedKeys(P, J, ivk, ds[0]!);
+        expect(ownsAddress(P, J, ivk, { ...own, d: DIVERSIFIER_BOUND })).toBe(false);
+        expect(ownsAddress(P, J, ivk, { ...own, d: -1n })).toBe(false);
     });
 
     it("rejects a d that is not a 16-byte diversifier", () => {

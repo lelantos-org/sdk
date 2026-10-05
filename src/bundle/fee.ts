@@ -12,10 +12,6 @@
 //   * The fee comes out of change. `buildSpend` enforces per-asset balance and the fee note
 //     counts as an output: adding one without deducting its value from change fails that
 //     check, and deducting it from the recipient's note passes it and short-pays the recipient.
-//   * The fee's entry must sit at the same index in `outputs`, `outputRecipients` and
-//     `outputRandomness`; `buildSpend` checks only that their lengths match. The wallet
-//     describes each slot as one `OutputSlotSpec` (`wallet/tx/outputs.ts`) and unzips at the
-//     `buildSpend` boundary.
 //   * The fee must not sit at a fixed index. Slot order is the only distinguisher between
 //     outputs (every other per-slot public signal is a commitment or a blinded point), so a
 //     fixed position would reveal which commitment is the relayer's. The wallet shuffles
@@ -33,10 +29,8 @@ import type { Field } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
 import { FeeAssetNotQuotedError, type FeeQuoteKind } from "../errors/funds.js";
 import { decodeAddress } from "../keys/address.js";
-import type { Note } from "../notes/note.js";
-import { freshNoteRandomness, freshOutputAuxRandomness } from "../notes/randomness.js";
 import type { EstimateResponse } from "../protocol/responses.js";
-import type { OutputRandomness, OutputRecipient } from "./common.js";
+import type { OutputSpec } from "./common.js";
 
 /** @internal */
 export interface FeeOutputArgs {
@@ -53,16 +47,11 @@ export interface FeeOutputArgs {
 }
 
 /**
- * The fee's output slot: its note, recipient and randomness, one entry for each of the three
- * parallel arrays `buildSpend` takes.
+ * The fee's output slot, as an entry of `SpendArgs.outputs`.
  *
  * @internal
  */
-export interface FeeOutput {
-    note: Note;
-    recipient: OutputRecipient;
-    randomness: OutputRandomness;
-}
+export interface FeeOutput extends OutputSpec {}
 
 /**
  * Build the fee slot for a spend, from an address and an amount.
@@ -71,12 +60,11 @@ export interface FeeOutput {
  * when the amount comes from elsewhere, such as a cached quote, a test, or a relayer reached
  * over another transport.
  *
- * `rho` is set only to satisfy the `Note` shape: `buildSpend` overwrites every output's `rho`
- * with `Poseidon(TAG_RHO, nf0, index)`, which binds the note to this spend and prevents a fee
- * note from being replayed into another.
+ * `buildSpend` gives the note `rho = Poseidon(TAG_RHO, nf0, index)`, which binds it to that spend
+ * and prevents a fee note from being replayed into another.
  *
- * Throws on a non-positive value: a zero-value output is treated as a self-pad and discarded
- * by every scanner, so it would pay nothing.
+ * @throws {InvalidArgumentError} on a non-positive value: a zero-value output is treated as a
+ * pad and discarded by every scanner, so it would pay nothing. Also on an invalid address.
  */
 export function feeOutput({ J, relayerAddress, asset, circuitAmount }: FeeOutputArgs): FeeOutput {
     if (circuitAmount <= 0n) {
@@ -86,17 +74,7 @@ export function feeOutput({ J, relayerAddress, asset, circuitAmount }: FeeOutput
             { argument: "circuitAmount" },
         );
     }
-    const relayer = decodeAddress(J, relayerAddress);
-    return {
-        note: {
-            asset,
-            value: circuitAmount,
-            pk: relayer.pk,
-            ...freshNoteRandomness(),
-        },
-        recipient: relayer,
-        randomness: freshOutputAuxRandomness(),
-    };
+    return { asset, value: circuitAmount, recipient: decodeAddress(J, relayerAddress) };
 }
 
 /** @internal */

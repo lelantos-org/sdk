@@ -1,12 +1,13 @@
 // Per-output OutputAux builder. Joins ECDH `epk`, FMD clue `(R, c_bits)`,
 // and ChaCha20-Poly1305 ciphertext (prefixed with 2B big-endian clueBits).
+// `epk` and `R` are both multiples of the recipient address's base `g_d`.
 // Paying and pad slots both go through `buildOutputAux`.
 
 import { BABYJUB_INV8 } from "../core/field.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
 import { assertInvariant } from "../errors/base.js";
-import { fmdFlag } from "../fmd/clue.js";
+import { fmdFlagOnBase } from "../fmd/clue.js";
 import type { FmdFlagKey } from "../fmd/keys.js";
 import {
     clueBitsToPrefix,
@@ -67,25 +68,37 @@ export function clueSubgroupWitness(J: Jubjub, clueR: Point): Point {
 export interface BuildAuxArgs {
     J: Jubjub;
     P: Poseidon;
+    /** The flag key of the recipient address: `X_i = x_i · gD`. */
     recipientFlagKey: FmdFlagKey;
     recipientPkD: Point;
+    /** Base point of the recipient address, the one `note.d` names. */
+    gD: Point;
     note: NotePayload;
-    /** ECDH ephemeral secret, fresh per output. Must be uniform in Z_q*. */
+    /** ECDH ephemeral secret: `expandSeed(note.rseed, note.rho).esk`. */
     esk: Field;
-    /** FMD blinding scalar, fresh per output. Must be uniform in Z_q*. */
+    /** FMD blinding scalar: `expandSeed(note.rseed, note.rho).fmdR`. */
     fmdR: Field;
 }
 
-/** @internal */
+/**
+ * The scanner accepts the output only when `esk` and `fmdR` are the expansion of `note.rseed` and
+ * `gD`, `recipientPkD` and `recipientFlagKey` belong to the address `note.d` names. None of that
+ * is checked here.
+ *
+ * @throws {InvalidArgumentError} when `esk` or `fmdR` is zero mod q, `esk · recipientPkD` is
+ * outside the prime-order subgroup, or `note` does not encode.
+ * @internal
+ */
 export function buildOutputAux(args: BuildAuxArgs): OutputAuxWithWitness {
-    const { J, P, recipientFlagKey, recipientPkD, note, esk, fmdR } = args;
+    const { J, P, recipientFlagKey, recipientPkD, gD, note, esk, fmdR } = args;
 
-    const clue = fmdFlag(J, P, recipientFlagKey, fmdR);
+    const clue = fmdFlagOnBase(J, P, recipientFlagKey, gD, fmdR);
     const clueRPoint = J.unpackPoint(clue.R);
     assertInvariant(clueRPoint, "aux: clue.R failed to unpack");
 
     const enc = encryptNote({
         J,
+        gD,
         recipientPkD,
         esk,
         plaintext: encodeNotePayload(note),

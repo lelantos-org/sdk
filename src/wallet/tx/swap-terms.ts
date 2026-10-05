@@ -96,7 +96,7 @@ export async function resolveSwapWrapper(
  * `MaspEscrowSatellite` reverts `FeeAssetMismatch` for a valued note in any other.
  */
 export async function swapLegs(
-    ctx: Pick<WalletContext, "J" | "cfg" | "address">,
+    ctx: Pick<WalletContext, "J" | "cfg">,
     assetIn: AssetInfo,
     assetOut: AssetInfo,
     out: ResolvedOutAmount,

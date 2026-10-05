@@ -27,6 +27,7 @@ function toInput(r: Row): ScanInput {
     return {
         ciphertext: new Uint8Array([0, 0]),
         epk: new Uint8Array(32),
+        clueR: new Uint8Array(32),
         cm: BigInt(r.id),
         leafIndex: r.leafIndex,
         blockNumber: 1,
@@ -87,6 +88,7 @@ class FakeScanner implements Scanner {
                 value: 10n,
                 rho: 0n,
                 rcm: 0n,
+                d: 0n,
                 cm: i.cm,
                 leafIndex: i.leafIndex,
                 blockNumber: i.blockNumber,

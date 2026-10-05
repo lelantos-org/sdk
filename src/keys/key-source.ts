@@ -53,8 +53,8 @@ export function resolveDirectNsk(source: DirectKeySource): Field {
             return prfOutputToNsk(source.prf);
         case "nsk":
             // The only source not produced by a reduction, so the only one that can be out of
-            // range. `nsk = 0` gives `pk_d = 0 · Base8 = O`, making every incoming note publicly
-            // decryptable; an unreduced value aliases onto `nsk mod r`, a different wallet.
+            // range. `nsk = 0` is a publicly known key; an unreduced value aliases onto
+            // `nsk mod r`, a different wallet.
             assertNonZeroField(source.nsk, "nsk");
             return source.nsk;
     }

@@ -7,6 +7,7 @@ import { NETWORKS, type NetworkPreset } from "../../chain/networks.js";
 import type { ChainReader } from "../../chain/port.js";
 import { evmAddress } from "../../core/brand.js";
 import { isWalletError } from "../../errors/guard.js";
+import { ADDRESS_HRP } from "../../keys/address.js";
 import type { EthSigner } from "../../keys/signer.js";
 import type { Scanner } from "../../sync/scanner.js";
 import { rejection } from "../../test-utils/expect.js";
@@ -271,15 +272,16 @@ describe("wallet lifecycle", () => {
 
         {
             await using scoped = wallet;
-            expect(scoped.address).toMatch(/^lelantos1/);
+            expect(scoped.address.startsWith(`${ADDRESS_HRP}1`)).toBe(true);
         }
         await wallet.dispose();
 
         expect(scanner.dispose).toHaveBeenCalledOnce();
         expect(seen).toEqual([true]);
         expect(wallet.state().disposed).toBe(true);
-        const err = await rejection(wallet.notes());
-        expect(isWalletError(err, "UNSUPPORTED_OPERATION")).toBe(true);
+        for (const call of [() => wallet.notes(), () => wallet.addressAt(0)]) {
+            expect(isWalletError(await rejection(call), "UNSUPPORTED_OPERATION")).toBe(true);
+        }
     });
 });
 

@@ -7,9 +7,7 @@ import { TxRevertedError } from "../../errors/chain.js";
 import type { TokenMeta, TxLog } from "../types.js";
 import { ERC20_ABI, WETH_DEPOSIT_ABI } from "./abi.js";
 import { addr, type ViemCtx, type ViemReadCtx } from "./ctx.js";
-
-/** Overall cap on a receipt wait. */
-const RECEIPT_TIMEOUT_MS = 300_000;
+import { isReceiptNotFound } from "./errors.js";
 
 export async function tokenMeta(ctx: ViemReadCtx, token: EvmAddress): Promise<TokenMeta> {
     const [symbol, decimals] = await Promise.all([
@@ -84,17 +82,50 @@ export async function wrapNative(
     return { txHash };
 }
 
+// Receipts. Three reads, chosen by what the caller knows about the hash:
+//
+//   minedReceipt    the transaction may be pending          `waitTxReceipt`, `sendAndConfirm`
+//   recentReceipt   the relayer has seen it mined            `txReceiptLogs`
+//   heldReceipt     nothing: the hash was handed in as is    `fetchNotePayload` (`reads.ts`)
+//
+// The first two wait and reject with viem's receipt timeout, which `chainError` reports as
+// `TxMiningError`. The third never waits and resolves `null` for a hash the node has no receipt of.
+
+/** Cap on waiting for a transaction to mine. */
+const RECEIPT_TIMEOUT_MS = 300_000;
+
 /**
- * The receipt of a transaction this adapter sent, once mined, polled every
- * second under {@link RECEIPT_TIMEOUT_MS}.
+ * Cap on waiting for a receipt the relayer has already seen mined. The relayer answers only after
+ * inclusion, so this covers a read RPC a block or two behind it, not a transaction in the mempool.
  */
-function minedReceipt(ctx: ViemReadCtx, txHash: Hex32, confirmations = 1) {
+const RECENT_RECEIPT_TIMEOUT_MS = 15_000;
+
+/** The receipt of `txHash`, polled for every second until `timeout` ms have passed. */
+function awaitReceipt(ctx: ViemReadCtx, txHash: Hex32, timeout: number, confirmations = 1) {
     return ctx.publicClient.waitForTransactionReceipt({
         hash: txHash,
         confirmations,
         pollingInterval: 1000,
-        timeout: RECEIPT_TIMEOUT_MS,
+        timeout,
     });
+}
+
+function minedReceipt(ctx: ViemReadCtx, txHash: Hex32, confirmations = 1) {
+    return awaitReceipt(ctx, txHash, RECEIPT_TIMEOUT_MS, confirmations);
+}
+
+function recentReceipt(ctx: ViemReadCtx, txHash: Hex32) {
+    return awaitReceipt(ctx, txHash, RECENT_RECEIPT_TIMEOUT_MS);
+}
+
+/** `null` for a hash the node does not know, or a transaction not yet mined. */
+export async function heldReceipt(ctx: ViemReadCtx, txHash: Hex32) {
+    try {
+        return await ctx.publicClient.getTransactionReceipt({ hash: txHash });
+    } catch (err) {
+        if (isReceiptNotFound(err)) return null;
+        throw err;
+    }
 }
 
 export async function waitTxReceipt(
@@ -135,24 +166,7 @@ export async function sendAndConfirm(
     return { txHash, receipt };
 }
 
-/**
- * Cap on waiting for a receipt the relayer has already seen mined.
- *
- * Short, unlike {@link RECEIPT_TIMEOUT_MS}: the relayer answers only after
- * inclusion, so this covers a read RPC a block or two behind it, not a
- * transaction still in the mempool.
- */
-const MINED_RECEIPT_TIMEOUT_MS = 15_000;
-
-/** The receipt of a transaction already mined, waiting briefly for a lagging read RPC. */
-export function recentReceipt(ctx: ViemReadCtx, txHash: Hex32) {
-    return ctx.publicClient.waitForTransactionReceipt({
-        hash: txHash,
-        pollingInterval: 1000,
-        timeout: MINED_RECEIPT_TIMEOUT_MS,
-    });
-}
-
+/** The logs of a transaction the relayer reported mined, in receipt order. */
 export async function txReceiptLogs(ctx: ViemReadCtx, txHash: Hex32): Promise<readonly TxLog[]> {
     const receipt = await recentReceipt(ctx, txHash);
     return receipt.logs.map((l) => ({

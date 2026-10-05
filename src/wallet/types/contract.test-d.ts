@@ -34,7 +34,7 @@ import type {
     WithdrawOptions,
 } from "./options.js";
 import type { SwapQuote } from "./quotes.js";
-import type { TransactionResult } from "./results.js";
+import type { TransactionResult, TransferResult } from "./results.js";
 
 declare const connect: (options: ConnectOptions) => Promise<WalletApi>;
 declare const connectWatch: (options: ConnectWatchOptions) => Promise<ReadOnlyWalletApi>;
@@ -134,6 +134,45 @@ async function _readOnlyConnectIsStillAWalletApi() {
     // `watch/capability.test-d.ts`.
     void watch.capabilities;
     expectTypeOf(w.keys.tier).toEqualTypeOf<"spending">();
+}
+
+async function _oneAddressPerIndex(w: WalletApi, watch: ReadOnlyWalletApi) {
+    expectTypeOf(w.address).toEqualTypeOf<ShieldedAddress>();
+    expectTypeOf(w.addressAt).toEqualTypeOf<(index: number) => Promise<ShieldedAddress>>();
+    // A viewing key derives the same addresses, so the watch wallet has the same method.
+    expectTypeOf(watch.addressAt).toEqualTypeOf<WalletApi["addressAt"]>();
+    expectTypeOf<ReadOnlyWalletApi>().toHaveProperty("addressAt");
+    // An address at any index is a recipient like `address`.
+    const t: TransferOptions = { asset: id, amount: units, recipient: await watch.addressAt(1) };
+    // @ts-expect-error — the index is required; index 0 is `address`.
+    void w.addressAt();
+    // @ts-expect-error — and a number, which holds every index below 2^32.
+    void w.addressAt(1n);
+    // @ts-expect-error — not a string.
+    void w.addressAt("1");
+    return t;
+}
+
+function _paymentProofNamesTheWholeOutput(w: WalletApi, r: TransferResult) {
+    // Every field comes from the transfer's result.
+    void w.paymentProof({
+        txHash: r.txHash,
+        commitment: r.recipientCommitment,
+        recipient: r.recipient,
+        asset: r.amount.asset,
+        amount: r.amount.amount,
+    });
+    // Unbranded values persisted by the application are accepted as well.
+    void w.paymentProof({ txHash: "0x", commitment: "0x", recipient: "", asset: 1n, amount: 5n });
+    // @ts-expect-error — the transaction and commitment do not name the recipient or the note.
+    void w.paymentProof({ txHash: r.txHash, commitment: r.recipientCommitment });
+    const partial = { txHash: r.txHash, commitment: r.recipientCommitment, recipient: r.recipient };
+    // @ts-expect-error — nor do they with the recipient alone.
+    void w.paymentProof(partial);
+    // @ts-expect-error — the amount is circuit units, not a decimal string.
+    void w.paymentProof({ ...partial, asset: r.amount.asset, amount: "1.5" });
+    // @ts-expect-error — and the asset an id, not a symbol.
+    void w.paymentProof({ ...partial, asset: "USDC", amount: r.amount.amount });
 }
 
 function _assetIsRequiredEverywhere(w: WalletApi) {

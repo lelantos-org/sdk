@@ -116,16 +116,28 @@ export interface ReceiptReads {
      * Every log of a mined transaction's receipt, in receipt order.
      *
      * Read after a relayed spend to find the wallet's own operation in a
-     * transaction the relayer may have bundled with others'. Only the hash is
-     * sent; matching against the wallet's commitments happens locally.
-     * Optional: without it a spend result carries no `operation`.
+     * transaction the relayer may have bundled with others', and by a payment
+     * proof to find an output's slot. Only the hash is sent; matching against
+     * the wallet's commitments happens locally. Optional: without it a spend
+     * result carries no `operation` and `paymentProof` is unsupported.
+     *
+     * Its callers pass a hash they have reason to believe mined, so an
+     * implementation may wait briefly for a node that lags, and rejects when
+     * no receipt arrives. A transaction the node does not know is not an
+     * empty list.
      */
     txReceiptLogs?(txHash: Hex32): Promise<readonly TxLog[]>;
     /**
      * The decoded `NotePayload` the pool emitted for commitment `cm` in mined
      * transaction `txHash`, or `null` when that transaction carries none from
-     * the pool. A payment proof needs the output's published `ephPub` and
-     * ciphertext. Optional.
+     * the pool. A payment proof needs the output's published clue, `ephPub`
+     * and ciphertext. Optional.
+     *
+     * A transaction the node holds no receipt for (unknown, or not yet mined)
+     * is "not found": resolve `null` without waiting for it. `verifyPaymentProof`
+     * passes a hash from a proof it has not checked, and reports `null` as
+     * `not-published`. Reject only when the node could not be asked, so an RPC
+     * failure is not read as "no such payment".
      */
     fetchNotePayload?(txHash: Hex32, cm: Hex32): Promise<PublishedNote | null>;
 }

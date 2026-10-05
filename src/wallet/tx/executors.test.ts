@@ -1,17 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChainReader } from "../../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
+import { randomJubjubScalar } from "../../core/random.js";
+import type { Jubjub } from "../../crypto/jubjub.js";
 import { NetworkError } from "../../errors/network.js";
+import { decodeAddress } from "../../keys/address.js";
+import { addressFromViewingKey, buildSpendingKey } from "../../keys/keys.js";
 import type { OutputAux } from "../../notes/aux.js";
-import { stripClueBitsPrefix } from "../../notes/codec.js";
-import { decryptNote } from "../../notes/encrypt.js";
 import {
     type CircuitShape,
     DEFAULT_SHAPE,
     shapeId,
     TRANSACT_SHAPES,
 } from "../../protocol/shape.js";
+import type { SubmitTransactPayload } from "../../protocol/transact.js";
+import { emptyScanStats, type ScanInput, scanNotes } from "../../sync/scan.js";
 import { makeTestCtx, NATIVE_ADAPTER_ADDR, TEST_RELAYER_ADDR } from "../../test-utils/context.js";
+import { openOutput, scanInputsOf } from "../../test-utils/outputs.js";
 import { storedNote, unreconciled } from "../../test-utils/wallet.js";
 import type { StoredNote } from "../notes/note-store.js";
 import { executeTransfer } from "../ops/transfer.js";
@@ -42,6 +47,12 @@ const BARE_READER: ChainReader = {
 /** Every test's context: the notes it may spend, at `shape`, over `chain`. */
 const makeCtx = (notes: StoredNote[], shape: CircuitShape = DEFAULT_SHAPE, chain?: unknown) =>
     makeTestCtx({ notes, shape, ...(chain !== undefined ? { chain } : {}) });
+
+/** A submitted spend's outputs as a scanner receives them, one per slot. */
+function scanInputs(J: Jubjub, submitted: unknown): ScanInput[] {
+    const { aux, pubInputs } = submitted as SubmitTransactPayload;
+    return scanInputsOf(J, aux, pubInputs.outCm);
+}
 
 describe("executeTransfer", () => {
     it("submits, marks inputs spent, and reports change", async () => {
@@ -102,13 +113,7 @@ describe("executeTransfer", () => {
         await executeTransfer(ctx, { asset: A1, recipient, amount: circuitAmount(30n) });
 
         const { aux } = submitted[0] as { aux: OutputAux[] };
-        const opened = aux.filter((a) => {
-            const note = {
-                epk: ctx.J.packPoint(a.ephPub),
-                ciphertext: stripClueBitsPrefix(a.ciphertext).body,
-            };
-            return decryptNote({ J: ctx.J, ivk: ctx.keys.ivk, note }) !== null;
-        });
+        const opened = aux.filter((a) => openOutput(ctx.J, ctx.keys.ivk, a) !== null);
         expect(aux).toHaveLength(DEFAULT_SHAPE.nOut);
         expect(opened).toHaveLength(MAX_CHANGE_NOTES);
     });
@@ -123,9 +128,75 @@ describe("executeTransfer", () => {
         expect(res.ownCommitments).toHaveLength(1 + MAX_CHANGE_NOTES);
     });
 
+    it("delivers to a payee's non-default address, its change to itself, its pads to no one", async () => {
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const payee = buildSpendingKey(ctx.P, randomJubjubScalar());
+        const recipient = addressFromViewingKey(ctx.P, ctx.J, payee, 8);
+
+        const res = await executeTransfer(ctx, {
+            asset: A1,
+            recipient,
+            amount: circuitAmount(30n),
+        });
+        const inputs = scanInputs(ctx.J, submitted[0]);
+        const nOut = DEFAULT_SHAPE.nOut;
+
+        // The payee's scanner stores one note, under the diversifier of the address it gave out.
+        const theirs = emptyScanStats();
+        const paid = scanNotes(ctx.J, ctx.P, payee.ivk, inputs, theirs);
+        expect(paid).toHaveLength(1);
+        expect(paid[0]).toMatchObject({
+            asset: 1n,
+            value: 30n,
+            d: decodeAddress(ctx.J, recipient).d,
+            cm: BigInt(res.recipientCommitment),
+        });
+        expect(theirs).toEqual({ ...emptyScanStats(), scanned: nOut, notOurs: nOut - 1, hits: 1 });
+
+        // The sender's scanner stores its change and nothing else: every pad fails to open, so it
+        // is `notOurs`, not a zero-value note of the sender's.
+        const mine = emptyScanStats();
+        const change = scanNotes(ctx.J, ctx.P, ctx.keys.ivk, inputs, mine);
+        expect(change.map((h) => h.cm).sort()).toEqual(res.ownCommitments.map(BigInt).sort());
+        expect(change.reduce((sum, h) => sum + h.value, 0n)).toBe(70n);
+        expect(change.every((h) => h.d === decodeAddress(ctx.J, ctx.address).d)).toBe(true);
+        expect(mine).toEqual({
+            ...emptyScanStats(),
+            scanned: nOut,
+            notOurs: nOut - MAX_CHANGE_NOTES,
+            hits: MAX_CHANGE_NOTES,
+        });
+
+        // A third party opens nothing.
+        const stranger = buildSpendingKey(ctx.P, randomJubjubScalar());
+        const none = emptyScanStats();
+        expect(scanNotes(ctx.J, ctx.P, stranger.ivk, inputs, none)).toEqual([]);
+        expect(none.notOurs).toBe(nOut);
+    });
+
+    it("credits a transfer to another of the wallet's own addresses as its own", async () => {
+        const { ctx, submitted } = await makeCtx([storedNote("01", 100n)]);
+        const elsewhere = addressFromViewingKey(ctx.P, ctx.J, ctx.keys, 3);
+
+        const res = await executeTransfer(ctx, {
+            asset: A1,
+            recipient: elsewhere,
+            amount: circuitAmount(30n),
+        });
+
+        expect(res.ownCommitments).toHaveLength(1 + MAX_CHANGE_NOTES);
+        expect(res.ownCommitments).toContain(res.recipientCommitment);
+        const hits = scanNotes(ctx.J, ctx.P, ctx.keys.ivk, scanInputs(ctx.J, submitted[0]));
+        expect(hits).toHaveLength(1 + MAX_CHANGE_NOTES);
+        expect(hits.find((h) => h.cm === BigInt(res.recipientCommitment))).toMatchObject({
+            value: 30n,
+            d: decodeAddress(ctx.J, elsewhere).d,
+        });
+    });
+
     it("recognises a self-transfer written in uppercase bech32m", async () => {
-        // Detection compares the decoded `pk`, not the address string: bech32m permits an
-        // all-uppercase spelling, which a string compare would treat as another recipient and
+        // Ownership is decided from the decoded address, not the address string: bech32m permits
+        // an all-uppercase spelling, which a string compare would treat as another recipient and
         // under-report `ownCommitments` and `ownInflow`.
         const { ctx, address } = await makeCtx([storedNote("01", 100n)]);
 

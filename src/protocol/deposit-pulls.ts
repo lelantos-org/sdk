@@ -131,9 +131,10 @@ export interface DepositPulls<
 /**
  * What a deposit pulls from the payer, per asset and per token.
  *
- * A zero relayer charge is a self-pad note in the deposited asset, whatever
- * `feeAsset` names, so it rides the principal's pull. While `relayer` is
- * unknown the fee is taken as separate exactly when `feeAsset` is another id.
+ * A zero relayer charge pulls nothing, whatever `feeAsset` names: its fee
+ * leaf is a zero-value note under asset 0, so the deposit is the principal's
+ * pull alone. While `relayer` is unknown the fee is taken as separate exactly
+ * when `feeAsset` is another id.
  */
 export function depositPulls<A extends DepositPullAsset, T extends TokenAmount | undefined>(
     args: DepositPullsArgs<A, T>,

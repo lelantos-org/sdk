@@ -197,6 +197,8 @@ export interface DepositSubmitted {
  */
 export interface PublishedNote {
     cm: Hex32;
+    /** The FMD clue point `R`. */
+    clueR: [bigint, bigint];
     /** The output's ECDH ephemeral public key. */
     ephPub: [bigint, bigint];
     /** Wire ciphertext: 2B clueBits prefix, then the ChaCha body. */

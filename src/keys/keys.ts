@@ -2,58 +2,48 @@
 //
 //   nsk  (root, never leaves owner)
 //    ├─ ivk  = Poseidon(TAG_IVK, nsk)
-//    │    ├─ d0    = defaultDiversifier(ivk)      — diversifier of the account's address
-//    │    ├─ pk    = Poseidon(TAG_PK, ivk, d0)    — scalar, binds note commitment
-//    │    ├─ pk_d  = (ivk mod q) · Base8          — Baby-Jubjub key, used for ECDH
-//    │    └─ dk    = Poseidon(TAG_DK, ivk)        — FMD root detection secret
-//    │         └─ ck = (dk mod q) · Base8         — FMD clue key, public
+//    │    ├─ dk  = Poseidon(TAG_DK, ivk)          — FMD root detection secret
+//    │    ├─ dvk = deriveDiversifierKey(ivk)      — maps an index to a diversifier d
+//    │    └─ per address, for d = diversifier(dvk, index) and g_d = diversifiedBase(d):
+//    │         ├─ pk   = Poseidon(TAG_PK, ivk, d) — scalar, binds note commitment
+//    │         ├─ pk_d = (ivk mod q) · g_d        — Baby-Jubjub key, used for ECDH
+//    │         └─ ck_d = (dk mod q) · g_d         — FMD clue key, public
 //    └─ nk   = Poseidon(TAG_NK, nsk)              — nullifier-deriving key (FVK)
 //
-// `dk` carries the detection capability and is released only to a delegate the owner chooses. The
-// address publishes `ck`, which senders expand into flag-key points (`fmdExpandFlagKey`). The
-// `TAG_DK` step keeps `ck` distinct from `pk_d`, so the clue stream is unlinked from the ECDH key.
+// The key structs hold scalars only. Per-address material is derived on demand
+// (`./diversified.ts`), and an address publishes `(d, pk_d, pk, ck_d)`.
 //
-// Viewing keys:
-//   ViewingKey     {ivk, pk_d, dk, ck}     — detects and decrypts incoming notes.
-//   FullViewingKey {ivk, pk_d, dk, ck, nk} — also recomputes nf = Poseidon(TAG_NF, nk, rho, cm)
-//     for a decrypted note and matches it against the on-chain nullifier set, learning which
-//     notes are spent. `nk` does not yield `nsk`, so it grants no spend authority.
+// `dk` carries the detection capability for every address of the account and is released only to
+// a delegate the owner chooses. Senders expand an address's `ck_d` into flag-key points
+// (`fmdDiversifiedFlagKey`). The `TAG_DK` step keeps `ck_d` distinct from `pk_d`, so the clue
+// stream is unlinked from the ECDH key.
 
 import type { ShieldedAddress } from "../core/brand.js";
-import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import { deriveDk, deriveIvk, deriveNk } from "../crypto/derive.js";
-import type { Point } from "../crypto/jubjub.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { type Field, Poseidon } from "../crypto/poseidon.js";
-import {
-    assertDetectionGamma,
-    FMD_DEFAULT_GAMMA,
-    type FmdDetectionKey,
-    fmdClueKeyFromRoot,
-    fmdExpandDetectionKey,
-} from "../fmd/keys.js";
+import { fmdDiversifiedDetectionKey } from "../fmd/diversified.js";
+import { assertDetectionGamma, FMD_DEFAULT_GAMMA, type FmdDetectionKey } from "../fmd/keys.js";
 import { encodeAddress } from "./address.js";
-import { deriveDefaultPk } from "./diversified.js";
+import { assertNonZeroModQ, buildDiversifiedKeys } from "./diversified.js";
+import { DEFAULT_DIVERSIFIER_INDEX, diversifierForIndex } from "./diversifier.js";
 
 /**
- * Incoming viewing key: detects and decrypts this account's incoming notes.
+ * Incoming viewing key: detects and decrypts the incoming notes of every address of the account.
  *
  * Grants neither spend authority nor spend visibility; the latter requires the `nk` of a
  * {@link FullViewingKey}, which derives from `nsk`, not `ivk`.
  */
 export interface ViewingKey {
     ivk: Field;
-    /** ECDH target, `(ivk mod q) · Base8`. Public; goes in the address. */
-    pk_d: Point;
-    /** FMD root detection secret. Never publish — see `ck`. */
+    /** FMD root detection secret, `Poseidon(TAG_DK, ivk)`. Never publish. */
     dk: Field;
-    /** FMD clue key `dk · Base8`. The public half; goes in the address. */
-    ck: Point;
 }
 
 /**
- * Adds `nk`, with which the holder recomputes nullifiers and so determines which of the account's
- * notes are spent on chain. Grants no spend authority.
+ * Adds `nk`, with which the holder recomputes `nf = Poseidon(TAG_NF, nk, rho, cm)` for a decrypted
+ * note and so determines which of the account's notes are spent on chain. `nk` does not yield
+ * `nsk`, so it grants no spend authority.
  */
 export interface FullViewingKey extends ViewingKey {
     nk: Field;
@@ -63,50 +53,48 @@ export interface FullViewingKey extends ViewingKey {
 export interface SpendingKey extends FullViewingKey {
     /** Root secret. Never leaves the owner. */
     nsk: Field;
-    /**
-     * Scalar binding the note commitment: `Poseidon(TAG_PK, ivk, d0)`, with `d0` the account's
-     * default diversifier, itself a function of `ivk`.
-     */
-    pk: Field;
 }
 
-export function buildSpendingKey(P: Poseidon, J: Jubjub, nsk: Field): SpendingKey {
-    const ivk = deriveIvk(P, nsk);
-    // `pk_d`, `dk` and `ck` come from `buildViewingKey`, so a spending key and its viewing key
-    // always resolve to one address.
-    return {
-        ...buildViewingKey(P, J, ivk),
-        nsk,
-        nk: deriveNk(P, nsk),
-        pk: deriveDefaultPk(P, ivk),
-    };
+/** @throws {InvalidArgumentError} when the `ivk` or `dk` of `nsk` is zero mod q. */
+export function buildSpendingKey(P: Poseidon, nsk: Field): SpendingKey {
+    // `dk` comes from `buildViewingKey`, so a spending key and its viewing key always resolve to
+    // the same addresses.
+    return { ...buildViewingKey(P, deriveIvk(P, nsk)), nsk, nk: deriveNk(P, nsk) };
 }
 
 /**
- * Build an incoming viewing key from `ivk`. `pk_d`, `dk` and `ck` are derived from it, so a
- * serialized viewing key carries only the scalar.
+ * Build an incoming viewing key from `ivk`. `dk` is derived from it, so a serialized viewing key
+ * carries only the scalar.
+ *
+ * @throws {InvalidArgumentError} when `ivk` or `dk` is zero mod q: every `pk_d`, respectively
+ * every `ck_d`, of the account would be the identity.
  */
-export function buildViewingKey(P: Poseidon, J: Jubjub, ivk: Field): ViewingKey {
+export function buildViewingKey(P: Poseidon, ivk: Field): ViewingKey {
+    assertNonZeroModQ(ivk, "ivk");
     const dk = deriveDk(P, ivk);
-    return {
-        ivk,
-        pk_d: J.mulPointEscalar(J.base8, ivk % BABYJUB_SUBGROUP_ORDER),
-        dk,
-        ck: fmdClueKeyFromRoot(J, dk),
-    };
+    assertNonZeroModQ(dk, "dk");
+    return { ivk, dk };
 }
 
 /** As {@link buildViewingKey}, with the `nk` that grants spend visibility. */
-export function buildFullViewingKey(P: Poseidon, J: Jubjub, ivk: Field, nk: Field): FullViewingKey {
-    return { ...buildViewingKey(P, J, ivk), nk };
+export function buildFullViewingKey(P: Poseidon, ivk: Field, nk: Field): FullViewingKey {
+    return { ...buildViewingKey(P, ivk), nk };
 }
 
 /**
- * The address a viewing key watches: `pk_d || pk || ck`, each a function of `ivk`. Lets a caller
- * check a key against a stated address.
+ * The address of a viewing key at diversifier `index`: `d || pk_d || pk || ck_d`, each a function
+ * of `ivk` and `index`. Index 0 is the account's default address. Lets a caller check a key
+ * against a stated address.
+ *
+ * @throws {InvalidArgumentError} when `index` is not an integer in `[0, 2^32)`.
  */
-export function addressFromViewingKey(P: Poseidon, J: Jubjub, vk: ViewingKey): ShieldedAddress {
-    return encodeAddress(J, vk.pk_d, deriveDefaultPk(P, vk.ivk), vk.ck);
+export function addressFromViewingKey(
+    P: Poseidon,
+    J: Jubjub,
+    vk: ViewingKey,
+    index: number = DEFAULT_DIVERSIFIER_INDEX,
+): ShieldedAddress {
+    return encodeAddress(J, buildDiversifiedKeys(P, J, vk.ivk, diversifierForIndex(vk.ivk, index)));
 }
 
 /**
@@ -116,7 +104,7 @@ export function addressFromViewingKey(P: Poseidon, J: Jubjub, vk: ViewingKey): S
  * `nsk` on the object at runtime.
  */
 export function viewingKeyFromSpending(sk: SpendingKey): ViewingKey {
-    return { ivk: sk.ivk, pk_d: sk.pk_d, dk: sk.dk, ck: sk.ck };
+    return { ivk: sk.ivk, dk: sk.dk };
 }
 
 /** As {@link viewingKeyFromSpending}, plus the `nk` that reveals spends. */
@@ -124,14 +112,9 @@ export function fullViewingKeyFromSpending(sk: SpendingKey): FullViewingKey {
     return { ...viewingKeyFromSpending(sk), nk: sk.nk };
 }
 
-/** @internal */
-export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddress {
-    return encodeAddress(J, sk.pk_d, sk.pk, sk.ck);
-}
-
 /**
  * The γ FMD detection scalars for a viewing key, as `POST /v1/subscriptions` expects them via
- * `detectionKeyToHex`.
+ * `detectionKeyToHex`. One key detects for every address of the account.
  *
  * Releasing these releases the root detection secret permanently: `h_i` is public, so any single
  * `x_i` yields `dk = x_i - h_i`.
@@ -140,13 +123,12 @@ export function addressFromSpendingKey(J: Jubjub, sk: SpendingKey): ShieldedAddr
  * never set and discards the wallet's own notes.
  */
 export function detectionKeyFor(
-    J: Jubjub,
     P: Poseidon,
     vk: ViewingKey,
     gamma = FMD_DEFAULT_GAMMA,
 ): FmdDetectionKey {
     assertDetectionGamma(gamma);
-    return fmdExpandDetectionKey(J, P, vk.dk, gamma);
+    return fmdDiversifiedDetectionKey(P, vk.dk, gamma);
 }
 
 /** @internal */
@@ -156,8 +138,9 @@ export interface DerivedWalletKeys {
 }
 
 /**
- * Derive `SpendingKey` + bech32m address from root scalar `nsk`. Pass pre-built `P` / `J` (e.g.
- * from `preloadWasm`) or omit to build defaults.
+ * Derive `SpendingKey` + bech32m address from root scalar `nsk`. The address is the one at
+ * diversifier index 0. Pass pre-built `P` / `J` (e.g. from `preloadWasm`) or omit to build
+ * defaults.
  */
 export async function deriveKeysFromNsk(
     nsk: Field,
@@ -165,8 +148,8 @@ export async function deriveKeysFromNsk(
 ): Promise<DerivedWalletKeys> {
     const P = deps?.P ?? (await Poseidon.build());
     const J = deps?.J ?? (await Jubjub.build());
-    const keys = buildSpendingKey(P, J, nsk);
-    return { keys, address: addressFromSpendingKey(J, keys) };
+    const keys = buildSpendingKey(P, nsk);
+    return { keys, address: addressFromViewingKey(P, J, keys) };
 }
 
 /** @internal */

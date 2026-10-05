@@ -6,8 +6,10 @@
 import { createMutex, type Mutex } from "../core/async.js";
 import type { AssetId, ShieldedAddress } from "../core/brand.js";
 import type { Jubjub, Poseidon } from "../crypto/index.js";
+import { type DecodedAddress, decodeAddress } from "../keys/address.js";
 import type { SpendingKey } from "../keys/keys.js";
 import { getLogger, type Logger } from "../log/logger.js";
+import { deriveOutgoingKey } from "../notes/outgoing.js";
 import { type AssetsFacade, lazyAssets } from "./assets/facade.js";
 import { NoteLeases } from "./notes/leases.js";
 import type { NoteCache } from "./notes/note-cache.js";
@@ -31,8 +33,15 @@ export interface WalletContext {
     readonly P: Poseidon;
     readonly J: Jubjub;
     readonly keys: SpendingKey;
-    /** Own bech32m shielded address. */
+    /** The account's address at index 0. */
     readonly address: ShieldedAddress;
+    /** `address`, decoded: the recipient of change. */
+    readonly ownAddress: DecodedAddress;
+    /**
+     * `deriveOutgoingKey(keys.nsk)`: the root of the randomness of every output this wallet seals.
+     * As sensitive as a viewing key for what the account sent.
+     */
+    readonly outgoingKey: Uint8Array;
     /** Every pluggable, resolved: chain, submitter, prover, selector, stores, scanner. */
     readonly cfg: ResolvedWalletConfig;
     /** The in-memory note set and its persistence. */
@@ -79,6 +88,8 @@ export function createWalletContext(init: WalletContextInit): WalletContext {
     const relayer = relayerInfo(cfg.submitter, cfg.chainId);
     return {
         ...init,
+        ownAddress: decodeAddress(init.J, init.address),
+        outgoingKey: deriveOutgoingKey(init.keys.nsk),
         assets: lazyAssets(() => cfg.chain, cfg, relayer.tokens),
         locks: { sync: createMutex() },
         leases: new NoteLeases(),

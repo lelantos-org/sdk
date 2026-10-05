@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { circuitAmount, type ShieldedAddress } from "../../core/brand.js";
+import { circuitAmount, shieldedAddress } from "../../core/brand.js";
+import { freshAddress } from "../../test-utils/estimate.js";
 import type { AwaitCommitmentsResult } from "../notes/note-cache.js";
 import type { SelectionResult } from "../selection/index.js";
 import type { TransferOptions } from "../types/options.js";
@@ -18,6 +19,9 @@ const selection = {
     consolidateSum: circuitAmount(110n),
 } as unknown as Extract<SelectionResult, { plan: "consolidate-first" }>;
 
+/** The host wallet's own address. */
+const SELF = shieldedAddress(await freshAddress());
+
 const SEEN: AwaitCommitmentsResult = { status: "seen", missing: [], attempts: 1 };
 
 /**
@@ -27,7 +31,7 @@ const SEEN: AwaitCommitmentsResult = { status: "seen", missing: [], attempts: 1 
  */
 function host(waited: AwaitCommitmentsResult = SEEN, fee = 0n, max = 110n - fee) {
     return {
-        address: "lelantos1self" as ShieldedAddress,
+        address: SELF,
         maxInputs: 4,
         blockNumber: async () => undefined,
         storedNotes: () => [],

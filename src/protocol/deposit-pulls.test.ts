@@ -46,7 +46,7 @@ describe("depositPulls", () => {
     });
 
     // The pool takes the single-token path (`isSameFeeAsset`): a zero fee is a
-    // self-pad note in the deposited asset.
+    // zero-value leaf under asset 0 and pulls nothing.
     it("keeps a zero fee in the principal's pull, whatever asset was picked", () => {
         const r = depositPulls({
             deposited: USDC,

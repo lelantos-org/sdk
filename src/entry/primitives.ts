@@ -1,5 +1,5 @@
-// `@lelantos-org/sdk/primitives`: hex/bytes/field/randomness, Poseidon and Jubjub, keys and
-// addresses, the note codec and FMD.
+// `@lelantos-org/sdk/primitives`: hex/bytes/field/randomness, Poseidon and Jubjub, keys,
+// diversifiers and addresses, the note codec, output-secret derivation and FMD.
 
 export { bitAt, packBits, unpackBits } from "../core/bits.js";
 export type { Brand } from "../core/brand.js";
@@ -45,6 +45,7 @@ export {
     derivePkFromIvk,
     deriveSubscriptionToken,
 } from "../crypto/derive.js";
+export { DIVERSIFIER_BYTES, diversifiedBase } from "../crypto/diversified-base.js";
 export type { Point } from "../crypto/jubjub.js";
 export { Jubjub } from "../crypto/jubjub-wasm/index.js";
 export { configureJubjubWasm, type JubjubWasmLoader } from "../crypto/jubjub-wasm/loader.js";
@@ -60,7 +61,8 @@ export {
     TAG_DIGEST,
     TAG_DK,
     TAG_FMD_BIT,
-    TAG_FMD_EXPAND,
+    TAG_FMD_EXPAND2,
+    TAG_GD,
     TAG_INNER,
     TAG_IVK,
     TAG_MERKLE,
@@ -70,7 +72,7 @@ export {
     TAG_RHO,
     TAG_SUB_TOKEN,
 } from "../crypto/tags.js";
-export { FMD_DOMAIN, type FmdClue, fmdFlag, fmdTest } from "../fmd/clue.js";
+export { FMD_DOMAIN, type FmdClue, fmdFlagOnBase, fmdTest } from "../fmd/clue.js";
 export {
     decodeClue,
     detectionKeyToBytes,
@@ -79,19 +81,38 @@ export {
     subscriptionTokenToHex,
 } from "../fmd/codec.js";
 export {
+    fmdDiversifiedDetectionKey,
+    fmdDiversifiedFlagKey,
+    fmdExpectedClue,
+} from "../fmd/diversified.js";
+export {
     assertDetectionGamma,
     FMD_DEFAULT_GAMMA,
     type FmdDetectionKey,
     type FmdFlagKey,
-    fmdClueKeyFromRoot,
-    fmdExpandDetectionKey,
-    fmdExpandFlagKey,
     fmdFlagKeyFromDetection,
     fmdGenDetectionKey,
 } from "../fmd/keys.js";
 export { ADDRESS_HRP, type DecodedAddress, decodeAddress, encodeAddress } from "../keys/address.js";
 export { deriveClaimLinkNsk } from "../keys/claim-link.js";
 export { detectionKey } from "../keys/convenience.js";
+export {
+    buildDiversifiedKeys,
+    type DiversifiedKeys,
+    deriveDiversifiedPk,
+    deriveDkRoot,
+    ownsAddress,
+} from "../keys/diversified.js";
+export {
+    DEFAULT_DIVERSIFIER_INDEX,
+    DIVERSIFIER_INDEX_BOUND,
+    defaultDiversifier,
+    deriveDiversifierKey,
+    diversifierAt,
+    diversifierIndex,
+    diversifierToBytes,
+    diversifierToField,
+} from "../keys/diversifier.js";
 export {
     accountPath,
     deriveAccount,
@@ -104,7 +125,6 @@ export {
 } from "../keys/hd.js";
 export { hexPrivateKeyToNsk } from "../keys/key-source.js";
 export {
-    addressFromSpendingKey,
     addressFromViewingKey,
     buildFullViewingKey,
     buildSpendingKey,
@@ -142,11 +162,12 @@ export {
 } from "../notes/codec.js";
 export { decryptNote, type EncryptArgs, encryptNote } from "../notes/encrypt.js";
 export type { EncryptedNote, Note, SpentNote } from "../notes/note.js";
+export { deriveOutgoingKey } from "../notes/outgoing.js";
 export {
-    freshNoteRandomness,
-    freshOutput,
-    freshOutputAuxRandomness,
-    type NoteOutputAuxRandomness,
-    type NoteOutputRandomness,
-    type NoteRandomness,
-} from "../notes/randomness.js";
+    deriveDepositRho,
+    deriveOutputSecret,
+    type ExpandedSeed,
+    expandSeed,
+    type OutputSecretInputs,
+    seedFromSecret,
+} from "../notes/seed.js";

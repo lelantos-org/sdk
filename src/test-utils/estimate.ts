@@ -1,24 +1,15 @@
-// Relayer fee quotes and identities for tests.
+// Relayer fee quotes and addresses for tests.
 //
 // Not shipped: `src/**/*test-utils*` is excluded from the build, coverage and the layer check.
 
-import { randomJubjubScalar } from "../core/random.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
-import { addressFromSpendingKey, buildSpendingKey } from "../keys/keys.js";
 import type { EstimateResponse } from "../protocol/responses.js";
-
-/** A fresh spending identity: its bech32m address and the viewing key that reads its notes. */
-export async function identity(J?: Jubjub): Promise<{ address: string; ivk: bigint }> {
-    const P = await Poseidon.build();
-    const jubjub = J ?? (await Jubjub.build());
-    const keys = buildSpendingKey(P, jubjub, randomJubjubScalar());
-    return { address: addressFromSpendingKey(jubjub, keys), ivk: keys.ivk };
-}
+import { freshAccount } from "./outputs.js";
 
 /** A fresh shielded address, e.g. standing in for a relayer's own. */
 export async function freshAddress(J?: Jubjub): Promise<string> {
-    return (await identity(J)).address;
+    return freshAccount(await Poseidon.build(), J ?? (await Jubjub.build())).address;
 }
 
 /**

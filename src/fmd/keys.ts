@@ -1,31 +1,15 @@
-// FMD receiver keys: generation, expansion from a root secret, and the γ policy.
+// FMD receiver keys and the γ policy.
 //
-// See `./clue.ts` for the scheme. Receiver keys:
+// See `./clue.ts` for the scheme. Receiver keys over a base point B:
 //   detection key   dk = (x_1, ..., x_γ) ∈ Z_q^γ
 //   flag key        fk = (X_1, ..., X_γ) where X_i = B · x_i
 //
-// Key expansion. Both γ-component keys derive on demand from a single scalar;
-// only the public half appears in an address:
-//
-//   root secret  dk_root ∈ Z_q          never published
-//   clue key     ck = B · dk_root       published (32 B, packed) in the address
-//   h_i = Poseidon(TAG_FMD_EXPAND, ck.x, ck.y, i) mod q     public
-//   x_i = dk_root + h_i  (mod q)        recipient; requires dk_root
-//   X_i = ck + B · h_i                  sender; computable from ck alone
-//
-// X_i = (dk_root + h_i)·B = x_i·B, and recovering x_i from ck is a discrete log on Baby-Jubjub,
-// so publishing `ck` allows flagging for a recipient, not detecting for them. Follows Penumbra's
-// S-FMD ClueKey/DetectionKey split (additive derivation, `decaf377-fmd::hkd`).
-//
-// `h_i` is public, so a delegate holding any single `x_i` recovers dk_root = x_i - h_i and every
-// other x_i. Detection delegation is all-or-nothing, non-revocable, and cannot be
-// precision-bounded.
+// `./diversified.ts` derives both from one root scalar, on the base `g_d` of an address.
 
 // Leaf imports, not the barrel, to keep the worker bundle minimal.
 import { BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
-import type { Field, Poseidon } from "../crypto/poseidon.js";
-import { TAG_FMD_EXPAND } from "../crypto/tags.js";
+import type { Field } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
 
 /**
@@ -90,63 +74,7 @@ export function fmdGenDetectionKey(
     return { x };
 }
 
-export function fmdFlagKeyFromDetection(J: Jubjub, dk: FmdDetectionKey): FmdFlagKey {
-    return { X: dk.x.map((xi) => J.mulPointEscalar(J.base8, xi)) };
-}
-
-/** Public clue key `ck = B · dk_root`, the value published in an address. */
-export function fmdClueKeyFromRoot(J: Jubjub, dkRoot: Field): Point {
-    return J.mulPointEscalar(J.base8, dkRoot % BABYJUB_SUBGROUP_ORDER);
-}
-
-// h_i = Poseidon(TAG_FMD_EXPAND, ck.x, ck.y, i) mod q. `ck` is bound into the hash so that no two
-// receivers share an expansion.
-//
-// The reduction mod q is not exactly uniform. h_i is a public additive offset on a secret rather
-// than a secret itself, so rejection sampling is unnecessary.
-function expandScalar(P: Poseidon, ck: Point, i: number): Field {
-    return P.hash([TAG_FMD_EXPAND, ck[0], ck[1], BigInt(i)]) % BABYJUB_SUBGROUP_ORDER;
-}
-
-/**
- * Expand a published clue key into the γ flag-key points, `X_i = ck + B·h_i`.
- * Sender side; requires no secret input.
- */
-export function fmdExpandFlagKey(
-    J: Jubjub,
-    P: Poseidon,
-    ck: Point,
-    gamma = FMD_DEFAULT_GAMMA,
-): FmdFlagKey {
-    return {
-        X: Array.from({ length: gamma }, (_, i) =>
-            J.addPoint(ck, J.mulPointEscalar(J.base8, expandScalar(P, ck, i))),
-        ),
-    };
-}
-
-/**
- * Expand the root secret into the γ detection scalars, `x_i = dk_root + h_i (mod q)`, the
- * discrete logs of `fmdExpandFlagKey`'s output. Receiver side.
- *
- * Must not apply `fmdGenDetectionKey`'s zero-scalar fixup: remapping a zero `x_i` here and not in
- * the flag key would desynchronise the two halves. A zero `x_i` yields a constant clue bit on
- * both sides, which keeps them consistent.
- */
-export function fmdExpandDetectionKey(
-    J: Jubjub,
-    P: Poseidon,
-    dkRoot: Field,
-    gamma = FMD_DEFAULT_GAMMA,
-): FmdDetectionKey {
-    // No γ guard: the cross-language vectors pin this primitive against the Rust indexer at
-    // several γ. Callers enforce the ceiling with `assertDetectionGamma`.
-    const root = dkRoot % BABYJUB_SUBGROUP_ORDER;
-    const ck = fmdClueKeyFromRoot(J, root);
-    return {
-        x: Array.from(
-            { length: gamma },
-            (_, i) => (root + expandScalar(P, ck, i)) % BABYJUB_SUBGROUP_ORDER,
-        ),
-    };
+/** The flag key of `dk` over `base`: `X_i = x_i · base`. */
+export function fmdFlagKeyFromDetection(J: Jubjub, dk: FmdDetectionKey, base: Point): FmdFlagKey {
+    return { X: dk.x.map((xi) => J.mulPointEscalar(base, xi)) };
 }

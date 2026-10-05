@@ -4,7 +4,7 @@
 // an init failure to the client. A failing static import would crash module evaluation before any
 // diagnostic could leave the worker.
 //
-// Poseidon is built alongside Jubjub for the per-hit commitment check in `scanNotes`.
+// Poseidon is built alongside Jubjub for the per-hit checks in `scanNotes`.
 
 import { memoAsync } from "../../core/async.js";
 import type { Jubjub as JubjubT } from "../../crypto/jubjub-wasm/index.js";
@@ -37,13 +37,14 @@ serveWorkerRpc<ScannerMethods>(
         },
 
         async scan({ ivk, inputs }) {
-            const [J, P, { scanNotes }] = await Promise.all([
+            const [J, P, { emptyScanStats, scanNotes }] = await Promise.all([
                 jubjub.get(),
                 poseidon.get(),
                 import("../scan.js"),
             ]);
-            const hits = scanNotes(J, P, BigInt(ivk), inputs.map(decodeInput));
-            return { hits: hits.map(encodeHit) };
+            const stats = emptyScanStats();
+            const hits = scanNotes(J, P, BigInt(ivk), inputs.map(decodeInput), stats);
+            return { hits: hits.map(encodeHit), stats };
         },
     },
     { forwardLogs: true },

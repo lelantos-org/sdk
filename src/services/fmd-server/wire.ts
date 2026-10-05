@@ -34,6 +34,11 @@ export interface FmdNoteOut {
      * never unpacked on this path.
      */
     epk: Uint8Array;
+    /**
+     * The clue point `R`, packed as `epk` is. The scanner compares it byte for byte with the clue
+     * it recomputes from the opened note.
+     */
+    clueR: Uint8Array;
 }
 
 /** Server-side FMD-filtered note. Wire field `noteId` normalised to `id`. */

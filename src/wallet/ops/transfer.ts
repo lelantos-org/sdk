@@ -1,9 +1,8 @@
 // Shielded transfer, as a spend spec. Backs `wallet.transfer`.
 
-import { freshNoteRandomness } from "../../notes/randomness.js";
+import { ownsAddress } from "../../keys/diversified.js";
 import { precheckAmount, requirePositive, resolveAmount, shieldedMoney } from "../assets/amount.js";
 import type { WalletContext } from "../context.js";
-import { payTo } from "../tx/outputs.js";
 import { shieldedRecipient } from "../tx/recipient.js";
 import { detachedRun, landedBase, runSpend, type SpendRun } from "../tx/run-spend.js";
 import type { TransferOptions } from "../types/options.js";
@@ -41,21 +40,15 @@ export function executeTransfer(
                     recipientAddress: address,
                 };
             },
-            // Ownership compares the decoded `pk`, not the address string: bech32m permits an
-            // uppercase spelling and re-encoding is not guaranteed byte-identical. On a
+            // Ownership is decided from the decoded address, at whichever index of the account it
+            // sits: every field must be the one `ivk` derives under its diversifier. On a
             // self-transfer the payee slot is also owned.
             outputs: (ctx, { asset, target, recipient }) => [
                 {
-                    ...payTo(
-                        {
-                            asset: asset.id,
-                            value: target,
-                            pk: recipient.pk,
-                            ...freshNoteRandomness(),
-                        },
-                        recipient,
-                        recipient.pk === ctx.keys.pk,
-                    ),
+                    asset: asset.id,
+                    value: target,
+                    recipient,
+                    own: ownsAddress(ctx.P, ctx.J, ctx.keys.ivk, recipient),
                     payee: true,
                 },
             ],

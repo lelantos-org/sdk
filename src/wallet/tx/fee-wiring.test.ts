@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { circuitAmount } from "../../core/brand.js";
-import { decodeNotePayload, stripClueBitsPrefix } from "../../notes/codec.js";
-import { decryptNote } from "../../notes/encrypt.js";
+import { Jubjub } from "../../crypto/jubjub-wasm/index.js";
+import { Poseidon } from "../../crypto/poseidon.js";
 import type { EstimateResponse } from "../../protocol/responses.js";
 import { TRANSACT_4X6 } from "../../protocol/shape.js";
 import type { SubmitTransactPayload } from "../../protocol/transact.js";
 import { makeTestCtx } from "../../test-utils/context.js";
-import { estimateOf, freshAddress, identity } from "../../test-utils/estimate.js";
+import { estimateOf, freshAddress } from "../../test-utils/estimate.js";
+import { freshAccount, openOutput } from "../../test-utils/outputs.js";
 import { storedNote } from "../../test-utils/wallet.js";
 import type { WalletContext } from "../context.js";
 import type { StoredNote } from "../notes/note-store.js";
@@ -21,6 +22,9 @@ import { executeWithdraw } from "../ops/withdraw.js";
 
 const ASSET_A = 1n;
 const ASSET_B = 2n;
+
+const P = await Poseidon.build();
+const J = await Jubjub.build();
 
 async function makeCtx(notes: StoredNote[], est?: EstimateResponse, cfg?: Record<string, unknown>) {
     const made = await makeTestCtx({
@@ -63,19 +67,10 @@ function netByAsset(w: Record<string, unknown>): Map<bigint, bigint> {
  * The slot a party's note landed in, and its plaintext, by trial decryption of every slot, as a
  * relayer finds its payment. Asserts exactly one match.
  */
-function noteFor(payload: SubmitTransactPayload, J: WalletContext["J"], ivk: bigint) {
+function noteFor(payload: SubmitTransactPayload, ivk: bigint) {
     const hits = payload.aux.flatMap((a, slot) => {
-        const plain = decryptNote({
-            J,
-            ivk,
-            note: {
-                epk: J.packPoint(a.ephPub),
-                // The wire ciphertext carries a 2B clueBits prefix that is not part of the ChaCha
-                // body.
-                ciphertext: stripClueBitsPrefix(a.ciphertext).body,
-            },
-        });
-        return plain ? [{ slot, payload: decodeNotePayload(plain) }] : [];
+        const opened = openOutput(J, ivk, a);
+        return opened ? [{ slot, payload: opened }] : [];
     });
     expect(hits).toHaveLength(1);
     return hits[0]!;
@@ -206,10 +201,10 @@ describe("cross-asset relayer fee", () => {
         expect(markedSpent).toEqual([["01", "02"]]);
     });
 
-    /// A fee note carrying another slot's randomness still balances and proves but cannot be
-    /// decrypted by the relayer.
+    // A fee value sealed to another slot's recipient balances and proves but pays the relayer
+    // nothing.
     it("leaves the fee note readable by the relayer, and not counted as ours", async () => {
-        const relayer = await identity();
+        const relayer = freshAccount(P, J);
         const notes = [
             storedNote("01", 100n, { asset: ASSET_A }),
             storedNote("02", 30n, { asset: ASSET_B }),
@@ -225,7 +220,7 @@ describe("cross-asset relayer fee", () => {
         });
 
         // Exactly one output decrypts to the relayer, and it is the fee.
-        const paid = noteFor(submitted.payload!, ctx.J, relayer.ivk);
+        const paid = noteFor(submitted.payload!, relayer.keys.ivk);
         expect(paid.payload?.asset).toBe(ASSET_B);
         expect(paid.payload?.value).toBe(7n);
 
@@ -239,8 +234,8 @@ describe("cross-asset relayer fee", () => {
 
 describe("output slot order", () => {
     it("puts the fee at no fixed slot, and still names the payee's", async () => {
-        const relayer = await identity();
-        const payee = await identity();
+        const relayer = freshAccount(P, J);
+        const payee = freshAccount(P, J);
         const feeSlots = new Set<number>();
 
         // 4x6 shape: six output slots. Draw until every slot has held the fee once — about 15
@@ -262,10 +257,10 @@ describe("output slot order", () => {
                 feeAsset: ASSET_B,
             });
 
-            feeSlots.add(noteFor(submitted.payload!, ctx.J, relayer.ivk).slot);
+            feeSlots.add(noteFor(submitted.payload!, relayer.keys.ivk).slot);
             // The receipt names the payee's note wherever it landed, and it is not booked as the
             // sender's income.
-            const paid = noteFor(submitted.payload!, ctx.J, payee.ivk);
+            const paid = noteFor(submitted.payload!, payee.keys.ivk);
             expect(res.recipientCommitment).toBe(res.commitments[paid.slot]);
             expect(res.ownCommitments).not.toContain(res.recipientCommitment);
         }

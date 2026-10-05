@@ -53,8 +53,8 @@ export function assertField(value: Field, what: string): void {
 /**
  * A canonical non-zero field element: `(0, r)`.
  *
- * For values whose zero case degenerates: `nsk = 0` gives `pk_d = O`, an
- * identity ECDH key whose incoming notes are publicly decryptable.
+ * For values whose zero case degenerates: `ivk = 0` gives `pk_d = 0 · g_d = O`,
+ * an identity ECDH key whose incoming notes are publicly decryptable.
  */
 export function assertNonZeroField(value: Field, what: string): void {
     assertRange(value, 1n, BN254_FR, what, "in (0, BN254_FR)");

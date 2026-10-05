@@ -15,7 +15,7 @@
 // | (unused)    | 10    | reserved; do not use
 // | TAG_RHO     | 11    | out rho = Poseidon(TAG_RHO, nullifier[0], out_index) arity 3
 // | TAG_SUB_TOKEN | 12  | sub token = Poseidon(TAG_SUB_TOKEN, ivk, epoch) arity 3, off-circuit
-// | TAG_FMD_EXPAND | 13 | h_i = Poseidon(TAG_FMD_EXPAND, ck_x, ck_y, i) arity 4, off-circuit, FMD
+// | (unused)    | 13    | reserved; do not use
 // | TAG_INNER   | 14    | inner = Poseidon(TAG_INNER, pk, rho, rcm) arity 4
 // | TAG_DIGEST  | 15    | first block of the coefficient digest   arity 5
 // | TAG_GD      | 16    | g_d candidate y = Poseidon(TAG_GD, d, ctr) arity 3, off-circuit
@@ -42,12 +42,8 @@ export const TAG_RHO = 11n;
 /** @internal */
 export const TAG_SUB_TOKEN = 12n;
 /** @internal */
-export const TAG_FMD_EXPAND = 13n;
-/** @internal */
 export const TAG_INNER = 14n;
 /** @internal */
 export const TAG_DIGEST = 15n;
-/** @internal */
 export const TAG_GD = 16n;
-/** @internal */
 export const TAG_FMD_EXPAND2 = 17n;

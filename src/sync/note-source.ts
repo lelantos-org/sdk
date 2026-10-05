@@ -37,6 +37,7 @@ function toScanInput(n: FmdNoteOut): ScanInput {
         ciphertext: n.ciphertext,
         // Already packed by the server.
         epk: n.epk,
+        clueR: n.clueR,
         cm: n.cm,
         leafIndex: n.leafIndex,
         blockNumber: n.blockNumber,

@@ -7,6 +7,7 @@
 // hex, so all go through `hexInt`/`hexBytes` and none through `bigintFrom`,
 // which would decode an all-digit bare-hex value as decimal.
 
+import { PACKED_POINT_BYTES } from "../../crypto/jubjub-wasm/point-codec.js";
 import { bool, hexBytes, hexBytesN, hexInt, int, mapArr, obj } from "../http/decode.js";
 import type {
     CommitmentChunkOut,
@@ -18,9 +19,6 @@ import type {
     SubscriptionOut,
 } from "./wire.js";
 
-/** Bytes in a packed Baby-Jubjub point: `y` plus one sign bit. */
-const PACKED_POINT_BYTES = 32;
-
 /** Shared by `/v1/notes` and `/v1/matches`, which differ only in the id field. */
 export function note(raw: unknown, idField: "id" | "noteId", path: string): FmdNoteOut {
     const d = obj(raw, path);
@@ -31,9 +29,12 @@ export function note(raw: unknown, idField: "id" | "noteId", path: string): FmdN
         leafIndex: int(d.leafIndex, `${path}.leafIndex`),
         cm: hexInt(d.commitmentHex, `${path}.commitmentHex`),
         ciphertext: hexBytes(d.ciphertextHex, `${path}.ciphertextHex`),
-        // Width-checked: `epk` reaches `decryptNote` untouched, where a wrong
-        // length would surface as a decryption failure with no link to the response.
+        // Both packed points are width-checked: they reach `scanNotes` untouched, which
+        // only tallies a wrong length, with no link to the response.
         epk: hexBytesN(d.ephPubPackedHex, `${path}.ephPubPackedHex`, PACKED_POINT_BYTES),
+        // BACKEND-GAP(fmd-webserver): `/v1/notes` and `/v1/matches` rows do not carry
+        // `clueRPackedHex` yet. The field is required: a row without it fails to decode.
+        clueR: hexBytesN(d.clueRPackedHex, `${path}.clueRPackedHex`, PACKED_POINT_BYTES),
     };
 }
 

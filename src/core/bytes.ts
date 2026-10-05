@@ -49,6 +49,13 @@ export function fromBeBytes(b: Uint8Array): Field {
     return v;
 }
 
+/** Whether `a` and `b` hold the same bytes. Returns at the first difference: for public values. */
+export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+}
+
 /**
  * `bytes` is exactly `length` bytes long.
  *

@@ -52,6 +52,26 @@ describe("shieldedAddress", () => {
         expect(() => shieldedAddress("lelantos1bio")).toThrow(/shielded address/);
     });
 
+    // The separator must follow `lelantos` directly, and `1` is not in the data charset, so no
+    // longer HRP matches: a viewing key (`lelantosivk`, `lelantosfvk`) is never branded as an
+    // address. Nor does a shorter or a prefixed one.
+    it.each([
+        "lelantosivk",
+        "lelantosfvk",
+        "lelanto",
+        "xlelantos",
+    ])("rejects the `%s` HRP", (hrp) => {
+        expect(() => shieldedAddress(`${hrp}1qqqqqqqqqqqqqqqqqqqqqqqq`)).toThrow(
+            /expected `lelantos1…`/,
+        );
+    });
+
+    it("rejects the uppercase and mixed-case spellings", () => {
+        expect(() => shieldedAddress("LELANTOS1QQQQQQQQ")).toThrow(/shielded address/);
+        expect(() => shieldedAddress("lelantos1qqqqQQQQ")).toThrow(/shielded address/);
+        expect(() => shieldedAddress("Lelantos1qqqqqqqq")).toThrow(/shielded address/);
+    });
+
     it("keeps the rejected address out of the message", () => {
         const secret = "lelantos1notreallyanaddressbio";
         expect(() => shieldedAddress(secret)).toThrow(

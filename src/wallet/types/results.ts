@@ -24,6 +24,8 @@ export interface WalletNotePayload {
     value: CircuitAmount;
     rho: bigint;
     rcm: bigint;
+    /** Diversifier of the address that received the note: `pk = Poseidon(TAG_PK, ivk, d)`. */
+    d: bigint;
 }
 
 /** Note view returned by `wallet.notes()`. */

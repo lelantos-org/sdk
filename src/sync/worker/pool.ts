@@ -10,7 +10,7 @@ import { getLogger } from "../../log/logger.js";
 import { hardwareConcurrency } from "../../runtime/detect.js";
 import { createWorkerRpc, type WorkerRpc } from "../../runtime/rpc/client.js";
 import type { WorkerFactory } from "../../runtime/rpc/types.js";
-import type { ScanHit, ScanInput } from "../scan.js";
+import { emptyScanStats, type ScanHit, type ScanInput, type ScanStats } from "../scan.js";
 import type { Scanner } from "../scanner.js";
 import {
     decodeHit,
@@ -39,7 +39,19 @@ interface Slot {
     ready: Promise<void>;
 }
 
+/** One chunk's hits and tallies, decoded. */
+interface ChunkResult {
+    hits: ScanHit[];
+    stats: ScanStats;
+}
+
 export class WorkerPoolScanner implements Scanner {
+    /**
+     * Tallies from the most recent `scan`, summed over its chunks. All zero while that scan runs
+     * and after one that failed.
+     */
+    lastStats: ScanStats = emptyScanStats();
+
     private readonly factory: WorkerFactory;
     private readonly chunkSize?: number | undefined;
     private readonly wasm?: WireWasmConfig | undefined;
@@ -81,6 +93,7 @@ export class WorkerPoolScanner implements Scanner {
     }
 
     async scan(ivk: Field, inputs: ScanInput[]): Promise<ScanHit[]> {
+        this.lastStats = emptyScanStats();
         if (inputs.length === 0) return [];
 
         const n = this.slots.length;
@@ -96,7 +109,7 @@ export class WorkerPoolScanner implements Scanner {
         // One in-flight scan per slot, pulling from a shared queue. A worker handles messages
         // serially, so chunks queued on one slot would consume `SCAN_TIMEOUT_MS` before doing any
         // work, and `recycle` would then discard a healthy worker.
-        const partials: ScanHit[][] = new Array(chunks.length);
+        const partials: ChunkResult[] = new Array(chunks.length);
         let nextChunk = 0;
         const runner = async (slotIndex: number): Promise<void> => {
             for (;;) {
@@ -109,8 +122,15 @@ export class WorkerPoolScanner implements Scanner {
         await Promise.all(Array.from({ length: n }, (_, i) => runner(i)));
 
         const out: ScanHit[] = [];
-        for (const p of partials) for (const h of p) out.push(h);
+        const stats = emptyScanStats();
+        for (const p of partials) {
+            for (const h of p.hits) out.push(h);
+            for (const tally of Object.keys(stats) as (keyof ScanStats)[]) {
+                stats[tally] += p.stats[tally];
+            }
+        }
         out.sort((a, b) => a.leafIndex - b.leafIndex);
+        this.lastStats = stats;
         return out;
     }
 
@@ -119,7 +139,7 @@ export class WorkerPoolScanner implements Scanner {
         ivk: string,
         chunk: ScanInput[],
         chunkIndex: number,
-    ): Promise<ScanHit[]> {
+    ): Promise<ChunkResult> {
         const slot = this.slots[slotIndex];
         if (!slot) throw new InternalError(`scanner pool has no slot ${slotIndex}`);
         const wireInputs = chunk.map(encodeInput);
@@ -127,7 +147,7 @@ export class WorkerPoolScanner implements Scanner {
 
         try {
             await slot.ready;
-            const { hits } = await slot.rpc.call(
+            const { hits, stats } = await slot.rpc.call(
                 "scan",
                 { ivk, inputs: wireInputs },
                 {
@@ -141,7 +161,7 @@ export class WorkerPoolScanner implements Scanner {
                     },
                 },
             );
-            return hits.map(decodeHit);
+            return { hits: hits.map(decodeHit), stats };
         } catch (err) {
             if (!slot.rpc.alive) this.recycle(slotIndex);
             throw err;

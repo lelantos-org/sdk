@@ -2,6 +2,7 @@
 // witness). Returns a `BuiltDeposit` the wallet signs and broadcasts; the relayer serves no
 // deposit route and picks the escrow up from the `DepositEscrowed` event.
 
+import { bytesEqual } from "../core/bytes.js";
 import { fieldToBytes32 } from "../core/hex.js";
 import {
     buildInner,
@@ -10,10 +11,12 @@ import {
     type Jubjub,
     type Poseidon,
 } from "../crypto/index.js";
+import { InvalidArgumentError } from "../errors/config.js";
 import type { Note } from "../notes/note.js";
+import { deriveDepositRho } from "../notes/seed.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
 import type { AuxOutput, DepositRequest } from "../protocol/deposit-request.js";
-import { buildAuxForReal, type OutputRandomness, type OutputRecipient } from "./common.js";
+import { type OutputRecipient, sealOutput } from "./common.js";
 
 /** @internal */
 export interface DepositArgs {
@@ -29,10 +32,16 @@ export interface DepositArgs {
     /** Decoded shielded address of the receiving wallet; supplies the note-binding `pk`. */
     recipient: OutputRecipient;
     /**
-     * Randomness for the depositor's output. `rcm` is the only secret in the published
-     * `inner`, so it must be uniform.
+     * The depositor's outgoing key (`deriveOutgoingKey`). Both leaves' `rho`, blinder, ECDH
+     * ephemeral and clue blinder derive from it (`sealOutput`). `rcm` is the only secret in the
+     * published `inner`.
      */
-    output0: { rho: Field; rcm: Field; aux: OutputRandomness };
+    outgoingKey: Uint8Array;
+    /**
+     * 32 random bytes, fresh per deposit: the depositor's note takes
+     * `rho = deriveDepositRho(outgoingKey, rhoNonce)`.
+     */
+    rhoNonce: Uint8Array;
     /**
      * The relayer's fee note. A deposit always mints two leaves: `value` may be zero on a
      * chain that subsidises deposits, and the leaf is still minted so the shape is fixed.
@@ -47,9 +56,8 @@ export interface DepositArgs {
          * zero-value fee leaf.
          */
         asset?: bigint | undefined;
-        rho: Field;
-        rcm: Field;
-        aux: OutputRandomness;
+        /** 32 random bytes, fresh per deposit and distinct from the depositor's `rhoNonce`. */
+        rhoNonce: Uint8Array;
     };
 }
 
@@ -76,8 +84,19 @@ export interface BuiltDeposit {
     producedNotes: [Note];
 }
 
+/**
+ * @throws {InvalidArgumentError} when `outgoingKey` or a `rhoNonce` is not 32 bytes, or the two
+ * nonces are equal.
+ */
 export function buildDeposit(a: DepositArgs): BuiltDeposit {
     const { P, J } = a;
+
+    // Equal nonces give both leaves one `rho`, and so one nullifier when they share an owner.
+    if (bytesEqual(a.rhoNonce, a.fee.rhoNonce)) {
+        throw new InvalidArgumentError("deposit: the two leaves need distinct rho nonces", {
+            argument: "rhoNonce",
+        });
+    }
 
     // One leaf: the note, its encrypted payload, the `inner` the request publishes, and its
     // commitment. The batch circuit builds the leaf as
@@ -87,19 +106,28 @@ export function buildDeposit(a: DepositArgs): BuiltDeposit {
         asset: bigint,
         value: bigint,
         recipient: OutputRecipient,
-        r: DepositArgs["output0"],
+        rhoNonce: Uint8Array,
     ): { note: Note; aux: AuxOutput; inner: Field; cm: Field } => {
-        const note: Note = { asset, value, pk: recipient.pk, rho: r.rho, rcm: r.rcm };
+        const { note, aux } = sealOutput(J, P, {
+            outgoingKey: a.outgoingKey,
+            chainId: a.chainId,
+            rho: deriveDepositRho(a.outgoingKey, rhoNonce),
+            asset,
+            value,
+            recipient,
+            // A deposit consumes no note; the random `rhoNonce` behind `rho` makes each leaf fresh.
+            nullifiers: [],
+        });
         const inner = buildInner(P, note);
         return {
             note,
-            aux: auxOutputToWire(buildAuxForReal(J, P, note, recipient, r.aux).aux),
+            aux: auxOutputToWire(aux.aux),
             inner,
             cm: commitWithInner(P, asset, value, inner),
         };
     };
 
-    const out = leaf(a.asset, a.publicIn, a.recipient, a.output0);
+    const out = leaf(a.asset, a.publicIn, a.recipient, a.rhoNonce);
     // The relayer's leaf, built like the depositor's. The batch circuit builds each leaf from
     // its own `(asset, value, inner)`, so the fee may be in another asset.
     //
@@ -107,7 +135,7 @@ export function buildDeposit(a: DepositArgs): BuiltDeposit {
     // the circuit hashes the request's `feeAssetId` into the leaf, so the note's plaintext
     // must carry the same id to open it.
     const feeAsset = a.fee.value === 0n ? 0n : (a.fee.asset ?? a.asset);
-    const fee = leaf(feeAsset, a.fee.value, a.fee.recipient, a.fee);
+    const fee = leaf(feeAsset, a.fee.value, a.fee.recipient, a.fee.rhoNonce);
 
     const deposit: DepositRequest = {
         chainId: a.chainId,

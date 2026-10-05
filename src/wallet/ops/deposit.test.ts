@@ -15,14 +15,21 @@ import { buildInner, commitWithInner } from "../../crypto/commit.js";
 import { Jubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
 import { isWalletError } from "../../errors/guard.js";
-import { deriveDefaultPk } from "../../keys/diversified.js";
-import { decodeNotePayload, stripClueBitsPrefix } from "../../notes/codec.js";
-import { decryptNote } from "../../notes/encrypt.js";
+import { fmdTest } from "../../fmd/clue.js";
+import { decodeAddress } from "../../keys/address.js";
+import { deriveDiversifiedPk } from "../../keys/diversified.js";
+import { addressFromViewingKey, detectionKeyFor } from "../../keys/keys.js";
+import type { NotePayload } from "../../notes/codec.js";
+import { deriveOutgoingKey } from "../../notes/outgoing.js";
+import { expandSeed } from "../../notes/seed.js";
 import { computePiHash } from "../../protocol/abi-hash.js";
+import { auxOutputFromWire } from "../../protocol/aux-wire.js";
 import type { AuxOutput, DepositRequest, Permit2Sig } from "../../protocol/deposit-request.js";
 import { RAY } from "../../protocol/units.js";
+import { emptyScanStats, scanNotes } from "../../sync/scan.js";
 import { DEPOSIT_TX, minedDeposit } from "../../test-utils/deposit.js";
-import { estimateOf, identity } from "../../test-utils/estimate.js";
+import { estimateOf } from "../../test-utils/estimate.js";
+import { clueOf, depositScanInputs, freshAccount, openOutput } from "../../test-utils/outputs.js";
 import type { WalletContext } from "../context.js";
 import type { DepositPhase, PhaseInfo } from "../types/options.js";
 import { executeDeposit, quoteDeposit } from "./deposit.js";
@@ -95,8 +102,9 @@ async function makeCtx(opts: {
 }) {
     const P = await Poseidon.build();
     const J = await Jubjub.build();
-    const me = await identity(J);
-    const relayer = await identity(J);
+    const { keys, address } = freshAccount(P, J);
+    const me = { address, ivk: keys.ivk };
+    const relayer = freshAccount(P, J);
     const rec: Recorded = { signed: [], submitted: [], native: [], authorized: [] };
     const far = Math.floor(Date.now() / 1000) + 86_400;
 
@@ -168,7 +176,9 @@ async function makeCtx(opts: {
     const ctx = {
         P,
         J,
+        keys,
         address: me.address,
+        outgoingKey: deriveOutgoingKey(keys.nsk),
         cfg: { chainId: 31337n, chain, submitter: { estimate: async () => estimate } },
         assets: {
             resolveVerified: async (ref: unknown) => {
@@ -186,26 +196,24 @@ async function makeCtx(opts: {
         },
     } as unknown as WalletContext;
 
-    return { ctx, rec, P, J, me, relayer };
+    return { ctx, rec, P, J, keys, me, relayer };
 }
 
 /** The fee note's plaintext, decrypted as its addressee would. */
 function openFeeNote(J: Jubjub, ivk: bigint, aux: AuxOutput) {
-    const plain = decryptNote({
-        J,
-        ivk,
-        note: {
-            epk: J.packPoint([aux.ephPubX, aux.ephPubY]),
-            ciphertext: stripClueBitsPrefix(aux.ciphertext).body,
-        },
-    });
-    expect(plain, "fee note does not decrypt for its addressee").not.toBeNull();
-    return decodeNotePayload(plain!);
+    const opened = openOutput(J, ivk, auxOutputFromWire(aux));
+    expect(opened, "fee note does not decrypt for its addressee").not.toBeNull();
+    return opened!;
 }
 
-/** The `inner` a request must publish for a note its addressee opens to `opened`. */
-function innerFor(P: Poseidon, ivk: bigint, opened: { rho: bigint; rcm: bigint }) {
-    return fieldToBytes32(buildInner(P, { pk: deriveDefaultPk(P, ivk), ...opened }));
+/**
+ * The `inner` a request must publish for a note its addressee opens to `opened`: under the `pk`
+ * of the address the plaintext names, with the blinder its seed expands to.
+ */
+function innerFor(P: Poseidon, ivk: bigint, opened: NotePayload) {
+    const pk = deriveDiversifiedPk(P, ivk, opened.d);
+    const { rcm } = expandSeed(opened.rseed, opened.rho);
+    return fieldToBytes32(buildInner(P, { pk, rho: opened.rho, rcm }));
 }
 
 /** Nothing reached the chain: no signature, and no submission on any path. */
@@ -228,11 +236,11 @@ describe("deposit relayer fee asset", () => {
         // WETH's quote, not USDC's.
         expect(deposit.feeIn).toBe(7n);
 
-        const opened = openFeeNote(J, relayer.ivk, feeAux);
+        const opened = openFeeNote(J, relayer.keys.ivk, feeAux);
         expect(opened).toMatchObject({ asset: WETH, value: 7n });
         // The flush circuit hashes `feeInner` with the request's `feeAssetId` and `feeIn` into
         // the fee leaf, so the relayer's plaintext must reproduce it.
-        expect(deposit.feeInner).toBe(innerFor(P, relayer.ivk, opened));
+        expect(deposit.feeInner).toBe(innerFor(P, relayer.keys.ivk, opened));
 
         // [USDC: principal + 0.2% fee, WETH: 7 units at scale 1000], bound to the request sent.
         expect(rec.signed[0]).toMatchObject({
@@ -255,7 +263,7 @@ describe("deposit relayer fee asset", () => {
 
         const { deposit, feeAux, permit2 } = rec.submitted[0]!;
         expect(deposit.feeAssetId).toBe(USDC);
-        expect(openFeeNote(J, relayer.ivk, feeAux)).toMatchObject({ asset: USDC, value: 3n });
+        expect(openFeeNote(J, relayer.keys.ivk, feeAux)).toMatchObject({ asset: USDC, value: 3n });
         // One ceiling over principal, protocol fee and the note: 10_000 + 20 + 30.
         expect(rec.signed[0]!.maxTotal).toBe(10_050n);
         expect(rec.signed[0]).not.toHaveProperty("feeToken");
@@ -263,24 +271,44 @@ describe("deposit relayer fee asset", () => {
         expect(permit2.maxFee).toBe(0n);
     });
 
-    it("self-pads a zero fee and names asset 0, in the request and in the note", async () => {
+    it("seals a zero fee to no one and names asset 0 in the request", async () => {
         // No shielded fee address: the relayer subsidises deposits.
         const { ctx, rec, P, J, me } = await makeCtx({});
 
         await executeDeposit(ctx, { amount: circuitAmount(1_000n), asset: USDC, feeAsset: WETH });
 
-        const { deposit, feeAux } = rec.submitted[0]!;
+        const { deposit } = rec.submitted[0]!;
         // The pool reverts `FeeAssetMustBeZero` for any other id on a zero-value leaf.
         expect(deposit.feeIn).toBe(0n);
         expect(deposit.feeAssetId).toBe(0n);
-        // Still the ordinary self-pad scanners discard. Its plaintext names the asset the leaf
-        // is hashed under.
-        const opened = openFeeNote(J, me.ivk, feeAux);
-        expect(opened).toMatchObject({ asset: 0n, value: 0n });
-        expect(deposit.feeInner).toBe(innerFor(P, me.ivk, opened));
+        // The depositor's scan finds its note and cannot open the fee leaf: a leaf it could open
+        // would count as `zeroValue`.
+        const stats = emptyScanStats();
+        const hits = scanNotes(J, P, me.ivk, depositScanInputs(P, J, rec.submitted[0]!), stats);
+        expect(hits).toHaveLength(1);
+        expect(hits[0]).toMatchObject({ asset: USDC, value: 1_000n, leafIndex: 0 });
+        expect(stats).toMatchObject({ scanned: 2, hits: 1, notOurs: 1, zeroValue: 0 });
         // Single-token: `isSameFeeAsset` holds for any zero fee.
         expect(rec.signed[0]).not.toHaveProperty("feeToken");
         expect(rec.signed[0]!.maxTotal).toBe(10_020n);
+    });
+
+    // The payer of a deposit is public, so a fee leaf flagged for the depositor would tell the
+    // holder of its detection key which deposits are the wallet's, whoever the note pays.
+    it("does not flag a zero fee leaf for the depositor's detection key", async () => {
+        const { ctx, rec, P, J, keys } = await makeCtx({});
+        const DEPOSITS = 64;
+        for (let i = 0; i < DEPOSITS; i++) {
+            await executeDeposit(ctx, { amount: circuitAmount(1_000n), asset: USDC });
+        }
+
+        const dk = detectionKeyFor(P, keys);
+        const detected = (aux: AuxOutput) => fmdTest(J, P, dk, clueOf(J, auxOutputFromWire(aux)));
+        // The depositor's own note is always detected.
+        expect(rec.submitted.filter((s) => detected(s.aux))).toHaveLength(DEPOSITS);
+        // A clue for another key matches with probability 2^-5: 2 of 64 expected, and 16 or more
+        // with probability below 1e-9.
+        expect(rec.submitted.filter((s) => detected(s.feeAux)).length).toBeLessThan(16);
     });
 
     it.each([
@@ -529,8 +557,57 @@ describe("deposit result", () => {
         ]);
     });
 
+    it("escrows two leaves that scan for the depositor and the relayer", async () => {
+        const { rec, P, J, me, relayer } = await run({ quotes: { "1": 3n } }, { asset: USDC });
+        const leaves = depositScanInputs(P, J, rec.submitted[0]!);
+
+        const mine = scanNotes(J, P, me.ivk, leaves);
+        expect(mine).toHaveLength(1);
+        expect(mine[0]).toMatchObject({
+            asset: USDC,
+            value: 1_000n,
+            d: decodeAddress(J, me.address).d,
+            leafIndex: 0,
+        });
+        const fee = scanNotes(J, P, relayer.keys.ivk, leaves);
+        expect(fee).toHaveLength(1);
+        expect(fee[0]).toMatchObject({ asset: USDC, value: 3n, leafIndex: 1 });
+        expect(fee[0]!.rho).not.toBe(mine[0]!.rho);
+    });
+
+    it("draws fresh nonces: the same deposit twice publishes unrelated leaves", async () => {
+        const made = await makeCtx({ quotes: { "1": 3n } });
+        const opts = { amount: circuitAmount(1_000n), asset: USDC };
+        await executeDeposit(made.ctx, opts);
+        await executeDeposit(made.ctx, opts);
+
+        const [a, b] = made.rec.submitted.map((s) => s.deposit);
+        expect(a!.inner).not.toBe(b!.inner);
+        expect(a!.feeInner).not.toBe(b!.feeInner);
+    });
+
+    it.each([
+        ["as encoded", (a: string) => a],
+        ["in uppercase", (a: string) => a.toUpperCase()],
+    ])("counts a note to another of the wallet's addresses as its own, %s", async (_, spell) => {
+        const { ctx, rec, P, J, keys } = await makeCtx({});
+        const elsewhere = addressFromViewingKey(P, J, keys, 6);
+
+        const res = await executeDeposit(ctx, {
+            amount: circuitAmount(1_000n),
+            asset: USDC,
+            recipient: spell(elsewhere),
+        });
+
+        expect(res.recipient).toBe(elsewhere);
+        expect(res.ownCommitments).toEqual(res.commitments);
+        const hits = scanNotes(J, P, keys.ivk, depositScanInputs(P, J, rec.submitted[0]!));
+        expect(hits).toHaveLength(1);
+        expect(hits[0]).toMatchObject({ value: 1_000n, d: decodeAddress(J, elsewhere).d });
+    });
+
     it("another recipient's note is not this wallet's own commitment", async () => {
-        const other = await identity();
+        const other = freshAccount(await Poseidon.build(), await Jubjub.build());
         const { res } = await run({}, { asset: USDC, recipient: other.address });
         expect(res.recipient).toBe(other.address.toLowerCase());
         expect(res.ownCommitments).toEqual([]);

@@ -45,6 +45,7 @@ export function storedNote(id: string, value = 100n, opts: StoredNoteOpts = {}):
         value: value.toString(),
         rho: randomFr().toString(),
         rcm: randomFr().toString(),
+        d: "0",
         cm: `0x${id.padStart(64, "0")}`,
         leafIndex: Number.parseInt(id, 16) || 0,
         spent: opts.spent ?? false,
@@ -61,6 +62,7 @@ export function incomingHit(over: Partial<ScanHit> = {}): ScanHit {
         value: 500n,
         rho: randomFr(),
         rcm: randomFr(),
+        d: 0n,
         cm: BigInt(`0x${"be".repeat(16)}`),
         leafIndex: 7,
         blockNumber: 42,
@@ -83,6 +85,7 @@ export function scannerYielding(hits: ScanHit[]): Scanner {
 const feedRow = (id: number): ScanInput => ({
     ciphertext: new Uint8Array(0),
     epk: new Uint8Array(32),
+    clueR: new Uint8Array(32),
     cm: BigInt(id),
     leafIndex: id,
     blockNumber: 42,

@@ -49,28 +49,38 @@ export interface OperationLocation {
     logRange: [number, number];
 }
 
-/**
- * Find the operation that published `commitments` among `logs`.
- *
- * `commitments` are the operation's output commitments, as `bytes32` hex. Its
- * `RootAdvanced` is the last one before its first matching `NotePayload`.
- * `undefined` when no `NotePayload` from `pool` carries one of them, or none is
- * preceded by a `RootAdvanced`; the pool produces neither layout for a spend.
- */
-export function locateOperation(
+/** Positions in `logs` of the operation that published one of the wanted commitments. */
+interface OperationScan {
+    /** The operation's first `NullifierConsumed`, or `root` when none leads it. */
+    start: number;
+    /** The operation's `RootAdvanced`. */
+    root: number;
+    /** `RootAdvanced` logs before `root`. */
+    rootIndex: number;
+    /** `RootAdvanced` logs in the transaction. */
+    count: number;
+    /** First and last matching `NotePayload`. */
+    first: number;
+    last: number;
+}
+
+/** Whether `pool` (lowercase) emitted `l`, and as the event `topic`. */
+function isPoolEvent(l: TxLog, pool: string, topic: Hex32): boolean {
+    return l.address.toLowerCase() === pool && l.topics[0]?.toLowerCase() === topic;
+}
+
+/** The operation {@link locateOperation} finds, as positions in `logs`. */
+function scanOperation(
     logs: readonly TxLog[],
-    pool: EvmAddress | string,
+    pool: string,
     commitments: readonly string[],
-): OperationLocation | undefined {
+): OperationScan | undefined {
     const poolAddr = pool.toLowerCase();
     const wanted = new Set(commitments.map((c) => c.toLowerCase()));
     if (wanted.size === 0) return undefined;
 
-    const fromPool = (l: TxLog) => l.address.toLowerCase() === poolAddr;
-    const topic0 = (l: TxLog) => l.topics[0]?.toLowerCase();
     const isOwnPayload = (l: TxLog) =>
-        fromPool(l) &&
-        topic0(l) === NOTE_PAYLOAD_TOPIC &&
+        isPoolEvent(l, poolAddr, NOTE_PAYLOAD_TOPIC) &&
         wanted.has(l.topics[1]?.toLowerCase() ?? "");
 
     let count = 0;
@@ -80,7 +90,7 @@ export function locateOperation(
     let last = -1;
     for (let i = 0; i < logs.length; i++) {
         const l = logs[i] as TxLog;
-        if (fromPool(l) && topic0(l) === ROOT_ADVANCED_TOPIC) {
+        if (isPoolEvent(l, poolAddr, ROOT_ADVANCED_TOPIC)) {
             // After the matched payloads, a later root belongs to a later operation.
             if (first === -1) {
                 root = i;
@@ -97,13 +107,61 @@ export function locateOperation(
     // The nullifiers lead the root directly; walk back over them. A log from
     // another contract ends the run, as nothing is emitted between them.
     let start = root;
-    while (start > 0) {
-        const prev = logs[start - 1] as TxLog;
-        if (!fromPool(prev) || topic0(prev) !== NULLIFIER_CONSUMED_TOPIC) break;
+    while (start > 0 && isPoolEvent(logs[start - 1] as TxLog, poolAddr, NULLIFIER_CONSUMED_TOPIC)) {
         start--;
     }
 
-    return { index: rootIndex, count, logRange: [start, last] };
+    return { start, root, rootIndex, count, first, last };
+}
+
+/**
+ * Find the operation that published `commitments` among `logs`.
+ *
+ * `commitments` are the operation's output commitments, as `bytes32` hex. Its
+ * `RootAdvanced` is the last one before its first matching `NotePayload`.
+ * `undefined` when no `NotePayload` from `pool` carries one of them, or none is
+ * preceded by a `RootAdvanced`; the pool produces neither layout for a spend.
+ */
+export function locateOperation(
+    logs: readonly TxLog[],
+    pool: EvmAddress | string,
+    commitments: readonly string[],
+): OperationLocation | undefined {
+    const op = scanOperation(logs, pool, commitments);
+    if (!op) return undefined;
+    return { index: op.rootIndex, count: op.count, logRange: [op.start, op.last] };
+}
+
+/**
+ * Find the output that published `commitment` among `logs`: the nullifiers of its spend and its
+ * slot among that spend's outputs. `nullifiers[0]` and `index` fix the output note's
+ * `rho = Poseidon(TAG_RHO, nullifiers[0], index)`.
+ *
+ * `nullifiers` are `topics[1]` of the operation's `NullifierConsumed` logs. The pool emits one per
+ * input slot, dummies included, in slot order, so they are the spend's public nullifier signals.
+ * `index` counts the operation's `NotePayload` logs before the one carrying `commitment`. Both
+ * read the pool's logs of that operation alone, so another operation bundled into the transaction
+ * contributes to neither.
+ *
+ * `undefined` when the pool published no such commitment in a spend: {@link locateOperation}
+ * finds no operation, or a `NullifierConsumed` carrying a nullifier does not lead its root.
+ */
+export function locateOutput(
+    logs: readonly TxLog[],
+    pool: EvmAddress | string,
+    commitment: string,
+): { nullifiers: Hex32[]; index: number } | undefined {
+    const op = scanOperation(logs, pool, [commitment]);
+    if (!op) return undefined;
+    const nullifiers = logs.slice(op.start, op.root).map((l) => l.topics[1]);
+    const complete = nullifiers.every((nf): nf is Hex32 => nf !== undefined);
+    if (nullifiers.length === 0 || !complete) return undefined;
+
+    const poolAddr = pool.toLowerCase();
+    const index = logs
+        .slice(op.root + 1, op.first)
+        .filter((l) => isPoolEvent(l, poolAddr, NOTE_PAYLOAD_TOPIC)).length;
+    return { nullifiers, index };
 }
 
 /**

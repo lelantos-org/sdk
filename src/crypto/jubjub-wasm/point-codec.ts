@@ -6,6 +6,9 @@ import type { Point } from "../jubjub.js";
 
 const POINT_BYTES = 64;
 
+/** Bytes in a packed point (`Jubjub.packPoint`): `y` plus one sign bit. */
+export const PACKED_POINT_BYTES = 32;
+
 export function pointToBytes(p: Point): Uint8Array {
     const out = new Uint8Array(POINT_BYTES);
     out.set(toLeBytes(p[0], FIELD_BYTES), 0);

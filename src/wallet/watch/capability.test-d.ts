@@ -4,6 +4,7 @@
 // either wallet object, makes the directive unused and fails the type check. The functions are
 // never called.
 
+import type { ShieldedAddress } from "../../core/brand.js";
 import type { ReadOnlyWalletApi, WalletApi } from "../api.js";
 
 function _noSpendSurface(w: ReadOnlyWalletApi) {
@@ -25,6 +26,20 @@ function _noSpendSurface(w: ReadOnlyWalletApi) {
     w.treeStore;
     // @ts-expect-error — `nsk` is the spend key and never reaches here.
     w.keys.nsk;
+    // @ts-expect-error — a payment proof is derived from the spending key.
+    w.paymentProof;
+    // @ts-expect-error — as is a claim link's key.
+    w.claimLinkKey;
+}
+
+function _addressesNeedNoSpendAuthority(watch: ReadOnlyWalletApi, full: WalletApi) {
+    // An address is a function of the viewing key and an index, so both wallets derive it.
+    const address: ShieldedAddress = watch.address;
+    const atIndex: Promise<ShieldedAddress> = watch.addressAt(1);
+    const same: ReadOnlyWalletApi["addressAt"] = full.addressAt;
+    // @ts-expect-error — the index is a number.
+    void watch.addressAt("1");
+    return [address, atIndex, same];
 }
 
 function _noRawKeysOnTheSpendingWallet(w: WalletApi) {

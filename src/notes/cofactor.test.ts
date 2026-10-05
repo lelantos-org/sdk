@@ -1,9 +1,12 @@
 // Cofactor clearing in trial decryption.
 //
 // `try_decrypt_note` clears the cofactor on `epk` instead of testing it for
-// subgroup membership, so a crafted `epk = T + [t]B8` yields the same shared
-// secret as `[t]B8` alone. These pin the two properties that depends on: the
-// torsion term is annihilated, and a pure-torsion `epk` is refused.
+// subgroup membership, so a crafted `epk = T + Q` with `Q` in the prime-order
+// subgroup yields the same shared secret as `Q` alone. These pin the two
+// properties that depends on: the torsion term is annihilated, and a
+// pure-torsion `epk` is refused. Decryption does not depend on the base `Q` is
+// a multiple of; `scanNotes` refuses the crafted `epk` afterwards
+// (`sync/scan.test.ts`).
 //
 // The fixtures are the eight points of the 8-torsion subgroup, packed. They are
 // curve constants, obtained as `[n]R` for points `R` off the prime-order
@@ -12,10 +15,10 @@
 import { chacha20poly1305 } from "@noble/ciphers/chacha";
 import { blake2b } from "@noble/hashes/blake2";
 import { beforeAll, describe, expect, it } from "vitest";
+import { deriveIvk } from "../crypto/derive.js";
 import type { Point } from "../crypto/jubjub.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
-import { Poseidon } from "../crypto/poseidon.js";
-import { buildSpendingKey, type SpendingKey } from "../keys/keys.js";
+import { type Field, Poseidon } from "../crypto/poseidon.js";
 import { encodeNotePayload } from "./codec.js";
 
 /** The 8-torsion subgroup, circomlibjs-packed. Orders 1, 2, 4, 4, 8, 8, 8, 8. */
@@ -45,7 +48,7 @@ const cat = (...parts: Uint8Array[]) => {
 describe("cofactor-cleared trial decryption", () => {
     let J: Jubjub;
     let P: Poseidon;
-    let me: SpendingKey;
+    let me: { ivk: Field };
     let plaintext: Uint8Array;
     const esk = 777n;
     let Q: Point;
@@ -53,8 +56,14 @@ describe("cofactor-cleared trial decryption", () => {
     beforeAll(async () => {
         J = await Jubjub.build();
         P = await Poseidon.build();
-        me = buildSpendingKey(P, J, 4242n);
-        plaintext = encodeNotePayload({ asset: 1n, value: 500n, rho: 11n, rcm: 22n });
+        me = { ivk: deriveIvk(P, 4242n) };
+        plaintext = encodeNotePayload({
+            asset: 1n,
+            value: 500n,
+            rho: 11n,
+            rseed: new Uint8Array(32).fill(22),
+            d: 0n,
+        });
         Q = J.mulPointEscalar(J.base8, esk);
     });
 

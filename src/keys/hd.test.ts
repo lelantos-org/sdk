@@ -146,8 +146,8 @@ describe("hd / ZIP-32-lite", () => {
     it("deriveKeysFromMnemonic yields distinct addresses per account", async () => {
         const r0 = await deriveKeysFromMnemonic({ mnemonic: TEST_MNEMONIC, account: 0 });
         const r1 = await deriveKeysFromMnemonic({ mnemonic: TEST_MNEMONIC, account: 1 });
-        expect(r0.address.startsWith(ADDRESS_HRP)).toBe(true);
-        expect(r1.address.startsWith(ADDRESS_HRP)).toBe(true);
+        expect(r0.address.startsWith(`${ADDRESS_HRP}1`)).toBe(true);
+        expect(r1.address.startsWith(`${ADDRESS_HRP}1`)).toBe(true);
         expect(r0.address).not.toBe(r1.address);
         expect(r0.nsk).not.toBe(r1.nsk);
         expect(r0.keys.nsk).toBe(r0.nsk);

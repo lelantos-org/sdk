@@ -46,7 +46,7 @@ import {
     TAG_PK,
     TAG_RHO,
 } from "../crypto/index.js";
-import { fmdFlag } from "../fmd/clue.js";
+import { fmdFlagOnBase } from "../fmd/clue.js";
 import { fmdFlagKeyFromDetection } from "../fmd/keys.js";
 import { challengeWordCount, coeffCount, shapeId, TRANSACT_SHAPES } from "../protocol/shape.js";
 import { loadJubjub, wasmDescribe } from "../test-utils/wasm.js";
@@ -623,11 +623,12 @@ wasmDescribe("transact vectors", () => {
 
                     it("derives the FMD clues bound into the proof", () => {
                         const dk = { x: im.fmd.dkX.map(f) };
-                        const fk = fmdFlagKeyFromDetection(J, dk);
+                        // The circuit vectors flag on Base8.
+                        const fk = fmdFlagKeyFromDetection(J, dk, J.base8);
                         expect(fk.X).toEqual(im.fmd.fkX.map(pt));
 
                         for (const out of im.fmd.perOutput) {
-                            const clue = fmdFlag(J, P, fk, f(out.r));
+                            const clue = fmdFlagOnBase(J, P, fk, J.base8, f(out.r));
                             expect(clue.gamma).toBe(im.fmd.gamma);
                             expect(hex(clue.R)).toBe(out.cluePackedR);
                             expect(hex(clue.bits)).toBe(out.clueBitsPacked);

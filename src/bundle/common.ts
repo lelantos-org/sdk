@@ -12,44 +12,46 @@ import {
 } from "../circuit/index.js";
 import { assertField } from "../core/field.js";
 import { randomFr } from "../core/random.js";
-import { buildRho, type Field, type Jubjub, type Point, type Poseidon } from "../crypto/index.js";
+import { diversifiedBase } from "../crypto/diversified-base.js";
+import type { Field, Jubjub, Point, Poseidon } from "../crypto/index.js";
 import { InvalidArgumentError, WalletConfigError } from "../errors/config.js";
-import { FMD_DEFAULT_GAMMA, type FmdFlagKey, fmdExpandFlagKey } from "../fmd/keys.js";
+import { fmdDiversifiedFlagKey } from "../fmd/diversified.js";
+import { FMD_DEFAULT_GAMMA, type FmdFlagKey } from "../fmd/keys.js";
+import { diversifierToBytes } from "../keys/diversifier.js";
 import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
 import type { Note } from "../notes/note.js";
+import { deriveOutputSecret, expandSeed, seedFromSecret } from "../notes/seed.js";
 import { auxDigest } from "../protocol/abi-hash.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
 import type { CircuitShape } from "../protocol/shape.js";
 import type { SpendKind, SubmitTransactPayload, TransactPubInputs } from "../protocol/transact.js";
 import type { Groth16Proof, Prover, ProverArtifacts } from "../prover/types.js";
 
+/** The address an output is sealed to: the fields of a decoded shielded address. */
 export interface OutputRecipient {
+    /** Diversifier, in `[0, 2^128)`. Selects the base `g_d` the output's ECDH and clue run on. */
+    d: Field;
+    /** ECDH target: `ivk · g_d`. */
     pk_d: Point;
-    /**
-     * Note-commitment binding scalar from the bech32m address: the receiver derives it from
-     * its `ivk` and default diversifier.
-     */
+    /** Note-commitment binding scalar: `Poseidon(TAG_PK, ivk, d)`. */
     pk: Field;
     /**
-     * FMD clue key from the recipient's address (the public half). Expanding it yields
-     * flag-key points, never detection scalars.
+     * FMD clue key: `dk_root · g_d`. Expanding it yields flag-key points, never detection
+     * scalars.
      */
-    ck: Point;
+    ck_d: Point;
     /**
-     * Set for a key no later output is addressed to (a pad's). Its flag key is expanded without
-     * entering the cache of recent recipients.
+     * Set for an address no later output is sealed to (a pad's). Its base and flag key are
+     * expanded without entering the cache of recent recipients.
      */
     oneTime?: boolean;
 }
 
-/**
- * Per-output randomness, supplied by the caller.
- *
- * @internal
- */
-export interface OutputRandomness {
-    esk: Field;
-    fmdR: Field;
+/** One output slot: what it pays and to whom. */
+export interface OutputSpec {
+    asset: bigint;
+    value: bigint;
+    recipient: OutputRecipient;
 }
 
 /** @internal */
@@ -138,61 +140,118 @@ export function buildInputs(P: Poseidon, slots: InputSlots, treeDepth: number): 
     );
 }
 
+/** What sealing to one address needs beyond the address itself. */
+interface AddressKeys {
+    /** The address's base, `diversifiedBase(d)`. */
+    gD: Point;
+    /** The clue key `ck_d` expanded on `gD`, `FMD_DEFAULT_GAMMA` points. */
+    flagKey: FmdFlagKey;
+}
+
+function expandAddress(J: Jubjub, P: Poseidon, recipient: OutputRecipient): AddressKeys {
+    const gD = diversifiedBase(J, P, recipient.d);
+    return { gD, flagKey: fmdDiversifiedFlagKey(J, P, recipient.ck_d, gD, FMD_DEFAULT_GAMMA) };
+}
+
+/** Entries kept in {@link recentAddressKeys}. */
+const ADDRESS_KEY_CACHE_SIZE = 8;
+
 /**
- * Set each output note's rho to the derivation the transact circuit enforces:
- * `rho = Poseidon(TAG_RHO, nullifier[0], out_index)`. Overrides any caller-supplied rho, so
- * no two committed output notes share a rho, and hence a future nullifier. Must run before
- * aux and commitments are built from the notes.
+ * The expansions of the most recent recipients, least recently used first, keyed by `(d, ck_d)`:
+ * every input of an expansion, which costs γ scalar multiplications. The wallet's own change
+ * address and the relayer's recur in every spend.
+ */
+const recentAddressKeys = new Map<string, AddressKeys>();
+
+/** {@link expandAddress}, remembered unless the address is `oneTime`. */
+function addressKeysFor(J: Jubjub, P: Poseidon, recipient: OutputRecipient): AddressKeys {
+    if (recipient.oneTime) return expandAddress(J, P, recipient);
+    const key = `${recipient.d}:${recipient.ck_d[0]}:${recipient.ck_d[1]}`;
+    const keys = recentAddressKeys.get(key) ?? expandAddress(J, P, recipient);
+    // A `Map` iterates in insertion order: re-inserting a hit moves it to the end.
+    recentAddressKeys.delete(key);
+    recentAddressKeys.set(key, keys);
+    if (recentAddressKeys.size > ADDRESS_KEY_CACHE_SIZE) {
+        recentAddressKeys.delete(recentAddressKeys.keys().next().value as string);
+    }
+    return keys;
+}
+
+/** An output as {@link sealOutput} takes it. */
+type SealArgs = Parameters<typeof sealOutput>[2];
+
+/**
+ * `osk` of an output: the secret all its randomness derives from. The one binding of an output's
+ * fields into `deriveOutputSecret`, shared by sealing and by the payment proof that recomputes it.
  *
+ * @throws {InvalidArgumentError} as {@link sealOutput} does for the fields `osk` binds.
  * @internal
  */
-export function deriveOutputRho(P: Poseidon, nf0: Field, outputs: readonly Note[]): Note[] {
-    return outputs.map((note, index) => ({ ...note, rho: buildRho(P, nf0, index) }));
+export function outputSecret(J: Jubjub, o: SealArgs): Uint8Array {
+    const { recipient } = o;
+    return deriveOutputSecret(o.outgoingKey, {
+        chainId: o.chainId,
+        rho: o.rho,
+        asset: o.asset,
+        value: o.value,
+        d: diversifierToBytes(recipient.d),
+        pk_d: J.packPoint(recipient.pk_d),
+        pk: recipient.pk,
+        ck_d: J.packPoint(recipient.ck_d),
+        nullifiers: o.nullifiers,
+    });
 }
-
-/** Entries kept in {@link flagKeys}. */
-const FLAG_KEY_CACHE_SIZE = 8;
 
 /**
- * Flag keys of the most recent recipients, by `(gamma, ck)`. An expansion is a pure function of
- * the public `ck` and costs γ scalar multiplications. A spend's paying outputs go to few recipients
- * (the payee, the wallet's own change, the relayer), and the last two recur in every spend.
+ * Seal one output: its note, and the clue, ephemeral key and ciphertext published with it.
+ *
+ * No random value is drawn. `osk` ({@link outputSecret}) binds the sender's outgoing key, the
+ * chain, the note's fields, the recipient's whole address and the spend's nullifiers; the header
+ * of `notes/seed.ts` defines its preimage and how `rseed`, `rcm`, `esk` and `fmdR` follow from it.
+ * Two calls therefore share an `esk` only when every one of those is equal. `rho` must be unique
+ * per output: it is the note's nullifier seed.
+ *
+ * ECDH and the clue run on the recipient's base `g_d = diversifiedBase(d)`. The clue has
+ * `FMD_DEFAULT_GAMMA` bits, the width a recipient checks. A pad goes through this function like a
+ * paying output, to an address drawn for it.
+ *
+ * @throws {InvalidArgumentError} when `outgoingKey` is not 32 bytes, `rho`, `recipient.pk` or a
+ * nullifier is not a canonical field element, `asset` or `value` is not a uint64, `recipient.d` is
+ * not in `[0, 2^128)`, or `recipient.pk_d` is not in the prime-order subgroup.
  */
-const flagKeys = new Map<string, FmdFlagKey>();
-
-function flagKeyFor(J: Jubjub, P: Poseidon, ck: Point, gamma: number): FmdFlagKey {
-    const key = `${gamma}:${ck[0]}:${ck[1]}`;
-    const flagKey = flagKeys.get(key) ?? fmdExpandFlagKey(J, P, ck, gamma);
-    // A `Map` iterates in insertion order, so re-inserting a hit keeps the first key the least
-    // recently used.
-    flagKeys.delete(key);
-    flagKeys.set(key, flagKey);
-    if (flagKeys.size > FLAG_KEY_CACHE_SIZE) {
-        flagKeys.delete(flagKeys.keys().next().value as string);
-    }
-    return flagKey;
-}
-
-/** @internal */
-export function buildAuxForReal(
+export function sealOutput(
     J: Jubjub,
     P: Poseidon,
-    note: Note,
-    recipient: OutputRecipient,
-    rng: OutputRandomness,
-    gamma: number = FMD_DEFAULT_GAMMA,
-): OutputAuxWithWitness {
-    return buildOutputAux({
+    o: {
+        /** The sender's outgoing key (`deriveOutgoingKey`). */
+        outgoingKey: Uint8Array;
+        chainId: bigint;
+        rho: Field;
+        asset: bigint;
+        value: bigint;
+        recipient: OutputRecipient;
+        /**
+         * The spend's public nullifiers, one per input slot in slot order, dummy slots included.
+         * Empty for a deposit.
+         */
+        nullifiers: readonly Field[];
+    },
+): { note: Note; aux: OutputAuxWithWitness } {
+    const { rho, asset, value, recipient } = o;
+    const rseed = seedFromSecret(outputSecret(J, o));
+    const { rcm, esk, fmdR } = expandSeed(rseed, rho);
+    const { gD, flagKey } = addressKeysFor(J, P, recipient);
+    const aux = buildOutputAux({
         J,
         P,
-        recipientFlagKey: recipient.oneTime
-            ? fmdExpandFlagKey(J, P, recipient.ck, gamma)
-            : flagKeyFor(J, P, recipient.ck, gamma),
+        recipientFlagKey: flagKey,
         recipientPkD: recipient.pk_d,
-        note,
-        esk: rng.esk,
-        fmdR: rng.fmdR,
+        gD,
+        note: { asset, value, rho, rseed, d: recipient.d },
+        esk,
+        fmdR,
     });
+    return { note: { asset, value, pk: recipient.pk, rho, rcm }, aux };
 }
 
 /** @internal */

@@ -1,48 +1,65 @@
 // bech32m payment address.
 //
 //   HRP     "lelantos"
-//   payload pk_d (32 B, Baby-Jubjub packed — ECDH target)
+//   payload d    (16 B, little-endian — diversifier, selects the base point g_d)
+//        || pk_d (32 B, Baby-Jubjub packed — ECDH target)
 //        || pk   (32 B, little-endian field scalar — note-commitment binding)
-//        || ck   (32 B, Baby-Jubjub packed — FMD clue key)
+//        || ck_d (32 B, Baby-Jubjub packed — FMD clue key)
 //
-// The HRP carries the format version: a format change takes a different HRP, under which
-// existing strings fail to decode.
+// 112 bytes, 195 characters. A payload of any other length fails to decode.
 //
-// `pk = Poseidon(TAG_PK, ivk, d0)` is published so a sender can build the recipient's note
-// commitment. It grants no spend authority, which rests on `nsk`, and adds no linkability beyond
-// `pk_d`.
+// The fields are derived in `./diversified.ts`. A sender needs nothing else: `g_d` is a function
+// of `d`, `pk` builds the recipient's note commitment, and `ck_d` expands into the flag key
+// (`fmdDiversifiedFlagKey`). None of them grants spend or detection authority: spending rests on
+// `nsk`, recovering the detection scalars from `ck_d` is a discrete log, and `dk_root` must never
+// appear in an address. An account has one address per diversifier index in `[0, 2^32)`; two of
+// them have no field in common.
 //
-// `ck = dk · Base8` is the public half of the FMD key. Senders expand it into flag-key points
-// (`fmdExpandFlagKey`); recovering the detection scalars from it requires a discrete log, so an
-// address lets a sender flag the recipient but not detect for them. `dk` must never appear in an
-// address.
-//
-// Both point slots are validated on decode: on-curve, prime-order subgroup, non-identity.
+// Both point slots are validated on decode: on-curve, prime-order subgroup, non-identity. Decoding
+// does not establish that `pk`, `pk_d` and `ck_d` belong to one `ivk`, or that the points are
+// multiples of `g_d`; only the holder of `ivk` can (`ownsAddress`).
 
 import { bech32m } from "bech32";
 import { branded, type ShieldedAddress } from "../core/brand.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../core/bytes.js";
 import { assertField } from "../core/field.js";
+import { assertDiversifier, DIVERSIFIER_BYTES } from "../crypto/diversified-base.js";
 import type { Jubjub, Point } from "../crypto/jubjub.js";
 import type { Field } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
 
 export const ADDRESS_HRP = "lelantos";
-const ADDRESS_PAYLOAD_LEN = 3 * FIELD_BYTES;
+const PK_D_OFFSET = DIVERSIFIER_BYTES;
+const PK_OFFSET = PK_D_OFFSET + FIELD_BYTES;
+const CK_D_OFFSET = PK_OFFSET + FIELD_BYTES;
+const ADDRESS_PAYLOAD_LEN = CK_D_OFFSET + FIELD_BYTES;
 /** Length cap passed to `bech32m`, above its 90-character default. @internal */
 export const BECH32_LIMIT = 256;
 
 export interface DecodedAddress {
+    /** The diversifier as an integer in `[0, 2^128)`. */
+    d: Field;
+    /** ECDH target, `(ivk mod q) · g_d`. */
     pk_d: Point;
+    /** `Poseidon(TAG_PK, ivk, d)`: binds the note commitment. */
     pk: Field;
-    ck: Point;
+    /** FMD clue key, `dk_root · g_d`. */
+    ck_d: Point;
 }
 
-export function encodeAddress(J: Jubjub, pk_d: Point, pk: Field, ck: Point): ShieldedAddress {
+/**
+ * Encode a payment address. The points are not validated; `decodeAddress` rejects an encoding of
+ * a point outside the prime-order subgroup or of the identity.
+ *
+ * @throws {InvalidArgumentError} when `d` is not in `[0, 2^128)` or `pk` exceeds 32 bytes.
+ */
+export function encodeAddress(J: Jubjub, a: DecodedAddress): ShieldedAddress {
+    assertDiversifier(a.d);
     const payload = new Uint8Array(ADDRESS_PAYLOAD_LEN);
-    payload.set(J.packPoint(pk_d), 0);
-    payload.set(toLeBytes(pk), FIELD_BYTES);
-    payload.set(J.packPoint(ck), 2 * FIELD_BYTES);
+    payload.set(toLeBytes(a.d, DIVERSIFIER_BYTES), 0);
+    payload.set(J.packPoint(a.pk_d), PK_D_OFFSET);
+    payload.set(toLeBytes(a.pk), PK_OFFSET);
+    payload.set(J.packPoint(a.ck_d), CK_D_OFFSET);
     return branded<ShieldedAddress>(
         bech32m.encode(ADDRESS_HRP, bech32m.toWords(payload), BECH32_LIMIT),
     );
@@ -77,42 +94,37 @@ export function rethrowBech32<T>(decode: () => T, what: string, argument: string
 function decode(J: Jubjub, addr: string): DecodedAddress {
     const { prefix, words } = bech32m.decode(addr, BECH32_LIMIT);
     if (prefix !== ADDRESS_HRP) {
-        throw new InvalidArgumentError(
-            `invalid shielded address: expected the "${ADDRESS_HRP}" prefix, got "${prefix}"`,
-            { argument: "address" },
-        );
+        throw bad(`expected the "${ADDRESS_HRP}" prefix, got "${prefix}"`);
     }
 
     const payload = new Uint8Array(bech32m.fromWords(words));
     if (payload.length !== ADDRESS_PAYLOAD_LEN) {
-        throw new InvalidArgumentError(
-            `invalid shielded address: bad payload length ${payload.length}, ` +
-                `expected ${ADDRESS_PAYLOAD_LEN}`,
-            { argument: "address" },
-        );
+        throw bad(`bad payload length ${payload.length}, expected ${ADDRESS_PAYLOAD_LEN}`);
     }
 
-    const pk_d = unpackChecked(J, payload.slice(0, FIELD_BYTES), "pk_d");
+    // Every 16-byte string is a diversifier, so `d` needs no range check.
+    const d = fromLeBytes(payload.slice(0, PK_D_OFFSET));
+    const pk_d = unpackChecked(J, payload.slice(PK_D_OFFSET, PK_OFFSET), "pk_d");
     // Range check: an unreduced `pk` would make the sender commit to `pk mod r` while the
     // recipient derives a canonical `pk` from `ivk`, producing a note the recipient cannot spend.
-    const pk = fromLeBytes(payload.slice(FIELD_BYTES, 2 * FIELD_BYTES));
+    const pk = fromLeBytes(payload.slice(PK_OFFSET, CK_D_OFFSET));
     assertField(pk, "address pk");
-    const ck = unpackChecked(J, payload.slice(2 * FIELD_BYTES), "ck");
+    const ck_d = unpackChecked(J, payload.slice(CK_D_OFFSET), "ck_d");
 
-    return { pk_d, pk, ck };
+    return { d, pk_d, pk, ck_d };
 }
 
-// Rejects the identity alongside the curve checks: an identity `ck` expands to flag-key points
-// with a known discrete log, which makes every clue bit predictable.
+// Rejects the identity alongside the curve checks. An identity `pk_d` gives the shared secret
+// `esk · O = O`, so anyone decrypts the note. An identity `ck_d` expands to flag-key points
+// `h_i · g_d` with public `h_i`, which makes every clue bit computable from the clue's `R`.
 function unpackChecked(J: Jubjub, bytes: Uint8Array, name: string): Point {
-    const bad = (why: string): never => {
-        throw new InvalidArgumentError(`invalid shielded address: ${name} ${why}`, {
-            argument: "address",
-        });
-    };
     const p = J.unpackPoint(bytes);
-    if (!p) return bad("not on Baby-Jubjub");
-    if (!J.inSubgroup(p)) return bad("not in prime subgroup");
-    if (p[0] === 0n && p[1] === 1n) return bad("is the identity");
+    if (!p) throw bad(`${name} not on Baby-Jubjub`);
+    if (!J.inSubgroup(p)) throw bad(`${name} not in prime subgroup`);
+    if (p[0] === 0n && p[1] === 1n) throw bad(`${name} is the identity`);
     return p;
+}
+
+function bad(why: string): InvalidArgumentError {
+    return new InvalidArgumentError(`invalid shielded address: ${why}`, { argument: "address" });
 }

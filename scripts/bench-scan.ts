@@ -3,37 +3,46 @@
 // Run: npm run bench:scan
 //
 // Sections:
-//   primitives — the wasm curve ops in isolation, where sync time is spent.
-//                `inSubgroup` is not on the decrypt path, which clears the
-//                cofactor instead; it is reported for reference.
-//   per-note   — one trial decrypt and one `fmdTest` on a foreign note.
+//   primitives — the wasm curve ops in isolation, where sync time is spent,
+//                and the two steps of a clue bit: the arity-6 hash and its
+//                Jacobi symbol. `inSubgroup` is not on the decrypt path,
+//                which clears the cofactor instead; it is reported for
+//                reference.
+//   per-note   — one trial decrypt and one `fmdTest` on a foreign note, and
+//                one full scan of an own note: decrypt, then the commitment,
+//                ephemeral-key and clue checks. The own note is timed alone
+//                and as one of a batch, which shares the per-scan keys.
 //   scan       — end-to-end `LocalScanner.scan` throughput at a few hit rates.
 //
-// Scalars are full-width (mod BABYJUB_SUBGROUP_ORDER, ~251 bits). `mul_scalar`
-// runs `n.bits()` iterations, so a short scalar understates its cost.
+// Scalars are full-width: a 300-bit value reduced mod BABYJUB_SUBGROUP_ORDER,
+// ~251 bits. `mul_scalar` runs `n.bits()` iterations, so a short scalar
+// understates its cost.
 //
 // `fmdTest` is reported for reference: the scan path does not call it (see
-// `src/sync/scanner.ts`).
+// `src/sync/scanner.ts`). A hit recomputes its clue instead.
 
+import { sealOutput } from "../src/bundle/common.js";
 import {
     BABYJUB_SUBGROUP_ORDER,
-    buildNoteCommitment,
+    BN254_FR,
     type Field,
     Jubjub,
     Poseidon,
 } from "../src/crypto/index.js";
-import { fmdFlag, fmdTest } from "../src/fmd/clue.js";
-import { fmdClueKeyFromRoot, fmdExpandDetectionKey, fmdExpandFlagKey } from "../src/fmd/keys.js";
-import { buildSpendingKey } from "../src/keys/keys.js";
-import { clueBitsToPrefix, encodeNotePayload, withClueBitsPrefix } from "../src/notes/codec.js";
-import { encryptNote } from "../src/notes/encrypt.js";
+import { jacobiSymbol } from "../src/crypto/sqrt.js";
+import { fmdTest } from "../src/fmd/clue.js";
+import { FMD_DEFAULT_GAMMA } from "../src/fmd/keys.js";
+import { buildSpendingKey, detectionKeyFor, type ViewingKey } from "../src/keys/keys.js";
+import { stripClueBitsPrefix } from "../src/notes/codec.js";
 import { type ScanInput, scanNotes } from "../src/sync/scan.js";
 import { LocalScanner } from "../src/sync/scanner.js";
+import { recipientAt, sealedScanInput } from "../src/test-utils/outputs.js";
 
 /** Deterministic full-width scalar, so runs are comparable across commits. */
 function scalar(seed: number): Field {
+    // `v` is about 75 bits: its fourth power exceeds the order, its square does not.
     let v = BigInt(seed) * 0x9e3779b97f4a7c15n + 0xbf58476d1ce4e5b9n;
-    v = (v * v) % BABYJUB_SUBGROUP_ORDER;
+    v = v ** 4n % BABYJUB_SUBGROUP_ORDER;
     return v === 0n ? 1n : v;
 }
 
@@ -56,8 +65,8 @@ async function main(): Promise<void> {
     const P = await Poseidon.build();
     const J = await Jubjub.build();
 
-    const me = buildSpendingKey(P, J, 1234n);
-    const eve = buildSpendingKey(P, J, 9999n);
+    const me = buildSpendingKey(P, 1234n);
+    const eve = buildSpendingKey(P, 9999n);
 
     const pt = J.mulPointEscalar(J.base8, scalar(1));
     const packed = J.packPoint(pt);
@@ -80,8 +89,11 @@ async function main(): Promise<void> {
     bench("addPoint", 5000, () => {
         J.addPoint(pt, pt);
     });
-    bench("poseidon6 (JS)", 2000, () => {
+    bench(`poseidon6 (${P.backend})`, 2000, () => {
         P.hash([1n, 2n, 3n, 4n, 5n, 6n]);
+    });
+    bench("jacobiSymbol (BN254_FR)", 5000, (i) => {
+        jacobiSymbol(scalars[i % scalars.length] as Field, BN254_FR);
     });
     console.log(`  ${"—".repeat(28)}`);
     console.log(
@@ -90,15 +102,21 @@ async function main(): Promise<void> {
 
     // Foreign notes: the dominant case in a firehose sync.
     const N = 2000;
-    const detection = fmdExpandDetectionKey(J, P, me.dk, 5);
-    const eveFlag = fmdExpandFlagKey(J, P, fmdClueKeyFromRoot(J, eve.dk), 5);
-    const clues = Array.from({ length: N }, (_, i) => fmdFlag(J, P, eveFlag, scalar(i + 5000)));
+    const detection = detectionKeyFor(P, me);
     const foreign = buildBatch(J, P, N, 0, me, eve);
+    const clues = foreign.map((inp) => ({
+        R: inp.clueR,
+        // Low byte of the big-endian prefix, which holds all γ bits.
+        bits: stripClueBitsPrefix(inp.ciphertext).prefix.subarray(1),
+        gamma: FMD_DEFAULT_GAMMA,
+    }));
+    const own = buildBatch(J, P, 200, 1, me, eve);
 
     console.log("\nper-note");
     console.log("=".repeat(48));
     // Reused one-element batch: `scanNotes` takes an array, and allocating one
     // per iteration would also measure the allocator.
+    // Each call also derives the scan's FMD root secret: one Poseidon hash.
     const single: ScanInput[] = [foreign[0]!];
     const decrypt = bench("try_decrypt_note (not mine)", N, (i) => {
         single[0] = foreign[i % N]!;
@@ -107,7 +125,17 @@ async function main(): Promise<void> {
     const fmd = bench("fmdTest (not mine)", N, (i) => {
         fmdTest(J, P, detection, clues[i % N]!);
     });
+    bench("scan one note (mine)", own.length, (i) => {
+        single[0] = own[i % own.length]!;
+        scanNotes(J, P, me.ivk, single);
+    });
+    // One scan over all of them, as a sync page is scanned: the detection key and the
+    // address's `pk` and `g_d`, which the one-note scan above builds every time, are built once.
+    const batched = bench(`scan ${own.length} notes (mine)`, 2, () => {
+        scanNotes(J, P, me.ivk, own);
+    });
     console.log(`  ${"—".repeat(28)}`);
+    console.log(`  per note (mine), batched   ${(batched / own.length).toFixed(1).padStart(8)} us`);
     console.log(
         `  decode share of decrypt    ${((100 * (dec + sub)) / decrypt).toFixed(0).padStart(7)}%`,
     );
@@ -134,45 +162,37 @@ async function main(): Promise<void> {
     }
 }
 
+/**
+ * Honest outputs to default addresses: the first `mineFrac` of them to `mine`, the rest to `eve`.
+ *
+ * `scanNotes` rebuilds the commitment, the ephemeral key and the clue from the decrypted plaintext
+ * and rejects a mismatch, so each is sealed as a wallet seals it.
+ */
 function buildBatch(
     J: Jubjub,
     P: Poseidon,
     n: number,
     mineFrac: number,
-    mine: ReturnType<typeof buildSpendingKey>,
-    eve: ReturnType<typeof buildSpendingKey>,
+    mine: ViewingKey,
+    eve: ViewingKey,
 ): ScanInput[] {
     const mineCount = Math.round(n * mineFrac);
-    const inputs: ScanInput[] = [];
-    for (let i = 0; i < n; i++) {
-        const owner = i < mineCount ? mine : eve;
-        const payload = {
+    const toMine = recipientAt(P, J, mine);
+    const toEve = recipientAt(P, J, eve);
+    // Fixed, so runs are comparable across commits.
+    const outgoingKey = new Uint8Array(32).fill(7);
+    return Array.from({ length: n }, (_, i) => {
+        const sealed = sealOutput(J, P, {
+            outgoingKey,
+            chainId: 1n,
+            rho: BigInt(i + 1000),
             asset: 1n,
             value: BigInt(i + 1),
-            rho: BigInt(i + 1000),
-            rcm: BigInt(i + 2000),
-        };
-        const enc = encryptNote({
-            J,
-            recipientPkD: owner.pk_d,
-            esk: scalar(i + 1),
-            plaintext: encodeNotePayload(payload),
+            recipient: i < mineCount ? toMine : toEve,
+            nullifiers: [],
         });
-        // Clue bits are a wire prefix on the ciphertext; scanNotes strips them.
-        const bits = new Uint8Array([i & 0x1f]);
-        const wire = withClueBitsPrefix(clueBitsToPrefix(bits, 5), enc.ciphertext);
-        inputs.push({
-            ciphertext: wire,
-            epk: enc.epk,
-            // `scanNotes` rebuilds the commitment from the decrypted plaintext and
-            // rejects a mismatch, so a placeholder would turn every "mine" note
-            // into a `cmMismatch` and report no hits.
-            cm: buildNoteCommitment(P, { ...payload, pk: owner.pk }),
-            leafIndex: i,
-            blockNumber: i,
-        });
-    }
-    return inputs;
+        return sealedScanInput(P, J, sealed, { leafIndex: i, blockNumber: i });
+    });
 }
 
 main().catch((e) => {

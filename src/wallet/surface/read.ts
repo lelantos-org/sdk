@@ -9,7 +9,8 @@ import { hex32, type ShieldedAddress } from "../../core/brand.js";
 import { boundary } from "../../errors/boundary.js";
 import { UnsupportedOperationError } from "../../errors/chain.js";
 import { InvalidArgumentError } from "../../errors/config.js";
-import type { FullViewingKey, ViewingKey } from "../../keys/keys.js";
+import { DIVERSIFIER_INDEX_BOUND } from "../../keys/diversifier.js";
+import { addressFromViewingKey, type FullViewingKey, type ViewingKey } from "../../keys/keys.js";
 import {
     encodeFullViewingKey,
     encodeViewingKey,
@@ -32,6 +33,7 @@ const ASYNC_DISPOSE: typeof Symbol.asyncDispose = (Symbol.asyncDispose ??
 
 /** What the read half runs on: a sync context plus assets, state and the chain tip. */
 export interface ReadContext extends SyncContext {
+    /** The account's address at index 0. */
     readonly address: ShieldedAddress;
     readonly assets: AssetsFacade;
     readonly shape: CircuitShape;
@@ -64,14 +66,12 @@ export async function assertLive(state: WalletStateStore, op: string): Promise<v
 export function walletKeysOf(keys: FullViewingKey, spending: true): SpendingWalletKeys;
 export function walletKeysOf(keys: ViewingKey | FullViewingKey, spending: false): WalletKeys;
 export function walletKeysOf(keys: ViewingKey | FullViewingKey, spending: boolean): WalletKeys {
-    const vk: ViewingKey = { ivk: keys.ivk, pk_d: keys.pk_d, dk: keys.dk, ck: keys.ck };
+    // The encoders read only the scalars they serialise, so a spending key passes as it is.
     const full = isFullViewingKey(keys);
     return Object.freeze({
         tier: spending ? ("spending" as const) : full ? ("full" as const) : ("incoming" as const),
-        viewingKey: encodeViewingKey(vk),
-        fullViewingKey: full
-            ? encodeFullViewingKey({ ...vk, nk: (keys as FullViewingKey).nk })
-            : undefined,
+        viewingKey: encodeViewingKey(keys),
+        fullViewingKey: full ? encodeFullViewingKey(keys) : undefined,
     });
 }
 
@@ -135,6 +135,19 @@ export function createReadMethods(
     };
 
     return {
+        addressAt: (index) =>
+            gated(ctx.state, "addressAt", (): ShieldedAddress => {
+                // `diversifierAt` applies the same bound; checked here so the message names the
+                // method.
+                if (!Number.isInteger(index) || index < 0 || index >= DIVERSIFIER_INDEX_BOUND) {
+                    throw new InvalidArgumentError(
+                        "addressAt: index must be an integer in [0, 2^32)",
+                        { argument: "index" },
+                    );
+                }
+                return addressFromViewingKey(ctx.P, ctx.J, ctx.keys, index);
+            }),
+
         sync: (opts = {}) =>
             gated(
                 ctx.state,

@@ -22,7 +22,7 @@ import { DIST, loadTs, ROOT, walk } from "./lib/package.mjs";
 const ts = loadTs();
 
 /** Budget for all emitted JS under `dist/`. */
-const DIST_MAX = 525_312; // 513 KiB
+const DIST_MAX = 532_480; // 520 KiB
 
 /**
  * Modules the spend path owns. An app entry must reach them only through a dynamic import, so a
@@ -69,7 +69,7 @@ const ENTRIES = [
         // mnemonic, the second only if the Poseidon wasm module fails to initialise.
         name: "root: connect",
         source: `export { connect } from "${ROOT}/dist/entry/index.js";`,
-        max: 135_000,
+        max: 139_500,
         module: "dist/entry/index.js",
         forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
@@ -92,7 +92,7 @@ const ENTRIES = [
         // stack and the scan loop, so it tracks `primitives: keys`.
         name: "watch: connectWatch",
         source: `export { connectWatch } from "${ROOT}/dist/entry/watch.js";`,
-        max: 70_500,
+        max: 74_000,
         module: "dist/entry/watch.js",
         forbid: [...SPEND_PATH, ...PROVER_PATH],
     },
@@ -118,7 +118,7 @@ const ENTRIES = [
         // the viem adapter and the signers, which the split harness shares into the entry chunk.
         name: "advanced: createWallet",
         source: `export { createWallet } from "${ROOT}/dist/entry/advanced.js";`,
-        max: 124_500,
+        max: 129_000,
         module: "dist/entry/advanced.js",
         forbid: SPEND_PATH,
     },

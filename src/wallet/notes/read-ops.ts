@@ -27,6 +27,7 @@ function toWalletNote(s: StoredNote): WalletNote {
             value: branded<CircuitAmount>(BigInt(s.value)),
             rho: BigInt(s.rho),
             rcm: BigInt(s.rcm),
+            d: BigInt(s.d),
         }),
     };
 }

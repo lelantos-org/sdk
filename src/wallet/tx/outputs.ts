@@ -1,41 +1,32 @@
-// Output slots, one object each.
-//
-// `buildSpend` takes `outputs`, `outputRecipients` and `outputRandomness` as positional arrays and
-// checks only that their lengths match. A slot that drifts between them delivers a note to the
-// wrong address; a misplaced fee slot pays the relayer's fee to the payer while every balance check
-// still passes. Each slot is described once here, with its ownership, and unzipped at the
-// `buildSpend` boundary.
+// Output slots. Each is one object: what it pays, to whom, and the roles the wallet tracks for it,
+// so a slot's value, recipient and ownership cannot drift apart.
 //
 // Slot index is the only per-slot public signal that is not a commitment or a blinded point, so a
 // fixed layout would reveal which commitment is the payee's and which the relayer's. The order is
 // shuffled.
 //
-// `finalizeSlots` shuffles and is the only exit from this module, so the three arrays, `ownIndices`
-// and the payee's index derive from one permutation. `ownIndices` read off the unshuffled list
-// would prove and submit while misreporting note ownership.
+// `finalizeSlots` shuffles and is the only exit from this module, so the outputs, `ownIndices` and
+// the payee's index derive from one permutation. `ownIndices` read off the unshuffled list would
+// prove and submit while misreporting note ownership.
 //
 // Every output carries an FMD clue, and a detector holding a wallet's detection key sees which
 // clues match it. A clue for another key matches with probability `2^-γ`, so a spend whose unused
 // slots were all addressed to the spender would match on most of its outputs and identify its
 // sender to that detector. Change is therefore capped at `MAX_CHANGE_NOTES`, and every remaining
-// slot is a pad addressed to a key drawn for that slot (`padSlots`).
+// slot is a pad addressed to an address drawn for that slot (`padSlots`).
 
-import type { OutputRandomness, OutputRecipient } from "../../bundle/common.js";
-import type { SpendArgs } from "../../bundle/spend.js";
-import { randomFr, randomJubjubScalar, shuffled } from "../../core/random.js";
+import type { OutputRecipient, OutputSpec } from "../../bundle/common.js";
+import { fromLeBytes } from "../../core/bytes.js";
+import { randomBytes, randomFr, randomJubjubScalar, shuffled } from "../../core/random.js";
+import { DIVERSIFIER_BYTES } from "../../crypto/diversified-base.js";
 import type { Jubjub, Point } from "../../crypto/jubjub.js";
 import { assertInvariant, InternalError } from "../../errors/base.js";
 import type { DecodedAddress } from "../../keys/address.js";
-import type { Note } from "../../notes/note.js";
-import { freshNoteRandomness, freshOutputAuxRandomness } from "../../notes/randomness.js";
 import { decompose, type Ladder } from "../../protocol/denominations.js";
 import type { OutputSlot } from "./result-builder.js";
 
-/** One output slot, with everything that must line up at its index. */
-export interface OutputSlotSpec {
-    note: Note;
-    recipient: OutputRecipient;
-    randomness: OutputRandomness;
+/** One output slot: what `buildSpend` seals, and the roles the wallet tracks for it. */
+export interface OutputSlotSpec extends OutputSpec {
     /** Owned by this wallet, and so counted in `ownIndices` / `ownInflow`. */
     own: boolean;
     /**
@@ -44,11 +35,6 @@ export interface OutputSlotSpec {
      * self-transfer.
      */
     payee?: boolean;
-}
-
-/** A slot paying `recipient`, with fresh randomness. */
-export function payTo(note: Note, recipient: DecodedAddress, own: boolean): OutputSlotSpec {
-    return { note, recipient, randomness: freshOutputAuxRandomness(), own };
 }
 
 /**
@@ -63,9 +49,6 @@ export const MAX_CHANGE_NOTES = 2;
 
 /** What a change split needs to know. See {@link splitChange}. */
 interface ChangeSplit {
-    /** Owner of every note produced — the spender's own `pk`. */
-    pk: bigint;
-    asset: bigint;
     /** Value to distribute. The notes always sum to exactly this. */
     remainder: bigint;
     /** Most notes to produce. */
@@ -75,7 +58,7 @@ interface ChangeSplit {
 }
 
 /**
- * Split a change remainder into at most `maxNotes` notes, none of value 0.
+ * Split a change remainder into the values of at most `maxNotes` notes, none 0.
  *
  * With a ladder, the remainder is decomposed onto it greedily, largest first, with any off-ladder
  * leftover in one final note. `publicOut` must be a denomination for a withdrawal to blend with
@@ -87,10 +70,10 @@ interface ChangeSplit {
  * `[floor(r/2), ceil(r/2)]`.
  *
  * Either way the values sum to `remainder` exactly, as the circuit's value conservation requires.
- * A zero remainder yields no note.
+ * A zero remainder yields no value.
  */
-export function splitChange(args: ChangeSplit): Note[] {
-    const { pk, asset, remainder, maxNotes, ladder } = args;
+export function splitChange(args: ChangeSplit): bigint[] {
+    const { remainder, maxNotes, ladder } = args;
     assertInvariant(maxNotes >= 1, `splitChange: need at least one note, got ${maxNotes}`);
     // `WalletConfig.denominations: false` resolves to an empty ladder. Decomposing against it would
     // put the whole remainder in the dust note, and `[]` is truthy, hence the length check.
@@ -98,9 +81,7 @@ export function splitChange(args: ChangeSplit): Note[] {
         ladder && ladder.length > 0
             ? denominatedValues(remainder, maxNotes, ladder)
             : evenValues(remainder, maxNotes);
-    return values
-        .filter((value) => value > 0n)
-        .map((value) => ({ asset, value, pk, ...freshNoteRandomness() }));
+    return values.filter((value) => value > 0n);
 }
 
 function evenValues(remainder: bigint, notes: number): bigint[] {
@@ -123,9 +104,12 @@ function denominatedValues(remainder: bigint, maxNotes: number, ladder: Ladder):
     return values;
 }
 
-/** {@link splitChange}, as slots addressed back to self. */
-export function changeSlots(args: ChangeSplit & { ownAddr: DecodedAddress }): OutputSlotSpec[] {
-    return splitChange(args).map((note) => payTo(note, args.ownAddr, true));
+/** {@link splitChange}, as slots of `asset` addressed back to self. */
+export function changeSlots(
+    args: ChangeSplit & { asset: bigint; ownAddr: DecodedAddress },
+): OutputSlotSpec[] {
+    const { asset, ownAddr: recipient } = args;
+    return splitChange(args).map((value) => ({ asset, value, recipient, own: true }));
 }
 
 /** A uniform non-identity point of the prime-order subgroup. */
@@ -134,31 +118,44 @@ function randomSubgroupPoint(J: Jubjub): Point {
 }
 
 /**
- * `count` pads: value-0 notes of `asset`, each addressed to a key drawn for it.
+ * An address drawn for one output, which no one holds.
  *
- * A pad's `pk`, `pk_d` and `ck` are uniform and no one holds their secrets, so the note is
- * unspendable, its ciphertext opens for no one, and its clue matches any detection key with the
- * `2^-γ` of an unrelated output. It is built by the same path as a paying output.
+ * Its `d`, `pk`, `pk_d` and `ck_d` are uniform and no one holds their secrets, so a note sealed to
+ * it is unspendable, its ciphertext opens for no one, and its clue matches any detection key with
+ * the `2^-γ` of an unrelated output. `oneTime` keeps its flag key out of the cache of recent
+ * recipients.
+ */
+export function padRecipient(J: Jubjub): OutputRecipient {
+    return {
+        d: fromLeBytes(randomBytes(DIVERSIFIER_BYTES)),
+        pk: randomFr(),
+        pk_d: randomSubgroupPoint(J),
+        ck_d: randomSubgroupPoint(J),
+        oneTime: true,
+    };
+}
+
+/**
+ * `count` pads: value-0 outputs of `asset`, each addressed to its own {@link padRecipient}.
+ *
+ * `buildSpend` seals a pad by the same path as a paying output, on the base `d` selects, so its
+ * published points are distributed as a paying output's.
  *
  * `asset` is not published: a pad may name any non-zero id.
  */
 export function padSlots(J: Jubjub, asset: bigint, count: number): OutputSlotSpec[] {
-    return Array.from({ length: count }, () => {
-        const recipient: OutputRecipient = {
-            pk: randomFr(),
-            pk_d: randomSubgroupPoint(J),
-            ck: randomSubgroupPoint(J),
-            oneTime: true,
-        };
-        const note: Note = { asset, value: 0n, pk: recipient.pk, ...freshNoteRandomness() };
-        return { note, recipient, randomness: freshOutputAuxRandomness(), own: false };
-    });
+    return Array.from({ length: count }, () => ({
+        asset,
+        value: 0n,
+        recipient: padRecipient(J),
+        own: false,
+    }));
 }
 
 /** Everything downstream needs about a spend's outputs, in their final order. */
 interface FinalSlots {
-    /** The three positional arrays `buildSpend` takes. Spread into its args. */
-    args: Pick<SpendArgs, "outputs" | "outputRecipients" | "outputRandomness">;
+    /** `SpendArgs.outputs`: the slots without the wallet's roles. */
+    outputs: OutputSpec[];
     /** Indices of the wallet's own slots, in slot order. */
     ownIndices: OutputSlot[];
     /** Where the payee's slot landed, on a transfer. */
@@ -166,8 +163,8 @@ interface FinalSlots {
 }
 
 /**
- * Shuffle a spend's output slots and unzip them, in that order, so the three arrays, `ownIndices`
- * and `payeeIndex` agree on one permutation (see the file header).
+ * Shuffle a spend's output slots, so the outputs, `ownIndices` and `payeeIndex` agree on one
+ * permutation (see the file header).
  *
  * Must run before `buildSpend`, which derives each output's `rho` from its final index; nothing
  * may reorder the outputs afterwards.
@@ -181,11 +178,7 @@ export function finalizeSlots(
     const order = shuffled(slots, pick);
     const payeeIndex = order.findIndex((s) => s.payee);
     return {
-        args: {
-            outputs: order.map((s) => s.note),
-            outputRecipients: order.map((s) => s.recipient),
-            outputRandomness: order.map((s) => s.randomness),
-        },
+        outputs: order.map(({ asset, value, recipient }) => ({ asset, value, recipient })),
         ownIndices: order.flatMap((s, i) => (s.own ? [i] : [])),
         ...(payeeIndex >= 0 ? { payeeIndex } : {}),
     };

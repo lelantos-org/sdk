@@ -6,14 +6,13 @@
 export {
     type BuiltBundle,
     type BundleCommon,
-    buildAuxForReal,
     buildInputs,
-    deriveOutputRho,
     finalize,
     type InputSlot,
     type InputSlots,
-    type OutputRandomness,
     type OutputRecipient,
+    type OutputSpec,
+    sealOutput,
 } from "../bundle/common.js";
 export { type BuiltDeposit, buildDeposit, type DepositArgs } from "../bundle/deposit.js";
 export {

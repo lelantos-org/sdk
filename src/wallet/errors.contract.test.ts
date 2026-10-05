@@ -123,6 +123,8 @@ describe("wallet object: every rejection is a WalletError", () => {
             "INVALID_ARGUMENT",
         ],
         ["quoteFee", (w) => w.quoteFee("teleport" as "transfer"), "INVALID_ARGUMENT"],
+        ["addressAt (range)", (w) => w.addressAt(2 ** 32), "INVALID_ARGUMENT"],
+        ["addressAt (integer)", (w) => w.addressAt(1.5), "INVALID_ARGUMENT"],
     ];
 
     for (const [name, call, code] of cases) {

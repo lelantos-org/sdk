@@ -70,7 +70,7 @@ export async function resolveFee(
     if (!output) return null;
 
     const crossAsset = asset !== args.spendAsset;
-    const value = branded<CircuitAmount>(output.note.value);
+    const value = branded<CircuitAmount>(output.value);
     assertFeeAccepted(ctx, { kind: args.kind, asset: assetId(asset), amount: value });
     return {
         output,
@@ -159,22 +159,15 @@ export function relayerMoney(feeAsset: AssetInfo, fee: ResolvedFee | null): Mone
 export function feeSlots(
     fee: ResolvedFee | null,
     feeSelection: { sum: bigint } | undefined,
-    pk: bigint,
     ownAddr: DecodedAddress,
 ): OutputSlotSpec[] {
     if (!fee) return [];
-    const relayerSlot: OutputSlotSpec = {
-        note: fee.output.note,
-        recipient: fee.output.recipient,
-        randomness: fee.output.randomness,
-        own: false,
-    };
+    const relayerSlot: OutputSlotSpec = { ...fee.output, own: false };
     if (!feeSelection) return [relayerSlot];
     return [
         relayerSlot,
         // The fee asset's change. No ladder: this asset has no `publicOut` to conform to.
         ...changeSlots({
-            pk,
             ownAddr,
             asset: fee.asset,
             remainder: feeSelection.sum - fee.value,

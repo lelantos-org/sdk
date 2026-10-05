@@ -8,7 +8,7 @@ import { type AssetId, assetId } from "../../core/brand.js";
 import { InvalidArgumentError } from "../../errors/config.js";
 import { isWalletError } from "../../errors/guard.js";
 import { deriveClaimLinkNsk } from "../../keys/claim-link.js";
-import { addressFromSpendingKey, buildSpendingKey } from "../../keys/keys.js";
+import { addressFromViewingKey, buildSpendingKey } from "../../keys/keys.js";
 import type { WalletApi } from "../api.js";
 import type { WalletContext } from "../context.js";
 import { filterNotes } from "../notes/read-ops.js";
@@ -127,7 +127,7 @@ export function spendMethods(env: SpendEnv): SpendMethods {
         claimLinkKey: (index) =>
             gated(state, "claimLinkKey", () => {
                 const nsk = deriveClaimLinkNsk(ctx.keys.nsk, ctx.cfg.chainId, index);
-                const address = addressFromSpendingKey(ctx.J, buildSpendingKey(ctx.P, ctx.J, nsk));
+                const address = addressFromViewingKey(ctx.P, ctx.J, buildSpendingKey(ctx.P, nsk));
                 return Object.freeze({ index, nsk, address });
             }),
 

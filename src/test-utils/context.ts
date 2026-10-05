@@ -3,20 +3,15 @@
 // Operations take the context rather than `Wallet`, so these tests need no chain, relayer, prover
 // or note store. For a real `Wallet` over stubs, see `./wallet.ts`.
 
-import { createMutex } from "../core/async.js";
-import { randomJubjubScalar } from "../core/random.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../crypto/poseidon.js";
-import { addressFromSpendingKey, buildSpendingKey } from "../keys/keys.js";
-import { getLogger } from "../log/logger.js";
 import type { EstimateResponse } from "../protocol/responses.js";
 import { type CircuitShape, DEFAULT_SHAPE } from "../protocol/shape.js";
 import type { ProveResult, Prover } from "../prover/types.js";
 import type { AssetInfo } from "../wallet/assets/info.js";
-import type { WalletContext } from "../wallet/context.js";
-import { NoteLeases } from "../wallet/notes/leases.js";
+import { createWalletContext, type WalletContext } from "../wallet/context.js";
 import type { StoredNote } from "../wallet/notes/note-store.js";
-import { NullifierMemo } from "../wallet/notes/sync-ops.js";
+import { freshAccount } from "./outputs.js";
 import { stubTreeStore } from "./wallet.js";
 
 export const TEST_RELAYER_ADDR = "0x0000000000000000000000000000000000000001";
@@ -55,8 +50,7 @@ export const NATIVE_ADAPTER_ADDR = "0x00000000000000000000000000000000000ada9e";
 export async function makeTestCtx(opts: TestCtxOpts = {}) {
     const P = await Poseidon.build();
     const J = await Jubjub.build();
-    const keys = buildSpendingKey(P, J, randomJubjubScalar());
-    const address = addressFromSpendingKey(J, keys);
+    const { keys, address } = freshAccount(P, J);
     const notes = opts.notes ?? [];
 
     const submitted: unknown[] = [];
@@ -98,52 +92,51 @@ export async function makeTestCtx(opts: TestCtxOpts = {}) {
             ladder: [],
         }));
 
-    const ctx = {
-        P,
-        J,
-        keys,
-        address,
-        cfg: {
-            chainId: 31337n,
-            treeDepth: 4,
-            relayerAddress: TEST_RELAYER_ADDR,
-            feeBps: 0n,
-            shape: opts.shape ?? DEFAULT_SHAPE,
-            chain: opts.chain ?? { nativeAdapterAddress: () => NATIVE_ADAPTER_ADDR },
-            prover,
-            submitter: {
-                async submit(payload: unknown) {
-                    submitted.push(payload);
-                    return submit.impl(payload);
-                },
-                ...(opts.estimate ? { estimate: async () => opts.estimate } : {}),
+    const cfg = {
+        chainId: 31337n,
+        treeDepth: 4,
+        relayerAddress: TEST_RELAYER_ADDR,
+        feeBps: 0n,
+        shape: opts.shape ?? DEFAULT_SHAPE,
+        chain: opts.chain ?? { nativeAdapterAddress: () => NATIVE_ADAPTER_ADDR },
+        prover,
+        submitter: {
+            async submit(payload: unknown) {
+                submitted.push(payload);
+                return submit.impl(payload);
             },
-            selector: {
-                select(all: readonly StoredNote[], asset: bigint, target: bigint) {
-                    const picked = all
-                        .filter((n) => !n.spent && BigInt(n.asset) === asset)
-                        .slice(0, 2);
-                    const sum = picked.reduce((a, n) => a + BigInt(n.value), 0n);
-                    if (sum < target) throw new Error("fixture: insufficient");
-                    return { plan: "direct" as const, notes: picked, sum };
-                },
+            ...(opts.estimate ? { estimate: async () => opts.estimate } : {}),
+        },
+        selector: {
+            select(all: readonly StoredNote[], asset: bigint, target: bigint) {
+                const picked = all.filter((n) => !n.spent && BigInt(n.asset) === asset).slice(0, 2);
+                const sum = picked.reduce((a, n) => a + BigInt(n.value), 0n);
+                if (sum < target) throw new Error("fixture: insufficient");
+                return { plan: "direct" as const, notes: picked, sum };
             },
-            treeStore,
-            ...opts.cfg,
         },
-        notes: noteCache,
-        assets: { resolve, resolveVerified: resolve, refresh: resolve, list: async () => [] },
-        locks: { sync: createMutex() },
-        leases: new NoteLeases(),
-        relayerInfo: {
-            tokens: undefined,
-            refundAddress: async () => undefined,
-            swapWrapperAddress: async () => undefined,
-        },
-        nullifiers: new NullifierMemo(P, keys.nk),
-        log: getLogger("lelantos:test"),
-        autoConsolidate: async () => undefined,
-    } as unknown as WalletContext;
+        treeStore,
+        ...opts.cfg,
+    };
+
+    // Derived as the wallet derives it; only the asset registry, which reads the chain, is stubbed.
+    const ctx: WalletContext = {
+        ...createWalletContext({
+            P,
+            J,
+            keys,
+            address,
+            cfg: cfg as unknown as WalletContext["cfg"],
+            notes: noteCache as unknown as WalletContext["notes"],
+            autoConsolidate: async () => undefined,
+        }),
+        assets: {
+            resolve,
+            resolveVerified: resolve,
+            refresh: resolve,
+            list: async () => [],
+        } as unknown as WalletContext["assets"],
+    };
 
     return {
         ctx,

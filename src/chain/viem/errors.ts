@@ -24,6 +24,11 @@ function hasName(err: unknown, name: string): boolean {
     return false;
 }
 
+/** Whether `err` is viem's answer for a hash the node holds no receipt of. */
+export function isReceiptNotFound(err: unknown): boolean {
+    return hasName(err, "TransactionReceiptNotFoundError");
+}
+
 /**
  * The `WalletError` for a failure of adapter method `method`.
  *

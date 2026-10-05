@@ -4,23 +4,19 @@
 // with `publicOut = 0`. `kind` sets `SubmitTransactPayload.kind`, which routes the on-chain call.
 
 import { assertU64 } from "../core/field.js";
-import { buildNoteCommitment, type Field } from "../crypto/index.js";
+import { buildRho, type Field } from "../crypto/index.js";
 import { assertInvariant } from "../errors/base.js";
 import { InvalidArgumentError } from "../errors/config.js";
-import type { Note } from "../notes/note.js";
-import { deriveOutputEsk } from "../notes/outgoing.js";
 import { shapeId } from "../protocol/shape.js";
 import type { SpendKind } from "../protocol/transact.js";
 import {
     type BuiltBundle,
     type BundleCommon,
-    buildAuxForReal,
     buildInputs,
-    deriveOutputRho,
     finalize,
     type InputSlots,
-    type OutputRandomness,
-    type OutputRecipient,
+    type OutputSpec,
+    sealOutput,
 } from "./common.js";
 
 export interface SpendArgs extends BundleCommon {
@@ -29,27 +25,23 @@ export interface SpendArgs extends BundleCommon {
     inputs: InputSlots;
     merkleRoot: Field;
     /**
-     * One note per output slot: the send note of a transfer, the relayer's fee note, change back
-     * to self, and zero-value pads. Per asset, they must sum to the real input value, less
+     * One entry per output slot: the send note of a transfer, the relayer's fee note, change back
+     * to self, and zero-value pads. Per asset, the values must sum to the real input value, less
      * `publicOut` for `asset`.
+     *
+     * Change takes the sender's own address. A pad takes an address drawn for it, never the
+     * sender's: a clue for the sender's key on every unused slot would mark the spend as the
+     * sender's to a detector.
      */
-    outputs: readonly Note[];
-    /**
-     * Recipient address per output slot, used for the FMD clue and ECDH. Change slots take
-     * the sender's own address. A pad takes keys drawn for it, never the sender's: a clue for
-     * the sender's key on every unused slot would mark the spend as the sender's to a detector.
-     */
-    outputRecipients: readonly OutputRecipient[];
-    outputRandomness: readonly OutputRandomness[];
+    outputs: readonly OutputSpec[];
     /** Value leaving the shielded pool. 0 for a transfer. */
     publicOut?: bigint;
     /**
-     * The sender's outgoing cipher key (`deriveOutgoingKey`). When set, every output's ECDH
-     * ephemeral is derived from it and the output itself, replacing `outputRandomness[i].esk`,
-     * so the sender can later recompute it and prove what the output paid. Omitted: the drawn
-     * `esk` is used.
+     * The sender's outgoing key (`deriveOutgoingKey`). Every output's blinder, ECDH ephemeral and
+     * clue blinder derive from it, the output itself and the spend's nullifiers (`sealOutput`), so
+     * the sender can recompute them and prove what an output paid.
      */
-    outgoingKey?: Uint8Array | undefined;
+    outgoingKey: Uint8Array;
 }
 
 export async function buildSpend(a: SpendArgs): Promise<BuiltBundle> {
@@ -61,42 +53,39 @@ export async function buildSpend(a: SpendArgs): Promise<BuiltBundle> {
             argument: "inputs",
         });
     }
-    if (
-        a.outputs.length !== a.outputRecipients.length ||
-        a.outputs.length !== a.outputRandomness.length
-    ) {
-        throw new InvalidArgumentError(
-            `${kind}: outputs, outputRecipients and outputRandomness must be the same length ` +
-                `(got ${a.outputs.length}, ${a.outputRecipients.length}, ${a.outputRandomness.length})`,
-            { argument: "outputs" },
-        );
-    }
 
     assertBalance(a, publicOut);
     assertProvable(a, publicOut);
 
-    const realIns = buildInputs(P, a.inputs, a.treeDepth);
-    const firstNullifier = realIns[0]?.nf;
+    const inputs = buildInputs(P, a.inputs, a.treeDepth);
+    // The circuit's public `nullifier` signals: every input slot in slot order, dummies included.
+    const nullifiers = inputs.map((input) => input.nf);
+    const firstNullifier = nullifiers[0];
     assertInvariant(firstNullifier !== undefined, `${kind}: no input slots`);
 
-    const outputs = deriveOutputRho(P, firstNullifier, a.outputs);
-    const aux = outputs.map((note, i) =>
-        buildAuxForReal(J, P, note, a.outputRecipients[i]!, outputRng(a, note, i)),
+    // `rho = Poseidon(TAG_RHO, nullifier[0], out_index)`, as the transact circuit enforces: no two
+    // outputs of the spend share a rho, and hence a future nullifier.
+    const sealed = a.outputs.map((o, index) =>
+        sealOutput(J, P, {
+            outgoingKey: a.outgoingKey,
+            chainId: a.chainId,
+            rho: buildRho(P, firstNullifier, index),
+            asset: o.asset,
+            value: o.value,
+            recipient: o.recipient,
+            nullifiers,
+        }),
     );
 
-    return finalize(a, kind, realIns, outputs, a.merkleRoot, publicOut, aux);
-}
-
-/**
- * Slot `i`'s aux randomness: as supplied, with `esk` replaced by the derived one when the
- * sender's outgoing key is known. `note` must already carry its final `rho`, since the
- * derivation binds the commitment.
- */
-function outputRng(a: SpendArgs, note: Note, i: number): OutputRandomness {
-    const rng = a.outputRandomness[i]!;
-    if (a.outgoingKey === undefined) return rng;
-    const cm = buildNoteCommitment(a.P, note);
-    return { ...rng, esk: deriveOutputEsk(a.outgoingKey, a.chainId, cm) };
+    return finalize(
+        a,
+        kind,
+        inputs,
+        sealed.map((s) => s.note),
+        a.merkleRoot,
+        publicOut,
+        sealed.map((s) => s.aux),
+    );
 }
 
 /** Quaternary Merkle tree: one slot for the node, three siblings per level. */
@@ -111,9 +100,9 @@ function assertProvable(a: SpendArgs, publicOut: bigint): void {
     assertArity(a);
     assertU64(publicOut, `${a.kind}: publicOut`);
     for (const [i, slot] of a.inputs.entries()) assertInputSlot(a, slot, i);
-    for (const [i, note] of a.outputs.entries()) {
-        assertU64(note.value, `${a.kind}: output slot ${i} value`);
-        assertAssetId(note.asset, `${a.kind}: output slot ${i} asset`);
+    for (const [i, output] of a.outputs.entries()) {
+        assertU64(output.value, `${a.kind}: output slot ${i} value`);
+        assertAssetId(output.asset, `${a.kind}: output slot ${i} asset`);
     }
 }
 
@@ -142,7 +131,7 @@ function assertArity({ kind, shape, inputs, outputs }: SpendArgs): void {
     if (outputs.length !== shape.nOut) {
         throw new InvalidArgumentError(
             `${kind}: ${outputs.length} output slots for a ${name} circuit; ` +
-                "pad unused slots with zero-value notes",
+                "pad unused slots with zero-value outputs",
             { argument: "outputs" },
         );
     }
@@ -182,7 +171,7 @@ function assertBalance(a: SpendArgs, publicOut: bigint): void {
     for (const slot of a.inputs) {
         if (slot) tally(ins, slot.cached.note.asset, slot.cached.note.value);
     }
-    for (const note of a.outputs) tally(outs, note.asset, note.value);
+    for (const output of a.outputs) tally(outs, output.asset, output.value);
     tally(outs, a.asset, publicOut);
 
     for (const asset of new Set([...ins.keys(), ...outs.keys()])) {

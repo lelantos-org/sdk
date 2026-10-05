@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { assetId, circuitAmount, type ShieldedAddress } from "../../core/brand.js";
+import { assetId, circuitAmount, shieldedAddress } from "../../core/brand.js";
 import { InsufficientCoverError } from "../../errors/funds.js";
 import { NetworkError } from "../../errors/network.js";
 import type { Ladder } from "../../protocol/denominations.js";
+import { freshAddress } from "../../test-utils/estimate.js";
 import type { AssetInfo } from "../assets/index.js";
 import type { TransferOptions } from "../types/options.js";
 import type { TransferResult, WalletNote } from "../types/results.js";
@@ -10,6 +11,9 @@ import { type RedenominateHost, redenominate } from "./redenominate.js";
 
 // A round tries ladder targets largest first and steps down only when a target does not fit the
 // notes. Every other failure is real and must surface.
+
+/** The host wallet's own address. */
+const SELF = shieldedAddress(await freshAddress());
 
 const ASSET = assetId(1n);
 const LADDER = [100n, 200n, 500n] as unknown as Ladder;
@@ -21,7 +25,7 @@ const note = (id: string, value: bigint): WalletNote =>
 function host(transfer: (args: TransferOptions) => Promise<TransferResult>) {
     let notes = [note("a", 150n), note("b", 170n)];
     const h = {
-        address: "lelantos1self" as ShieldedAddress,
+        address: SELF,
         maxInputs: 4,
         notes: () => notes,
         transfer: vi.fn(async (args: TransferOptions) => {

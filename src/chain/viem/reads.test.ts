@@ -1,11 +1,11 @@
 import { createPublicClient, custom, encodeAbiParameters, pad, toHex } from "viem";
-import { describe, expect, it } from "vitest";
-import { assetId, branded, type EvmAddress } from "../../core/brand.js";
+import { describe, expect, it, vi } from "vitest";
+import { assetId, branded, type EvmAddress, type Hex32 } from "../../core/brand.js";
 import { WireFormatError } from "../../errors/network.js";
 import { RAY } from "../../protocol/units.js";
 import type { ViemCtx } from "./ctx.js";
 import { chainError } from "./errors.js";
-import { fetchAsset, fetchAssetYield, fetchDepositEscrowed } from "./reads.js";
+import { fetchAsset, fetchAssetYield, fetchDepositEscrowed, fetchNotePayload } from "./reads.js";
 
 const MASP = branded<EvmAddress>("0x0000000000000000000000000000000000000a11");
 const VENUE = branded<EvmAddress>("0x000000000000000000000000000000000000e4ee");
@@ -265,6 +265,113 @@ describe("fetchDepositEscrowed", () => {
         // The node is asked for this topic and this id, any payer and recipient: a topic from
         // another signature matches no deposit, and the escrow reads as absent.
         expect(filters.map((f) => f.topics)).toEqual([[TOPIC, pad(toHex(42n)), null, null]]);
+    });
+});
+
+describe("fetchNotePayload", () => {
+    // `keccak256` of the `NotePayload` signature.
+    const TOPIC = "0x9c97c070d97621a8523b62e1c3d43be0cc098cde21767e1bd2da497cda692772";
+    const TX = `0x${"7a".repeat(32)}` as Hex32;
+    const CM = `0x${"0c".repeat(32)}` as Hex32;
+    const OTHER_CM = `0x${"0d".repeat(32)}` as Hex32;
+    const BLOCK_HASH = `0x${"bb".repeat(32)}`;
+
+    /** `NotePayload` as a node returns it: the indexed commitment, then the body in order. */
+    const payloadLog = (cm: string, seed: bigint, address: string = MASP) => ({
+        address,
+        topics: [TOPIC, cm],
+        data: encodeMembers([
+            ["uint256", seed + 1n], // clueR
+            ["uint256", seed + 2n],
+            ["uint256", seed + 3n], // ephPub
+            ["uint256", seed + 4n],
+            ["bytes", "0x0005dead"], // ciphertext
+        ]),
+        blockNumber: "0x4d",
+        blockHash: BLOCK_HASH,
+        transactionHash: TX,
+        transactionIndex: "0x0",
+        logIndex: "0x0",
+        removed: false,
+    });
+
+    const receiptOf = (logs: unknown[]) =>
+        rpcPool({
+            eth_getTransactionReceipt: () => ({
+                transactionHash: TX,
+                transactionIndex: "0x0",
+                blockHash: BLOCK_HASH,
+                blockNumber: "0x4d",
+                from: VENUE,
+                to: MASP,
+                cumulativeGasUsed: "0x1",
+                gasUsed: "0x1",
+                effectiveGasPrice: "0x1",
+                contractAddress: null,
+                logs,
+                logsBloom: `0x${"00".repeat(256)}`,
+                status: "0x1",
+                type: "0x2",
+            }),
+        });
+
+    it("decodes the pool's log for the commitment: clue point, ephemeral key, ciphertext", async () => {
+        const ctx = receiptOf([
+            // Same shape and commitment from another contract: not the pool's word.
+            payloadLog(CM, 100n, VENUE),
+            payloadLog(OTHER_CM, 200n),
+            payloadLog(CM, 300n),
+        ]);
+
+        expect(
+            await fetchNotePayload(ctx, TX, CM.toUpperCase().replace("0X", "0x") as Hex32),
+        ).toEqual({
+            cm: CM,
+            clueR: [301n, 302n],
+            ephPub: [303n, 304n],
+            ciphertext: new Uint8Array([0x00, 0x05, 0xde, 0xad]),
+        });
+    });
+
+    it("is null when the pool published no such commitment in the transaction", async () => {
+        expect(await fetchNotePayload(receiptOf([payloadLog(OTHER_CM, 200n)]), TX, CM)).toBeNull();
+        expect(await fetchNotePayload(receiptOf([payloadLog(CM, 100n, VENUE)]), TX, CM)).toBeNull();
+        expect(await fetchNotePayload(receiptOf([]), TX, CM)).toBeNull();
+    });
+
+    // A payment proof names its transaction, and a proof naming one that does not exist is a bad
+    // proof, not a failed read.
+    it("is null at once when the node holds no receipt for the hash", async () => {
+        const asked: string[] = [];
+        const ctx = rpcPool({
+            eth_getTransactionReceipt: () => {
+                asked.push("eth_getTransactionReceipt");
+                return null;
+            },
+        });
+        const wait = vi
+            .spyOn(ctx.publicClient, "waitForTransactionReceipt")
+            .mockRejectedValue(new Error("waited for the receipt"));
+
+        expect(await fetchNotePayload(ctx, TX, CM)).toBeNull();
+        expect(asked).toEqual(["eth_getTransactionReceipt"]);
+        expect(wait).not.toHaveBeenCalled();
+    });
+
+    it("rejects when the node cannot be asked, rather than reading it as no receipt", async () => {
+        const ctx = rpcPool({
+            eth_getTransactionReceipt: () => {
+                throw new TypeError("fetch failed");
+            },
+        });
+        const err = await fetchNotePayload(ctx, TX, CM).catch((e: unknown) => e);
+        expect(String((err as Error).message)).toMatch(/fetch failed/);
+        // What the reader's `chainCall` makes of it.
+        expect(chainError("fetchNotePayload", err)).toMatchObject({
+            code: "RPC_FAILED",
+            method: "fetchNotePayload",
+            retryable: true,
+        });
     });
 });
 

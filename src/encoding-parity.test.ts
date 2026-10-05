@@ -13,6 +13,12 @@
 //   SNARK fails to verify.
 // - `fiatShamirZ`: generated with ethers@6 (`AbiCoder.defaultAbiCoder().encode`, `keccak256`). A
 //   shift makes SNARK verification and relayer batching diverge.
+// - `tests/vectors/diversified.json` (`address_bech32`, `dvk_hex`, `osk_hex`, `rseed_hex`,
+//   `rcm_dec`, `esk_dec`, `fmd_r_dec`, `plaintext_hex`, `ciphertext_hex`, the deposit `rho_dec`):
+//   re-derived here from the layouts, with `bech32`, `@noble/hashes` and `@noble/ciphers` called
+//   directly on the inputs the file gives. Every string of the file's `domains` block is hashed
+//   into one of them, so the block cannot name a string the implementation does not use. A shift
+//   means addresses stop decoding or the backend stops opening notes.
 //
 // Update these constants only with a contract/relayer upgrade that bumps the corresponding domain
 // version.
@@ -21,14 +27,21 @@
 // relayer's fee note, with its `feeAssetId`). `abi-hash.test.ts` derives the component list from
 // the Foundry ABI.
 
+import { readFileSync } from "node:fs";
+import { chacha20poly1305 } from "@noble/ciphers/chacha";
+import { blake2b } from "@noble/hashes/blake2";
 import { keccak_256 } from "@noble/hashes/sha3";
-import { describe, expect, it } from "vitest";
+import { concatBytes } from "@noble/hashes/utils";
+import { bech32m } from "bech32";
+import { beforeAll, describe, expect, it } from "vitest";
 import { fiatShamirZ } from "./circuit/index.js";
 import { BN254_FR } from "./core/field.js";
 import { hexToBytes } from "./core/hex.js";
+import { Jubjub } from "./crypto/jubjub-wasm/index.js";
 import { lelantosTypedDataHash } from "./keys/metamask.js";
 import { auxDigest, computePiHash } from "./protocol/abi-hash.js";
 import type { AuxOutput, DepositRequest } from "./protocol/deposit-request.js";
+import type { DiversifiedVectors } from "./test-utils/diversified-vectors.js";
 
 const PINNED = {
     lelantosTypedDataHash: "0xaf9b4003f47701e282c9f5934e4ea6e5fe0f794e18c0e12c60bb6ba68ee3a93f",
@@ -135,6 +148,157 @@ describe("encoding parity (independent implementation → viem)", () => {
         expect(`0x${z.toString(16).padStart(64, "0")}`).toBe(PINNED.fiatShamirZ);
     });
 });
+
+describe("encoding parity (diversified vectors → layouts spelled out from the spec)", () => {
+    const file: DiversifiedVectors = JSON.parse(
+        readFileSync(new URL("../tests/vectors/diversified.json", import.meta.url), "utf8"),
+    );
+    let J: Jubjub;
+    beforeAll(async () => {
+        J = await Jubjub.build();
+    });
+
+    it("address_bech32 is bech32m over d || pk_d || pk || ck_d", () => {
+        expect(file.address_hrp).toBe("lelantos");
+        for (const a of file.addresses) {
+            const payload = addressPayload(a);
+            expect(payload).toHaveLength(112);
+            expect(bech32m.encode(file.address_hrp, bech32m.toWords(payload), 256)).toBe(
+                a.address_bech32,
+            );
+        }
+    });
+
+    it("dvk_hex is blake2b-128 over the dvk domain and ivk as 32 little-endian bytes", () => {
+        for (const a of file.addresses) {
+            const preimage = concatBytes(utf8(file.domains.dvk), leBytes(BigInt(a.ivk_dec), 32));
+            expect(bytesToHexWord(blake2b(preimage, { dkLen: 16 }))).toBe(a.dvk_hex);
+        }
+    });
+
+    it("osk_hex is blake2b-256 over the note, the whole address payload and the nullifiers", () => {
+        for (const s of file.seed) {
+            // The entry repeats the recipient fields of the address it pays.
+            const payload = addressPayload(s);
+            expect(payload).toEqual(addressPayload(file.addresses[s.address_index]!));
+            const preimage = concatBytes(
+                utf8(file.domains.osk),
+                hexToBytes(s.ock_hex),
+                leBytes(BigInt(s.chain_id_dec), 32),
+                leBytes(BigInt(s.rho_dec), 32),
+                leBytes(BigInt(s.asset_dec), 8),
+                leBytes(BigInt(s.value_dec), 8),
+                payload,
+                Uint8Array.of(s.nullifiers_dec.length),
+                ...s.nullifiers_dec.map((nf) => leBytes(BigInt(nf), 32)),
+            );
+            expect(bytesToHexWord(preimage)).toBe(s.osk_preimage_hex);
+            expect(bytesToHexWord(blake2b(preimage, { dkLen: 32 }))).toBe(s.osk_hex);
+        }
+    });
+
+    it("rseed_hex is blake2b-256 over the rseed domain and osk", () => {
+        for (const s of file.seed) {
+            const preimage = concatBytes(utf8(file.domains.rseed), hexToBytes(s.osk_hex));
+            expect(bytesToHexWord(blake2b(preimage, { dkLen: 32 }))).toBe(s.rseed_hex);
+        }
+    });
+
+    it("rcm, esk and fmd_r are blake2b-512 over their domain, rseed and rho, reduced", () => {
+        const r = BigInt(file.constants.bn254_fr_dec);
+        const q = BigInt(file.constants.babyjub_subgroup_order_dec);
+        for (const s of file.seed) {
+            const tail = concatBytes(hexToBytes(s.rseed_hex), leBytes(BigInt(s.rho_dec), 32));
+            const wide = (domain: string) =>
+                leInt(blake2b(concatBytes(utf8(domain), tail), { dkLen: 64 }));
+            // `rcm` is a field element; the two scalars are in [1, q - 1].
+            expect((wide(file.domains.rcm) % r).toString()).toBe(s.rcm_dec);
+            expect(((wide(file.domains.esk) % (q - 1n)) + 1n).toString()).toBe(s.esk_dec);
+            expect(((wide(file.domains.fmd_r) % (q - 1n)) + 1n).toString()).toBe(s.fmd_r_dec);
+        }
+    });
+
+    it("a deposit's rho is blake2b-512 over the rho domain, ock and the nonce, mod r", () => {
+        const r = BigInt(file.constants.bn254_fr_dec);
+        for (const v of file.deposit_rho) {
+            const preimage = concatBytes(
+                utf8(file.domains.deposit_rho),
+                hexToBytes(v.ock_hex),
+                hexToBytes(v.nonce_hex),
+            );
+            expect((leInt(blake2b(preimage, { dkLen: 64 })) % r).toString()).toBe(v.rho_dec);
+        }
+    });
+
+    it("plaintext_hex is asset || value || rho || rseed || d, little-endian", () => {
+        for (const s of file.seed) {
+            const plaintext = concatBytes(
+                leBytes(BigInt(s.asset_dec), 8),
+                leBytes(BigInt(s.value_dec), 8),
+                leBytes(BigInt(s.rho_dec), 32),
+                hexToBytes(s.rseed_hex),
+                hexToBytes(s.d_bytes_hex),
+            );
+            expect(plaintext).toHaveLength(96);
+            expect(bytesToHexWord(plaintext)).toBe(s.plaintext_hex);
+        }
+    });
+
+    it("ciphertext_hex is the clue-bits prefix, then ChaCha20-Poly1305 under the blake2b key", () => {
+        for (const s of file.seed) {
+            const epk = hexToBytes(s.epk_packed_hex);
+            const pkD = J.unpackPoint(hexToBytes(file.addresses[s.address_index]!.pk_d_packed_hex));
+            const shared = J.packPoint(J.mulPointEscalar(pkD!, BigInt(s.esk_dec)));
+            const key = blake2b(concatBytes(utf8(file.domains.kdf), epk, shared), { dkLen: 32 });
+            const nonce = blake2b(concatBytes(utf8(file.domains.nonce), epk), { dkLen: 12 });
+            const body = chacha20poly1305(key, nonce).encrypt(hexToBytes(s.plaintext_hex));
+
+            // `clue_bits_hex` holds bit i at bit (i & 7) of byte (i >> 3); the prefix is that
+            // integer as two big-endian bytes.
+            const bits = hexToBytes(s.clue_bits_hex);
+            const prefix = Uint8Array.of(bits[1] ?? 0, bits[0] ?? 0);
+
+            const wire = concatBytes(prefix, body);
+            expect(wire).toHaveLength(114);
+            expect(bytesToHexWord(wire)).toBe(s.ciphertext_hex);
+        }
+    });
+
+    it("the domains block lists only the strings the tests above hash", () => {
+        expect(Object.keys(file.domains).sort()).toEqual(
+            ["deposit_rho", "dvk", "esk", "fmd_r", "kdf", "nonce", "osk", "rcm", "rseed"].sort(),
+        );
+    });
+});
+
+/** `n` as `len` little-endian bytes. */
+function leBytes(n: bigint, len: number): Uint8Array {
+    return Uint8Array.from({ length: len }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
+}
+
+/** The integer `bytes` encode little-endian. */
+function leInt(bytes: Uint8Array): bigint {
+    return bytes.reduceRight((acc, b) => (acc << 8n) | BigInt(b), 0n);
+}
+
+function utf8(text: string): Uint8Array {
+    return new TextEncoder().encode(text);
+}
+
+/** The address payload `d || pk_d || pk || ck_d`, from an entry's own recipient fields. */
+function addressPayload(entry: {
+    d_bytes_hex: string;
+    pk_d_packed_hex: string;
+    pk_dec: string;
+    ck_d_packed_hex: string;
+}): Uint8Array {
+    return concatBytes(
+        hexToBytes(entry.d_bytes_hex),
+        hexToBytes(entry.pk_d_packed_hex),
+        leBytes(BigInt(entry.pk_dec), 32),
+        hexToBytes(entry.ck_d_packed_hex),
+    );
+}
 
 /** 32-byte big-endian word. */
 function word(n: bigint): string {

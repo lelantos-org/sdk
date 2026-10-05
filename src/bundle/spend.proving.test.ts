@@ -19,17 +19,19 @@ import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { MerkleTree } from "../crypto/merkle.js";
 import { Poseidon } from "../crypto/poseidon.js";
 import { TAG_PK } from "../crypto/tags.js";
-import { defaultDiversifier } from "../keys/diversifier.js";
+import { deriveDiversifiedPk } from "../keys/diversified.js";
+import { defaultDiversifier, diversifierForIndex } from "../keys/diversifier.js";
 import { buildSpendingKey, type SpendingKey } from "../keys/keys.js";
 import type { Note } from "../notes/note.js";
-import { freshNoteRandomness, freshOutputAuxRandomness } from "../notes/randomness.js";
+import { deriveOutgoingKey } from "../notes/outgoing.js";
 import { auxDigest } from "../protocol/abi-hash.js";
 import { auxOutputToWire } from "../protocol/aux-wire.js";
 import { TRANSACT_4X6 } from "../protocol/shape.js";
 import type { SpendKind, SubmitTransactPayload } from "../protocol/transact.js";
 import { prove, verify } from "../prover/snarkjs.js";
 import type { ProveResult, Prover, ProverPaths } from "../prover/types.js";
-import type { InputSlot } from "./common.js";
+import { padAddress, recipientAt } from "../test-utils/outputs.js";
+import type { InputSlot, OutputSpec } from "./common.js";
 import { buildSpend } from "./spend.js";
 
 /** Depth of `4x6.circom`'s tree: `Transact(11, 4, 6)`. */
@@ -100,7 +102,7 @@ function compressedByPool(payload: SubmitTransactPayload): string[] {
 describe.skipIf(!paths || !vkeyPath)("buildSpend against the 4x6 circuit", () => {
     /**
      * `opening` replaces what the spent note is committed under (`pk`) and what the witness
-     * opens it with (`d`); the default is the spender's own `pk` and default diversifier.
+     * opens it with (`d`); the default is the spender's default address.
      */
     async function spend(
         kind: SpendKind,
@@ -109,12 +111,12 @@ describe.skipIf(!paths || !vkeyPath)("buildSpend against the 4x6 circuit", () =>
     ) {
         const P = await Poseidon.build();
         const J = await Jubjub.build();
-        const me = buildSpendingKey(P, J, randomJubjubScalar());
-        const payee = buildSpendingKey(P, J, randomJubjubScalar());
-        const { pk, d } = opening?.(P, me) ?? { pk: me.pk, d: defaultDiversifier(me.ivk) };
+        const me = buildSpendingKey(P, randomJubjubScalar());
+        const payee = buildSpendingKey(P, randomJubjubScalar());
+        const { pk, d } = opening?.(P, me) ?? ownOpening(P, me, 0);
 
         // One note in a tree that also holds unrelated leaves.
-        const spent: Note = { asset: ASSET, value: 100n, pk, ...freshNoteRandomness() };
+        const spent: Note = { asset: ASSET, value: 100n, pk, rho: randomFr(), rcm: randomFr() };
         const tree = new MerkleTree(P, DEPTH);
         tree.bulkInsert([randomFr(), randomFr(), buildNoteCommitment(P, spent), randomFr()]);
         const leafIndex = 2;
@@ -123,11 +125,15 @@ describe.skipIf(!paths || !vkeyPath)("buildSpend against the 4x6 circuit", () =>
             ...tree.proof(leafIndex),
         };
 
-        // The payee's note first, then pads to self: zero-value, in the spend asset.
-        const pad = (): Note => ({ asset: ASSET, value: 0n, pk: me.pk, ...freshNoteRandomness() });
+        // The payee's note first, then pads to no one: zero-value, in the spend asset.
+        const pad = (): OutputSpec => ({ asset: ASSET, value: 0n, recipient: padAddress(J) });
         const sent = 100n - publicOut;
-        const outputs: Note[] = [
-            { asset: ASSET, value: sent, pk: payee.pk, ...freshNoteRandomness() },
+        const outputs: OutputSpec[] = [
+            {
+                asset: ASSET,
+                value: sent,
+                recipient: recipientAt(P, J, payee, 2),
+            },
             ...Array.from({ length: TRANSACT_4X6.nOut - 1 }, pad),
         ];
 
@@ -147,11 +153,16 @@ describe.skipIf(!paths || !vkeyPath)("buildSpend against the 4x6 circuit", () =>
             inputs: [input, null, null, null],
             merkleRoot: tree.root(),
             outputs,
-            outputRecipients: [payee, ...outputs.slice(1).map(() => me)],
-            outputRandomness: outputs.map(() => freshOutputAuxRandomness()),
+            outgoingKey: deriveOutgoingKey(me.nsk),
             publicOut,
         });
         return { built, proved: prover.last as ProveResult };
+    }
+
+    /** The `pk` and `d` of the spender's address at `index`. */
+    function ownOpening(P: Poseidon, me: SpendingKey, index: number) {
+        const d = diversifierForIndex(me.ivk, index);
+        return { pk: deriveDiversifiedPk(P, me.ivk, d), d };
     }
 
     async function expectVerifies({ built, proved }: Awaited<ReturnType<typeof spend>>) {
@@ -177,18 +188,31 @@ describe.skipIf(!paths || !vkeyPath)("buildSpend against the 4x6 circuit", () =>
         await expectVerifies(made);
     }, 120_000);
 
+    it("proves a spend of a note held at a non-default address", async () => {
+        const made = await spend("transfer", 0n, (P, me) => ownOpening(P, me, 7));
+
+        await expectVerifies(made);
+    }, 120_000);
+
     // SpentNote derives the slot's pk from `nsk` and `in_d` and opens the commitment under it, so
     // a note committed under any other key is not in the tree: witness generation fails before
     // any proving.
     it("rejects an input opened under a diversifier its pk was not derived with", async () => {
-        const d0 = (me: SpendingKey) => defaultDiversifier(me.ivk);
+        const pk0 = (P: Poseidon, me: SpendingKey) => ownOpening(P, me, 0).pk;
 
         await expect(
-            spend("transfer", 0n, (_P, me) => ({ pk: me.pk, d: d0(me) + 1n })),
+            spend("transfer", 0n, (P, me) => ({
+                pk: pk0(P, me),
+                d: defaultDiversifier(me.ivk) + 1n,
+            })),
         ).rejects.toThrow(/Assert Failed/);
-        await expect(spend("transfer", 0n, (_P, me) => ({ pk: me.pk, d: 0n }))).rejects.toThrow(
+        await expect(spend("transfer", 0n, (P, me) => ({ pk: pk0(P, me), d: 0n }))).rejects.toThrow(
             /Assert Failed/,
         );
+        // The key of one address does not open under the diversifier of another.
+        await expect(
+            spend("transfer", 0n, (P, me) => ({ pk: pk0(P, me), d: ownOpening(P, me, 1).d })),
+        ).rejects.toThrow(/Assert Failed/);
     }, 120_000);
 
     it("rejects a note committed under the arity-2 pk, whatever diversifier opens it", async () => {

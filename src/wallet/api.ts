@@ -118,7 +118,7 @@ export interface ClaimLinkKey {
     index: number;
     /** The link account's spending key: the secret the link carries. */
     nsk: bigint;
-    /** The address to fund. */
+    /** The address to fund: the link account's address at index 0. */
     address: ShieldedAddress;
 }
 
@@ -129,7 +129,20 @@ export interface ClaimLinkKey {
  * Amounts are branded circuit units; format with `formatAmount(x, await wallet.asset(ref))`.
  */
 export interface ReadOnlyWalletApi {
+    /** The account's address at index 0, `lelantos1…`. Equal to `addressAt(0)`. */
     readonly address: ShieldedAddress;
+    /**
+     * The account's address at `index`. A function of the viewing key and the index, so it is
+     * the same on every device and on a watch wallet of the account.
+     *
+     * Every address receives into this wallet with nothing to register: `sync()` finds a note
+     * sent to any of them. Addresses of one account are unlinkable to anyone holding neither its
+     * viewing key nor its detection key, so giving each payer its own index keeps payers from
+     * recognising a shared payee.
+     *
+     * Rejects `INVALID_ARGUMENT` unless `index` is an integer in `[0, 2^32)`.
+     */
+    addressAt(index: number): Promise<ShieldedAddress>;
     readonly keys: WalletKeys;
     /** `false` for an incoming-tier key: every note reads unspent; balances are gross received. */
     readonly spentKnown: boolean;
@@ -152,8 +165,9 @@ export interface ReadOnlyWalletApi {
      * note, for its asset and value, and this, for its existence. `false` for a transaction that
      * does not carry it, including a deposit's escrow, which is not in the tree until flushed.
      *
-     * Waits for the transaction to be mined. Rejects `UNSUPPORTED_OPERATION` when the wallet has
-     * no chain layer that reads receipts.
+     * With the default reader, a hash the node holds no receipt for is waited on for a bounded
+     * time (15 s) and then rejects `TX_MINING`, which is retryable; it never resolves `false`.
+     * Rejects `UNSUPPORTED_OPERATION` when the wallet has no chain layer that reads receipts.
      */
     confirmCommitment(commitment: Hex32 | string, txHash: Hex32 | string): Promise<boolean>;
 
@@ -229,15 +243,20 @@ export interface WalletApi extends ReadOnlyWalletApi {
 
     transfer(args: TransferOptions): Promise<TransferResult>;
     /**
-     * A proof, for a third party, of one payment this wallet made: `txHash` and the payee's
-     * `commitment` from the spend's result (`TransferResult.recipientCommitment`). Whoever holds
-     * it and the payee's address learns that output's asset and value (`verifyPaymentProof`) and
-     * nothing else; give it only to them.
+     * A proof, for a third party, of one payment this wallet made. Whoever holds it and the
+     * payee's address learns that output's asset and value (`verifyPaymentProof`) and nothing
+     * else; give it only to them.
      *
-     * Recomputed from the seed and the chain, so it can be produced at any time, on any device,
-     * for any spend this account made with ephemerals derived from the seed. Rejects
-     * `INVALID_ARGUMENT` for an output another wallet made, and `UNSUPPORTED_OPERATION` without
-     * a chain layer that reads logs.
+     * The target names the output and what it paid, each field from the spend's
+     * `TransferResult`: `txHash`, `commitment` (`recipientCommitment`), `recipient`, `asset`
+     * (`amount.asset`) and `amount` (`amount.amount`, circuit units). The proof is recomputed
+     * from those, the account's key and the chain, so it can be made at any time, on any device.
+     *
+     * Rejects `INVALID_ARGUMENT` when the transaction did not publish `commitment`, which
+     * includes a transaction the node holds no receipt for, or when the account's key with
+     * `recipient`, `asset` and `amount` does not reproduce the output (another wallet made it, or
+     * it paid a different recipient, asset or amount). Rejects `UNSUPPORTED_OPERATION` unless the
+     * chain layer has both `fetchNotePayload` and `txReceiptLogs`.
      */
     paymentProof(target: PaymentProofTarget): Promise<PaymentProof>;
     /**

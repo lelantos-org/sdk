@@ -33,13 +33,14 @@ export function withinReservation(pendingSpendAt: string | undefined, now: numbe
 /**
  * The notes-file schema version this SDK reads and writes. It names the note layout as well as
  * the record's fields: a stored note is spendable only under the commitment
- * `cm = Poseidon(TAG_CM, asset·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm))`, so a file on
- * any other version is refused by `NoteCache` instead of being read as this one.
+ * `cm = Poseidon(TAG_CM, asset·2^64 + value, Poseidon(TAG_INNER, pk, rho, rcm))` with
+ * `pk = Poseidon(TAG_PK, ivk, d)` for the record's own `d`, so a file on any other version is
+ * refused by `NoteCache` instead of being read as this one.
  *
  * `StoredNote.id` is 16 random bytes. The id keys the nullifier memo, `markSpent` and selection's
  * `only` filter, so a collision would retire an unrelated note.
  */
-export const NOTES_FILE_VERSION = 2;
+export const NOTES_FILE_VERSION = 3;
 
 export interface NoteStore {
     load(): Promise<NotesFile>;
@@ -94,6 +95,7 @@ export function addHits(
             value: h.value.toString(),
             rho: h.rho.toString(),
             rcm: h.rcm.toString(),
+            d: h.d.toString(),
             cm: cmHex,
             leafIndex: h.leafIndex,
             spent: false,

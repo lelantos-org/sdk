@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, evmAddress, hex32 } from "../core/brand.js";
 import {
+    SHIELDED_PAY_TO,
     shieldedRequirements,
     spendableMaxSpy,
     transferSpy,
@@ -88,7 +89,7 @@ describe("x402", () => {
         expect(res.status).toBe(200);
         expect(fetchImpl).toHaveBeenCalledTimes(2);
         expect(wallet.transfer).toHaveBeenCalledWith(
-            expect.objectContaining({ recipient: "lelantos1qqqq", amount: 1500n, asset: 1n }),
+            expect.objectContaining({ recipient: SHIELDED_PAY_TO, amount: 1500n, asset: 1n }),
         );
 
         const payload = decodePaymentHeader(fetchImpl.mock.calls[1]![0]);

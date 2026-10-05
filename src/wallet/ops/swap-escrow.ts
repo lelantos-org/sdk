@@ -5,7 +5,7 @@ import { type BuiltDeposit, buildDeposit } from "../../bundle/deposit.js";
 import { supportsSigning } from "../../chain/port.js";
 import { type AssetId, type EvmAddress, evmAddress } from "../../core/brand.js";
 import { InvalidArgumentError } from "../../errors/config.js";
-import { decodeAddress } from "../../keys/address.js";
+import type { DecodedAddress } from "../../keys/address.js";
 import { abiAddress } from "../../protocol/deposit-request.js";
 import { assertPublicInFits } from "../../protocol/fees.js";
 import type { WalletContext } from "../context.js";
@@ -59,8 +59,8 @@ interface EscrowSide {
     /** The note's value (`publicIn`), sized by `swapLegs`. */
     value: bigint;
     fee: DepositFee;
-    /** Bech32m address the note credits. */
-    recipientAddress: string;
+    /** The shielded address the note credits. */
+    recipient: DecodedAddress;
 }
 
 /**
@@ -73,7 +73,7 @@ interface EscrowSide {
  * this relayer" and its note never appears, so each carries a flush fee in its own asset.
  */
 export function buildSwapEscrows(
-    ctx: Pick<WalletContext, "P" | "J" | "cfg">,
+    ctx: Pick<WalletContext, "P" | "J" | "cfg" | "outgoingKey">,
     wrapperAddress: EvmAddress,
     a: { output: EscrowSide; refund: EscrowSide },
 ): { output: BuiltDeposit; refund: BuiltDeposit } {
@@ -87,7 +87,8 @@ export function buildSwapEscrows(
             payerAddress: wrapperAddress,
             recipientAddress: wrapperAddress,
             publicIn: side.value,
-            recipient: decodeAddress(ctx.J, side.recipientAddress),
+            recipient: side.recipient,
+            outgoingKey: ctx.outgoingKey,
             ...depositSlots(side.fee),
         });
     };

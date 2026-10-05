@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
-import { randomJubjubScalar } from "../../core/random.js";
 import { Jubjub } from "../../crypto/jubjub-wasm/index.js";
 import { Poseidon } from "../../crypto/poseidon.js";
-import { addressFromSpendingKey, buildSpendingKey } from "../../keys/keys.js";
+import { freshAccount } from "../../test-utils/outputs.js";
 import type { AssetInfo } from "../assets/index.js";
 import type { WalletContext } from "../context.js";
 import type { SwapQuote } from "../types/quotes.js";
@@ -22,7 +21,7 @@ const USDC = { id: assetId(2n), symbol: "USDC", scale: 1n, ladder: [] } as unkno
 async function spyCtx() {
     const J = await Jubjub.build();
     const P = await Poseidon.build();
-    const address = addressFromSpendingKey(J, buildSpendingKey(P, J, randomJubjubScalar()));
+    const { address } = freshAccount(P, J);
     const touched = {
         payerAddress: vi.fn(async () => evmAddress(`0x${"aa".repeat(20)}`)),
         fetchAsset: vi.fn(async () => ({})),

@@ -21,9 +21,9 @@ export interface ResourceInfo {
  * select the mechanism; `@x402/core` validates `network` only for CAIP-2 shape
  * (`min(3)` and contains `":"`), so `shielded:<chainId>` is valid.
  *
- * `amount` and `asset` are denominated by the network: circuit units and a
- * MASP asset id for `shielded:*`; ERC-20 base units and a token address for
- * `eip155:*`.
+ * `amount`, `asset` and `payTo` are denominated by the network: circuit units,
+ * a MASP asset id and a `lelantos1…` shielded address for `shielded:*`; ERC-20
+ * base units, a token address and an EVM address for `eip155:*`.
  */
 export interface PaymentRequirements {
     scheme: string;

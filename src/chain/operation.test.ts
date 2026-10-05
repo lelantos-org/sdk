@@ -4,6 +4,7 @@ import { keccak256 } from "../crypto/keccak.js";
 import {
     commitmentPublished,
     locateOperation,
+    locateOutput,
     NOTE_PAYLOAD_TOPIC,
     NULLIFIER_CONSUMED_TOPIC,
     ROOT_ADVANCED_TOPIC,
@@ -29,8 +30,9 @@ const log = (t0: Hex32, t1?: Hex32, address: EvmAddress = POOL): TxLog => ({
     address,
     topics: t1 === undefined ? [t0] : [t0, t1],
 });
-const nullifiers = (seed: number) =>
-    Array.from({ length: 4 }, (_, i) => log(NULLIFIER_CONSUMED_TOPIC, word(seed + i)));
+/** The nullifiers of one spend, in input-slot order. */
+const spent = (seed: number) => Array.from({ length: 4 }, (_, i) => word(seed + i));
+const nullifiers = (seed: number) => spent(seed).map((nf) => log(NULLIFIER_CONSUMED_TOPIC, nf));
 const root = () => log(ROOT_ADVANCED_TOPIC, word(0));
 const payloads = (cms: Hex32[]) => cms.map((cm) => log(NOTE_PAYLOAD_TOPIC, cm));
 const outputs = (seed: number) => Array.from({ length: 6 }, (_, i) => word(seed + i));
@@ -138,6 +140,107 @@ describe("locateOperation", () => {
     it("is undefined when no root precedes the payloads", () => {
         const mine = outputs(0xa0);
         expect(locateOperation([...payloads(mine), root()], POOL, mine)).toBeUndefined();
+    });
+});
+
+// What fixes an output note's randomness: the nullifiers of its own spend, in the order the pool
+// consumed them, and its slot there.
+describe("locateOutput", () => {
+    it("finds every slot of a lone transfer", () => {
+        const mine = outputs(0xa0);
+        const logs = transfer(mine);
+        for (const [index, cm] of mine.entries()) {
+            expect(locateOutput(logs, POOL, cm)).toEqual({ nullifiers: spent(0x100), index });
+        }
+    });
+
+    it("scopes the nullifier and the slot to the output's own operation in a bundle", () => {
+        const t = outputs(0xa0);
+        const w = outputs(0xb0);
+        const s = outputs(0xc0);
+        // Several operations' logs share the receipt; `transfer` leads with nullifier 0x100,
+        // `withdraw` and `swap` with 0x200.
+        const logs = [...flush(2), ...transfer(t), ...flush(1), ...withdraw(w), ...swap(s)];
+
+        expect(locateOutput(logs, POOL, t[0]!)).toEqual({ nullifiers: spent(0x100), index: 0 });
+        expect(locateOutput(logs, POOL, t[5]!)).toEqual({ nullifiers: spent(0x100), index: 5 });
+        // Not 6..11: the transfer's payloads earlier in the receipt are not counted.
+        expect(locateOutput(logs, POOL, w[0]!)).toEqual({ nullifiers: spent(0x200), index: 0 });
+        expect(locateOutput(logs, POOL, w[3]!)).toEqual({ nullifiers: spent(0x200), index: 3 });
+        expect(locateOutput(logs, POOL, s[4]!)).toEqual({ nullifiers: spent(0x200), index: 4 });
+    });
+
+    it("tells apart two spends with the same shape", () => {
+        const a = outputs(0xa0);
+        const b = outputs(0xb0);
+        const second = [...nullifiers(0x300), root(), ...payloads(b)];
+        const logs = [...transfer(a), ...second];
+
+        expect(locateOutput(logs, POOL, a[2]!)).toEqual({ nullifiers: spent(0x100), index: 2 });
+        expect(locateOutput(logs, POOL, b[2]!)).toEqual({ nullifiers: spent(0x300), index: 2 });
+    });
+
+    it("returns the nullifiers in emission order, however many lead the root", () => {
+        const mine = outputs(0xa0);
+        const order = [word(0x903), word(0x901), word(0x902)];
+        const logs = [
+            ...transfer(outputs(0xb0)),
+            ...order.map((nf) => log(NULLIFIER_CONSUMED_TOPIC, nf)),
+            root(),
+            ...payloads(mine),
+        ];
+
+        expect(locateOutput(logs, POOL, mine[4]!)).toEqual({ nullifiers: order, index: 4 });
+    });
+
+    it("is undefined when a nullifier log carries no nullifier", () => {
+        const mine = outputs(0xa0);
+        const logs = [
+            log(NULLIFIER_CONSUMED_TOPIC, word(1)),
+            log(NULLIFIER_CONSUMED_TOPIC),
+            root(),
+            ...payloads(mine),
+        ];
+
+        expect(locateOutput(logs, POOL, mine[0]!)).toBeUndefined();
+    });
+
+    it("counts only the pool's payloads, and skips what sits between the root and them", () => {
+        const mine = outputs(0xa0);
+        const logs = [
+            ...nullifiers(0x200),
+            root(),
+            log(ASSET_MOVED, word(1)),
+            // Another contract's event of the same shape, inside the operation.
+            log(NOTE_PAYLOAD_TOPIC, word(0xbad), TOKEN),
+            ...payloads(mine),
+        ];
+        expect(locateOutput(logs, POOL, mine[1]!)).toEqual({ nullifiers: spent(0x200), index: 1 });
+    });
+
+    it("matches the commitment and the pool in any case", () => {
+        const mine = outputs(0xa0);
+        const upper = (mine[3] as string).toUpperCase().replace("0X", "0x");
+        expect(locateOutput(transfer(mine), POOL.toLowerCase(), upper)).toEqual({
+            nullifiers: spent(0x100),
+            index: 3,
+        });
+    });
+
+    it("is undefined for a commitment the pool did not publish in a spend", () => {
+        const mine = outputs(0xa0);
+        expect(locateOutput(transfer(mine), POOL, word(0xdead))).toBeUndefined();
+        expect(locateOutput([], POOL, mine[0]!)).toBeUndefined();
+        // From another contract.
+        const spoofed = [...nullifiers(0), root(), log(NOTE_PAYLOAD_TOPIC, mine[0], TOKEN)];
+        expect(locateOutput(spoofed, POOL, mine[0]!)).toBeUndefined();
+        // No root before it, or no nullifier leading the root.
+        expect(locateOutput([...payloads(mine), root()], POOL, mine[0]!)).toBeUndefined();
+        expect(locateOutput([root(), ...payloads(mine)], POOL, mine[0]!)).toBeUndefined();
+        // The nullifiers before the root are another contract's.
+        const foreign = [log(NULLIFIER_CONSUMED_TOPIC, word(7), TOKEN), root(), ...payloads(mine)];
+        expect(locateOutput(foreign, POOL, mine[0]!)).toBeUndefined();
+        expect(locateOutput([log(DEPOSIT_ESCROWED, mine[0])], POOL, mine[0]!)).toBeUndefined();
     });
 });
 

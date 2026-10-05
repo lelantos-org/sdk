@@ -7,6 +7,8 @@ export interface StoredNote {
     value: string;
     rho: string;
     rcm: string;
+    /** Diversifier of the address the note was sent to, decimal. `pk = Poseidon(TAG_PK, ivk, d)`. */
+    d: string;
     cm: string;
     leafIndex: number;
     spent: boolean;
@@ -30,7 +32,7 @@ export interface StoredNote {
 
 /** The persisted notes file a `NoteStore` loads and saves. */
 export interface NotesFile {
-    version: 2;
+    version: 3;
     notes: StoredNote[];
     /**
      * Resume point for `syncWallet`: the highest source row id whose notes are accounted for.
@@ -49,6 +51,7 @@ export interface NoteRecord {
     value: bigint;
     rho: bigint;
     rcm: bigint;
+    d: bigint;
     cm: string; // 0x-hex 32 B
     leafIndex: number;
     spent: boolean;
@@ -64,6 +67,7 @@ export function decodeStoredNote(s: StoredNote): NoteRecord {
         value: BigInt(s.value),
         rho: BigInt(s.rho),
         rcm: BigInt(s.rcm),
+        d: BigInt(s.d),
         cm: s.cm,
         leafIndex: s.leafIndex,
         spent: s.spent,

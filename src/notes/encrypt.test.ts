@@ -1,56 +1,108 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { BABYJUB_SUBGROUP_ORDER, Jubjub, Poseidon } from "../crypto/index.js";
-import { buildSpendingKey } from "../keys/keys.js";
+import {
+    BABYJUB_SUBGROUP_ORDER,
+    deriveIvk,
+    type Field,
+    Jubjub,
+    Poseidon,
+} from "../crypto/index.js";
+import { buildDiversifiedKeys, type DiversifiedKeys } from "../keys/diversified.js";
+import { diversifierForIndex } from "../keys/diversifier.js";
 import { clueBitsToPrefix, packClueBits } from "./codec.js";
 import { decryptNote, encryptNote, openNoteAsSender } from "./encrypt.js";
+import type { EncryptedNote } from "./note.js";
+
+let P: Poseidon;
+let J: Jubjub;
+beforeAll(async () => {
+    P = await Poseidon.build();
+    J = await Jubjub.build();
+});
+
+/** The viewing key of `nsk` and its address at diversifier `index`. */
+function addressOf(nsk: Field, index = 0): DiversifiedKeys & { ivk: Field } {
+    const ivk = deriveIvk(P, nsk);
+    const d = diversifierForIndex(ivk, index);
+    return { ivk, ...buildDiversifiedKeys(P, J, ivk, d) };
+}
+
+/** `plaintext` encrypted to `to` on its own base. */
+function encryptTo(to: DiversifiedKeys, esk: Field, plaintext: Uint8Array): EncryptedNote {
+    return encryptNote({ J, gD: to.g_d, recipientPkD: to.pk_d, esk, plaintext });
+}
 
 describe("note encryption", () => {
-    let P: Poseidon;
-    let J: Jubjub;
-    beforeAll(async () => {
-        P = await Poseidon.build();
-        J = await Jubjub.build();
-    });
+    const ESK = 999n;
 
     it("round-trip with correct ivk", () => {
-        const sk = buildSpendingKey(P, J, 7777n);
+        const to = addressOf(7777n);
         const pt = new TextEncoder().encode("hello, masp");
-        const enc = encryptNote({
-            J,
-            recipientPkD: sk.pk_d,
-            esk: 999n % BABYJUB_SUBGROUP_ORDER,
-            plaintext: pt,
-        });
-        const out = decryptNote({ J, ivk: sk.ivk, note: enc });
+        const enc = encryptTo(to, ESK, pt);
+        const out = decryptNote({ J, ivk: to.ivk, note: enc });
         expect(out).not.toBeNull();
         expect(new TextDecoder().decode(out!)).toBe("hello, masp");
     });
 
+    it("publishes the ephemeral key on the address base", () => {
+        const to = addressOf(7777n, 3);
+        const enc = encryptTo(to, ESK, new Uint8Array(4));
+
+        expect(enc.epk).toEqual(J.packPoint(J.mulPointEscalar(to.g_d, ESK)));
+        expect(enc.epk).not.toEqual(J.packPoint(J.mulPointEscalar(J.base8, ESK)));
+    });
+
+    it("opens notes to every address of one ivk", () => {
+        const pt = new Uint8Array([9, 8, 7]);
+        for (const index of [0, 1, 2 ** 32 - 1]) {
+            const to = addressOf(7777n, index);
+            const enc = encryptTo(to, ESK, pt);
+            expect(decryptNote({ J, ivk: to.ivk, note: enc })).toEqual(pt);
+        }
+    });
+
+    it("does not open a note whose ephemeral key is on another base", () => {
+        // `ivk · epk` equals `esk · pk_d` only when `epk` is a multiple of the address's `g_d`.
+        const to = addressOf(7777n);
+        const other = addressOf(7777n, 1);
+        for (const gD of [J.base8, other.g_d]) {
+            const enc = encryptNote({
+                J,
+                gD,
+                recipientPkD: to.pk_d,
+                esk: ESK,
+                plaintext: new Uint8Array(4),
+            });
+            expect(decryptNote({ J, ivk: to.ivk, note: enc })).toBeNull();
+        }
+    });
+
     it("returns null for foreign ivk", () => {
-        const sender = buildSpendingKey(P, J, 1n);
-        const eve = buildSpendingKey(P, J, 2n);
+        const to = addressOf(1n);
+        const eve = addressOf(2n);
         const pt = new Uint8Array([1, 2, 3, 4]);
-        const enc = encryptNote({ J, recipientPkD: sender.pk_d, esk: 5n, plaintext: pt });
+        const enc = encryptTo(to, 5n, pt);
         expect(decryptNote({ J, ivk: eve.ivk, note: enc })).toBeNull();
+    });
+
+    it("refuses a zero ephemeral secret", () => {
+        const to = addressOf(1n);
+        for (const esk of [0n, BABYJUB_SUBGROUP_ORDER]) {
+            expect(() => encryptTo(to, esk, new Uint8Array(4))).toThrow(/esk/);
+        }
     });
 });
 
 // The sender's side of the same ciphertext: opened with the ephemeral secret
 // and the payee's public key, which is what a payment proof hands a verifier.
 describe("opening a note as its sender", () => {
-    let P: Poseidon;
-    let J: Jubjub;
-    beforeAll(async () => {
-        P = await Poseidon.build();
-        J = await Jubjub.build();
-    });
-
     const PLAINTEXT = new Uint8Array([1, 2, 3, 4, 5]);
     const ESK = 123456789n;
 
+    const noteTo = (to: DiversifiedKeys) => encryptTo(to, ESK, PLAINTEXT);
+
     it("opens what the recipient's ivk opens", () => {
-        const payee = buildSpendingKey(P, J, 11n);
-        const note = encryptNote({ J, recipientPkD: payee.pk_d, esk: ESK, plaintext: PLAINTEXT });
+        const payee = addressOf(11n, 2);
+        const note = noteTo(payee);
 
         expect(openNoteAsSender({ J, recipientPkD: payee.pk_d, esk: ESK, note })).toEqual(
             PLAINTEXT,
@@ -59,19 +111,21 @@ describe("opening a note as its sender", () => {
     });
 
     it("is null for a secret that is not the note's ephemeral", () => {
-        const payee = buildSpendingKey(P, J, 11n);
-        const note = encryptNote({ J, recipientPkD: payee.pk_d, esk: ESK, plaintext: PLAINTEXT });
+        const payee = addressOf(11n);
+        const note = noteTo(payee);
 
         expect(openNoteAsSender({ J, recipientPkD: payee.pk_d, esk: ESK + 1n, note })).toBeNull();
         expect(openNoteAsSender({ J, recipientPkD: payee.pk_d, esk: 0n, note })).toBeNull();
     });
 
     it("is null for an address the note was not encrypted to", () => {
-        const payee = buildSpendingKey(P, J, 11n);
-        const other = buildSpendingKey(P, J, 12n);
-        const note = encryptNote({ J, recipientPkD: payee.pk_d, esk: ESK, plaintext: PLAINTEXT });
+        const payee = addressOf(11n);
+        const note = noteTo(payee);
 
-        expect(openNoteAsSender({ J, recipientPkD: other.pk_d, esk: ESK, note })).toBeNull();
+        // Another account, and another address of the payee's own account.
+        for (const other of [addressOf(12n), addressOf(11n, 1)]) {
+            expect(openNoteAsSender({ J, recipientPkD: other.pk_d, esk: ESK, note })).toBeNull();
+        }
     });
 });
 

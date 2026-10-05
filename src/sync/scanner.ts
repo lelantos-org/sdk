@@ -21,7 +21,7 @@ export class LocalScanner implements Scanner {
     /** Tallies from the most recent `scan`. */
     lastStats: ScanStats = emptyScanStats();
 
-    /** `P` reproduces each hit's commitment; see {@link scanNotes}. */
+    /** `P` reproduces each hit's commitment, address keys and clue; see {@link scanNotes}. */
     constructor(
         private readonly J: Jubjub,
         private readonly P: Poseidon,

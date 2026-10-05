@@ -4,7 +4,7 @@
 //   spec.plan      validate arguments, resolve assets and amounts          → phase "preparing"
 //   fee            resolve the relayer's fee (and its asset); refuse one above the caller's limit
 //   cover          select and lease notes, consolidating if allowed        (→ "consolidating")
-//   witness        sync and verify the tree, read root and paths atomically
+//   witness        sync and verify the tree, read root and paths atomically; inputs shuffled
 //   outputs        spec.outputs (payee) + change + fee slots + pads, shuffled
 //   spec.bind      the proof's public bindings, and any pre-proof work
 //   prove                                                                  → phase "proving"
@@ -25,9 +25,6 @@ import { randomHex } from "../../core/random.js";
 import { assertInvariant } from "../../errors/base.js";
 import { InsufficientCoverError } from "../../errors/funds.js";
 import { TreeOutOfSyncError } from "../../errors/network.js";
-import { type DecodedAddress, decodeAddress } from "../../keys/address.js";
-import { defaultDiversifier } from "../../keys/diversifier.js";
-import { deriveOutgoingKey } from "../../notes/outgoing.js";
 import type { RelayerSubmitResponse } from "../../protocol/responses.js";
 import type { SpendKind } from "../../protocol/transact.js";
 import type { EstimateKind } from "../../services/relayer/submitter.js";
@@ -161,19 +158,11 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
     const cover = await coverAndWitness(ctx, plan, fee, { rules: selection, opts, run });
     try {
         signal?.throwIfAborted();
-        const {
-            selection: picked,
-            feeSelection,
-            ownAddr,
-            inputs,
-            merkleRoot,
-            spentIds,
-            covered,
-        } = cover;
+        const { selection: picked, feeSelection, inputs, merkleRoot, spentIds, covered } = cover;
+        const ownAddr = ctx.ownAddress;
         const change = branded<CircuitAmount>(picked.sum - covered);
-        const { pk } = ctx.keys;
         const extra = spec.outputs?.(ctx, plan) ?? [];
-        const feeOut = feeSlots(fee, feeSelection, pk, ownAddr);
+        const feeOut = feeSlots(fee, feeSelection, ownAddr);
         const free = ctx.cfg.shape.nOut - extra.length - feeOut.length;
         assertInvariant(free >= 1, `${plan.feeKind}: no output slot left for change`);
         // A cross-asset fee's change counts against the cap; the spend's own keeps at least one
@@ -182,7 +171,6 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
         const paying = [
             ...extra,
             ...changeSlots({
-                pk,
                 ownAddr,
                 asset: plan.asset.id,
                 remainder: change,
@@ -216,10 +204,10 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
             inputs,
             merkleRoot,
             ...(binding.publicOut !== undefined ? { publicOut: binding.publicOut } : {}),
-            ...slots.args,
-            // Every output's ephemeral derives from the seed, so `paymentProof` can recompute it
-            // for any output of this spend.
-            outgoingKey: deriveOutgoingKey(ctx.keys.nsk),
+            outputs: slots.outputs,
+            // Every output's randomness derives from this key, the output and the spend's public
+            // nullifiers, so `paymentProof` can recompute it for any output of this spend.
+            outgoingKey: ctx.outgoingKey,
         });
         // Last moment to back out: once handed to the relayer, the spend cannot be recalled.
         signal?.throwIfAborted();
@@ -262,8 +250,6 @@ interface Witnessed {
      * otherwise moving. A same-asset fee is part of `covered` and comes out of `selection`.
      */
     feeSelection?: DirectSelection;
-    /** Own decoded shielded address, the change recipient. */
-    ownAddr: DecodedAddress;
     inputs: InputSlots;
     merkleRoot: bigint;
     /** Every note this spend consumes, across both assets. */
@@ -339,12 +325,10 @@ async function coverAndWitness(
             held.push(...feeSelection.notes);
         }
 
-        const ownAddr = decodeAddress(ctx.J, ctx.address);
         const { merkleRoot, inputs } = await witnessAgainstVerifiedRoot(ctx, held);
         return {
             selection,
             ...(feeSelection ? { feeSelection } : {}),
-            ownAddr,
             inputs,
             merkleRoot,
             spentIds: held.map((n) => n.id),
@@ -380,10 +364,9 @@ async function witnessAgainstVerifiedRoot(
             const merkleRoot = treeStore.root();
             const inputs = await buildInputSlots(
                 {
-                    pk: ctx.keys.pk,
+                    P: ctx.P,
+                    ivk: ctx.keys.ivk,
                     nsk: ctx.keys.nsk,
-                    // `keys.pk` is the default address's, and every stored note is under it.
-                    d: defaultDiversifier(ctx.keys.ivk),
                     treeStore,
                     nIn: ctx.cfg.shape.nIn,
                     expectedRoot: merkleRoot,

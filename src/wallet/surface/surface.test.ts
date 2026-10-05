@@ -1,15 +1,19 @@
 // The read surface: one `sync` with a report per stream, `balance` whose split adds up, an
-// immutable coalesced `state()`, operations tracked with their `opId`, and `walletInternals` as the
-// only way to the plumbing.
+// immutable coalesced `state()`, operations tracked with their `opId`, one address per index, and
+// `walletInternals` as the only way to the plumbing.
 
 import { describe, expect, it, vi } from "vitest";
 import { NOTE_PAYLOAD_TOPIC, ROOT_ADVANCED_TOPIC } from "../../chain/operation.js";
 import type { ChainAdapter } from "../../chain/port.js";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
 import { isWalletError } from "../../errors/guard.js";
+import { ADDRESS_HRP, decodeAddress } from "../../keys/address.js";
 import { deriveClaimLinkNsk } from "../../keys/claim-link.js";
+import { ownsAddress } from "../../keys/diversified.js";
+import { buildSpendingKey } from "../../keys/keys.js";
 import type { TreeStore } from "../../sync/tree-store.js";
 import { scannerYielding, storedNote, testWallet } from "../../test-utils/wallet.js";
+import { NOTES_FILE_VERSION } from "../notes/note-store.js";
 import type { SyncProgress, WalletState } from "../types/sync.js";
 import { walletInternals } from "./internals.js";
 import { WalletStateStore } from "./state.js";
@@ -31,6 +35,8 @@ const chain = {
 } as unknown as ChainAdapter;
 
 const microtask = () => new Promise<void>((r) => queueMicrotask(r));
+
+const SHIELDED_ADDRESS = new RegExp(`^${ADDRESS_HRP}1`);
 
 describe("sync", () => {
     const treeSummary = { chunksFetched: 1, leavesAdded: 4, syncedCount: 4, stoppedBy: "complete" };
@@ -88,7 +94,7 @@ describe("sync", () => {
 
     it("reloads the note store first when asked", async () => {
         const { wallet, noteStore } = await testWallet({ chain, scanner: scannerYielding([]) });
-        await noteStore.save({ version: 2, notes: [storedNote("a", 5n)] });
+        await noteStore.save({ version: NOTES_FILE_VERSION, notes: [storedNote("a", 5n)] });
         expect(await wallet.notes()).toHaveLength(0);
         await wallet.sync({ scope: "notes", reload: true });
         expect(await wallet.notes()).toHaveLength(1);
@@ -260,6 +266,64 @@ describe("walletInternals", () => {
     });
 });
 
+// One account, one address per index: `address` is index 0.
+describe("addressAt", () => {
+    const LAST_INDEX = 2 ** 32 - 1;
+
+    it("is `address` at index 0, and the same address for an index every time", async () => {
+        const { wallet } = await testWallet({ scanner: scannerYielding([]) });
+        // Bound, like every method of the wallet object.
+        const { addressAt } = wallet;
+
+        expect(await addressAt(0)).toBe(wallet.address);
+        const seventh = await addressAt(7);
+        expect(seventh).toMatch(SHIELDED_ADDRESS);
+        expect(await wallet.addressAt(7)).toBe(seventh);
+    });
+
+    it("gives each index its own address, each decoding to keys of the account", async () => {
+        const { wallet, internals } = await testWallet({ scanner: scannerYielding([]) });
+        const { P, J, keys } = internals;
+        const indices = [0, 1, 2, LAST_INDEX];
+
+        const addresses = await Promise.all(indices.map((i) => wallet.addressAt(i)));
+        expect(new Set(addresses).size).toBe(indices.length);
+
+        const decoded = addresses.map((a) => decodeAddress(J, a));
+        // No component repeats across the account's addresses.
+        expect(new Set(decoded.map((a) => a.d)).size).toBe(indices.length);
+        expect(new Set(decoded.map((a) => a.pk)).size).toBe(indices.length);
+        expect(new Set(decoded.map((a) => a.pk_d.join())).size).toBe(indices.length);
+        expect(new Set(decoded.map((a) => a.ck_d.join())).size).toBe(indices.length);
+        for (const a of decoded) expect(ownsAddress(P, J, keys.ivk, a)).toBe(true);
+    });
+
+    it("is a function of the account: another key owns none of them", async () => {
+        const [a, b] = await Promise.all([testWallet({ nsk: 11n }), testWallet({ nsk: 12n })]);
+        const { P, J } = a.internals;
+
+        for (const index of [0, 5]) {
+            const address = await a.wallet.addressAt(index);
+            expect(await b.wallet.addressAt(index)).not.toBe(address);
+            expect(ownsAddress(P, J, b.internals.keys.ivk, decodeAddress(J, address))).toBe(false);
+        }
+    });
+
+    it("refuses an index that is not an integer in [0, 2^32)", async () => {
+        const { wallet } = await testWallet({ scanner: scannerYielding([]) });
+        const invalid = [-1, 0.5, LAST_INDEX + 1, Number.NaN, Number.POSITIVE_INFINITY, "1", 1n];
+
+        for (const index of invalid) {
+            await expect(wallet.addressAt(index as number), String(index)).rejects.toMatchObject({
+                code: "INVALID_ARGUMENT",
+                argument: "index",
+                context: { op: "addressAt" },
+            });
+        }
+        await expect(wallet.addressAt(LAST_INDEX)).resolves.toMatch(SHIELDED_ADDRESS);
+    });
+});
+
 // A note in `notes()` is what the indexer served. A payee crediting a receipt needs the pool's own
 // word that the commitment exists.
 describe("confirmCommitment", () => {
@@ -330,8 +394,22 @@ describe("claimLinkKey", () => {
             index: 0,
             nsk: deriveClaimLinkNsk((keys as { nsk: bigint }).nsk, cfg.chainId, 0),
         });
-        expect(first.address).toMatch(/^lelantos1/);
+        expect(first.address).toMatch(SHIELDED_ADDRESS);
         expect(first.address).not.toBe(wallet.address);
+    });
+
+    it("hands out the link account's own address at index 0", async () => {
+        const { wallet, internals } = await testWallet({ chain, scanner: scannerYielding([]) });
+        const { P, J } = internals;
+
+        const link = await wallet.claimLinkKey(3);
+        const decoded = decodeAddress(J, link.address);
+        // The key the link carries opens notes sent to the address; the funding wallet's does not.
+        expect(ownsAddress(P, J, buildSpendingKey(P, link.nsk).ivk, decoded)).toBe(true);
+        expect(ownsAddress(P, J, internals.keys.ivk, decoded)).toBe(false);
+
+        const claimed = await testWallet({ nsk: link.nsk, scanner: scannerYielding([]) });
+        expect(claimed.wallet.address).toBe(link.address);
     });
 
     it("gives each index its own account, and refuses a bad index", async () => {

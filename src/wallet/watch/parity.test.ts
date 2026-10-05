@@ -1,11 +1,11 @@
 // Parity: a watch wallet must see exactly what the spending wallet sees.
 //
-// Uses real encrypted notes and the real `LocalScanner`; a stubbed scanner ignores the key it is
+// Uses real sealed outputs and the real `LocalScanner`; a stubbed scanner ignores the key it is
 // given.
 
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { sealOutput } from "../../bundle/common.js";
 import {
-    BABYJUB_SUBGROUP_ORDER,
     buildNoteCommitment,
     buildNullifierFromNsk,
     type Field,
@@ -19,11 +19,11 @@ import {
     viewingKeyFromSpending,
 } from "../../keys/keys.js";
 import { encodeFullViewingKey, encodeViewingKey } from "../../keys/viewing-key.js";
-import { clueBitsToPrefix, encodeNotePayload, type NotePayload } from "../../notes/codec.js";
-import { encryptNote } from "../../notes/encrypt.js";
+import { deriveOutgoingKey } from "../../notes/outgoing.js";
 import type { NotePage, NoteSource } from "../../sync/note-source.js";
 import type { NullifierStore } from "../../sync/nullifier-store.js";
 import type { ScanInput } from "../../sync/scan.js";
+import { recipientAt, sealedScanInput } from "../../test-utils/outputs.js";
 import { testWallet } from "../../test-utils/wallet.js";
 import type { ReadOnlyWalletApi } from "../api.js";
 import { InMemoryNoteStore } from "../notes/note-store.js";
@@ -32,54 +32,51 @@ import { connectWatch } from "./connect.js";
 import { createWatchWallet } from "./watch-wallet.js";
 
 const NSK = 4242n;
+/** The account paying every note in the feed. */
+const SENDER_NSK = 777n;
+const CHAIN_ID = 31337n;
+const LAST_INDEX = 2 ** 32 - 1;
+
+/** One note per payment, each to the address of `NSK` at `index`. The first is spent on chain. */
+const PAYMENTS = [
+    { index: 5, asset: 1n, value: 500n, rho: 111n },
+    { index: 0, asset: 1n, value: 250n, rho: 444n },
+    { index: LAST_INDEX, asset: 2n, value: 700n, rho: 777n },
+];
 
 describe("watch wallet parity", () => {
     let P: Poseidon;
     let J: Jubjub;
     let sk: SpendingKey;
+    /** The account's viewing key at each tier, encoded. */
+    let fullKey: string;
+    let incomingKey: string;
     /** The notes the feed serves, and the nullifier of the one that is spent. */
     let feed: ScanInput[];
+    /** The diversifier each payment was addressed to, in feed order. */
+    let paidTo: Field[];
     let spentNf: Field;
 
     beforeAll(async () => {
         P = await Poseidon.build();
         J = await Jubjub.build();
-        sk = buildSpendingKey(P, J, NSK);
+        sk = buildSpendingKey(P, NSK);
+        fullKey = encodeFullViewingKey(fullViewingKeyFromSpending(sk));
+        incomingKey = encodeViewingKey(viewingKeyFromSpending(sk));
 
-        const notes: NotePayload[] = [
-            { asset: 1n, value: 500n, rho: 111n, rcm: 222n },
-            { asset: 1n, value: 250n, rho: 444n, rcm: 555n },
-            { asset: 2n, value: 700n, rho: 777n, rcm: 888n },
-        ];
-        feed = notes.map((n, i) => input(n, i));
-        // The first note has been spent on chain.
-        const first = notes[0] as NotePayload;
-        spentNf = buildNullifierFromNsk(
-            P,
-            NSK,
-            first.rho,
-            buildNoteCommitment(P, { ...first, pk: sk.pk }),
-        );
-    });
-
-    function input(note: NotePayload, i: number): ScanInput {
-        const enc = encryptNote({
-            J,
-            recipientPkD: sk.pk_d,
-            esk: (777n + BigInt(i)) % BABYJUB_SUBGROUP_ORDER,
-            plaintext: encodeNotePayload(note),
+        const outgoingKey = deriveOutgoingKey(SENDER_NSK);
+        const sealed = PAYMENTS.map(({ index, ...note }) => {
+            const recipient = recipientAt(P, J, sk, index);
+            const output = { outgoingKey, chainId: CHAIN_ID, ...note, recipient, nullifiers: [] };
+            return { recipient, ...sealOutput(J, P, output) };
         });
-        return {
-            ciphertext: new Uint8Array([
-                ...clueBitsToPrefix(new Uint8Array([0]), 5),
-                ...enc.ciphertext,
-            ]),
-            epk: enc.epk,
-            cm: buildNoteCommitment(P, { ...note, pk: sk.pk }),
-            leafIndex: i,
-            blockNumber: 9 + i,
-        };
-    }
+        feed = sealed.map((output, i) =>
+            sealedScanInput(P, J, output, { leafIndex: i, blockNumber: 9 + i }),
+        );
+        paidTo = sealed.map(({ recipient }) => recipient.d);
+        const first = sealed[0]!.note;
+        spentNf = buildNullifierFromNsk(P, NSK, first.rho, buildNoteCommitment(P, first));
+    });
 
     /** Serves the whole feed once, then nothing, as a caught-up server does. */
     function noteSource(): NoteSource {
@@ -111,7 +108,7 @@ describe("watch wallet parity", () => {
 
     async function watchWallet(key: string): Promise<ReadOnlyWalletApi> {
         return createWatchWallet(key, {
-            chainId: 31337n,
+            chainId: CHAIN_ID,
             fmdUrl: "http://fmd.invalid",
             noteStore: new InMemoryNoteStore(),
             noteSource: noteSource(),
@@ -123,14 +120,20 @@ describe("watch wallet parity", () => {
     // agree on every note and on none of the ids.
     const shape = async (w: { notes: () => Promise<WalletNote[]> }) =>
         (await w.notes())
-            .map((n) => ({ cm: n.cm, asset: n.asset, value: n.value, spent: n.spent }))
+            .map((n) => ({
+                cm: n.cm,
+                asset: n.asset,
+                value: n.value,
+                spent: n.spent,
+                d: n.notePayload().d,
+            }))
             .sort((a, b) => a.cm.localeCompare(b.cm));
     const balance = (w: ReadOnlyWalletApi, asset: bigint) =>
         w.state().balances.get(asset as never) ?? 0n;
 
     it("an FVK watch wallet matches the spending wallet exactly", async () => {
         const spend = await spendingWallet();
-        const watch = await watchWallet(encodeFullViewingKey(fullViewingKeyFromSpending(sk)));
+        const watch = await watchWallet(fullKey);
 
         await spend.sync({ scope: "notes" });
         const report = await watch.sync();
@@ -142,7 +145,10 @@ describe("watch wallet parity", () => {
             viewingKey: spend.keys.viewingKey,
             fullViewingKey: spend.keys.fullViewingKey,
         });
-        expect(await shape(watch)).toEqual(await shape(spend));
+        const seen = await shape(watch);
+        expect(seen).toEqual(await shape(spend));
+        // Every address of the account receives, not only the one at index 0.
+        expect(seen.map((n) => n.d).sort()).toEqual([...paidTo].sort());
         expect(balance(watch, 1n)).toBe(balance(spend, 1n));
         expect(balance(watch, 2n)).toBe(balance(spend, 2n));
         // The spent note is marked spent, not dropped.
@@ -153,7 +159,7 @@ describe("watch wallet parity", () => {
 
     it("an IVK watch wallet sees the same notes but cannot settle spends", async () => {
         const spend = await spendingWallet();
-        const watch = await watchWallet(encodeViewingKey(viewingKeyFromSpending(sk)));
+        const watch = await watchWallet(incomingKey);
 
         await spend.sync({ scope: "notes" });
         const report = await watch.sync({ scope: "full" });
@@ -165,7 +171,8 @@ describe("watch wallet parity", () => {
             viewingKey: spend.keys.viewingKey,
             fullViewingKey: undefined,
         });
-        expect(await watch.notes()).toHaveLength((await spend.notes()).length);
+        expect(await watch.notes()).toHaveLength(PAYMENTS.length);
+        expect(await spend.notes()).toHaveLength(PAYMENTS.length);
         expect(await watch.notes({ spent: true })).toHaveLength(0);
         // Its balance is therefore everything received, the spent note included.
         expect(balance(watch, 1n)).toBe(balance(spend, 1n) + 500n);
@@ -174,10 +181,34 @@ describe("watch wallet parity", () => {
         expect(report.tree).toBeUndefined();
     });
 
+    it("derives the spending wallet's address at every index, from either key tier", async () => {
+        const spend = await spendingWallet();
+        const full = await watchWallet(fullKey);
+        const incoming = await watchWallet(incomingKey);
+
+        const addresses = new Set<string>();
+        for (const index of [0, 1, 5, LAST_INDEX]) {
+            const address = await spend.addressAt(index);
+            expect(await full.addressAt(index)).toBe(address);
+            expect(await incoming.addressAt(index)).toBe(address);
+            addresses.add(address);
+        }
+        expect(addresses.size).toBe(4);
+        expect(await full.addressAt(0)).toBe(full.address);
+        expect(await incoming.addressAt(0)).toBe(spend.address);
+
+        for (const index of [-1, 1.5, LAST_INDEX + 1]) {
+            await expect(incoming.addressAt(index)).rejects.toMatchObject({
+                code: "INVALID_ARGUMENT",
+                context: { op: "addressAt" },
+            });
+        }
+    });
+
     it("connectWatch builds a reader from the preset's rpcUrl without contacting it", async () => {
         const watch = await connectWatch({
             network: "anvil",
-            viewingKey: encodeFullViewingKey(fullViewingKeyFromSpending(sk)),
+            viewingKey: fullKey,
             storage: { notes: new InMemoryNoteStore() },
         });
         expect(watch.keys.tier).toBe("full");

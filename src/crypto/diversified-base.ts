@@ -21,7 +21,7 @@ import type { Jubjub, Point } from "./jubjub.js";
 import type { Field, Poseidon } from "./poseidon.js";
 import { TAG_GD } from "./tags.js";
 
-/** @internal */
+/** Byte width of a diversifier. */
 export const DIVERSIFIER_BYTES = 16;
 
 /**
@@ -79,7 +79,6 @@ export function findDiversifiedBase(J: Jubjub, P: Poseidon, d: Field): Diversifi
  * A function of `d` alone, so a sender computes it from the address.
  *
  * @throws {InvalidArgumentError} when `d` is not in `[0, 2^128)`.
- * @internal
  */
 export function diversifiedBase(J: Jubjub, P: Poseidon, d: Field): Point {
     return findDiversifiedBase(J, P, d).g_d;

@@ -22,8 +22,8 @@ export function derivePk(P: Poseidon, nsk: Field, d: Field): Field {
 }
 
 /** @internal */
-// Off-circuit FMD root detection secret. Not published; the address carries
-// `ck = dk · Base8` instead (see `fmdClueKeyFromRoot`).
+// Off-circuit FMD root detection secret. Not published; an address carries
+// `ck_d = (dk mod q) · g_d` instead (see `keys/diversified.ts`).
 export function deriveDk(P: Poseidon, ivk: Field): Field {
     return P.hash([TAG_DK, ivk]);
 }

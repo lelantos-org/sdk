@@ -1,4 +1,6 @@
+import { TransactionReceiptNotFoundError, WaitForTransactionReceiptTimeoutError } from "viem";
 import { describe, expect, it, vi } from "vitest";
+import type { Hex32 } from "../../core/brand.js";
 import { ViemChainReader } from "./reader.js";
 
 // The spend cooldown and the consolidation wait compare notes against the chain tip, so a tip
@@ -56,5 +58,59 @@ describe("ViemChainReader block number", () => {
 
         expect(second).toBe(first);
         expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+});
+
+// `fetchNotePayload` is handed hashes from payment proofs, so a transaction that does not exist is
+// an answer. `txReceiptLogs` is handed hashes of transactions believed mined, so it waits.
+describe("ViemChainReader receipt reads for a hash the node does not know", () => {
+    const TX = `0x${"7a".repeat(32)}` as Hex32;
+    const CM = `0x${"0c".repeat(32)}` as Hex32;
+
+    /** A reader whose client answers the receipt lookup with `lookup` and the wait with `wait`. */
+    function readerOver(lookup: () => Promise<unknown>, wait: () => Promise<unknown>) {
+        const reader = new ViemChainReader({ rpcUrl: "http://rpc.test", maspAddress: MASP });
+        const client = {
+            getTransactionReceipt: vi.fn(lookup),
+            waitForTransactionReceipt: vi.fn(wait),
+        };
+        Object.assign(reader.publicClient, client);
+        return { reader, client };
+    }
+    const notFound = async () => {
+        throw new TransactionReceiptNotFoundError({ hash: TX });
+    };
+    const timedOut = async () => {
+        throw new WaitForTransactionReceiptTimeoutError({ hash: TX });
+    };
+
+    it("fetchNotePayload: null, without the waiting call", async () => {
+        const { reader, client } = readerOver(notFound, timedOut);
+
+        await expect(reader.fetchNotePayload(TX, CM)).resolves.toBeNull();
+        expect(client.getTransactionReceipt).toHaveBeenCalledExactlyOnceWith({ hash: TX });
+        expect(client.waitForTransactionReceipt).not.toHaveBeenCalled();
+    });
+
+    it("fetchNotePayload: RPC_FAILED when the lookup fails in transport", async () => {
+        const { reader } = readerOver(async () => {
+            throw new TypeError("fetch failed");
+        }, timedOut);
+
+        await expect(reader.fetchNotePayload(TX, CM)).rejects.toMatchObject({
+            code: "RPC_FAILED",
+            method: "fetchNotePayload",
+            retryable: true,
+        });
+    });
+
+    it("txReceiptLogs: waits, and rejects TX_MINING when no receipt arrives", async () => {
+        const { reader, client } = readerOver(notFound, timedOut);
+
+        await expect(reader.txReceiptLogs(TX)).rejects.toMatchObject({
+            code: "TX_MINING",
+            retryable: true,
+        });
+        expect(client.waitForTransactionReceipt).toHaveBeenCalledOnce();
     });
 });

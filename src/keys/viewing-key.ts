@@ -3,19 +3,18 @@
 //   HRP     "lelantosivk"  payload version (1 B) || ivk (32 B, little-endian)
 //   HRP     "lelantosfvk"  payload version (1 B) || ivk (32 B) || nk (32 B)
 //
-// The payload carries only the secret scalars; `pk`, `pk_d`, `dk` and `ck` derive from `ivk` and
-// are recomputed on decode. The HRP marks the tier, the version byte a format change that keeps
-// the prefix.
+// The payload carries only the secret scalars; `dk` derives from `ivk` and is recomputed on
+// decode, and so does every address of the account. The HRP marks the tier, the version byte a
+// format change that keeps the prefix.
 //
 // Releasing a viewing key is permanent: `ivk` is fixed by `nsk` and cannot be rotated. The holder
-// decrypts every note the account receives, and an FVK also sees which are spent. Neither grants
-// spend authority.
+// decrypts every note the account receives, at every address, and an FVK also sees which are
+// spent. Neither grants spend authority.
 
 import { bech32m } from "bech32";
 import { branded, type ViewingKeyString } from "../core/brand.js";
 import { FIELD_BYTES, fromLeBytes, toLeBytes } from "../core/bytes.js";
-import { assertNonZeroField } from "../core/field.js";
-import type { Jubjub } from "../crypto/jubjub.js";
+import { assertNonZeroField, BABYJUB_SUBGROUP_ORDER } from "../core/field.js";
 import type { Field, Poseidon } from "../crypto/poseidon.js";
 import { InvalidArgumentError } from "../errors/config.js";
 import { BECH32_LIMIT, rethrowBech32 } from "./address.js";
@@ -66,11 +65,11 @@ function encode(hrp: string, scalars: readonly Field[]): ViewingKeyString {
  * {@link isFullViewingKey}. Failures are {@link InvalidArgumentError}. The key is kept out of the
  * message: it is secret, and error text reaches application logs verbatim.
  */
-export function decodeViewingKey(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKey {
-    return rethrowBech32(() => decode(P, J, key), "invalid viewing key", "viewingKey");
+export function decodeViewingKey(P: Poseidon, key: string): ViewingKey | FullViewingKey {
+    return rethrowBech32(() => decode(P, key), "invalid viewing key", "viewingKey");
 }
 
-function decode(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKey {
+function decode(P: Poseidon, key: string): ViewingKey | FullViewingKey {
     const { prefix, words } = bech32m.decode(key, BECH32_LIMIT);
     if (prefix !== IVK_HRP && prefix !== FVK_HRP) {
         throw bad(`expected the "${IVK_HRP}" or "${FVK_HRP}" prefix, got "${prefix}"`);
@@ -85,11 +84,13 @@ function decode(P: Poseidon, J: Jubjub, key: string): ViewingKey | FullViewingKe
         throw bad(`unsupported payload version ${payload[0]}, expected ${VERSION}`);
     }
 
-    // Non-zero, not merely in range: `ivk = 0` gives an identity `pk_d`, whose notes are publicly
-    // decryptable, and `nk = 0` yields a nullifier independent of the account.
+    // Non-zero, not merely in range: `nk = 0` yields a nullifier independent of the account.
+    // `ivk` must also be non-zero mod q: `pk_d = (ivk mod q) · g_d` is otherwise the identity,
+    // whose notes are publicly decryptable.
     const ivk = scalar(payload.slice(1, 1 + FIELD_BYTES), "ivk");
-    if (prefix === IVK_HRP) return buildViewingKey(P, J, ivk);
-    return buildFullViewingKey(P, J, ivk, scalar(payload.slice(1 + FIELD_BYTES), "nk"));
+    if (ivk % BABYJUB_SUBGROUP_ORDER === 0n) throw bad("ivk is zero mod the subgroup order");
+    if (prefix === IVK_HRP) return buildViewingKey(P, ivk);
+    return buildFullViewingKey(P, ivk, scalar(payload.slice(1 + FIELD_BYTES), "nk"));
 }
 
 function scalar(bytes: Uint8Array, name: string): Field {

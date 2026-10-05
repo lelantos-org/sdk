@@ -3,11 +3,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { assetId, circuitAmount, evmAddress } from "../../core/brand.js";
+import type { OutputAux } from "../../notes/aux.js";
 import { depositTotal, unitFee, withdrawNet } from "../../protocol/fees.js";
 import type { SubmitSwapPayload } from "../../protocol/transact.js";
 import { RAY } from "../../protocol/units.js";
 import { makeTestCtx } from "../../test-utils/context.js";
 import { estimateOf, freshAddress } from "../../test-utils/estimate.js";
+import { openOutput } from "../../test-utils/outputs.js";
 import { storedNote } from "../../test-utils/wallet.js";
 import type { AssetInfo } from "../assets/info.js";
 import type { SwapQuote } from "../types/quotes.js";
@@ -280,6 +282,30 @@ describe("quoteSwap then swap", () => {
 
         await executeSwap(ctx, { quote: structuredClone(quote), refundAddress: REFUND });
         expect(submitSwap.mock.calls[0]![0].swap.depositD.publicIn).toBe(quote.credit.amount);
+    });
+
+    // Both escrows are deposits, so each mints a fee leaf. With no fee address to seal it to, a
+    // leaf sealed to the wallet would carry its clue on the output escrow and on the refund.
+    it("seals neither escrow's fee leaf to the wallet when the relayer advertises no fee address", async () => {
+        const { ctx, submitSwap } = await swapCtx(P);
+        (ctx.cfg.submitter as { estimate: unknown }).estimate = async () => estimateOf(undefined);
+        const quote = await quoteSwap(ctx, {
+            assetIn: P,
+            assetOut: OUT,
+            slippageBps: 50,
+            net: { baseUnits: 1_000n },
+        });
+        expect(quote.fees.flush).toBeNull();
+
+        await executeSwap(ctx, { quote, refundAddress: REFUND });
+
+        const { swap } = submitSwap.mock.calls[0]![0];
+        const opens = (aux: OutputAux) => openOutput(ctx.J, ctx.keys.ivk, aux) !== null;
+        // Both notes default to the wallet: the output credit and the refund.
+        expect([swap.auxD, swap.refundAuxD].map(opens)).toEqual([true, true]);
+        expect([swap.feeAuxD, swap.refundFeeAuxD].map(opens)).toEqual([false, false]);
+        expect(swap.depositD).toMatchObject({ feeIn: 0n, feeAssetId: 0n });
+        expect(swap.refundD).toMatchObject({ feeIn: 0n, feeAssetId: 0n });
     });
 
     it("refuses without a wrapper address, and one asset named twice", async () => {

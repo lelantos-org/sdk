@@ -10,7 +10,7 @@ import { detectionKeyFor, type ViewingKey } from "./keys.js";
  * Parse and validate a bech32m shielded address.
  *
  * ```ts
- * const { pk_d, pk, ck } = await parseAddress(peerBech32);
+ * const { d, pk_d, pk, ck_d } = await parseAddress(peerBech32);
  * ```
  */
 export async function parseAddress(addr: string): Promise<DecodedAddress> {
@@ -19,7 +19,8 @@ export async function parseAddress(addr: string): Promise<DecodedAddress> {
 }
 
 /**
- * The γ FMD detection scalars for a viewing key.
+ * The γ FMD detection scalars for a viewing key. One key detects for every address of the
+ * account.
  *
  * Releasing these permanently releases the root detection secret; see `detectionKeyFor`.
  */
@@ -27,6 +28,6 @@ export async function detectionKey(
     vk: ViewingKey,
     gamma: number = FMD_DEFAULT_GAMMA,
 ): Promise<FmdDetectionKey> {
-    const { P, J } = await cryptoContext();
-    return detectionKeyFor(J, P, vk, gamma);
+    const { P } = await cryptoContext();
+    return detectionKeyFor(P, vk, gamma);
 }

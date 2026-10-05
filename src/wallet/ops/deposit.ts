@@ -30,6 +30,7 @@ import {
 import { InvalidArgumentError } from "../../errors/config.js";
 import { WireFormatError } from "../../errors/network.js";
 import type { DecodedAddress } from "../../keys/address.js";
+import { ownsAddress } from "../../keys/diversified.js";
 import { getLogger } from "../../log/logger.js";
 import { computePiHash } from "../../protocol/abi-hash.js";
 import {
@@ -406,6 +407,7 @@ export async function executeDeposit(
         recipientAddress: payer,
         publicIn: plan.amount,
         recipient: plan.decodedRecipient,
+        outgoingKey: ctx.outgoingKey,
         ...depositSlots(plan.relayerFee),
     });
 
@@ -456,8 +458,9 @@ export async function executeDeposit(
         feeAsset: plan.feeAsset.id,
         txHash: submitted.txHash,
     });
-    // One leaf is the depositor's note; it is this wallet's only when addressed to it.
-    const own = plan.recipient === ctx.address.toLowerCase() ? [0] : [];
+    // One leaf is the depositor's note; it is this wallet's only when addressed to one of its
+    // addresses.
+    const own = ownsAddress(ctx.P, ctx.J, ctx.keys.ivk, plan.decodedRecipient) ? [0] : [];
     const { ownInflow: _, ...commitments } = outputCommitments(
         { cm: [built.cm], producedNotes: built.producedNotes },
         own,
