@@ -38,6 +38,12 @@ export interface WalletNote {
     /** ISO-8601. */
     discoveredAt: string;
     cm: Hex32;
+    /**
+     * The memo the note's sender attached. Absent when the note carries none.
+     *
+     * The text is the sender's, unverified: show it as plain text and do not act on it.
+     */
+    memo?: string;
     /** Decoded payload. Recomputes on each call. */
     notePayload(): WalletNotePayload;
 }

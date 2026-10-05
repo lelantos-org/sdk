@@ -1,6 +1,7 @@
 // Shielded transfer, as a spend spec. Backs `wallet.transfer`.
 
 import { ownsAddress } from "../../keys/diversified.js";
+import { encodeMemo } from "../../notes/codec.js";
 import { precheckAmount, requirePositive, resolveAmount, shieldedMoney } from "../assets/amount.js";
 import type { WalletContext } from "../context.js";
 import { shieldedRecipient } from "../tx/recipient.js";
@@ -19,6 +20,7 @@ export function executeTransfer(
             options: args,
             async plan(ctx) {
                 precheckAmount(args.amount, "amount", "transfer");
+                const memo = encodeMemo(args.memo);
                 // Decoded before selection, so an invalid address fails before auto-consolidation,
                 // tree sync and input construction.
                 const { address, decoded: recipient } = shieldedRecipient(
@@ -38,16 +40,18 @@ export function executeTransfer(
                     target,
                     recipient,
                     recipientAddress: address,
+                    memo,
                 };
             },
             // Ownership is decided from the decoded address, at whichever index of the account it
             // sits: every field must be the one `ivk` derives under its diversifier. On a
             // self-transfer the payee slot is also owned.
-            outputs: (ctx, { asset, target, recipient }) => [
+            outputs: (ctx, { asset, target, recipient, memo }) => [
                 {
                     asset: asset.id,
                     value: target,
                     recipient,
+                    memo,
                     own: ownsAddress(ctx.P, ctx.J, ctx.keys.ivk, recipient),
                     payee: true,
                 },

@@ -191,6 +191,7 @@ describe("encoding parity (diversified vectors → layouts spelled out from the 
                 payload,
                 Uint8Array.of(s.nullifiers_dec.length),
                 ...s.nullifiers_dec.map((nf) => leBytes(BigInt(nf), 32)),
+                hexToBytes(s.memo_hex),
             );
             expect(bytesToHexWord(preimage)).toBe(s.osk_preimage_hex);
             expect(bytesToHexWord(blake2b(preimage, { dkLen: 32 }))).toBe(s.osk_hex);
@@ -230,7 +231,7 @@ describe("encoding parity (diversified vectors → layouts spelled out from the 
         }
     });
 
-    it("plaintext_hex is asset || value || rho || rseed || d, little-endian", () => {
+    it("plaintext_hex is asset || value || rho || rseed || d || memo, integers little-endian", () => {
         for (const s of file.seed) {
             const plaintext = concatBytes(
                 leBytes(BigInt(s.asset_dec), 8),
@@ -238,8 +239,9 @@ describe("encoding parity (diversified vectors → layouts spelled out from the 
                 leBytes(BigInt(s.rho_dec), 32),
                 hexToBytes(s.rseed_hex),
                 hexToBytes(s.d_bytes_hex),
+                hexToBytes(s.memo_hex),
             );
-            expect(plaintext).toHaveLength(96);
+            expect(plaintext).toHaveLength(224);
             expect(bytesToHexWord(plaintext)).toBe(s.plaintext_hex);
         }
     });
@@ -259,7 +261,7 @@ describe("encoding parity (diversified vectors → layouts spelled out from the 
             const prefix = Uint8Array.of(bits[1] ?? 0, bits[0] ?? 0);
 
             const wire = concatBytes(prefix, body);
-            expect(wire).toHaveLength(114);
+            expect(wire).toHaveLength(242);
             expect(bytesToHexWord(wire)).toBe(s.ciphertext_hex);
         }
     });

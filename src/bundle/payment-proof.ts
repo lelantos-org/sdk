@@ -22,9 +22,9 @@
 // note or to track its later spend. The recipient cannot forge one: it learns the seed from the
 // plaintext, but `osk` is a preimage of the seed.
 //
-// `osk` is recomputed from the sender's outgoing key, the output's `rho`, asset, value and
-// recipient, and the nullifiers of its spend, so making a proof needs those and what the pool
-// published.
+// `osk` is recomputed from the sender's outgoing key, the output's `rho`, asset, value, recipient
+// and memo, and the nullifiers of its spend, so making a proof needs those and what the pool
+// published. The plaintext a verifier opens carries the memo, so a proof discloses it.
 
 import type { PublishedNote } from "../chain/types.js";
 import {
@@ -50,6 +50,7 @@ import { type DecodedAddress, decodeAddress } from "../keys/address.js";
 import {
     CLUE_BITS_PREFIX_BYTES,
     clueBitsToPrefix,
+    decodeMemo,
     decodeNotePayload,
     type NotePayload,
 } from "../notes/codec.js";
@@ -58,14 +59,14 @@ import { type ExpandedSeed, expandSeed, seedFromSecret } from "../notes/seed.js"
 import { outputSecret } from "./common.js";
 
 /** Format version of a {@link PaymentProof}. */
-export const PAYMENT_PROOF_VERSION = 2;
+export const PAYMENT_PROOF_VERSION = 3;
 
 /**
  * A sender's proof of one payment. Every field is a string or a small integer, so it survives
  * `JSON.stringify` unchanged.
  *
  * Hand it only to whoever should learn the payment: with the payee's address it reveals that
- * output's asset and value.
+ * output's asset, value and memo.
  */
 export interface PaymentProof {
     version: typeof PAYMENT_PROOF_VERSION;
@@ -108,19 +109,26 @@ export type PaymentProofFailure =
 
 /** What a payment proof establishes, or why it establishes nothing. */
 export type PaymentProofResult =
-    | { ok: true; asset: AssetId; value: CircuitAmount }
+    | {
+          ok: true;
+          asset: AssetId;
+          value: CircuitAmount;
+          /** The memo the output carries, as the payee reads it. Absent when it carries none. */
+          memo?: string;
+      }
     | { ok: false; reason: PaymentProofFailure };
 
 /**
  * The proof for `published`, an output of one of this account's spends.
  *
  * `output` is what the wallet sealed: the note's `rho` (`Poseidon(TAG_RHO, nullifiers[0], index)`),
- * its asset and value, the address it paid, and its spend's public nullifiers in input-slot order.
+ * its asset and value, the address it paid, its spend's public nullifiers in input-slot order, and
+ * its memo field.
  *
  * @throws {InvalidArgumentError} when the account's key and `output` do not reproduce the
  * output's published ephemeral key: another wallet made it, or it paid a different recipient,
- * asset or amount, or the nullifiers are not its spend's. Also when a field of `output` is out of
- * range.
+ * asset or amount, or carried a different memo, or the nullifiers are not its spend's. Also when a
+ * field of `output` is out of range.
  *
  * @internal
  */
@@ -138,6 +146,7 @@ export function buildPaymentProof(args: {
         value: bigint;
         recipient: DecodedAddress;
         nullifiers: readonly Field[];
+        memo: Uint8Array;
     };
 }): PaymentProof {
     const { P, J, outgoingKey, chainId, txHash, published } = args;
@@ -147,7 +156,8 @@ export function buildPaymentProof(args: {
     if (!samePoint(ephPub, published.ephPub)) {
         throw new InvalidArgumentError(
             "paymentProof: this wallet's key does not reproduce that output's ephemeral key; " +
-                "another wallet created it, or it paid a different recipient, asset or amount",
+                "another wallet created it, or it paid a different recipient, asset or amount, " +
+                "or carried a different memo",
             { argument: "commitment" },
         );
     }
@@ -171,7 +181,8 @@ export interface PaymentProofReader {
  * Verify a sender's {@link PaymentProof} for a payment to `recipient`, against the chain
  * `reader` reads.
  *
- * Resolves the asset and value paid when the proof holds, and the reason when it does not.
+ * Resolves the asset and value paid, and the memo sent with them, when the proof holds, and the
+ * reason when it does not.
  * Needs no key: only the payee's address, which the party asking for proof already has.
  *
  * ```ts
@@ -230,7 +241,13 @@ export async function verifyPaymentProof(args: {
 
     if (!carriesClue(J, P, published, recipient.ck_d, gD, fmdR)) return fail("wrong-clue");
 
-    return { ok: true, asset: assetId(asset), value: branded<CircuitAmount>(value) };
+    const memo = decodeMemo(note.memo);
+    return {
+        ok: true,
+        asset: assetId(asset),
+        value: branded<CircuitAmount>(value),
+        ...(memo !== undefined ? { memo } : {}),
+    };
 }
 
 /**

@@ -28,6 +28,8 @@ export interface StoredNote {
      * leave an unspent note unreachable until the next wipe-and-rescan.
      */
     pendingSpendAt?: string | undefined;
+    /** The memo the note's sender attached, as text. Absent when the note carries none. */
+    memo?: string | undefined;
 }
 
 /** The persisted notes file a `NoteStore` loads and saves. */
@@ -58,6 +60,7 @@ export interface NoteRecord {
     discoveredAt: string;
     firstSeenBlock?: number | undefined;
     pendingSpendAt?: string | undefined;
+    memo?: string | undefined;
 }
 
 export function decodeStoredNote(s: StoredNote): NoteRecord {
@@ -74,5 +77,6 @@ export function decodeStoredNote(s: StoredNote): NoteRecord {
         discoveredAt: s.discoveredAt,
         firstSeenBlock: s.firstSeenBlock,
         pendingSpendAt: s.pendingSpendAt,
+        memo: s.memo,
     };
 }

@@ -13,6 +13,7 @@ import { deriveDiversifiedPk } from "../keys/diversified.js";
 import { diversifierToBytes } from "../keys/diversifier.js";
 import { buildSpendingKey, type SpendingKey } from "../keys/keys.js";
 import { buildOutputAux } from "../notes/aux.js";
+import { EMPTY_MEMO, encodeMemo } from "../notes/codec.js";
 import type { Note } from "../notes/note.js";
 import { deriveOutgoingKey } from "../notes/outgoing.js";
 import { deriveOutputSecret, expandSeed, seedFromSecret } from "../notes/seed.js";
@@ -448,6 +449,7 @@ describe("sealOutput", () => {
             pk: recipient.pk,
             ck_d: J.packPoint(recipient.ck_d),
             nullifiers: NULLIFIERS,
+            memo: EMPTY_MEMO,
         });
         const rseed = seedFromSecret(osk);
         const { rcm, esk, fmdR } = expandSeed(rseed, o.rho);
@@ -460,7 +462,7 @@ describe("sealOutput", () => {
                 recipientFlagKey: fmdDiversifiedFlagKey(J, P, recipient.ck_d, gD),
                 recipientPkD: recipient.pk_d,
                 gD,
-                note: { asset: 1n, value: 7n, rho: o.rho, rseed, d: recipient.d },
+                note: { asset: 1n, value: 7n, rho: o.rho, rseed, d: recipient.d, memo: EMPTY_MEMO },
                 esk,
                 fmdR,
             }),
@@ -468,6 +470,8 @@ describe("sealOutput", () => {
         expect(sealed.aux.aux.ephPub).toEqual(J.mulPointEscalar(gD, esk));
         // Deterministic: the sender rebuilds the same output from the same inputs.
         expect(sealOutput(J, P, { ...o, recipient })).toEqual(sealed);
+        // No memo is the empty field.
+        expect(sealOutput(J, P, { ...o, recipient, memo: EMPTY_MEMO })).toEqual(sealed);
     });
 
     it("gives outputs that differ in any bound field different randomness", () => {
@@ -491,6 +495,10 @@ describe("sealOutput", () => {
             { ...base, nullifiers: [NULLIFIERS[1]!, NULLIFIERS[0]!] },
             { ...base, nullifiers: [NULLIFIERS[0]!] },
             { ...base, nullifiers: [] },
+            // The same payment with a memo, and with that memo edited: the encryption key and
+            // nonce follow from the ephemeral key, so each text needs its own.
+            { ...base, memo: encodeMemo("rent, October") },
+            { ...base, memo: encodeMemo("rent, November") },
         ];
 
         const sealed = variants.map((v) => sealOutput(J, P, v));

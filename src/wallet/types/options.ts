@@ -192,6 +192,13 @@ export interface TransferOptions extends SpendOptions {
     /** Value of the recipient's note. */
     amount: Amount;
     recipient: ShieldedAddressLike;
+    /**
+     * Text for the recipient, encrypted with the note: at most 128 bytes as UTF-8, without U+0000.
+     *
+     * The wallet keeps no copy and cannot read it back from the chain. A payment proof for the
+     * transfer needs the same text, and shows it to whoever verifies the proof.
+     */
+    memo?: string | undefined;
 }
 
 /** Unshield to an EVM account. `native: true` unwraps through `NativeAdapter`. */

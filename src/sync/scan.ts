@@ -18,7 +18,12 @@ import { fmdDiversifiedDetectionKey, fmdExpectedClueOnBase } from "../fmd/divers
 import { FMD_DEFAULT_GAMMA, type FmdDetectionKey } from "../fmd/keys.js";
 import { deriveDiversifiedPk, deriveDkRoot } from "../keys/diversified.js";
 import { getLogger } from "../log/logger.js";
-import { clueBitsToPrefix, decodeNotePayload, stripClueBitsPrefix } from "../notes/codec.js";
+import {
+    clueBitsToPrefix,
+    decodeMemo,
+    decodeNotePayload,
+    stripClueBitsPrefix,
+} from "../notes/codec.js";
 import { decryptNote } from "../notes/encrypt.js";
 import { expandSeed } from "../notes/seed.js";
 
@@ -53,6 +58,8 @@ export interface ScanHit {
     cm: Field;
     leafIndex: number;
     blockNumber: number;
+    /** The plaintext's memo, as text (`decodeMemo`). Absent when the note carries none. */
+    memo?: string | undefined;
 }
 
 /** Per-scan tallies, which distinguish a systematic decode failure from an empty result. */
@@ -156,7 +163,7 @@ export function scanNotes(
 
     /** Check a decrypted note against what was published; a rejected one is tallied here. */
     const check = (inp: ScanInput, prefix: Uint8Array, plain: Uint8Array): ScanHit | undefined => {
-        const { asset, value, rho, rseed, d } = decodeNotePayload(plain);
+        const { asset, value, rho, rseed, d, memo } = decodeNotePayload(plain);
         // Value-0 notes are unspendable and would otherwise pile up as phantom unspent notes.
         if (value === 0n) {
             tally.zeroValue++;
@@ -221,6 +228,7 @@ export function scanNotes(
             cm: inp.cm,
             leafIndex: inp.leafIndex,
             blockNumber: inp.blockNumber,
+            memo: decodeMemo(memo),
         };
     };
 

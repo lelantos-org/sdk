@@ -19,7 +19,10 @@ import { diversifierForIndex } from "../keys/diversifier.js";
 import { buildOutputAux } from "../notes/aux.js";
 import {
     clueBitsToPrefix,
+    EMPTY_MEMO,
+    encodeMemo,
     encodeNotePayload,
+    NOTE_PLAINTEXT_BYTES,
     type NotePayload,
     withClueBitsPrefix,
 } from "../notes/codec.js";
@@ -46,6 +49,8 @@ interface SealOpts {
     rseed?: Uint8Array;
     /** Diversifier the plaintext names. Default: the recipient's. */
     d?: Field;
+    /** Memo text the plaintext carries. Default: none. */
+    memo?: string;
     /** Commitment key. Default: the recipient's `pk`. */
     pk?: Field;
     /** The feed's leaf. Default: the commitment of the note under `pk`. */
@@ -84,6 +89,17 @@ describe("scanNotes", () => {
         eve = account(9999n);
     });
 
+    /** The plaintext of 500 units of asset 1 to `to`, with no memo, unless `over` says otherwise. */
+    const payload = (to: DiversifiedKeys, over: Partial<NotePayload> = {}): NotePayload => ({
+        asset: 1n,
+        value: 500n,
+        rho: RHO,
+        rseed: RSEED,
+        d: to.d,
+        memo: EMPTY_MEMO,
+        ...over,
+    });
+
     /**
      * The feed row of an output paying `to`, built from the primitives so that each published part
      * can be made to disagree with the plaintext on its own.
@@ -95,6 +111,7 @@ describe("scanNotes", () => {
             rho: opts.rho ?? RHO,
             rseed: opts.rseed ?? RSEED,
             d: opts.d ?? to.d,
+            memo: encodeMemo(opts.memo),
         };
         const seed = expandSeed(note.rseed, note.rho);
         const flagged = opts.clueFor ?? to;
@@ -207,9 +224,19 @@ describe("scanNotes", () => {
             }
         });
 
+        it("returns the memo an output carries, and none for an empty field", () => {
+            const memo = "Affitto di ottobre, 3B · grazie";
+            const [plain, withMemo] = scanNotes(J, P, me.ivk, [
+                seal(me.at(0)),
+                seal(me.at(0), { memo, rho: RHO + 1n }),
+            ]);
+            expect(plain?.memo).toBeUndefined();
+            expect(withMemo?.memo).toBe(memo);
+        });
+
         it("returns an output built by buildOutputAux", () => {
             const to = me.at(7);
-            const note: NotePayload = { asset: 1n, value: 500n, rho: RHO, rseed: RSEED, d: to.d };
+            const note = payload(to);
             const { rcm, esk, fmdR } = expandSeed(RSEED, RHO);
             const { aux } = buildOutputAux({
                 J,
@@ -393,8 +420,7 @@ describe("scanNotes", () => {
             const nonce = blake2b(new Uint8Array([...utf8("lelantos.note.nonce.v1"), ...epk]), {
                 dkLen: 12,
             });
-            const note: NotePayload = { asset: 1n, value: 500n, rho: RHO, rseed: RSEED, d: to.d };
-            const body = chacha20poly1305(key, nonce).encrypt(encodeNotePayload(note));
+            const body = chacha20poly1305(key, nonce).encrypt(encodeNotePayload(payload(to)));
             const crafted: ScanInput = {
                 ...honest,
                 epk,
@@ -501,8 +527,8 @@ describe("scanNotes", () => {
         }
 
         it("counts a plaintext of another length as decodeFailed", () => {
-            // 80 bytes is the plaintext without a diversifier.
-            for (const length of [0, 80, 95, 97]) {
+            // 96 bytes is the plaintext without a memo field.
+            for (const length of [0, 96, NOTE_PLAINTEXT_BYTES - 1, NOTE_PLAINTEXT_BYTES + 1]) {
                 expectRejected(sealRaw(me.at(0), new Uint8Array(length).fill(1)), "decodeFailed");
             }
         });
@@ -510,13 +536,7 @@ describe("scanNotes", () => {
         it("counts a plaintext whose rho is not a field element as decodeFailed", () => {
             const to = me.at(0);
             for (const rho of [BN254_FR, (1n << 256n) - 1n]) {
-                const plaintext = encodeNotePayload({
-                    asset: 1n,
-                    value: 500n,
-                    rho,
-                    rseed: RSEED,
-                    d: to.d,
-                });
+                const plaintext = encodeNotePayload(payload(to, { rho }));
                 expectRejected(sealRaw(to, plaintext), "decodeFailed");
             }
         });

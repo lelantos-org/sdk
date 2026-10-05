@@ -29,11 +29,11 @@
 //   epk      = esk·g_d
 //
 // Byte layouts of the address payload (112 bytes, HRP `ADDRESS_HRP`), the `osk` preimage, the
-// plaintext (96 bytes) and the wire ciphertext (114 bytes) with its key and nonce: `ENCODING`.
+// plaintext (224 bytes) and the wire ciphertext (242 bytes) with its key and nonce: `ENCODING`.
 //
 // Each `seed` entry is one output sealed by `sealOutput` to the address at `address_index`, with
 // `ock` as the sender's outgoing key and `nullifiers_dec` as the nullifiers of its spend, in
-// input-slot order (empty for a deposit).
+// input-slot order (empty for a deposit), and `memo_hex` as its memo field.
 
 import { sealOutput } from "../bundle/common.js";
 import { bytesEqual, toLeBytes } from "../core/bytes.js";
@@ -67,6 +67,7 @@ import {
 import {
     CLUE_BITS_PREFIX_BYTES,
     clueBitsToPrefix,
+    encodeMemo,
     encodeNotePayload,
     NOTE_CIPHERTEXT_BYTES,
     NOTE_PLAINTEXT_BYTES,
@@ -94,7 +95,7 @@ const PATTERNED_KEY = Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + 3) & 0x
 /** The file's `domains` block. */
 const DOMAINS = {
     dvk: "lelantos.addr.dvk.v1",
-    osk: "lelantos.note.osk.v2",
+    osk: "lelantos.note.osk.v3",
     rseed: "lelantos.note.rseed.v2",
     rcm: "lelantos.note.rcm.v2",
     esk: "lelantos.note.esk.v2",
@@ -119,9 +120,12 @@ const ENCODING = {
         "osk domain || ock || chain id as 32 LE bytes || rho as 32 LE bytes || " +
         "asset as 8 LE bytes || value as 8 LE bytes || d_bytes || pk_d packed || " +
         "pk as 32 LE bytes || ck_d packed || " +
-        "nullifier count as 1 byte || each nullifier as 32 LE bytes; osk is its blake2b-256",
+        "nullifier count as 1 byte || each nullifier as 32 LE bytes || memo; " +
+        "osk is its blake2b-256",
+    memo: "128 bytes: UTF-8 text, zero-padded; all zero for an output with no memo",
     plaintext:
-        "asset as 8 LE bytes || value as 8 LE bytes || rho as 32 LE bytes || rseed || d_bytes",
+        "asset as 8 LE bytes || value as 8 LE bytes || rho as 32 LE bytes || rseed || d_bytes || " +
+        "memo",
     ciphertext:
         "2 bytes, the big-endian integer whose bit i is clue bit i, then " +
         "ChaCha20-Poly1305(key, nonce, plaintext) with its 16-byte tag; " +
@@ -157,6 +161,8 @@ interface SeedInput {
     value: bigint;
     address: number;
     nullifiers: Field[];
+    /** The output's memo text. Omit for none. */
+    memo?: string;
 }
 
 const dec = (x: bigint) => x.toString();
@@ -309,6 +315,7 @@ function seedInputs(P: Poseidon): SeedInput[] {
             value: 10n ** 18n,
             address: 5,
             nullifiers: [P.hash([TAG_IVK, 1n]), P.hash([TAG_IVK, 2n])],
+            memo: "INV-2026-00418 · grazie",
         },
     ];
 }
@@ -323,6 +330,7 @@ function seedVector(J: Jubjub, P: Poseidon, input: SeedInput, to: OwnedAddress) 
     const { pk, g_d } = keys;
     const pkD = J.packPoint(keys.pk_d);
     const ckD = J.packPoint(keys.ck_d);
+    const memo = encodeMemo(input.memo);
 
     const osk = deriveOutputSecret(ock, {
         chainId,
@@ -334,12 +342,13 @@ function seedVector(J: Jubjub, P: Poseidon, input: SeedInput, to: OwnedAddress) 
         pk,
         ck_d: ckD,
         nullifiers,
+        memo,
     });
     const rseed = seedFromSecret(osk);
     const { rcm, esk, fmdR } = expandSeed(rseed, rho);
     const epk = J.mulPointEscalar(g_d, esk);
     const clue = fmdExpectedClue(J, P, to.dkRoot, d, fmdR);
-    const plaintext = encodeNotePayload({ asset, value, rho, rseed, d });
+    const plaintext = encodeNotePayload({ asset, value, rho, rseed, d, memo });
 
     const sealed = sealOutput(J, P, {
         outgoingKey: ock,
@@ -349,6 +358,7 @@ function seedVector(J: Jubjub, P: Poseidon, input: SeedInput, to: OwnedAddress) 
         value,
         recipient: keys,
         nullifiers,
+        memo,
     });
     checkSealedOutput(J, sealed, { ivk: to.ivk, rcm, epk, clue, plaintext });
 
@@ -364,6 +374,7 @@ function seedVector(J: Jubjub, P: Poseidon, input: SeedInput, to: OwnedAddress) 
         pk_dec: dec(pk),
         ck_d_packed_hex: bytesToHex(ckD),
         nullifiers_dec: nullifiers.map(dec),
+        memo_hex: bytesToHex(memo),
         osk_preimage_hex: bytesToHex(
             concat([
                 new TextEncoder().encode(DOMAINS.osk),
@@ -378,6 +389,7 @@ function seedVector(J: Jubjub, P: Poseidon, input: SeedInput, to: OwnedAddress) 
                 ckD,
                 Uint8Array.of(nullifiers.length),
                 ...nullifiers.map((nf) => toLeBytes(nf, 32)),
+                memo,
             ]),
         ),
         osk_hex: bytesToHex(osk),
@@ -449,7 +461,7 @@ export function buildDiversifiedVectors(J: Jubjub, P: Poseidon) {
     );
 
     return {
-        version: 2,
+        version: 3,
         curve: "babyjubjub",
         hash: "poseidon",
         encoding: ENCODING,

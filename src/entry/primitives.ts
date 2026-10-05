@@ -157,6 +157,9 @@ export {
 export {
     CLUE_BITS_PREFIX_BYTES,
     clueBitsToPrefix,
+    decodeMemo,
+    encodeMemo,
+    MEMO_BYTES,
     stripClueBitsPrefix,
     withClueBitsPrefix,
 } from "../notes/codec.js";

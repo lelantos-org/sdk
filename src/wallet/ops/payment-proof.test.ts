@@ -27,6 +27,7 @@ import { type DecodedAddress, decodeAddress, encodeAddress } from "../../keys/ad
 import { addressFromViewingKey } from "../../keys/keys.js";
 import {
     clueBitsToPrefix,
+    EMPTY_MEMO,
     encodeNotePayload,
     type NotePayload,
     withClueBitsPrefix,
@@ -105,10 +106,10 @@ const readerOf = (note: PublishedNote): PaymentProofReader => ({
 });
 
 /**
- * A 30-unit transfer to the payee's address at `payeeIndex`, with a 7-unit relayer fee, as it
- * would land: second of three spends in one transaction.
+ * A 30-unit transfer to the payee's address at `payeeIndex`, with a 7-unit relayer fee and
+ * `memo` if given, as it would land: second of three spends in one transaction.
  */
-async function paid(payeeIndex = 0) {
+async function paid(payeeIndex = 0, memo?: string) {
     const P = await Poseidon.build();
     const J = await Jubjub.build();
     const { keys: payeeKeys } = freshAccount(P, J);
@@ -124,6 +125,7 @@ async function paid(payeeIndex = 0) {
         recipient: payee,
         amount: circuitAmount(30n),
         asset: ASSET,
+        memo,
     });
     const payload = made.submitted.at(-1) as SubmitTransactPayload;
     const published = publishedBy(payload);
@@ -180,7 +182,7 @@ describe("payment proof", () => {
         const proof = await createPaymentProof(ctx, target);
 
         expect(proof).toMatchObject({
-            version: 2,
+            version: 3,
             chainId: "31337",
             txHash: TX,
             commitment: result.recipientCommitment,
@@ -195,6 +197,26 @@ describe("payment proof", () => {
             asset: ASSET,
             value: 30n,
         });
+    });
+
+    it("needs the transfer's memo, and shows it to the verifier", async () => {
+        const memo = "INV-2026-00418 · grazie";
+        const { ctx, payee, reader, target } = await paid(0, memo);
+
+        const proof = await createPaymentProof(ctx, { ...target, memo });
+        await expect(verifyPaymentProof({ proof, recipient: payee, reader })).resolves.toEqual({
+            ok: true,
+            asset: ASSET,
+            value: 30n,
+            memo,
+        });
+
+        // The memo is part of what the output secret binds.
+        for (const wrong of [undefined, "INV-2026-00419 · grazie"]) {
+            await expect(createPaymentProof(ctx, { ...target, memo: wrong })).rejects.toThrow(
+                /or carried a different memo/,
+            );
+        }
     });
 
     it("holds for a payee paid at a non-default address", async () => {
@@ -383,16 +405,16 @@ describe("payment proof", () => {
         );
     });
 
-    it("refuses anything that is not a well-formed version-2 proof", async () => {
+    it("refuses anything that is not a well-formed version-3 proof", async () => {
         const { ctx, payee, reader, target } = await paid();
         const proof = await createPaymentProof(ctx, target);
         const { osk: _osk, ...noSecret } = proof;
         const { rho: _rho, ...noRho } = proof;
 
         for (const bad of [
-            { ...proof, version: 1 },
-            { ...proof, version: 3 },
-            { ...proof, version: "2" },
+            { ...proof, version: 2 },
+            { ...proof, version: 4 },
+            { ...proof, version: "3" },
             // An ephemeral secret in place of `rho` and `osk`.
             { ...noSecret, version: 1, esk: proof.osk, rho: undefined },
             noSecret,
@@ -461,7 +483,14 @@ describe("payment proof, against a dishonest sender", () => {
         const gD = diversifiedBase(J, P, recipient.d);
         const asset = over.asset ?? ASSET;
         const value = over.value ?? 30n;
-        const honest: NotePayload = { asset, value, rho, rseed, d: recipient.d };
+        const honest: NotePayload = {
+            asset,
+            value,
+            rho,
+            rseed,
+            d: recipient.d,
+            memo: EMPTY_MEMO,
+        };
         const enc = encryptNote({
             J,
             gD,
@@ -486,7 +515,7 @@ describe("payment proof, against a dishonest sender", () => {
             ciphertext: withClueBitsPrefix(clueBitsToPrefix(clue.bits, clue.gamma), enc.ciphertext),
         };
         const proof: PaymentProof = {
-            version: 2,
+            version: 3,
             chainId: CHAIN_ID.toString(),
             txHash: TX,
             commitment: cm,
@@ -517,7 +546,7 @@ describe("payment proof, against a dishonest sender", () => {
             (p) => encodeNotePayload({ ...p, value: p.value + 1n }),
             (p) => encodeNotePayload({ ...p, asset: p.asset + 1n }),
             // Authenticated, but not a note payload.
-            (p) => encodeNotePayload(p).subarray(0, 80),
+            (p) => encodeNotePayload(p).subarray(0, 96),
         ];
         for (const plaintext of cases) {
             expect(await forge({ plaintext })).toBe("commitment-mismatch");

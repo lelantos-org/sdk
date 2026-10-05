@@ -67,12 +67,10 @@ export async function buildSpend(a: SpendArgs): Promise<BuiltBundle> {
     // outputs of the spend share a rho, and hence a future nullifier.
     const sealed = a.outputs.map((o, index) =>
         sealOutput(J, P, {
+            ...o,
             outgoingKey: a.outgoingKey,
             chainId: a.chainId,
             rho: buildRho(P, firstNullifier, index),
-            asset: o.asset,
-            value: o.value,
-            recipient: o.recipient,
             nullifiers,
         }),
     );

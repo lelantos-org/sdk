@@ -39,6 +39,7 @@ export interface WireScanHit {
     cm: string;
     leafIndex: number;
     blockNumber: number;
+    memo?: string | undefined;
 }
 
 export interface ScanParams {
@@ -90,6 +91,7 @@ export function encodeHit(h: ScanHit): WireScanHit {
         cm: h.cm.toString(),
         leafIndex: h.leafIndex,
         blockNumber: h.blockNumber,
+        memo: h.memo,
     };
 }
 
@@ -103,6 +105,7 @@ export function decodeHit(w: WireScanHit): ScanHit {
         cm: BigInt(w.cm),
         leafIndex: w.leafIndex,
         blockNumber: w.blockNumber,
+        memo: w.memo,
     };
 }
 

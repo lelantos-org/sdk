@@ -5,6 +5,7 @@ import { randomBytes, randomFr } from "../../core/random.js";
 import { Jubjub } from "../../crypto/jubjub.js";
 import { Poseidon } from "../../crypto/poseidon.js";
 import type { DecodedAddress } from "../../keys/address.js";
+import { encodeMemo } from "../../notes/codec.js";
 import { universalLadder } from "../../protocol/denominations.js";
 import { freshAccount, recipientAt } from "../../test-utils/outputs.js";
 import {
@@ -284,9 +285,17 @@ describe("padSlots", () => {
                 expect(J.inSubgroup(point)).toBe(true);
             }
         }
-        // Same wire length: 2 B clue bits, 96 B plaintext, 16 B tag.
-        expect(sealedPad.aux.aux.ciphertext).toHaveLength(114);
-        expect(sealedReal.aux.aux.ciphertext).toHaveLength(114);
+        // Same wire length, memo or none: 2 B clue bits, 224 B plaintext, 16 B tag.
+        const sealedMemo = sealOutput(J, P, {
+            ...o,
+            asset: ASSET,
+            value: 5n,
+            recipient: real,
+            memo: encodeMemo("x".repeat(128)),
+        });
+        expect(sealedPad.aux.aux.ciphertext).toHaveLength(242);
+        expect(sealedReal.aux.aux.ciphertext).toHaveLength(242);
+        expect(sealedMemo.aux.aux.ciphertext).toHaveLength(242);
         expect(sealedPad.note).toMatchObject({ value: 0n, pk: pad!.recipient.pk, rho: o.rho });
     });
 });

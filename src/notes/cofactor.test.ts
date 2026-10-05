@@ -19,7 +19,7 @@ import { deriveIvk } from "../crypto/derive.js";
 import type { Point } from "../crypto/jubjub.js";
 import { Jubjub } from "../crypto/jubjub-wasm/index.js";
 import { type Field, Poseidon } from "../crypto/poseidon.js";
-import { encodeNotePayload } from "./codec.js";
+import { EMPTY_MEMO, encodeNotePayload } from "./codec.js";
 
 /** The 8-torsion subgroup, circomlibjs-packed. Orders 1, 2, 4, 4, 8, 8, 8, 8. */
 const TORSION = [
@@ -63,6 +63,7 @@ describe("cofactor-cleared trial decryption", () => {
             rho: 11n,
             rseed: new Uint8Array(32).fill(22),
             d: 0n,
+            memo: EMPTY_MEMO,
         });
         Q = J.mulPointEscalar(J.base8, esk);
     });

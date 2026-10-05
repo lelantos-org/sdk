@@ -178,7 +178,7 @@ export function finalizeSlots(
     const order = shuffled(slots, pick);
     const payeeIndex = order.findIndex((s) => s.payee);
     return {
-        outputs: order.map(({ asset, value, recipient }) => ({ asset, value, recipient })),
+        outputs: order.map(({ own: _own, payee: _payee, ...output }) => output),
         ownIndices: order.flatMap((s, i) => (s.own ? [i] : [])),
         ...(payeeIndex >= 0 ? { payeeIndex } : {}),
     };

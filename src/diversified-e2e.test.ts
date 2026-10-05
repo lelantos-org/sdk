@@ -3,7 +3,7 @@
 // `d`, `rseed`, `rho`, `epk`, the clue.
 //
 // The first property composes the primitives alone: no wallet, codec or cipher. The second goes
-// through the published forms: the address string, the 96-byte plaintext and the 114-byte wire
+// through the published forms: the address string, the 224-byte plaintext and the 242-byte wire
 // ciphertext.
 
 import fc from "fast-check";
@@ -33,6 +33,7 @@ import { addressFromViewingKey, buildViewingKey } from "./keys/keys.js";
 import {
     CLUE_BITS_PREFIX_BYTES,
     decodeNotePayload,
+    EMPTY_MEMO,
     NOTE_CIPHERTEXT_BYTES,
     NOTE_PLAINTEXT_BYTES,
 } from "./notes/codec.js";
@@ -95,6 +96,7 @@ describe("diversified address, sender to recipient", () => {
                         pk: address.pk,
                         ck_d: J.packPoint(address.ck_d),
                         nullifiers,
+                        memo: EMPTY_MEMO,
                     };
                     const osk = deriveOutputSecret(deriveOutgoingKey(senderNsk), output);
                     const rseed = seedFromSecret(osk);

@@ -22,6 +22,7 @@ function toWalletNote(s: StoredNote): WalletNote {
         ...(s.firstSeenBlock !== undefined ? { firstSeenBlock: s.firstSeenBlock } : {}),
         discoveredAt: s.discoveredAt,
         cm: branded<Hex32>(s.cm),
+        ...(s.memo !== undefined ? { memo: s.memo } : {}),
         notePayload: () => ({
             asset: branded<AssetId>(BigInt(s.asset)),
             value: branded<CircuitAmount>(BigInt(s.value)),

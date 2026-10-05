@@ -12,7 +12,7 @@ import { Jubjub } from "./crypto/jubjub-wasm/index.js";
 import { Poseidon } from "./crypto/poseidon.js";
 import { ADDRESS_HRP, decodeAddress } from "./keys/address.js";
 import { ownsAddress } from "./keys/diversified.js";
-import { decodeNotePayload } from "./notes/codec.js";
+import { decodeMemo, decodeNotePayload } from "./notes/codec.js";
 import { emptyScanStats, scanNotes } from "./sync/scan.js";
 import {
     buildDiversifiedVectors,
@@ -53,8 +53,8 @@ describe("diversified vectors", () => {
         expect(fresh.fmd.clues.some((c) => !c.detect_other)).toBe(true);
     });
 
-    it("is version 2", () => {
-        expect(fresh.version).toBe(2);
+    it("is version 3", () => {
+        expect(fresh.version).toBe(3);
     });
 
     it("every address string decodes to the address's fields and belongs to its ivk", () => {
@@ -72,7 +72,7 @@ describe("diversified vectors", () => {
         }
     });
 
-    it("every sealed output is a 96-byte plaintext in a 114-byte ciphertext its recipient scans", () => {
+    it("every sealed output is a 224-byte plaintext in a 242-byte ciphertext its recipient scans", () => {
         for (const s of fresh.seed) {
             const address = fresh.addresses[s.address_index]!;
             const note = {
@@ -83,15 +83,18 @@ describe("diversified vectors", () => {
             const [rcm, d] = [BigInt(s.rcm_dec), BigInt(address.d_dec)];
 
             const plaintext = hexToBytes(s.plaintext_hex);
-            expect(plaintext).toHaveLength(96);
+            expect(plaintext).toHaveLength(224);
+            const memoField = hexToBytes(s.memo_hex);
             expect(decodeNotePayload(plaintext)).toEqual({
                 ...note,
                 rseed: hexToBytes(s.rseed_hex),
                 d,
+                memo: memoField,
             });
+            const memo = decodeMemo(memoField);
 
             const ciphertext = hexToBytes(s.ciphertext_hex);
-            expect(ciphertext).toHaveLength(114);
+            expect(ciphertext).toHaveLength(242);
             const position = {
                 cm: buildNoteCommitment(P, { ...note, pk: BigInt(s.pk_dec), rcm }),
                 leafIndex: 3,
@@ -109,7 +112,7 @@ describe("diversified vectors", () => {
                 // Opens, and is dropped as unspendable.
                 expect(stats).toMatchObject({ scanned: 1, zeroValue: 1, hits: 0 });
             } else {
-                expect(hits).toEqual([{ ...note, rcm, d, ...position }]);
+                expect(hits).toEqual([{ ...note, rcm, d, ...position, memo }]);
             }
 
             // Another account of the file does not open it.
@@ -120,5 +123,8 @@ describe("diversified vectors", () => {
         }
         expect(fresh.seed.some((s) => s.value_dec === "0")).toBe(true);
         expect(fresh.seed.some((s) => s.value_dec !== "0")).toBe(true);
+        // One valued output carries a memo with a multi-byte character; the rest carry none.
+        const memos = fresh.seed.map((s) => decodeMemo(hexToBytes(s.memo_hex)));
+        expect(memos.filter((m) => m !== undefined)).toEqual(["INV-2026-00418 · grazie"]);
     });
 });

@@ -19,6 +19,7 @@ import { fmdDiversifiedFlagKey } from "../fmd/diversified.js";
 import { FMD_DEFAULT_GAMMA, type FmdFlagKey } from "../fmd/keys.js";
 import { diversifierToBytes } from "../keys/diversifier.js";
 import { buildOutputAux, type OutputAux, type OutputAuxWithWitness } from "../notes/aux.js";
+import { EMPTY_MEMO } from "../notes/codec.js";
 import type { Note } from "../notes/note.js";
 import { deriveOutputSecret, expandSeed, seedFromSecret } from "../notes/seed.js";
 import { auxDigest } from "../protocol/abi-hash.js";
@@ -52,6 +53,8 @@ export interface OutputSpec {
     asset: bigint;
     value: bigint;
     recipient: OutputRecipient;
+    /** The memo field the output's plaintext carries (`encodeMemo`). Omit for none. */
+    memo?: Uint8Array | undefined;
 }
 
 /** @internal */
@@ -177,8 +180,8 @@ function addressKeysFor(J: Jubjub, P: Poseidon, recipient: OutputRecipient): Add
     return keys;
 }
 
-/** An output as {@link sealOutput} takes it. */
-type SealArgs = Parameters<typeof sealOutput>[2];
+/** An output as {@link sealOutput} takes it, with its memo field resolved. */
+type SealArgs = Parameters<typeof sealOutput>[2] & { memo: Uint8Array };
 
 /**
  * `osk` of an output: the secret all its randomness derives from. The one binding of an output's
@@ -199,6 +202,7 @@ export function outputSecret(J: Jubjub, o: SealArgs): Uint8Array {
         pk: recipient.pk,
         ck_d: J.packPoint(recipient.ck_d),
         nullifiers: o.nullifiers,
+        memo: o.memo,
     });
 }
 
@@ -206,18 +210,19 @@ export function outputSecret(J: Jubjub, o: SealArgs): Uint8Array {
  * Seal one output: its note, and the clue, ephemeral key and ciphertext published with it.
  *
  * No random value is drawn. `osk` ({@link outputSecret}) binds the sender's outgoing key, the
- * chain, the note's fields, the recipient's whole address and the spend's nullifiers; the header
- * of `notes/seed.ts` defines its preimage and how `rseed`, `rcm`, `esk` and `fmdR` follow from it.
- * Two calls therefore share an `esk` only when every one of those is equal. `rho` must be unique
- * per output: it is the note's nullifier seed.
+ * chain, the note's fields, the recipient's whole address, the spend's nullifiers and the memo;
+ * the header of `notes/seed.ts` defines its preimage and how `rseed`, `rcm`, `esk` and `fmdR`
+ * follow from it. Two calls therefore share an `esk` only when every one of those is equal. `rho`
+ * must be unique per output: it is the note's nullifier seed.
  *
  * ECDH and the clue run on the recipient's base `g_d = diversifiedBase(d)`. The clue has
  * `FMD_DEFAULT_GAMMA` bits, the width a recipient checks. A pad goes through this function like a
  * paying output, to an address drawn for it.
  *
- * @throws {InvalidArgumentError} when `outgoingKey` is not 32 bytes, `rho`, `recipient.pk` or a
- * nullifier is not a canonical field element, `asset` or `value` is not a uint64, `recipient.d` is
- * not in `[0, 2^128)`, or `recipient.pk_d` is not in the prime-order subgroup.
+ * @throws {InvalidArgumentError} when `outgoingKey` is not 32 bytes, `memo` is not 128 bytes,
+ * `rho`, `recipient.pk` or a nullifier is not a canonical field element, `asset` or `value` is not
+ * a uint64, `recipient.d` is not in `[0, 2^128)`, or `recipient.pk_d` is not in the prime-order
+ * subgroup.
  */
 export function sealOutput(
     J: Jubjub,
@@ -235,10 +240,12 @@ export function sealOutput(
          * Empty for a deposit.
          */
         nullifiers: readonly Field[];
+        /** The memo field of the plaintext (`encodeMemo`). Omit for none. */
+        memo?: Uint8Array | undefined;
     },
 ): { note: Note; aux: OutputAuxWithWitness } {
-    const { rho, asset, value, recipient } = o;
-    const rseed = seedFromSecret(outputSecret(J, o));
+    const { rho, asset, value, recipient, memo = EMPTY_MEMO } = o;
+    const rseed = seedFromSecret(outputSecret(J, { ...o, memo }));
     const { rcm, esk, fmdR } = expandSeed(rseed, rho);
     const { gD, flagKey } = addressKeysFor(J, P, recipient);
     const aux = buildOutputAux({
@@ -247,7 +254,7 @@ export function sealOutput(
         recipientFlagKey: flagKey,
         recipientPkD: recipient.pk_d,
         gD,
-        note: { asset, value, rho, rseed, d: recipient.d },
+        note: { asset, value, rho, rseed, d: recipient.d, memo },
         esk,
         fmdR,
     });

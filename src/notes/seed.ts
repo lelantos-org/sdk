@@ -1,7 +1,7 @@
 // Per-output randomness derived from one 32-byte seed.
 //
 //   osk   = blake2b-256 of, in order:
-//             "lelantos.note.osk.v2"    20 B   domain
+//             "lelantos.note.osk.v3"    20 B   domain
 //             ock                       32 B   sender's outgoing key
 //             LE32(chainId)             32 B
 //             LE32(rho)                 32 B
@@ -13,6 +13,7 @@
 //             pack(ck_d)                32 B   recipient's FMD clue key
 //             LE1(n)                     1 B   nullifier count
 //             LE32(nullifier_i)       32·n B   for i = 0 … n-1
+//             memo                     128 B   the plaintext's memo field
 //   rseed = blake2b-256( "lelantos.note.rseed.v2" || osk )
 //   rcm   =     LE( blake2b-512( "lelantos.note.rcm.v2"  || rseed || LE32(rho) ) ) mod BN254_FR
 //   esk   = 1 + LE( blake2b-512( "lelantos.note.esk.v2"  || rseed || LE32(rho) ) ) mod (q - 1)
@@ -28,12 +29,14 @@
 // (`keys/address.ts`), so `osk` binds the whole address: two addresses that differ in any field
 // share no output randomness. The nullifiers are the public ones of the spend that made the
 // output, `n` of them, none for a deposit; binding them means a rebuilt spend whose input
-// nullifiers differ shares no output randomness with the earlier build.
+// nullifiers differ shares no output randomness with the earlier build. The memo is bound for the
+// same reason: the encryption key and nonce follow from `esk` alone (`./encrypt.ts`), so two
+// builds that differ only in their memo must not share one.
 //
-// The sender recomputes `osk` from `ock`, the note's fields, the recipient's address and the
-// spend's nullifiers. The recipient receives `rseed` and `rho`, and `expandSeed` gives both sides
-// the same `rcm`, `esk` and `fmdR`. `osk` to `rseed` is one-way, so a recipient cannot recover
-// `osk`.
+// The sender recomputes `osk` from `ock`, the note's fields, the recipient's address, the spend's
+// nullifiers and the memo. The recipient receives `rseed` and `rho`, and `expandSeed` gives both
+// sides the same `rcm`, `esk` and `fmdR`. `osk` to `rseed` is one-way, so a recipient cannot
+// recover `osk`.
 //
 // `esk` and `fmdR` are in `[1, q - 1]`; `rcm` and `depositRho` are in `[0, BN254_FR)`. Each
 // reduces 512 bits, so the bias is below `2^-256`.
@@ -50,10 +53,11 @@ import {
 } from "../core/field.js";
 import { DIVERSIFIER_BYTES } from "../crypto/diversified-base.js";
 import { PACKED_POINT_BYTES } from "../crypto/jubjub-wasm/point-codec.js";
+import { MEMO_BYTES } from "./codec.js";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
-const OSK_DOMAIN = utf8("lelantos.note.osk.v2");
+const OSK_DOMAIN = utf8("lelantos.note.osk.v3");
 const RSEED_DOMAIN = utf8("lelantos.note.rseed.v2");
 const RCM_DOMAIN = utf8("lelantos.note.rcm.v2");
 const ESK_DOMAIN = utf8("lelantos.note.esk.v2");
@@ -80,7 +84,7 @@ function wide(parts: Uint8Array[]): bigint {
 
 /**
  * What an output secret binds: the chain, every field of the note the output commits to, the
- * recipient's full address, and the nullifiers of the spend that made it.
+ * recipient's full address, the nullifiers of the spend that made it, and its memo.
  */
 export interface OutputSecretInputs {
     chainId: bigint;
@@ -102,6 +106,8 @@ export interface OutputSecretInputs {
      * Empty for a deposit, whose `rho` comes from a fresh nonce.
      */
     nullifiers: readonly Field[];
+    /** The memo field of the output's plaintext (`encodeMemo`): 128 bytes. */
+    memo: Uint8Array;
 }
 
 /**
@@ -111,8 +117,9 @@ export interface OutputSecretInputs {
  * hashed as given: whether they decode to curve points is not checked.
  *
  * @throws {InvalidArgumentError} when `ock` is not 32 bytes, `d` is not 16 bytes, `pk_d` or `ck_d`
- * is not 32 bytes, `rho`, `pk` or a nullifier is not a canonical field element, `asset` or `value`
- * is not a uint64, `chainId` is not a uint256, or there are more than 255 nullifiers.
+ * is not 32 bytes, `memo` is not 128 bytes, `rho`, `pk` or a nullifier is not a canonical field
+ * element, `asset` or `value` is not a uint64, `chainId` is not a uint256, or there are more than
+ * 255 nullifiers.
  */
 export function deriveOutputSecret(ock: Uint8Array, note: OutputSecretInputs): Uint8Array {
     assertByteLength(ock, SEED_BYTES, "ock");
@@ -124,6 +131,7 @@ export function deriveOutputSecret(ock: Uint8Array, note: OutputSecretInputs): U
     assertByteLength(note.pk_d, PACKED_POINT_BYTES, "pk_d");
     assertField(note.pk, "pk");
     assertByteLength(note.ck_d, PACKED_POINT_BYTES, "ck_d");
+    assertByteLength(note.memo, MEMO_BYTES, "memo");
     const { nullifiers } = note;
     assertRange(
         BigInt(nullifiers.length),
@@ -147,6 +155,7 @@ export function deriveOutputSecret(ock: Uint8Array, note: OutputSecretInputs): U
         // The count delimits the list.
         Uint8Array.of(nullifiers.length),
         ...nullifiers.map((nf) => toLeBytes(nf)),
+        note.memo,
     ]);
 }
 

@@ -101,6 +101,7 @@ export function addHits(
             spent: false,
             discoveredAt: new Date().toISOString(),
             firstSeenBlock: h.blockNumber,
+            memo: h.memo,
         });
     }
     file.notes.push(...added);

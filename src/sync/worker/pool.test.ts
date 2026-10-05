@@ -186,7 +186,7 @@ describe("WorkerPoolScanner dispatch", () => {
 const D = (1n << 128n) - 5n;
 
 const scanInput = (): ScanInput => ({
-    ciphertext: Uint8Array.from({ length: 114 }, (_, i) => i),
+    ciphertext: Uint8Array.from({ length: 242 }, (_, i) => i),
     epk: new Uint8Array(32).fill(0xe1),
     clueR: Uint8Array.from({ length: 32 }, (_, i) => 0xc0 + i),
     cm: (1n << 250n) + 7n,

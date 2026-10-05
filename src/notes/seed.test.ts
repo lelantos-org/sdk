@@ -29,6 +29,7 @@ const note: OutputSecretInputs = {
     pk: 123_456_789n,
     ck_d: Uint8Array.from({ length: 32 }, (_, i) => 0x80 + i),
     nullifiers: [0xa11n, 0xb22n],
+    memo: Uint8Array.from({ length: 128 }, (_, i) => (i < 5 ? 0x61 + i : 0)),
 };
 
 /** `bytes` with the lowest bit of byte `at` flipped. */
@@ -58,9 +59,9 @@ describe("deriveOutputSecret", () => {
     });
 
     // An independent concatenation, so the field order and every width are pinned.
-    it("hashes ock, chainId, rho, asset, value, d, pk_d, pk, ck_d and the counted nullifiers in that order", () => {
+    it("hashes ock, chainId, rho, asset, value, d, pk_d, pk, ck_d, the counted nullifiers and the memo in that order", () => {
         const preimage = concat(
-            utf8("lelantos.note.osk.v2"),
+            utf8("lelantos.note.osk.v3"),
             ock,
             toLeBytes(note.chainId, 32),
             toLeBytes(note.rho, 32),
@@ -76,14 +77,15 @@ describe("deriveOutputSecret", () => {
             Uint8Array.of(2),
             toLeBytes(0xa11n, 32),
             toLeBytes(0xb22n, 32),
+            note.memo,
         );
         expect(withNullifiers).toHaveLength(
-            20 + 32 + 32 + 32 + 8 + 8 + (16 + 32 + 32 + 32) + 1 + 2 * 32,
+            20 + 32 + 32 + 32 + 8 + 8 + (16 + 32 + 32 + 32) + 1 + 2 * 32 + 128,
         );
         expect(deriveOutputSecret(ock, note)).toEqual(blake2b(withNullifiers, { dkLen: 32 }));
         // An empty list hashes its count, zero.
         expect(deriveOutputSecret(ock, { ...note, nullifiers: [] })).toEqual(
-            blake2b(concat(preimage, Uint8Array.of(0)), { dkLen: 32 }),
+            blake2b(concat(preimage, Uint8Array.of(0), note.memo), { dkLen: 32 }),
         );
     });
 
@@ -139,6 +141,9 @@ describe("deriveOutputSecret", () => {
             deriveOutputSecret(ock, { ...note, pk: note.pk + 1n }),
             deriveOutputSecret(ock, { ...note, ck_d: flipped(note.ck_d, 0) }),
             deriveOutputSecret(ock, { ...note, ck_d: flipped(note.ck_d, 31) }),
+            deriveOutputSecret(ock, { ...note, memo: flipped(note.memo, 0) }),
+            deriveOutputSecret(ock, { ...note, memo: flipped(note.memo, 127) }),
+            deriveOutputSecret(ock, { ...note, memo: new Uint8Array(128) }),
             // asset and value are adjacent 8-byte fields: swapping them must not collide.
             deriveOutputSecret(ock, { ...note, asset: note.value, value: note.asset }),
             // Likewise the two 32-byte points.
@@ -180,6 +185,11 @@ describe("deriveOutputSecret", () => {
             );
             expect(() => deriveOutputSecret(ock, { ...note, ck_d: bad })).toThrow(
                 /ck_d must be 32 bytes/,
+            );
+        }
+        for (const bad of [new Uint8Array(0), new Uint8Array(127), new Uint8Array(129)]) {
+            expect(() => deriveOutputSecret(ock, { ...note, memo: bad })).toThrow(
+                /memo must be 128 bytes/,
             );
         }
         expect(() => deriveOutputSecret(ock, { ...note, rho: BN254_FR })).toThrow(/rho must be/);

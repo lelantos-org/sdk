@@ -19,6 +19,7 @@ import { buildOutputAux, clueSubgroupWitness } from "./aux.js";
 import {
     CLUE_BITS_PREFIX_BYTES,
     decodeNotePayload,
+    encodeMemo,
     NOTE_PLAINTEXT_BYTES,
     type NotePayload,
     stripClueBitsPrefix,
@@ -70,6 +71,7 @@ describe("buildOutputAux", () => {
             rho: 12345n,
             rseed: new Uint8Array(32).fill(index + 1),
             d,
+            memo: encodeMemo(`memo ${index}`),
         };
         const seed = expandSeed(note.rseed, note.rho);
         const built = buildOutputAux({
@@ -109,7 +111,7 @@ describe("buildOutputAux", () => {
         }
     });
 
-    it("carries the 96-byte plaintext, opened by the recipient's ivk", () => {
+    it("carries the 224-byte plaintext, opened by the recipient's ivk", () => {
         const { note, aux } = output(5);
         const { body } = stripClueBitsPrefix(aux.ciphertext);
         const plain = decryptNote({
@@ -120,7 +122,7 @@ describe("buildOutputAux", () => {
 
         // Prefix, plaintext and the 16-byte Poly1305 tag.
         expect(aux.ciphertext).toHaveLength(CLUE_BITS_PREFIX_BYTES + NOTE_PLAINTEXT_BYTES + 16);
-        expect(aux.ciphertext).toHaveLength(114);
+        expect(aux.ciphertext).toHaveLength(242);
         expect(plain && decodeNotePayload(plain)).toEqual(note);
     });
 });

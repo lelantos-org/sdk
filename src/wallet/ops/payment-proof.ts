@@ -1,10 +1,10 @@
 // A proof of one payment this wallet made. Backs `wallet.paymentProof`.
 //
 // The proof reveals the output's `rho` and output secret. The secret is recomputed from the
-// wallet's outgoing key, what the output paid (recipient, asset, amount) and the nullifiers of
-// its spend; `rho` from the first of those nullifiers and the output's slot. The nullifiers and
-// the slot are read from the transaction's logs. See `bundle/payment-proof.ts` for what the proof
-// establishes.
+// wallet's outgoing key, what the output paid (recipient, asset, amount), its memo and the
+// nullifiers of its spend; `rho` from the first of those nullifiers and the output's slot. The
+// nullifiers and the slot are read from the transaction's logs. See `bundle/payment-proof.ts` for
+// what the proof establishes.
 
 import { buildPaymentProof, type PaymentProof } from "../../bundle/payment-proof.js";
 import { locateOutput } from "../../chain/operation.js";
@@ -18,12 +18,13 @@ import {
 import { buildRho } from "../../crypto/index.js";
 import { UnsupportedOperationError } from "../../errors/chain.js";
 import { InvalidArgumentError } from "../../errors/config.js";
+import { encodeMemo } from "../../notes/codec.js";
 import type { WalletContext } from "../context.js";
 import { shieldedRecipient } from "../tx/recipient.js";
 
 /**
  * Which output to prove, and what it paid: a transfer result's `txHash`, `recipientCommitment`,
- * `recipient` and `amount`.
+ * `recipient` and `amount`, and the memo the transfer was given.
  */
 export interface PaymentProofTarget {
     txHash: string;
@@ -35,12 +36,14 @@ export interface PaymentProofTarget {
     asset: AssetIdLike;
     /** The output's value, in circuit units. */
     amount: CircuitAmountLike;
+    /** The transfer's `memo`, exactly as given. Omit when it had none. */
+    memo?: string | undefined;
 }
 
 /**
  * @throws {InvalidArgumentError} for a malformed target, a commitment the pool did not publish in
  * a spend of that transaction (including a transaction the node holds no receipt for), or an
- * output this wallet's key and the stated recipient, asset and amount do not reproduce.
+ * output this wallet's key and the stated recipient, asset, amount and memo do not reproduce.
  * @throws {UnsupportedOperationError} when the chain layer cannot read a transaction's logs.
  */
 export async function createPaymentProof(
@@ -52,6 +55,7 @@ export async function createPaymentProof(
     const { decoded: recipient } = shieldedRecipient(ctx.J, target.recipient, "paymentProof");
     const asset = assetId(bigintArg(target.asset, "asset"));
     const value = circuitAmount(bigintArg(target.amount, "amount"));
+    const memo = encodeMemo(target.memo);
 
     const { chain, chainId } = ctx.cfg;
     if (!chain.fetchNotePayload || !chain.txReceiptLogs) {
@@ -94,6 +98,7 @@ export async function createPaymentProof(
             value,
             recipient,
             nullifiers,
+            memo,
         },
     });
 }
