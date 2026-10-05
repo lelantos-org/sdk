@@ -27,7 +27,7 @@ import { InsufficientCoverError } from "../../errors/funds.js";
 import { TreeOutOfSyncError } from "../../errors/network.js";
 import type { RelayerSubmitResponse } from "../../protocol/responses.js";
 import type { SpendKind } from "../../protocol/transact.js";
-import type { EstimateKind } from "../../services/relayer/submitter.js";
+import type { EstimateKind, EstimateOptions } from "../../services/relayer/submitter.js";
 import type { AssetInfo } from "../assets/info.js";
 import type { WalletContext } from "../context.js";
 import type { StoredNote } from "../notes/note-store.js";
@@ -59,7 +59,7 @@ import { submitSpend, withOperation } from "./steps.js";
 export type SpendRun = OpRun<SpendPhase>;
 
 /** A spend's options; `onPhase` and `opId` reach it through the {@link SpendRun}. */
-type SpendRunOptions = Omit<SpendOptions, "onPhase" | "opId">;
+export type SpendRunOptions = Omit<SpendOptions, "onPhase" | "opId">;
 
 /** A run with a fresh id that reports nowhere, for a spend driven outside the wallet object. */
 export function detachedRun(op: string): SpendRun {
@@ -70,6 +70,8 @@ export function detachedRun(op: string): SpendRun {
 interface SpendPlan {
     /** The relayer estimate the fee is quoted under. */
     readonly feeKind: EstimateKind;
+    /** What that estimate depends on besides its kind (a generic execution's `minGas`). */
+    readonly feeEstimate?: EstimateOptions | undefined;
     /** The asset the spend draws from its notes; change is split onto its ladder. */
     readonly asset: AssetInfo;
     /** Value to cover from `asset`, excluding a same-asset relayer fee. */
@@ -151,7 +153,13 @@ export async function runSpend<P extends SpendPlan, R extends SpendResult>(
     run.phase("preparing");
     const plan = await spec.plan(ctx);
     assertBeforeDeadline(deadline);
-    const { feeAsset, fee } = await resolveSpendFee(ctx, plan.feeKind, plan.asset, opts.feeAsset);
+    const { feeAsset, fee } = await resolveSpendFee(
+        ctx,
+        plan.feeKind,
+        plan.asset,
+        opts.feeAsset,
+        plan.feeEstimate,
+    );
     assertWithinMaxFee(opts.maxFee, plan.feeKind, feeAsset, fee);
     signal?.throwIfAborted();
 

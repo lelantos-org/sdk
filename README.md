@@ -1,12 +1,13 @@
 # Lelantos SDK
 
-Client SDK for the Lelantos MASP: shielded deposits, transfers, withdrawals and swaps, note sync,
-and balances.
+Client SDK for the Lelantos MASP: shielded deposits, transfers, withdrawals, swaps and handle
+registration, note sync, and balances.
 
 `connect()` returns a `WalletApi`: a frozen object of bound methods (`deposit`, `transfer`,
-`withdraw`, `quoteSwap` / `swap`, `sync`, `balance`, `state` / `subscribe`, …). That, the amount
-helpers and the typed errors are the root entry, and they are all most applications import. Every
-other name has exactly one home on a subpath (see [Subpaths](#subpaths)).
+`withdraw`, `quoteSwap` / `swap`, `registerName`, `sync`, `balance`, `state` / `subscribe`, …).
+That, the amount helpers and the typed errors are the root entry, and they are all most
+applications import. Every other name has exactly one home on a subpath (see
+[Subpaths](#subpaths)).
 
 Runtime requirements: Node 24+, modern browsers, or Deno. The SDK uses Web Crypto and `fetch`; it
 contains no `node:*` imports in browser-reachable code.
@@ -101,15 +102,15 @@ One home per name: `check:api` fails if a name is published from two subpaths.
 | `@lelantos-org/sdk` | `connect`, `WalletApi` and its options/quotes/results, amounts and brands, `NETWORKS`, logging, `configureWasm`, key helpers (`generateMnemonic`, `deriveNskFromSigner`, `deriveNskFromPasskey`, viewing-key and full-viewing-key codecs), every error class and `isWalletError` | semver |
 | `@lelantos-org/sdk/watch` | `connectWatch` (returns `ReadOnlyWalletApi`, exported from the root) | semver |
 | `@lelantos-org/sdk/x402` | x402 payers (`x402`, `shieldedExact`, `unshieldedExact`, budgets) | semver |
-| `@lelantos-org/sdk/advanced` | `createWallet(KeySource, WalletConfig)`, `ChainAdapter` / `ChainReader` ports and the viem adapter, signers, `Submitter` / `HttpRelayerSubmitter`, note stores and sources, tree/nullifier persistence, coin selectors, scanners, `createWatchWallet` | semver, integrator tier |
+| `@lelantos-org/sdk/advanced` | `createWallet(KeySource, WalletConfig)`, `ChainAdapter` / `ChainReader` ports and the viem adapter, signers, `Submitter` / `HttpRelayerSubmitter`, note stores and sources, tree/nullifier persistence, coin selectors, scanners, `createWatchWallet`, handle registrar reads (`readNameRecord`) | semver, integrator tier |
 | `@lelantos-org/sdk/prover` | `Prover`, `WorkerProver`, `WasmProver`, `SnarkjsProver`, artifact resolution and caching | semver, integrator tier |
-| `@lelantos-org/sdk/protocol` | fees (`depositTotals`, `withdrawNet`, `grossForNet`), denominations, deposit pulls, units (`RAY`, `toCircuitUnits`), swap sizing, circuit shapes, relayer wire types, bundle builders, Permit2 signing | semver, integrator tier |
+| `@lelantos-org/sdk/protocol` | fees (`depositTotals`, `withdrawNet`, `grossForNet`), denominations, deposit pulls, units (`RAY`, `toCircuitUnits`), swap sizing, handle parsing (`parseHandle`), circuit shapes, relayer wire types, bundle builders, Permit2 signing | semver, integrator tier |
 | `@lelantos-org/sdk/primitives` | hex/bytes/field/randomness, Poseidon, Jubjub, keys, diversifiers and addresses, note encryption and output-secret derivation, FMD | semver, integrator tier |
 | `@lelantos-org/sdk/services` | `RelayerClient`, `DepositStream`, `FmdClient`, `fetchSwapQuote`, the HTTP client | semver, integrator tier |
 | `@lelantos-org/sdk/workers/prover` | prover worker bootstrap (`new Worker(new URL(…))`) | semver |
 | `@lelantos-org/sdk/workers/scanner` | scanner worker bootstrap | semver |
 | `@lelantos-org/sdk/wasm/{prover,jubjub,poseidon}[/wasm]` | raw wasm-pack modules for bundler setups | semver |
-| `@lelantos-org/sdk/internal` | `walletInternals`, circuit internals, stored-note codec, sync engine pieces, test hooks | **unstable** |
+| `@lelantos-org/sdk/internal` | `walletInternals`, `genericCall`, circuit internals, stored-note codec, sync engine pieces, test hooks | **unstable** |
 
 Guides for what this README leaves out: the bech32m
 [address format](https://docs.lelantos.xyz/guide/addresses),

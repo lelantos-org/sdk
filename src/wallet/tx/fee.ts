@@ -17,10 +17,11 @@ import { assetId, branded } from "../../core/brand.js";
 import { InvalidArgumentError } from "../../errors/config.js";
 import { FeeAboveLimitError, type FeeQuoteKind } from "../../errors/funds.js";
 import type { DecodedAddress } from "../../keys/address.js";
-import type { EstimateKind } from "../../services/relayer/submitter.js";
+import type { EstimateKind, EstimateOptions } from "../../services/relayer/submitter.js";
 import { type Amount, chargedMoney, resolveAmount, shieldedMoney } from "../assets/amount.js";
 import type { AssetRef } from "../assets/asset-ref.js";
 import type { AssetInfo } from "../assets/info.js";
+import { REGISTER_NAME_MIN_GAS } from "../constants.js";
 import type { WalletContext } from "../context.js";
 import { relayerEstimate } from "../relayer-info.js";
 import type { FeeKind } from "../types/quotes.js";
@@ -43,6 +44,8 @@ export interface ResolvedFee {
 
 interface ResolveFeeArgs {
     kind: EstimateKind;
+    /** What the quote depends on besides `kind` (a generic execution's `minGas`). */
+    estimate?: EstimateOptions | undefined;
     /** The asset the spend is moving. */
     spendAsset: AssetId;
     /** Asset to pay the fee in. Defaults to `spendAsset`. */
@@ -62,7 +65,7 @@ export async function resolveFee(
     ctx: Pick<WalletContext, "J" | "cfg">,
     args: ResolveFeeArgs,
 ): Promise<ResolvedFee | null> {
-    const estimate = await relayerEstimate(ctx, args.kind);
+    const estimate = await relayerEstimate(ctx, args.kind, args.estimate);
     if (!estimate) return null;
 
     const asset = args.feeAsset ?? args.spendAsset;
@@ -138,9 +141,15 @@ export async function resolveSpendFee(
     kind: EstimateKind,
     asset: AssetInfo,
     feeRef: AssetRef | undefined,
+    estimate?: EstimateOptions,
 ): Promise<{ feeAsset: AssetInfo; fee: ResolvedFee | null }> {
     const feeAsset = feeRef === undefined ? asset : await ctx.assets.resolveVerified(feeRef);
-    const fee = await resolveFee(ctx, { kind, spendAsset: asset.id, feeAsset: feeAsset.id });
+    const fee = await resolveFee(ctx, {
+        kind,
+        spendAsset: asset.id,
+        feeAsset: feeAsset.id,
+        estimate,
+    });
     return { feeAsset, fee };
 }
 
@@ -176,13 +185,32 @@ export function feeSlots(
     ];
 }
 
-/** The relayer estimate for `kind`: a native withdrawal is priced on its own. */
-export function estimateKindOf(kind: unknown, op: string, native?: boolean): EstimateKind {
-    if (kind !== "transfer" && kind !== "withdraw" && kind !== "swap" && kind !== "deposit") {
-        throw new InvalidArgumentError(
-            `${op}: kind must be "transfer", "withdraw", "swap" or "deposit"`,
-            { argument: "kind" },
-        );
+/** The relayer estimate a fee is quoted under, with what it depends on besides its kind. */
+export interface FeeEstimate {
+    kind: EstimateKind;
+    options?: EstimateOptions | undefined;
+}
+
+/**
+ * The estimate behind a `FeeKind`: a native withdrawal is priced on its own, and a handle
+ * registration as a generic execution of its call-leg gas.
+ *
+ * @throws {InvalidArgumentError} when `kind` is not a `FeeKind`. `op` prefixes the message.
+ */
+export function feeEstimateOf(kind: unknown, op: string, native?: boolean): FeeEstimate {
+    switch (kind) {
+        case "registerName":
+            return { kind: "generic", options: { minGas: REGISTER_NAME_MIN_GAS } };
+        case "withdraw":
+            return { kind: native ? "withdrawNative" : "withdraw" };
+        case "transfer":
+        case "swap":
+        case "deposit":
+            return { kind: kind satisfies FeeKind };
+        default:
+            throw new InvalidArgumentError(
+                `${op}: kind must be "transfer", "withdraw", "swap", "deposit" or "registerName"`,
+                { argument: "kind" },
+            );
     }
-    return kind === "withdraw" && native ? "withdrawNative" : (kind satisfies FeeKind);
 }

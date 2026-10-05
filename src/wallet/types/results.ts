@@ -178,8 +178,45 @@ export interface SwapResult extends ResultBase<"swap"> {
     change: CircuitAmount;
 }
 
+/**
+ * A handle registration the relayer landed. Landing is not registering: the calls may have failed
+ * (the label was taken first, the registrar's fee rose), in which case the input came back as the
+ * refund note and only the relayer's and the pool's fees were spent. `registered` says which.
+ */
+export interface RegisterNameResult extends ResultBase<"registerName"> {
+    /** The label, case-folded. */
+    label: string;
+    /** The address published under it: the account's at `PUBLISHED_DIVERSIFIER_INDEX`. */
+    address: ShieldedAddress;
+    /** The handle's controller: the address of the account's `nameControllerKey()`. */
+    controller: EvmAddress;
+    /** What the registrar charged, in base units of `asset`; `null` where registration is free. */
+    registrationFee: Money | null;
+    /**
+     * Whether this transaction registered the handle, read from its receipt. `false`: the calls
+     * failed and the input was refunded. `undefined`: the receipt could not be read; look the
+     * handle up, or see which of the two commitments arrives.
+     */
+    registered: boolean | undefined;
+    /** Commitment of the change note, re-shielded if the registration landed. */
+    changeCommitment: Hex32;
+    changeCredit: Money;
+    /** Commitment of the refund note. Exactly one of the two lands. */
+    refundCommitment: Hex32;
+    refundCredit: Money;
+    /** Unix seconds after which the wrapper refunds instead of registering. */
+    deadline: bigint;
+    spent: string[];
+    change: CircuitAmount;
+}
+
 /** Every shielded operation's result. Switch on `kind`. */
-export type TransactionResult = DepositResult | TransferResult | WithdrawResult | SwapResult;
+export type TransactionResult =
+    | DepositResult
+    | TransferResult
+    | WithdrawResult
+    | SwapResult
+    | RegisterNameResult;
 
 /** What `cancelDeposit` refunded, from the pool's `DepositCanceled` log. */
 export interface CancelDepositResult {

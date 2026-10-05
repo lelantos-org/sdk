@@ -89,6 +89,15 @@ export {
     type WithdrawNetArgs,
     withdrawNet,
 } from "../protocol/fees.js";
+export {
+    formatHandle,
+    isNameLabel,
+    NAME_LABEL_MAX_LENGTH,
+    NAME_LABEL_MIN_LENGTH,
+    NAME_TEXT_KEY,
+    type ParsedHandle,
+    parseHandle,
+} from "../protocol/names.js";
 export type {
     ChainInfo,
     ChainsResponse,

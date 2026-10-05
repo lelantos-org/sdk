@@ -3,6 +3,7 @@ import type { EstimateResponse } from "../../protocol/responses.js";
 import { estimateOf, freshAddress } from "../../test-utils/estimate.js";
 import { storedNote } from "../../test-utils/wallet.js";
 import type { AssetInfo } from "../assets/index.js";
+import { REGISTER_NAME_MIN_GAS } from "../constants.js";
 import { quoteFee } from "./fee-quote.js";
 
 const WETH = {
@@ -57,6 +58,38 @@ const RELAYER = await freshAddress();
 const estimate = (amounts: Record<string, bigint>) => estimateOf(RELAYER, amounts);
 
 describe("quoteFee", () => {
+    it("prices a handle registration as a generic execution of its call-leg gas", async () => {
+        const asked: unknown[][] = [];
+        const c = ctx({ estimate: estimate({ "2": 40n }), balances: { "2": 100n } });
+        (c.cfg as { submitter: unknown }).submitter = {
+            estimate: async (...args: unknown[]) => {
+                asked.push(args);
+                return estimate({ "2": 40n });
+            },
+        };
+
+        const quote = await quoteFee(c, "registerName");
+
+        expect(asked).toEqual([[31337n, "generic", { minGas: REGISTER_NAME_MIN_GAS }]]);
+        expect(quote.kind).toBe("registerName");
+        expect(quote.options.map((o) => [o.asset.symbol, o.amount, o.affordable])).toEqual([
+            ["USDC", 40n, true],
+        ]);
+    });
+
+    it("sends no gas figure with any other kind", async () => {
+        const asked: unknown[][] = [];
+        const c = ctx({ estimate: estimate({}) });
+        (c.cfg as { submitter: unknown }).submitter = {
+            estimate: async (...args: unknown[]) => {
+                asked.push(args);
+                return estimate({});
+            },
+        };
+        await quoteFee(c, "transfer");
+        expect(asked).toEqual([[31337n, "transfer", undefined]]);
+    });
+
     it("reports what each accepted asset costs and whether it is affordable", async () => {
         const c = ctx({
             estimate: estimate({ "1": 10n, "2": 25n }),

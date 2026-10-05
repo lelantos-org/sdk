@@ -11,6 +11,7 @@
 import type { PaymentProof } from "../bundle/payment-proof.js";
 import type { ChainReader } from "../chain/port.js";
 import type { Hex32, ShieldedAddress, ViewingKeyString } from "../core/brand.js";
+import type { NameControllerKey } from "../keys/name-controller.js";
 import type { CircuitShape } from "../protocol/shape.js";
 import type { AssetRef, OutAmount } from "./assets/amount.js";
 import type { AssetInfo } from "./assets/info.js";
@@ -26,6 +27,7 @@ import type {
     NotesFilter,
     OpOptions,
     QuoteSwapOptions,
+    RegisterNameOptions,
     SelectionOptions,
     SpendPhase,
     SwapOptions,
@@ -37,6 +39,7 @@ import type {
     CancelDepositResult,
     DepositEscrow,
     DepositResult,
+    RegisterNameResult,
     SwapResult,
     TransferResult,
     WalletNote,
@@ -97,6 +100,11 @@ export interface WalletCapabilities {
      * still rejects `quoteSwap` with `UNSUPPORTED_OPERATION`.
      */
     readonly swap: boolean;
+    /**
+     * `prove`, a submitter that relays generic executions, a `LelantosNameRegistrar` address and a
+     * chain layer that reads it. Needs no EOA.
+     */
+    readonly registerName: boolean;
 }
 
 /** `spendableMax` options. */
@@ -143,6 +151,12 @@ export interface ReadOnlyWalletApi {
      * Rejects `INVALID_ARGUMENT` unless `index` is an integer in `[0, 2^32)`.
      */
     addressAt(index: number): Promise<ShieldedAddress>;
+    /**
+     * The address this account publishes under its handle: `addressAt(PUBLISHED_DIVERSIFIER_INDEX)`.
+     * Hand out any other index for everything else, so nothing given to a payer can be matched to
+     * the published address.
+     */
+    publishedAddress(): Promise<ShieldedAddress>;
     readonly keys: WalletKeys;
     /** `false` for an incoming-tier key: every note reads unspent; balances are gross received. */
     readonly spentKnown: boolean;
@@ -270,6 +284,23 @@ export interface WalletApi extends ReadOnlyWalletApi {
     claimLinkKey(index: number): Promise<ClaimLinkKey>;
     withdraw(args: WithdrawOptions): Promise<WithdrawResult>;
     swap(args: SwapOptions): Promise<SwapResult>;
+    /**
+     * Claim a handle, paid from shielded funds, publishing `publishedAddress()` under it.
+     *
+     * The handle and the address become public and stay in chain history. No EVM account is named:
+     * the handle belongs to `nameControllerKey()`. Resolves once the relayer landed the
+     * transaction; `registered` says whether the handle was claimed or the input refunded.
+     *
+     * Rejects `INVALID_ARGUMENT` (`argument: "label"`) for a label that is malformed or already
+     * registered, and `UNSUPPORTED_OPERATION` without `capabilities.registerName`.
+     */
+    registerName(args: RegisterNameOptions): Promise<RegisterNameResult>;
+    /**
+     * The key that controls this account's handle. Its signature changes or clears the published
+     * value, and a cancelled escrow of a registration refunds to its address. Derived from the
+     * seed, so it is the same on every device.
+     */
+    nameControllerKey(): Promise<NameControllerKey>;
     /** Re-split off-ladder notes onto the ladder; returns rounds run. Best-effort. */
     redenominate(
         asset: AssetRef,

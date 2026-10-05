@@ -72,6 +72,7 @@ export interface ChainInfo {
     refundAddress?: string;
     nativeAdapterAddress?: string;
     swapWrapperAddress?: string;
+    genericCallWrapperAddress?: string;
     chainName?: string;
     /**
      * Browser-reachable RPC; not the relayer's own endpoint.

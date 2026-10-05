@@ -220,3 +220,23 @@ export interface TokenMeta {
     symbol: string;
     decimals: number;
 }
+
+/** A handle's record in `LelantosNameRegistrar`. */
+export interface NameRecord {
+    /** Whether the label is registered. A registered handle may hold an empty value. */
+    registered: boolean;
+    /** The published value, unvalidated: decode it before paying it. Empty when cleared. */
+    value: string;
+    /** The address whose signature changes the value; the zero address when unregistered. */
+    controller: EvmAddress;
+    /** Count of value changes, bound into the next one's signature. */
+    nonce: bigint;
+}
+
+/** What `LelantosNameRegistrar.register` charges its caller. */
+export interface NameFee {
+    /** The zero address when `amount` is zero. */
+    token: EvmAddress;
+    /** Base units of `token`. Zero when registration is free. */
+    amount: TokenAmount;
+}

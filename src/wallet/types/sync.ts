@@ -100,6 +100,7 @@ export interface OpActivity {
         | "transfer"
         | "withdraw"
         | "swap"
+        | "registerName"
         | "redenominate";
     /** Latest phase emitted; `undefined` before the first. */
     phase: Phase | undefined;

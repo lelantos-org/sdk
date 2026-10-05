@@ -119,6 +119,22 @@ export interface SpendOptions<P extends Phase = SpendPhase> extends OpOptions<P>
     autoConsolidate?: boolean | undefined;
 }
 
+export interface RegisterNameOptions extends SpendOptions {
+    /**
+     * The handle to claim: 3 to 32 characters of `a-z`, `0-9` and single hyphens, not starting or
+     * ending with one. Case is folded. A name under a parent (`mehow.lelantos.xyz`) is refused:
+     * pass the label.
+     */
+    label: string;
+    /**
+     * The asset unshielded to pay the registrar's fee: a plain (not yield-bearing) pool asset of
+     * the registrar's fee token. Default: looked up from that token, which needs an asset list the
+     * wallet may not have; pass it where the wallet cannot resolve a token address. Required where
+     * registration is free, to name what the (minimal) change is re-shielded in.
+     */
+    asset?: AssetRef | undefined;
+}
+
 export interface DepositOptions extends OpOptions<DepositPhase> {
     asset: AssetRef;
     /**

@@ -1,4 +1,4 @@
-import { maspAbi } from "@lelantos-org/contracts";
+import { genericCallWrapperAbi, maspAbi } from "@lelantos-org/contracts";
 import { encodeAbiParameters, keccak256 } from "viem";
 import { describe, expect, it } from "vitest";
 import { flatten } from "../circuit/index.js";
@@ -8,6 +8,9 @@ import {
     auxDigest,
     computePiHash,
     DEPOSIT_REQUEST_COMPONENTS,
+    GENERIC_CALL_COMPONENTS,
+    GENERIC_OUTPUT_COMPONENTS,
+    genericIntentHash,
     swapIntentHash,
 } from "./abi-hash.js";
 import { AUX_OUTPUT_COMPONENTS, type AuxOutput } from "./deposit-request.js";
@@ -243,5 +246,142 @@ describe("swapIntentHash", () => {
             // `SwapWrapperBindingTest.INTENT_VECTOR`.
             20568246496086653981650821090611381092259931261982909181487420188972474156030n,
         );
+    });
+});
+
+// `GenericCallWrapper.execute` reverts `IntentMismatch` unless the withdraw proof's `intentHash`
+// equals `GenericCallWrapper.intentHash(args)`. The vector is pinned identically in the Solidity
+// and relayer test suites.
+
+describe("genericIntentHash", () => {
+    const addr = (tail: string) => `0x${tail.padStart(40, "0")}`;
+    const word = (hex: string) => `0x${hex.padStart(64, "0")}`;
+    const intent = {
+        refundTo: addr("4EF0"),
+        surplusTo: addr("5E55"),
+        deadline: 1_900_000_000n,
+        minGas: 600_000n,
+        calls: [
+            { target: addr("CA11"), value: 0n, data: "0xaabbccdd01" },
+            { target: addr("CA12"), value: 7n, data: "0x" },
+        ],
+        outputs: [
+            {
+                minOut: 9_900_000_000_000n,
+                deposit: {
+                    chainId: 31337n,
+                    publicAssetId: 2n,
+                    publicIn: 990n,
+                    payer: addr("5A5A"),
+                    recipient: addr("BEEF"),
+                    inner: word("1"),
+                    feeAssetId: 2n,
+                    feeIn: 5n,
+                    feeInner: word("6"),
+                },
+                aux: {
+                    clueR: [10n, 11n],
+                    clueQ: [40n, 41n],
+                    ephPub: [12n, 13n],
+                    ciphertext: new Uint8Array([1, 2]),
+                },
+                feeAux: {
+                    clueR: [14n, 15n],
+                    clueQ: [42n, 43n],
+                    ephPub: [16n, 17n],
+                    ciphertext: new Uint8Array([3, 4, 5]),
+                },
+            },
+            {
+                minOut: 30_000_000_000n,
+                deposit: {
+                    chainId: 31337n,
+                    publicAssetId: 3n,
+                    publicIn: 3n,
+                    payer: addr("5A5A"),
+                    recipient: addr("BEEF"),
+                    inner: word("21"),
+                    feeAssetId: 0n,
+                    feeIn: 0n,
+                    feeInner: word("0"),
+                },
+                aux: {
+                    clueR: [50n, 51n],
+                    clueQ: [52n, 53n],
+                    ephPub: [54n, 55n],
+                    ciphertext: new Uint8Array([9]),
+                },
+                feeAux: {
+                    clueR: [56n, 57n],
+                    clueQ: [58n, 59n],
+                    ephPub: [60n, 61n],
+                    ciphertext: new Uint8Array([10, 11]),
+                },
+            },
+        ],
+        refundD: {
+            chainId: 31337n,
+            publicAssetId: 1n,
+            publicIn: 995n,
+            payer: addr("5A5A"),
+            recipient: addr("BEEF"),
+            inner: word("12"),
+            feeAssetId: 1n,
+            feeIn: 22n,
+            feeInner: word("17"),
+        },
+        refundAuxD: {
+            clueR: [27n, 28n],
+            clueQ: [44n, 45n],
+            ephPub: [29n, 30n],
+            ciphertext: new Uint8Array([6]),
+        },
+        refundFeeAuxD: {
+            clueR: [31n, 32n],
+            clueQ: [46n, 47n],
+            ephPub: [33n, 34n],
+            ciphertext: new Uint8Array([7, 8]),
+        },
+    } satisfies Parameters<typeof genericIntentHash>[0];
+
+    it("matches the cross-language vector", () => {
+        expect(genericIntentHash(intent)).toBe(
+            // `GenericCallWrapperBindingTest.INTENT_VECTOR`.
+            827219559487417732596895015167420095798095380869771450310630500175677464989n,
+        );
+    });
+
+    it("moves with every field it covers", () => {
+        const base = genericIntentHash(intent);
+        const changed = [
+            { ...intent, refundTo: addr("1") },
+            { ...intent, surplusTo: addr("1") },
+            { ...intent, deadline: intent.deadline + 1n },
+            { ...intent, minGas: intent.minGas + 1n },
+            { ...intent, calls: intent.calls.slice(0, 1) },
+            { ...intent, calls: [...intent.calls].reverse() },
+            { ...intent, outputs: [...intent.outputs].reverse() },
+            { ...intent, refundD: { ...intent.refundD, publicIn: 994n } },
+        ];
+        for (const other of changed) expect(genericIntentHash(other)).not.toBe(base);
+    });
+
+    it("declares Call and Output exactly as the contract does", () => {
+        const execute = (genericCallWrapperAbi as readonly AbiFn[]).find(
+            (i) => i.type === "function" && i.name === "execute",
+        );
+        const args = execute?.inputs?.[0]?.components ?? [];
+        const member = (name: string) => args.find((c) => c.name === name);
+        const layout = (params: readonly AbiParam[] = []): unknown[] =>
+            params.map((c) => ({
+                name: c.name,
+                type: c.type,
+                ...(c.components ? { components: layout(c.components) } : {}),
+            }));
+
+        expect(member("calls")?.type).toBe("tuple[]");
+        expect(layout(member("calls")?.components)).toEqual(layout(GENERIC_CALL_COMPONENTS));
+        expect(member("outputs")?.type).toBe("tuple[]");
+        expect(layout(member("outputs")?.components)).toEqual(layout(GENERIC_OUTPUT_COMPONENTS));
     });
 });

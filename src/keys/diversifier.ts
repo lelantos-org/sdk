@@ -31,6 +31,13 @@ export const DIVERSIFIER_INDEX_BOUND = 2 ** 32;
 /** Index of the account's default address. */
 export const DEFAULT_DIVERSIFIER_INDEX = 0;
 
+/**
+ * Index of the address an account publishes under its handle. The last index, so addresses handed
+ * out one per payer from index 1 never reach it, and nothing else an account gives out can be
+ * matched to its published address.
+ */
+export const PUBLISHED_DIVERSIFIER_INDEX = DIVERSIFIER_INDEX_BOUND - 1;
+
 /** The single-block AES-128 permutation keyed by `dvk`. */
 function blockCipher(dvk: Uint8Array) {
     assertByteLength(dvk, DVK_BYTES, "dvk");

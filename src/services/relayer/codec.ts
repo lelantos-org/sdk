@@ -11,6 +11,8 @@ import { WireFormatError } from "../../errors/network.js";
 import type { OutputAux } from "../../notes/aux.js";
 import type { DepositRequest } from "../../protocol/deposit-request.js";
 import type {
+    GenericBlob,
+    SubmitGenericPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     SwapBlob,
@@ -76,6 +78,37 @@ function serializeSwapBlob(s: SwapBlob): unknown {
         minOut: decStr(s.minOut),
         deadline: decStr(s.deadline),
         refundTo: s.refundTo,
+    };
+}
+
+/** @internal */
+export function serializeSubmitGeneric(p: SubmitGenericPayload): unknown {
+    return {
+        chainId: u64Num(p.chainId, "$.chainId"),
+        proof: p.proof,
+        pubInputs: serializePubInputs(p.pubInputs),
+        aux: p.aux.map(serializeAux),
+        generic: serializeGenericBlob(p.generic),
+    };
+}
+
+function serializeGenericBlob(g: GenericBlob): unknown {
+    return {
+        amountIn: decStr(g.amountIn),
+        calls: g.calls.map((c) => ({ target: c.target, value: decStr(c.value), data: c.data })),
+        outputs: g.outputs.map((o, i) => ({
+            minOut: decStr(o.minOut),
+            deposit: serializeSwapDeposit(o.deposit, `$.generic.outputs[${i}].deposit`),
+            aux: serializeAux(o.aux),
+            feeAux: serializeAux(o.feeAux),
+        })),
+        deadline: decStr(g.deadline),
+        minGas: decStr(g.minGas),
+        refundTo: g.refundTo,
+        surplusTo: g.surplusTo,
+        refundD: serializeSwapDeposit(g.refundD, "$.generic.refundD"),
+        refundAuxD: serializeAux(g.refundAuxD),
+        refundFeeAuxD: serializeAux(g.refundFeeAuxD),
     };
 }
 

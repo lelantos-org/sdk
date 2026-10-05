@@ -130,6 +130,7 @@ describe("connect: construction", () => {
             nativeDeposit: false,
             nativeWithdraw: false,
             swap: false,
+            registerName: false,
         });
         expect(walletInternals(wallet).keys.nsk).toBe(7n);
         await wallet.dispose();

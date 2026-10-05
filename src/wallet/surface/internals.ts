@@ -15,6 +15,7 @@ import type { NullifierStore } from "../../sync/nullifier-store.js";
 import type { Scanner } from "../../sync/scanner.js";
 import type { TreeStore } from "../../sync/tree-store.js";
 import type { ReadOnlyWalletApi, WalletApi } from "../api.js";
+import type { WalletContext } from "../context.js";
 import type { NoteLeases } from "../notes/leases.js";
 import type { NoteCache } from "../notes/note-cache.js";
 import type { NoteStore, NotesFile, StoredNote } from "../notes/note-store.js";
@@ -83,4 +84,19 @@ export function walletInternals(wallet: ReadOnlyWalletApi): ReadOnlyWalletIntern
         );
     }
     return found;
+}
+
+const contexts = new WeakMap<object, WalletContext>();
+
+/** Associate a spending wallet with its context. Called once, by `createWalletApi`. */
+export function registerContext(wallet: object, ctx: WalletContext): void {
+    contexts.set(wallet, ctx);
+}
+
+/**
+ * A spending wallet's context, or `undefined` for any other object. Not published: it reaches
+ * everything the wallet holds.
+ */
+export function walletContext(wallet: unknown): WalletContext | undefined {
+    return typeof wallet === "object" && wallet !== null ? contexts.get(wallet) : undefined;
 }

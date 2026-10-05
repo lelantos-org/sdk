@@ -80,6 +80,17 @@ export const ERC20_ABI = /* @__PURE__ */ parseAbi([
 
 export const WETH_DEPOSIT_ABI = /* @__PURE__ */ parseAbi(["function deposit() payable"]);
 
+/** The parts of `LelantosNameRegistrar` a wallet calls, reads or encodes. */
+export const NAME_REGISTRAR_ABI = /* @__PURE__ */ parseAbi([
+    "function register(string label,string value,address controller)",
+    "function setValue(string label,string value,uint256 deadline,bytes signature)",
+    "function recordOf(string label) view returns (string value,address controller,uint64 nonce)",
+    "function available(string label) view returns (bool)",
+    "function feeToken() view returns (address)",
+    "function feeAmount() view returns (uint96)",
+    "event HandleRegistered(bytes32 indexed labelHash,address indexed controller,string label)",
+]);
+
 export const PERMIT2_VIEW_ABI = /* @__PURE__ */ parseAbi([
     "function allowance(address user,address token,address spender) view returns (uint160,uint48,uint48)",
 ]);

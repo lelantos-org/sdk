@@ -15,7 +15,7 @@ import { reconcileSpentOnChain } from "../notes/sync-ops.js";
 import type { DepositEscrow } from "../types/results.js";
 import type { AwaitCommitmentsOptions } from "../types/sync.js";
 import type { DepositMethods } from "./deposit.js";
-import { registerInternals, type WalletInternals } from "./internals.js";
+import { registerContext, registerInternals, type WalletInternals } from "./internals.js";
 import { createReadMethods, gated, type ReadContext, walletKeysOf } from "./read.js";
 import type { SpendEnv, SpendMethods } from "./spend.js";
 import type { WalletStateStore } from "./state.js";
@@ -41,6 +41,12 @@ function capabilitiesOf(ctx: Pick<WalletContext, "cfg">, prove: boolean): Wallet
         nativeDeposit: supportsNativeEth(chain),
         nativeWithdraw: chain.nativeAdapterAddress?.() !== undefined,
         swap: prove && typeof submitter.submitSwap === "function" && !!ctx.cfg.quoterUrl,
+        registerName:
+            prove &&
+            typeof submitter.submitGeneric === "function" &&
+            !!ctx.cfg.nameRegistrarAddress &&
+            typeof chain.nameFee === "function" &&
+            typeof chain.nameAvailable === "function",
     });
 }
 
@@ -119,10 +125,13 @@ export function createWalletApi(ctx: WalletContext, extras: WalletApiExtras): Wa
         claimLinkKey: s("claimLinkKey"),
         withdraw: s("withdraw"),
         swap: s("swap"),
+        registerName: s("registerName"),
+        nameControllerKey: s("nameControllerKey"),
         redenominate: s("redenominate"),
     });
 
     registerInternals(api, spendingInternals(ctx, extras));
+    registerContext(api, ctx);
     return api;
 }
 

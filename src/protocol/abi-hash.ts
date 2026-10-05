@@ -14,7 +14,7 @@ import {
     type DepositRequest,
     depositTuple,
 } from "./deposit-request.js";
-import type { SwapBlob } from "./transact.js";
+import type { GenericBlob, SwapBlob } from "./transact.js";
 
 /**
  * Component list of `PubInputs.DepositRequest`, in declaration order.
@@ -156,6 +156,89 @@ export function swapIntentHash(
                 swap.refundD,
                 auxOutputToWire(swap.refundAuxD),
                 auxOutputToWire(swap.refundFeeAuxD),
+            ),
+        ] as never,
+    );
+    return BigInt(keccak256(encoded)) % BN254_FR;
+}
+
+/**
+ * `CallExecutor.Call`, in declaration order. `abi-hash.test.ts` checks it against the ABI.
+ *
+ * @internal
+ */
+export const GENERIC_CALL_COMPONENTS = [
+    { name: "target", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "data", type: "bytes" },
+] as const;
+
+/**
+ * `GenericCallWrapper.Output`, in declaration order.
+ *
+ * @internal
+ */
+export const GENERIC_OUTPUT_COMPONENTS = [
+    { name: "minOut", type: "uint256" },
+    { name: "deposit", type: "tuple", components: [...DEPOSIT_REQUEST_COMPONENTS] },
+    { name: "aux", type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
+    { name: "feeAux", type: "tuple", components: [...AUX_OUTPUT_COMPONENTS] },
+] as const;
+
+/**
+ * `PubInputs.Transact.intentHash` for a generic execution's withdraw leg:
+ * `uint256(keccak256(abi.encode(refundTo, surplusTo, deadline, minGas, calls,
+ * outputs, refund_d, refund_aux_d, refund_fee_aux_d))) mod r`. Mirrors
+ * `GenericCallWrapper.intentHash`; `execute` reverts `IntentMismatch` when the
+ * proof's word differs.
+ *
+ * Covers every field the submitter could otherwise rewrite. `amountIn` is not
+ * covered: the withdraw leg pins what is spent.
+ */
+export function genericIntentHash(
+    generic: Pick<
+        GenericBlob,
+        | "refundTo"
+        | "surplusTo"
+        | "deadline"
+        | "minGas"
+        | "calls"
+        | "outputs"
+        | "refundD"
+        | "refundAuxD"
+        | "refundFeeAuxD"
+    >,
+): Field {
+    const encoded = encodeAbiParameters(
+        [
+            { type: "address" },
+            { type: "address" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "tuple[]", components: [...GENERIC_CALL_COMPONENTS] },
+            { type: "tuple[]", components: [...GENERIC_OUTPUT_COMPONENTS] },
+            ...DEPOSIT_WITH_AUX_PARAMS,
+        ],
+        [
+            abiAddress(generic.refundTo),
+            abiAddress(generic.surplusTo),
+            generic.deadline,
+            generic.minGas,
+            generic.calls.map((c) => ({
+                target: abiAddress(c.target),
+                value: c.value,
+                data: c.data as `0x${string}`,
+            })),
+            generic.outputs.map((o) => ({
+                minOut: o.minOut,
+                deposit: depositTuple(o.deposit),
+                aux: auxTuple(auxOutputToWire(o.aux)),
+                feeAux: auxTuple(auxOutputToWire(o.feeAux)),
+            })),
+            ...depositWithAux(
+                generic.refundD,
+                auxOutputToWire(generic.refundAuxD),
+                auxOutputToWire(generic.refundFeeAuxD),
             ),
         ] as never,
     );

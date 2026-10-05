@@ -29,12 +29,13 @@ import type {
 } from "../../protocol/responses.js";
 import type {
     SpendKind,
+    SubmitGenericPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
 } from "../../protocol/transact.js";
 import type { HttpClientOptions } from "../http/client.js";
 import { createJsonClient, type JsonClient } from "../http/json-client.js";
-import { serializeSubmitSwap, serializeSubmitTransact } from "./codec.js";
+import { serializeSubmitGeneric, serializeSubmitSwap, serializeSubmitTransact } from "./codec.js";
 
 /**
  * The estimate endpoints are read-only POSTs, so they retry on 5xx like a GET.
@@ -91,6 +92,18 @@ export class RelayerClient {
     }
 
     /**
+     * What the relayer charges for a `GenericCallWrapper` execution whose call leg is forwarded
+     * `minGas`: the wrapper's own gas plus that floor.
+     */
+    async estimateGeneric(chainId: bigint | number, minGas: bigint): Promise<EstimateResponse> {
+        return this.json.post(
+            "/v1/generic/estimate",
+            { chainId: Number(chainId), minGas: Number(minGas) },
+            READ_ONLY_POST,
+        );
+    }
+
+    /**
      * What the relayer charges to flush a deposit: a deposit is not relayed at
      * submit time, so this recovers the cost of the `flushBatch` the relayer
      * later proves and broadcasts.
@@ -105,6 +118,10 @@ export class RelayerClient {
 
     async submitSwap(payload: SubmitSwapPayload): Promise<RelayerSubmitResponse> {
         return this.json.post("/v1/swap", serializeSubmitSwap(payload));
+    }
+
+    async submitGeneric(payload: SubmitGenericPayload): Promise<RelayerSubmitResponse> {
+        return this.json.post("/v1/generic", serializeSubmitGeneric(payload));
     }
 }
 

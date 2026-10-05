@@ -15,12 +15,15 @@ import type {
     AssetEntry,
     DepositEscrowedRecord,
     EscrowedDepositView,
+    NameFee,
+    NameRecord,
     PublishedNote,
     TokenMeta,
     TxLog,
 } from "../types.js";
 import { addr, type ViemReadCtx } from "./ctx.js";
 import { chainCall } from "./errors.js";
+import * as names from "./names.js";
 import * as permit2 from "./permit2.js";
 import * as reads from "./reads.js";
 import * as token from "./token.js";
@@ -196,5 +199,19 @@ export class ViemChainReader implements ChainReader {
     /** `undefined` when no `NativeAdapter` is configured for this chain. */
     nativeAdapterAddress(): EvmAddress | undefined {
         return this._nativeAdapterAddress;
+    }
+
+    nameRecord(registrar: EvmAddress, label: string): Promise<NameRecord> {
+        return chainCall("nameRecord", () =>
+            names.readNameRecord(this.publicClient, registrar, label),
+        );
+    }
+    nameAvailable(registrar: EvmAddress, label: string): Promise<boolean> {
+        return chainCall("nameAvailable", () =>
+            names.readNameAvailable(this.publicClient, registrar, label),
+        );
+    }
+    nameFee(registrar: EvmAddress): Promise<NameFee> {
+        return chainCall("nameFee", () => names.readNameFee(this.publicClient, registrar));
     }
 }

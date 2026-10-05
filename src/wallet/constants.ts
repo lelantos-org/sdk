@@ -21,6 +21,22 @@ export const PERMIT2_DEFAULT_DEADLINE_SECS = 3600;
 export const SWAP_DEFAULT_DEADLINE_SECS = 900;
 
 /**
+ * Default lifetime, in seconds, of a `GenericCallWrapper` intent built without `deadline`. Bound
+ * into the withdraw proof's intent hash like a swap's; past it the wrapper refunds the input
+ * instead of making the calls.
+ */
+export const GENERIC_DEFAULT_DEADLINE_SECS = 900;
+
+/**
+ * Gas the call leg `[approve, register]` of a handle registration is forwarded, for a shielded
+ * address as the value. Equal to `REGISTER_MIN_GAS` in `contracts/test/names/NameFixtures.sol`,
+ * which `NameRegistrationGas.t.sol` holds the measured leg under with a quarter to spare and an
+ * allowance for a fee token dearer than a plain ERC-20. The relayer's fee for a registration is
+ * quoted for it.
+ */
+export const REGISTER_NAME_MIN_GAS = 360_000n;
+
+/**
  * A Permit2 AllowanceTransfer window expiring within this many seconds is not reused, so the
  * allowance does not lapse mid-transaction under block-clock skew or confirmation latency.
  */

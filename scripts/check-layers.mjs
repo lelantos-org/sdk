@@ -11,9 +11,9 @@
 //   6. `errors/` imports only `core/` (and itself), so every layer can throw a typed error without
 //      an upward or domain dependency.
 //   7. `wallet/ops/*` (one module per operation) never imports another operation, so an operation
-//      composes others only through `WalletContext` hooks bound by the wallet shell. The one
-//      exception is `swap.ts` → `swap-escrow.ts`, its own second leg. `wallet/tx/` (the pipeline
-//      operations share) and `wallet/context.ts` import no operation at all, nor the shell.
+//      composes others only through `WalletContext` hooks bound by the wallet shell. `wallet/tx/`
+//      (the pipeline operations share) and `wallet/context.ts` import no operation at all, nor the
+//      shell.
 //   8. `entry/*` (the published subpaths) holds only `export { … } from` statements naming modules
 //      outside `entry/`, and nothing outside `entry/` imports an entry. The published surface is
 //      then exactly the list in those files, each name forwarded once from where it is declared.
@@ -66,7 +66,6 @@ function tierOf(rel) {
 }
 
 const OPS = "wallet/ops/";
-const OP_EXCEPTIONS = new Set(["wallet/ops/swap.ts -> wallet/ops/swap-escrow.ts"]);
 /** Rule 7: what the pipeline and the context sit below. */
 const ABOVE_TX = [OPS, "wallet/create.ts", "wallet/connect/"];
 
@@ -127,11 +126,7 @@ for (const { abs, rel } of shippedSources()) {
         if (rel.startsWith("errors/") && !/^(errors|core)\//.test(target)) {
             problems.push(`${rel} imports ${target} — \`errors/\` may import only \`core/\``);
         }
-        if (
-            rel.startsWith(OPS) &&
-            target.startsWith(OPS) &&
-            !OP_EXCEPTIONS.has(`${rel} -> ${target}`)
-        ) {
+        if (rel.startsWith(OPS) && target.startsWith(OPS)) {
             problems.push(
                 `${rel} imports ${target} — an operation may not import another; compose ` +
                     "through a `WalletContext` hook bound in `wallet/create.ts`",

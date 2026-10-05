@@ -9,7 +9,7 @@ import { isUnknownAsset } from "../assets/registry.js";
 import type { WalletContext } from "../context.js";
 import { balancesOf } from "../notes/read-ops.js";
 import { relayerEstimate } from "../relayer-info.js";
-import { estimateKindOf } from "../tx/fee.js";
+import { feeEstimateOf } from "../tx/fee.js";
 import type { FeeKind, FeeOption, FeeQuote } from "../types/quotes.js";
 
 /**
@@ -27,7 +27,8 @@ export async function quoteFee(
     kind: FeeKind,
     opts: { native?: boolean | undefined } = {},
 ): Promise<FeeQuote> {
-    const estimate = await relayerEstimate(ctx, estimateKindOf(kind, "quoteFee", opts.native));
+    const quoted = feeEstimateOf(kind, "quoteFee", opts.native);
+    const estimate = await relayerEstimate(ctx, quoted.kind, quoted.options);
     if (estimate?.shieldedFeeAddress === undefined) {
         return Object.freeze({ kind, charged: false, options: [] });
     }

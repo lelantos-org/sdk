@@ -7,7 +7,7 @@ import { applyFee, depositTotal } from "../../protocol/fees.js";
 import { sizeBNote, sizeRefundNote } from "../../protocol/swap-sizing.js";
 import { SWAP_DEFAULT_DEADLINE_SECS } from "../constants.js";
 import { resolveSwapDeadline } from "../tx/deadline.js";
-import { resolveRefundAddress } from "./swap-escrow.js";
+import { resolveRefundAddress } from "../tx/escrows.js";
 
 // `SwapWrapper` accepts the deposit leg only when the pool's Permit2 pull is at least `minOut`
 // (`MaspPullBelowMinOut`) and at most the venue's actual output (`MaspPullExceedsActualOut`). The

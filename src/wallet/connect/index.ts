@@ -224,6 +224,12 @@ async function connectUnchecked(options: ConnectOptions): Promise<WalletApi> {
             relayerUrl: preset.relayerUrl,
             ...(preset.quoterUrl ? { quoterUrl: preset.quoterUrl } : {}),
             ...(preset.swapWrapperAddress ? { swapWrapperAddress: preset.swapWrapperAddress } : {}),
+            ...(preset.genericCallWrapperAddress
+                ? { genericCallWrapperAddress: preset.genericCallWrapperAddress }
+                : {}),
+            ...(preset.nameRegistrarAddress
+                ? { nameRegistrarAddress: preset.nameRegistrarAddress }
+                : {}),
             ...(preset.submitTimeoutMs !== undefined
                 ? { submitTimeoutMs: preset.submitTimeoutMs }
                 : {}),

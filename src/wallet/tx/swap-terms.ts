@@ -14,7 +14,7 @@ import {
 } from "../../core/brand.js";
 import { UnsupportedOperationError } from "../../errors/chain.js";
 import { InvalidArgumentError } from "../../errors/config.js";
-import { sizeBNote, sizeRefundNote, type YieldPricing } from "../../protocol/swap-sizing.js";
+import { sizeBNote, sizeRefundNote } from "../../protocol/swap-sizing.js";
 import {
     chargedMoney,
     publicMoney,
@@ -28,6 +28,7 @@ import type { WalletContext } from "../context.js";
 import type { SwapFees, SwapQuote } from "../types/quotes.js";
 import type { Money } from "../types/results.js";
 import { type DepositFee, depositProtocolFee, resolveDepositFees } from "./deposit-fee.js";
+import { yieldPricing } from "./escrows.js";
 
 /** A quote's fields `swap` reads, checked for shape. A quote is plain data a UI may have cloned. */
 export interface CheckedQuote {
@@ -156,11 +157,6 @@ export function swapFees(
         // Leg 2 mints the output note as a deposit, charged on top of it inside the pull.
         outProtocol: depositProtocolFee(assetOut, legs.credit),
     });
-}
-
-/** The rate a yield asset's deposit is priced at; nothing for a plain asset. */
-function yieldPricing(asset: AssetInfo): YieldPricing {
-    return asset.yieldEnabled ? { yieldEnabled: true, rate: asset.rate } : {};
 }
 
 /**

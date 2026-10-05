@@ -3,11 +3,12 @@ import { isWalletError } from "../../errors/guard.js";
 import type { OutputAux } from "../../notes/aux.js";
 import type { DepositRequest } from "../../protocol/deposit-request.js";
 import type {
+    SubmitGenericPayload,
     SubmitSwapPayload,
     SubmitTransactPayload,
     TransactPubInputs,
 } from "../../protocol/transact.js";
-import { serializeSubmitSwap, serializeSubmitTransact } from "./codec.js";
+import { serializeSubmitGeneric, serializeSubmitSwap, serializeSubmitTransact } from "./codec.js";
 
 // Golden fixtures for the two outbound bigint encodings described in
 // `codec.ts`: JSON numbers for `u64` DTO fields, decimal strings for field
@@ -99,6 +100,69 @@ describe("outbound encoding (golden)", () => {
         expect(out.swap.deadline).toBe("1900000000");
         // An address, sent verbatim as hex.
         expect(out.swap.refundTo).toBe("0xrefund");
+    });
+
+    it("/v1/generic sends U256 words as strings and deposit u64 fields as numbers", () => {
+        const payload: SubmitGenericPayload = {
+            chainId: 31337n,
+            proof,
+            pubInputs,
+            aux: [aux, aux],
+            generic: {
+                amountIn: 10n ** 30n,
+                calls: [
+                    { target: "0xtarget", value: 2n ** 200n, data: "0xaabb" },
+                    { target: "0xpayee", value: 0n, data: "0x" },
+                ],
+                outputs: [{ minOut: 10n ** 20n, deposit, aux, feeAux: aux }],
+                deadline: 1_900_000_000n,
+                minGas: 600_000n,
+                refundTo: "0xrefund",
+                surplusTo: "0xsurplus",
+                refundD: { ...deposit, publicIn: 251n },
+                refundAuxD: aux,
+                refundFeeAuxD: aux,
+            },
+        };
+        const out = JSON.parse(JSON.stringify(serializeSubmitGeneric(payload)));
+
+        expect(out.chainId).toBe(31337);
+        expect(Object.keys(out).sort()).toEqual([
+            "aux",
+            "chainId",
+            "generic",
+            "proof",
+            "pubInputs",
+        ]);
+        expect(Object.keys(out.generic).sort()).toEqual([
+            "amountIn",
+            "calls",
+            "deadline",
+            "minGas",
+            "outputs",
+            "refundAuxD",
+            "refundD",
+            "refundFeeAuxD",
+            "refundTo",
+            "surplusTo",
+        ]);
+        expect(out.generic.amountIn).toBe((10n ** 30n).toString());
+        expect(out.generic.deadline).toBe("1900000000");
+        expect(out.generic.minGas).toBe("600000");
+        expect(out.generic.calls).toEqual([
+            { target: "0xtarget", value: (2n ** 200n).toString(), data: "0xaabb" },
+            { target: "0xpayee", value: "0", data: "0x" },
+        ]);
+        expect(out.generic.outputs[0].minOut).toBe((10n ** 20n).toString());
+        expect(out.generic.outputs[0].deposit.publicIn).toBe(250);
+        expect(Object.keys(out.generic.outputs[0]).sort()).toEqual([
+            "aux",
+            "deposit",
+            "feeAux",
+            "minOut",
+        ]);
+        expect(out.generic.refundD.publicIn).toBe(251);
+        expect(out.generic.refundAuxD.ciphertext).toBe("0xdead");
     });
 
     it("/v1/spend encodes pubInputs u64 slots as numbers and fields as strings", () => {

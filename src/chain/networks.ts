@@ -36,6 +36,10 @@ export interface NetworkPreset {
     nativeAdapterAddress?: EvmAddressLike | undefined;
     /** `SwapWrapper`. Else read from the relayer's `/chains` (TTL-cached). */
     swapWrapperAddress?: EvmAddressLike | undefined;
+    /** `GenericCallWrapper`. Else read from the relayer's `/chains` (TTL-cached). */
+    genericCallWrapperAddress?: EvmAddressLike | undefined;
+    /** `LelantosNameRegistrar`. Without it `capabilities.registerName` is `false`. */
+    nameRegistrarAddress?: EvmAddressLike | undefined;
     /**
      * Per-attempt submit deadline in ms: block time plus bundling wait.
      * `HttpOptions.submitTimeoutMs` overrides it. Default 30 000.

@@ -9,7 +9,7 @@ import type { AssetInfo } from "../assets/info.js";
 import type { FeeBreakdown, Money } from "./results.js";
 
 /** Which operation a relayer fee is quoted for. */
-export type FeeKind = "transfer" | "withdraw" | "swap" | "deposit";
+export type FeeKind = "transfer" | "withdraw" | "swap" | "deposit" | "registerName";
 
 /** One asset the relayer accepts for a fee. */
 export interface FeeOption {

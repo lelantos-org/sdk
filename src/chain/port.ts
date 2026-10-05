@@ -24,6 +24,8 @@ import type {
     DepositEscrowedRecord,
     DepositSubmitted,
     EscrowedDepositView,
+    NameFee,
+    NameRecord,
     Permit2SignArgs,
     PublishedNote,
     TokenMeta,
@@ -105,6 +107,17 @@ export interface TokenReads {
     ): Promise<TokenAmount>;
 }
 
+/**
+ * Reads of a `LelantosNameRegistrar`. Optional: without them `registerName` is unsupported. The
+ * registrar is named per call because it is a deployment address, not part of the pool.
+ */
+export interface NameReads {
+    nameRecord?(registrar: EvmAddress, label: string): Promise<NameRecord>;
+    /** Whether `label` is valid and unregistered. */
+    nameAvailable?(registrar: EvmAddress, label: string): Promise<boolean>;
+    nameFee?(registrar: EvmAddress): Promise<NameFee>;
+}
+
 /** Receipts of mined transactions. */
 export interface ReceiptReads {
     /** Block number and receipt status (1 = success, 0 = revert). */
@@ -152,7 +165,12 @@ export interface ReceiptReads {
  * Implementations must be deterministic w.r.t. constructor inputs (no hidden
  * global state).
  */
-export interface ChainReader extends RegistryReads, TreeReads, TokenReads, ReceiptReads {}
+export interface ChainReader
+    extends RegistryReads,
+        TreeReads,
+        TokenReads,
+        ReceiptReads,
+        NameReads {}
 
 /** Signing as the user's EOA, and the deposit and cancel calls that spend its gas. */
 export interface DepositWrites {

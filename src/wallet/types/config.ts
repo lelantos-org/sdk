@@ -73,6 +73,10 @@ export interface WalletConfig {
     quoterUrl?: string | undefined;
     /** `SwapWrapper` address. Default: read from the relayer's `/chains`. */
     swapWrapperAddress?: string | undefined;
+    /** `GenericCallWrapper` address. Default: read from the relayer's `/chains`. */
+    genericCallWrapperAddress?: string | undefined;
+    /** `LelantosNameRegistrar` address. Without it `capabilities.registerName` is `false`. */
+    nameRegistrarAddress?: string | undefined;
 
     /** Required if `noteSource` is not provided. */
     fmdUrl?: string | undefined;

@@ -1,7 +1,7 @@
 // Atomic shielded swap, as a spend spec. Backs `wallet.swap`.
 //
 // Leg 1 is a withdraw of `assetIn` to `SwapWrapper`; leg 2 is a deposit request the wrapper
-// escrows (`./swap-escrow.ts`). Both are bundled via `submitter.submitSwap`.
+// escrows (`../tx/escrows.ts`). Both are bundled via `submitter.submitSwap`.
 //
 // The quote is never trusted: both assets are re-resolved, and gross, net and both note values are
 // recomputed from `quote.side` with the functions `quoteSwap` used (`tx/swap-terms.ts`). A quote
@@ -21,6 +21,7 @@ import { publicMoney, resolveOutAmount, shieldedMoney } from "../assets/amount.j
 import type { AssetInfo } from "../assets/info.js";
 import type { WalletContext } from "../context.js";
 import { resolveSwapDeadline } from "../tx/deadline.js";
+import { buildEscrow, resolveRefundAddress } from "../tx/escrows.js";
 import { shieldedRecipient } from "../tx/recipient.js";
 import { detachedRun, landedBase, runSpend, type SpendRun } from "../tx/run-spend.js";
 import {
@@ -35,7 +36,6 @@ import {
 import type { SwapOptions } from "../types/options.js";
 import type { SwapQuote } from "../types/quotes.js";
 import type { SwapResult } from "../types/results.js";
-import { buildSwapEscrows, resolveRefundAddress } from "./swap-escrow.js";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HEX_BLOB = /^0x([0-9a-fA-F]{2})*$/;
@@ -103,20 +103,31 @@ export function executeSwap(
             bind(ctx, plan) {
                 const { asset, assetOut, legs, quote, wrapper } = plan;
                 // Leg 2 is built first because leg 1's proof binds a hash over it.
-                const escrows = buildSwapEscrows(ctx, wrapper, {
-                    output: {
-                        asset: assetOut,
-                        value: legs.credit,
-                        fee: legs.outputFee,
-                        recipient: plan.recipient,
-                    },
-                    refund: {
-                        asset,
-                        value: legs.refundCredit,
-                        fee: legs.refundFee,
-                        recipient: ctx.ownAddress,
-                    },
-                });
+                const escrows = {
+                    output: buildEscrow(
+                        ctx,
+                        wrapper,
+                        {
+                            asset: assetOut,
+                            value: legs.credit,
+                            fee: legs.outputFee,
+                            recipient: plan.recipient,
+                        },
+                        "swap output-note publicIn",
+                    ),
+                    // Escrowed instead of the output when the venue leg fails.
+                    refund: buildEscrow(
+                        ctx,
+                        wrapper,
+                        {
+                            asset,
+                            value: legs.refundCredit,
+                            fee: legs.refundFee,
+                            recipient: ctx.ownAddress,
+                        },
+                        "swap refund-note publicIn",
+                    ),
+                };
                 // The default deadline is computed here, after selection and any
                 // auto-consolidation, so they do not shorten the swap's window.
                 const deadline = resolveSwapDeadline(args.deadline);

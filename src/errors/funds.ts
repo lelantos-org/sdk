@@ -184,7 +184,13 @@ export class InsufficientCoverError extends WalletError<"INSUFFICIENT_COVER"> {
 }
 
 /** What a relayer fee quote was requested for. */
-export type FeeQuoteKind = "transfer" | "withdraw" | "withdrawNative" | "swap" | "deposit";
+export type FeeQuoteKind =
+    | "transfer"
+    | "withdraw"
+    | "withdrawNative"
+    | "swap"
+    | "generic"
+    | "deposit";
 
 /**
  * The relayer charges a fee but quoted nothing for the asset named to pay it,

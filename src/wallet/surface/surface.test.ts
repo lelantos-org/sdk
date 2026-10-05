@@ -10,6 +10,7 @@ import { isWalletError } from "../../errors/guard.js";
 import { ADDRESS_HRP, decodeAddress } from "../../keys/address.js";
 import { deriveClaimLinkNsk } from "../../keys/claim-link.js";
 import { ownsAddress } from "../../keys/diversified.js";
+import { PUBLISHED_DIVERSIFIER_INDEX } from "../../keys/diversifier.js";
 import { buildSpendingKey } from "../../keys/keys.js";
 import type { TreeStore } from "../../sync/tree-store.js";
 import { scannerYielding, storedNote, testWallet } from "../../test-utils/wallet.js";
@@ -279,6 +280,14 @@ describe("addressAt", () => {
         const seventh = await addressAt(7);
         expect(seventh).toMatch(SHIELDED_ADDRESS);
         expect(await wallet.addressAt(7)).toBe(seventh);
+    });
+
+    it("publishes the address at the last index, on a spending and a watch wallet alike", async () => {
+        const { wallet } = await testWallet({ scanner: scannerYielding([]) });
+        const published = await wallet.publishedAddress();
+        expect(PUBLISHED_DIVERSIFIER_INDEX).toBe(LAST_INDEX);
+        expect(published).toBe(await wallet.addressAt(LAST_INDEX));
+        expect(published).not.toBe(wallet.address);
     });
 
     it("gives each index its own address, each decoding to keys of the account", async () => {

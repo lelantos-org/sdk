@@ -9,7 +9,7 @@ import { hex32, type ShieldedAddress } from "../../core/brand.js";
 import { boundary } from "../../errors/boundary.js";
 import { UnsupportedOperationError } from "../../errors/chain.js";
 import { InvalidArgumentError } from "../../errors/config.js";
-import { DIVERSIFIER_INDEX_BOUND } from "../../keys/diversifier.js";
+import { DIVERSIFIER_INDEX_BOUND, PUBLISHED_DIVERSIFIER_INDEX } from "../../keys/diversifier.js";
 import { addressFromViewingKey, type FullViewingKey, type ViewingKey } from "../../keys/keys.js";
 import {
     encodeFullViewingKey,
@@ -147,6 +147,14 @@ export function createReadMethods(
                 }
                 return addressFromViewingKey(ctx.P, ctx.J, ctx.keys, index);
             }),
+
+        publishedAddress: () =>
+            gated(
+                ctx.state,
+                "publishedAddress",
+                (): ShieldedAddress =>
+                    addressFromViewingKey(ctx.P, ctx.J, ctx.keys, PUBLISHED_DIVERSIFIER_INDEX),
+            ),
 
         sync: (opts = {}) =>
             gated(

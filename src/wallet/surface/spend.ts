@@ -17,7 +17,12 @@ import type { RedenominateHost } from "../ops/redenominate.js";
 import type { ConsolidateFirst } from "../selection/index.js";
 import type { SpendRun } from "../tx/run-spend.js";
 import type { SpendPhase } from "../types/options.js";
-import type { SwapResult, TransferResult, WithdrawResult } from "../types/results.js";
+import type {
+    RegisterNameResult,
+    SwapResult,
+    TransferResult,
+    WithdrawResult,
+} from "../types/results.js";
 import type { WalletApiExtras } from "./api.js";
 import { requireObject, runOp, signalOf } from "./op.js";
 import { gated } from "./read.js";
@@ -41,6 +46,8 @@ export type SpendMethods = Pick<
     | "withdraw"
     | "swap"
     | "quoteSwap"
+    | "registerName"
+    | "nameControllerKey"
     | "redenominate"
 >;
 
@@ -78,25 +85,31 @@ export function spendMethods(env: SpendEnv): SpendMethods {
                 const [
                     { spendableMax },
                     { selectionRules, withSelection },
-                    { resolveSpendFee, estimateKindOf },
+                    { resolveSpendFee, feeEstimateOf },
                 ] = await Promise.all([
                     import("../selection/spendable-max.js"),
                     import("../tx/cover.js"),
                     import("../tx/fee.js"),
                 ]);
-                const estimateKind =
+                const quoted =
                     kind === undefined
                         ? undefined
-                        : estimateKindOf(kind, "spendableMax", opts.native);
+                        : feeEstimateOf(kind, "spendableMax", opts.native);
                 const selection = selectionRules(opts.selection);
                 const asset = await ctx.assets.resolveVerified(ref);
                 let maxInputs = ctx.cfg.shape.nIn;
                 let fee = 0n;
                 // A deposit's fee is paid from the public account, so it reserves nothing here.
-                if (estimateKind !== undefined && estimateKind !== "deposit") {
+                if (quoted !== undefined && quoted.kind !== "deposit") {
                     // The spend's own fee lookup: a same-asset fee comes out of the maximum, a
                     // cross-asset one takes an input slot.
-                    const resolved = await resolveSpendFee(ctx, estimateKind, asset, opts.feeAsset);
+                    const resolved = await resolveSpendFee(
+                        ctx,
+                        quoted.kind,
+                        asset,
+                        opts.feeAsset,
+                        quoted.options,
+                    );
                     if (resolved.fee?.crossAsset) maxInputs -= 1;
                     else if (resolved.fee) fee = resolved.fee.value;
                 }
@@ -157,6 +170,20 @@ export function spendMethods(env: SpendEnv): SpendMethods {
                 await requireProver();
                 const { executeSwap } = await import("../ops/swap.js");
                 return executeSwap(ctx, args, run);
+            }),
+
+        registerName: (args) =>
+            runOp<RegisterNameResult, SpendPhase>(state, "registerName", args, async (run) => {
+                requireObject(args, "registerName");
+                await requireProver();
+                const { executeRegisterName } = await import("../ops/register-name.js");
+                return executeRegisterName(ctx, args, run);
+            }),
+
+        nameControllerKey: () =>
+            gated(state, "nameControllerKey", async () => {
+                const { deriveNameControllerKey } = await import("../../keys/name-controller.js");
+                return Object.freeze(deriveNameControllerKey(ctx.keys.nsk));
             }),
 
         redenominate: (ref, opts = {}) =>

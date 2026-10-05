@@ -1,8 +1,9 @@
 // `@lelantos-org/sdk/internal`: unstable, no semver guarantee.
 //
-// Circuit internals, the stored-note codec, wallet plumbing (`walletInternals`), sync engine pieces
-// and test hooks. These change with the circuit, the stored-note encoding or the wallet's internal
-// structure, including in patch releases. Pin `@lelantos-org/circuits` when relying on them.
+// Circuit internals, the stored-note codec, wallet plumbing (`walletInternals`, `genericCall`), sync
+// engine pieces and test hooks. These change with the circuit, the stored-note encoding or the
+// wallet's internal structure, including in patch releases. Pin `@lelantos-org/circuits` when
+// relying on them.
 
 export {
     coeffDigest,
@@ -83,7 +84,13 @@ export { NullifierMemo, type SyncContext } from "../wallet/notes/sync-ops.js";
 export type { ConsolidateHost } from "../wallet/ops/consolidate.js";
 export type { RedenominateHost } from "../wallet/ops/redenominate.js";
 export {
+    type GenericCallOutput,
+    type GenericCallRequest,
+    genericCall,
+} from "../wallet/surface/generic.js";
+export {
     type ReadOnlyWalletInternals,
     type WalletInternals,
     walletInternals,
 } from "../wallet/surface/internals.js";
+export type { GenericCallResult } from "../wallet/tx/generic-call.js";

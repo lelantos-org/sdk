@@ -31,14 +31,17 @@ export type {
     DepositEscrowedRecord,
     DepositSubmitted,
     EscrowedDepositView,
+    NameFee,
+    NameRecord,
     Permit2SignArgs,
     PublishedNote,
     TokenMeta,
     TxLog,
 } from "../chain/types.js";
-export { MASP_ABI, NATIVE_ADAPTER_ABI } from "../chain/viem/abi.js";
+export { MASP_ABI, NAME_REGISTRAR_ABI, NATIVE_ADAPTER_ABI } from "../chain/viem/abi.js";
 export type { ViemReadCtx } from "../chain/viem/ctx.js";
 export { ViemChainAdapter, type ViemChainAdapterOpts } from "../chain/viem/index.js";
+export { readNameAvailable, readNameFee, readNameRecord } from "../chain/viem/names.js";
 export { ViemChainReader, type ViemChainReaderOpts } from "../chain/viem/reader.js";
 export { requestPersistentStorage } from "../core/storage.js";
 export type { TypedDataDomain, TypedDataParameter } from "../crypto/eip712.js";

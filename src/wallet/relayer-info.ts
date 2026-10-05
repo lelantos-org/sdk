@@ -5,7 +5,7 @@
 
 import { ttlCache } from "../core/async.js";
 import type { ChainToken, EstimateResponse } from "../protocol/responses.js";
-import type { EstimateKind, Submitter } from "../services/relayer/submitter.js";
+import type { EstimateKind, EstimateOptions, Submitter } from "../services/relayer/submitter.js";
 
 /**
  * How long a `/chains` answer is reused: bounds how stale the registered assets and the refund
@@ -21,6 +21,8 @@ export interface RelayerInfo {
     refundAddress(): Promise<string | undefined>;
     /** The `SwapWrapper` the relayer advertises, if any. */
     swapWrapperAddress(): Promise<string | undefined>;
+    /** The `GenericCallWrapper` the relayer advertises, if any. */
+    genericCallWrapperAddress(): Promise<string | undefined>;
 }
 
 export function relayerInfo(
@@ -28,17 +30,18 @@ export function relayerInfo(
     chainId: bigint,
     ttlMs: number = RELAYER_INFO_TTL_MS,
 ): RelayerInfo {
+    /** `read` bound to this chain and cached, or a reader of nothing when the submitter lacks it. */
+    const cached = <T>(
+        read: ((chainId: bigint) => Promise<T>) | undefined,
+    ): (() => Promise<T | undefined>) =>
+        read ? ttlCache(() => read.call(submitter, chainId), ttlMs) : async () => undefined;
+
     const assets = submitter.assets;
-    const refund = submitter.refundAddress;
-    const wrapper = submitter.swapWrapperAddress;
     return {
         tokens: assets ? ttlCache(() => assets.call(submitter, chainId), ttlMs) : undefined,
-        refundAddress: refund
-            ? ttlCache(() => refund.call(submitter, chainId), ttlMs)
-            : async () => undefined,
-        swapWrapperAddress: wrapper
-            ? ttlCache(() => wrapper.call(submitter, chainId), ttlMs)
-            : async () => undefined,
+        refundAddress: cached(submitter.refundAddress),
+        swapWrapperAddress: cached(submitter.swapWrapperAddress),
+        genericCallWrapperAddress: cached(submitter.genericCallWrapperAddress),
     };
 }
 
@@ -51,7 +54,10 @@ export function relayerInfo(
 export function relayerEstimate(
     ctx: { readonly cfg: { readonly submitter: Submitter; readonly chainId: bigint } },
     kind: EstimateKind,
+    opts?: EstimateOptions,
 ): Promise<EstimateResponse | undefined> {
     const { submitter, chainId } = ctx.cfg;
-    return submitter.estimate ? submitter.estimate(chainId, kind) : Promise.resolve(undefined);
+    return submitter.estimate
+        ? submitter.estimate(chainId, kind, opts)
+        : Promise.resolve(undefined);
 }

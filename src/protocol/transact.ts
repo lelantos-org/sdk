@@ -113,6 +113,80 @@ export interface SwapBlob {
 }
 
 /**
+ * Atomic shielded execution of arbitrary calls: the leg-1 transact SNARK (a `withdraw` whose
+ * recipient is the `GenericCallWrapper`) plus the calls and the escrows the wrapper makes with
+ * what they return. The relayer adds the matching tree_update_batch proof and submits to
+ * `GenericCallWrapper.execute`.
+ *
+ * @internal
+ */
+export interface SubmitGenericPayload {
+    chainId: bigint;
+    /** Same layout as `SubmitTransactPayload`; the relayer applies the same shape validators. */
+    proof: SubmitTransactPayload["proof"];
+    pubInputs: TransactPubInputs;
+    aux: OutputAux[];
+    generic: GenericBlob;
+}
+
+/**
+ * One call of a generic execution, as `CallExecutor.Call`. Made from a single-use clone, so
+ * `msg.sender` at `target` is a fresh address every time.
+ *
+ * @internal
+ */
+export interface GenericCall {
+    /** 0x-hex. The pool, the wrapper and the zero address are refused on chain. */
+    target: string;
+    /** Native value, paid from what earlier calls left on the clone. */
+    value: bigint;
+    /** 0x-hex calldata. Empty is a plain native transfer. */
+    data: string;
+}
+
+/**
+ * One shielded output of a generic execution, as `GenericCallWrapper.Output`: a note of the
+ * registry token of `deposit.publicAssetId`.
+ *
+ * @internal
+ */
+export interface GenericOutput {
+    /** Floor, in token base units, on what the calls deliver and on the pool's pull. */
+    minOut: bigint;
+    /** `payer` must be the wrapper. */
+    deposit: DepositRequest;
+    aux: OutputAux;
+    /** Payload of the deposit's fee leaf. */
+    feeAux: OutputAux;
+}
+
+/**
+ * Everything `GenericCallWrapper.execute` takes besides the withdraw proof.
+ *
+ * @internal
+ */
+export interface GenericBlob {
+    /** Token base units leg 1 must deliver. Not in the intent hash: the proof fixes the amount. */
+    amountIn: bigint;
+    /** At most 16. */
+    calls: GenericCall[];
+    /** One to four, of distinct tokens. */
+    outputs: GenericOutput[];
+    /** Hard expiry, unix seconds. Past it the wrapper refunds into `refundD`. */
+    deadline: bigint;
+    /** Gas the call leg must be forwarded; below it the execution reverts. */
+    minGas: bigint;
+    /** 0x-hex address a cancelled escrow refunds to. Never zero and never the wrapper. */
+    refundTo: string;
+    /** 0x-hex address receiving unused input, slippage cushions and native leftovers. */
+    surplusTo: string;
+    /** The note, in the input token, escrowed instead of the outputs when the calls fail. */
+    refundD: DepositRequest;
+    refundAuxD: OutputAux;
+    refundFeeAuxD: OutputAux;
+}
+
+/**
  * `PubInputs.Transact` mirror, in struct order.
  *
  * @internal

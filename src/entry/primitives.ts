@@ -112,6 +112,7 @@ export {
     diversifierIndex,
     diversifierToBytes,
     diversifierToField,
+    PUBLISHED_DIVERSIFIER_INDEX,
 } from "../keys/diversifier.js";
 export {
     accountPath,
@@ -145,6 +146,7 @@ export {
     reduceSignatureToScalar,
 } from "../keys/metamask.js";
 export { deriveKeysFromMnemonic } from "../keys/mnemonic.js";
+export { deriveNameControllerKey, type NameControllerKey } from "../keys/name-controller.js";
 export { LELANTOS_PRF_SALT, prfOutputToNsk } from "../keys/passkey.js";
 export { FVK_HRP, IVK_HRP } from "../keys/viewing-key.js";
 export {
