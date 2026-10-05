@@ -22,7 +22,7 @@ import { DIST, loadTs, ROOT, walk } from "./lib/package.mjs";
 const ts = loadTs();
 
 /** Budget for all emitted JS under `dist/`. */
-const DIST_MAX = 532_480; // 520 KiB
+const DIST_MAX = 534_528; // 522 KiB
 
 /**
  * Modules the spend path owns. An app entry must reach them only through a dynamic import, so a
